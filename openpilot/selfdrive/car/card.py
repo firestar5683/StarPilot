@@ -370,6 +370,15 @@ class Car:
       config.safetyParam |= aol_policy.safety_param_addition
       self.CP.alternativeExperience |= aol_policy.alternative_experience_addition
     self.vehicle_startup.finalize_aol_configuration(self.CI)
+    self.learning_stamp_observer = None
+    self.learning_send_mono_ns = self.learning_send_committed_mono_ns = 0
+    self.learning_car_state_source_ns = 0
+    self.learning_applied_evidence = self.learning_previous_applied_evidence = None
+    try:
+      from opendbc.car.steering_projection import install_observer
+      self.learning_stamp_observer = self.record_learning_send_stamp if install_observer(self.CI) else None
+    except Exception:
+      pass  # Optional learning setup cannot stop native startup.
     self.aol_transport_feedback = TransportPauseFeedback(self.CP) if self.aol_replay else None
     if isinstance(self.CI, GMInterface) and self.CI.CC is not None and self.CI.CC.volt_sng_plan_input is not None:
       self.CI.CC.volt_sng_plan_input.boottime = self.volt_startup_keepalive()
@@ -949,8 +958,22 @@ class Car:
       companion = messaging.new_message('starpilotCarState', valid=bool(cs_send.valid), logMonoTime=int(cs_send.logMonoTime))
       companion.starpilotCarState.lateralAuthorityUnavailable = bool(steering_authority.latched)
       companion.starpilotCarState.sourceCarStateMonoTime = int(cs_send.logMonoTime)
+    if getattr(self, 'learning_applied_evidence', None) is not None:
+      try:
+        from openpilot.starpilot.flm.evidence_hooks import applied_message
+        # Commit the optional child only after it is complete. A failed writer
+        # must not publish partial trust or discard existing GM authority/GPS.
+        learning_companion = (companion.as_reader().as_builder() if companion is not None else
+          messaging.new_message('starpilotCarState', valid=bool(cs_send.valid), logMonoTime=int(cs_send.logMonoTime)))
+        if applied_message(learning_companion, self.learning_applied_evidence) is not True:
+          raise ValueError('optional applied evidence write failed')
+        companion = learning_companion
+      except Exception:
+        self._clear_learning_evidence()
     self.car_gps_publisher.update(self.CI.CS, self.pm, companion)
     self.pm.send('carState', cs_send)
+    if getattr(self, 'learning_stamp_observer', None) is not None:
+      self.learning_car_state_source_ns = int(cs_send.logMonoTime)
 
     wheel = getattr(self, 'wheel_publisher', None)
     if wheel is not None:
@@ -1200,11 +1223,34 @@ class Car:
                     (not ps.safetyRxChecksInvalid or inactive_keepalive and self.volt_startup_keepalive())
                     for ps, cfg in zip(pandas, self.CP.safetyConfigs, strict=True)))
 
+  def _clear_learning_evidence(self):
+    self.learning_stamp_observer = None
+    self.learning_applied_evidence = self.learning_previous_applied_evidence = None
+    self.learning_send_mono_ns = self.learning_send_committed_mono_ns = 0
+    self.learning_car_state_source_ns = 0
+
+  def record_learning_send_stamp(self, observed_ns):
+    # Metadata only; no permission, coordinate conversion, or extra clock sample.
+    self.learning_send_mono_ns = int(observed_ns)
+
+  def _observe_learning_send_stamp(self, observed_ns):
+    try:
+      observer = getattr(self, 'learning_stamp_observer', None)
+      if observer is not None:
+        observer(observed_ns)
+    except Exception:
+      self._clear_learning_evidence()
+
   def publish_sendcan(self, frames, valid=True):
     steering_authority = getattr(getattr(getattr(self, 'CI', None), 'CS', None), 'steering_authority', None)
     monitored_steering = (getattr(getattr(self, 'CP', None), 'brand', None) == 'gm' and
                           steering_authority is not None and steering_authority.enabled)
-    packet = can_list_to_can_capnp(frames, msgtype='sendcan', valid=valid)
+    observer=getattr(self,'learning_stamp_observer',None)
+    self.learning_send_mono_ns=self.learning_send_committed_mono_ns=0
+    if observer is None:
+      packet = can_list_to_can_capnp(frames, msgtype='sendcan', valid=valid)
+    else:
+      packet = can_list_to_can_capnp(frames, msgtype='sendcan', valid=valid,source_observer=self._observe_learning_send_stamp)
     if getattr(self, 'volt_cc_selected', False):
       # CAN producer/parser and pandad send age use BOOTTIME; Python controls/device envelopes use MONOTONIC.
       builder = messaging.log_from_bytes(packet).as_builder()
@@ -1225,6 +1271,7 @@ class Car:
         self.pm.send('sendcan', packet)
     else:
       self.pm.send('sendcan', packet)
+    self.learning_send_committed_mono_ns=self.learning_send_mono_ns
 
   def volt_cc_control_current(self):
     pair = clock_pair_ns()
@@ -1396,8 +1443,21 @@ class Car:
                    self.can_log_mono_time if REPLAY else
                    time.clock_gettime_ns(time.CLOCK_BOOTTIME) if self.volt_startup_keepalive() or monitored_steering else
                    int(time.monotonic() * 1e9))
+      learning_snapshot = None
+      try:
+        from openpilot.starpilot.flm.evidence_hooks import begin_applied_frame, applied_snapshot
+        begin_applied_frame(self)
+        learning_snapshot = applied_snapshot
+      except Exception:
+        self._clear_learning_evidence()
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos)
       self.publish_sendcan(can_sends, valid=CS.canValid)
+      if learning_snapshot is not None and self.learning_send_committed_mono_ns:
+        try:
+          self.learning_applied_evidence = learning_snapshot(self, CC, CS, self.last_actuators_output,
+            apply_ns=self.learning_send_committed_mono_ns, state_ns=self.learning_car_state_source_ns)
+        except Exception:
+          self._clear_learning_evidence()
 
       self.CC_prev = CC
 

@@ -230,10 +230,16 @@ def decide_ordinary_axis(*, requested: bool, native) -> AxisDecision:
                       native_acknowledged=acknowledged)
 
 
-def ordinary_axis_acknowledged(sm, CP, *, now_ns: int) -> bool:
+def ordinary_axis_acknowledged(sm, CP, *, now_ns: int, on_validated_native=None) -> bool:
   axis = current_axis(sm, now_ns=now_ns)
   native = current_native(sm, CP, now_ns=now_ns,
                           axis_session_id=str(axis.sessionId) if axis is not None else None)
-  return bool(axis is not None and native is not None and axis.nativeAcknowledged and
-              axis.desiredLateral and axis.lateralActive and not axis.desiredLongitudinal and
-              native.requestedLateral and not native.requestedLongitudinal and native.lateralAllowed)
+  acknowledged = bool(axis is not None and native is not None and axis.nativeAcknowledged and
+                      axis.desiredLateral and axis.lateralActive and not axis.desiredLongitudinal and
+                      native.requestedLateral and not native.requestedLongitudinal and native.lateralAllowed)
+  if acknowledged and on_validated_native is not None:
+    try:
+      on_validated_native(native)
+    except Exception:
+      pass  # Optional evidence observation cannot change actuator admission.
+  return acknowledged

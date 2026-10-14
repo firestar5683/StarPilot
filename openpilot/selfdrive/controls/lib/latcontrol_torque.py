@@ -1,3 +1,4 @@
+from openpilot.starpilot.flm import torque_stages as auto_stages
 import math
 import numpy as np
 from collections import deque
@@ -121,6 +122,8 @@ class LatControlTorque(LatControl):
     ff, threshold = flm.stages(self.flm_surface, CS, setpoint, desired_lateral_jerk, ff, threshold)
     if friction_policy is not None:
       threshold = friction_policy.friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
+    ff, threshold = auto_stages.apply_stages(self, CS, setpoint, desired_lateral_jerk, ff, threshold,
+      active=active, limited=steer_limited_by_safety or curvature_limited)
     ff += self.friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, threshold, CS, setpoint)
 
     if not active:

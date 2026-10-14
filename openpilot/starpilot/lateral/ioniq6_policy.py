@@ -1,6 +1,7 @@
 """Ioniq 6 torque shaping; native control retains output ownership and limits."""
 
 from __future__ import annotations
+from openpilot.starpilot.flm import torque_stages as auto_stages
 
 import math
 import numpy as np
@@ -856,6 +857,8 @@ class Ioniq6TorquePolicy:
     vehicle_jerk_deadzone = IONIQ_6_2025_FRICTION_JERK_DEADZONE if self.is_2025 else IONIQ_6_FRICTION_JERK_DEADZONE
     friction_jerk_deadzone = center_chatter_friction_jerk_deadzone(CS.vEgo, setpoint, vehicle_jerk_deadzone)
     friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0), desired_lateral_jerk)
+    ff, friction_threshold = auto_stages.apply_stages(parent, CS, setpoint, desired_lateral_jerk, ff, friction_threshold,
+      active=active, limited=steer_limited_by_safety or curvature_limited)
     ff += friction_scale * parent.friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone,
                                           friction_threshold, CS, setpoint)
     if CS.vEgo < self.low_speed_reset_threshold:

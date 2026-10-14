@@ -441,6 +441,9 @@ class CarController(CarControllerBase):
     return self.regen_paddle_pressed
 
   def update(self, CC, CS, now_nanos, *, startup_keepalive=False):
+    _projection = self.learning_projection_observer
+    if _projection is not None:
+      _projection.begin(CC.actuators.torque, self.frame)
     long_pitch = self.long_pitch
     if ((self.camera_pedal_profile is not None and self.camera_pedal_profile.volt or self.volt_cc_pedal_profile is not None)
         and self.frame % 25 == 0):
@@ -600,6 +603,8 @@ class CarController(CarControllerBase):
 
       if lat_active and not (self.ordinary_cc_profile and CC.enabled and not CS.out.cruiseState.enabled and not aol_lateral):
         new_torque = int(round(actuators.torque * self.params.STEER_MAX))
+        if _projection is not None:
+          _projection.input(new_torque, self.params.STEER_MAX, self.apply_torque_last, CS.out.steeringTorque, self.params, limiter='driver')
         apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.params)
       else:
         apply_torque = 0
@@ -608,6 +613,8 @@ class CarController(CarControllerBase):
       self.apply_torque_last = apply_torque
       idx = self.lka_steering_cmd_counter % 4
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, lat_active))
+      if _projection is not None:
+        _projection.emit('gm.ASCMLKASteeringCmd', apply_torque, lat_active, can_sends[-1])
       CS.steering_authority.command(now_nanos, lat_active)
 
     status_bolt = self.CP.carFingerprint in NO_ACC_BOLT_CAR and (
@@ -1317,4 +1324,6 @@ class CarController(CarControllerBase):
         self.CP.openpilotLongitudinalControl and self.frame % keepalive_step == 0):
       can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
     self.frame += 1
+    if _projection is not None:
+      _projection.finish(new_actuators.torque)
     return new_actuators, can_sends

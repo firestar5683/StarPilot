@@ -16,6 +16,9 @@ class CarController(CarControllerBase):
     self.cancel_frames = 0
 
   def update(self, CC, CS, now_nanos):
+    _projection = self.learning_projection_observer
+    if _projection is not None:
+      _projection.begin(CC.actuators.torque, self.frame)
     actuators = CC.actuators
     can_sends = []
 
@@ -24,12 +27,16 @@ class CarController(CarControllerBase):
                                       CarControllerParams.STEER_MAX_LOOKUP[1])))
     if CC.latActive:
       new_torque = int(round(CC.actuators.torque * steer_max))
+      if _projection is not None:
+        _projection.input(new_torque, steer_max, self.apply_torque_last, CS.out.steeringTorque, CarControllerParams, limiter='driver')
       apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last,
                                                       CS.out.steeringTorque, CarControllerParams, steer_max)
 
     # send steering command
     self.apply_torque_last = apply_torque
     can_sends.append(create_lka_steering(self.packer, self.frame, CS.acm_lka_hba_cmd, apply_torque, CC.enabled, CC.latActive))
+    if _projection is not None:
+      _projection.emit('rivian.ACM_lkaHbaCmd', apply_torque, CC.latActive, can_sends[-1])
 
     if self.frame % 5 == 0 and not (self.CP.flags & RivianFlags.GEN2):
       can_sends.append(create_wheel_touch(self.packer, CS.sccm_wheel_touch, CC.enabled))
@@ -56,4 +63,6 @@ class CarController(CarControllerBase):
     new_actuators.torqueOutputCan = apply_torque
 
     self.frame += 1
+    if _projection is not None:
+      _projection.finish(new_actuators.torque)
     return new_actuators, can_sends

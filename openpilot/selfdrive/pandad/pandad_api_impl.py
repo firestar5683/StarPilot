@@ -26,7 +26,7 @@ def _get_writer_fields(schema):
   return _cached_writer_fields
 
 
-def can_list_to_can_capnp(can_msgs, msgtype='can', valid=True):
+def can_list_to_can_capnp(can_msgs, msgtype='can', valid=True, *, source_observer=None):
   """Convert list of CAN messages to Cap'n Proto serialized bytes.
 
   Args:
@@ -40,6 +40,13 @@ def can_list_to_can_capnp(can_msgs, msgtype='can', valid=True):
   global _cached_writer_fields
 
   dat = log.Event.new_message(valid=valid, logMonoTime=int(time.monotonic() * 1e9))
+  if source_observer is not None:
+    try:
+      # Observe the SAME original MONO sample. Native callers may subsequently
+      # replace their transport stamp with BOOT; this metadata never converts it.
+      source_observer(int(dat.logMonoTime))
+    except Exception:
+      pass  # Optional observation cannot change packet bytes or publication.
   can_data = dat.init(msgtype, len(can_msgs))
 
   # Cache schema fields on first call

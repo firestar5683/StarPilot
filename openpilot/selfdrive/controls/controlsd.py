@@ -16,10 +16,9 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
-from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
-from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
-from openpilot.selfdrive.controls.lib.latcontrol_curvature import LatControlCurvature
+from openpilot.selfdrive.controls.lib.latcontrol_angle import STEER_ANGLE_SATURATION_THRESHOLD
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+from openpilot.selfdrive.controls.lib.lateral_controller_factory import create_lateral_controller
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
@@ -40,7 +39,9 @@ from openpilot.starpilot.lateral.lane_runtime import LaneCenteringHost, runtime_
 from openpilot.starpilot.lateral.torque_runtime import TorqueHost, runtime_enabled as torque_runtime_enabled
 from openpilot.starpilot.lateral.controller_selection import learning_allowed, read_selection
 from openpilot.starpilot.lateral.gain_runtime import create_gain_owner
-from openpilot.starpilot.flm.learning_source import AutomaticLearningConsumer
+from openpilot.starpilot.flm.global_runtime import GlobalRuntime
+from openpilot.starpilot.flm.evidence_hooks import control_message
+from openpilot.starpilot.flm.application_wire import write_application
 from openpilot.starpilot.longitudinal.inputs import LongitudinalInputs
 from openpilot.starpilot.longitudinal.output_max import final_output
 
@@ -94,8 +95,6 @@ class Controls:
     self.torque_host = (TorqueHost(self.params, self.CP, allow_learning=(self.torque_learning_allowed
                         if self.lateral_controller_selection.policy is not None else None))
                         if torque_runtime_enabled(self.CP, self.params) else None)
-    self.automatic_learning = AutomaticLearningConsumer(
-      self.CP, self.CI, self.lateral_controller_selection.mode, self.params)
     self.last_lane_centering_result: LaneCenteringResult | None = None
     self.lane_centering_applied = 0.0
 
@@ -106,15 +105,9 @@ class Controls:
     self.LoC = LongControl(self.CP, startup_preferences=self.vehicle_startup_preferences)
     self.VM = VehicleModel(self.CP)
     self.LaC: LatControl
-    if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
-      self.LaC = LatControlAngle(self.CP, self.CI, DT_CTRL)
-    elif self.CP.steerControlType == car.CarParams.SteerControlType.curvature:
-      self.LaC = LatControlCurvature(self.CP, self.CI, DT_CTRL)
-    elif self.CP.lateralTuning.which() == 'pid':
-      self.LaC = LatControlPID(self.CP, self.CI, DT_CTRL)
-    elif self.CP.lateralTuning.which() == 'torque':
-      self.LaC = LatControlTorque(self.CP, self.CI, DT_CTRL, controller_mode=self.lateral_controller_selection.mode,
-                                 turn_assist=self.vehicle_startup_preferences.turn_assist)
+    self.LaC = create_lateral_controller(self.CP, self.CI, DT_CTRL,
+      mode=self.lateral_controller_selection.mode, turn_assist=self.vehicle_startup_preferences.turn_assist)
+    if isinstance(self.LaC, LatControlTorque):
       self.lateral_gain_owner = create_gain_owner(self.params, self.CP, self.LaC)
       cloudlog.info({"event": "torque controller selected", "controller": self.LaC.controller_mode.value,
                      "source": self.lateral_controller_selection.source,
@@ -125,6 +118,8 @@ class Controls:
                                        "friction": self.LaC.torque_params.friction},
                      "startupPidGain": [list(row) for row in self.LaC.pid._k_p],
                      "startupPidLimits": [self.LaC.pid.neg_limit, self.LaC.pid.pos_limit]})
+
+    self.global_learning = GlobalRuntime(self.CP, self.CI, self.LaC)
 
     from openpilot.starpilot.lateral.controller_selection import model_turn_assist_supported
     assist_enabled = self.vehicle_startup_preferences.turn_assist and model_turn_assist_supported(self.CP)
@@ -144,8 +139,25 @@ class Controls:
       maneuver_active=model_v2.meta.laneChangeState != LaneChangeState.off)
     return self.lane_change_policy
 
+  def _discard_global_learning(self):
+    automatic = getattr(self, 'global_learning', None)
+    self.global_learning = None
+    if automatic is not None:
+      try:
+        automatic._neutral('optional_metadata_failed')
+      except Exception:
+        pass  # Hooks are detached below even if optional cleanup failed.
+      # These are optional metadata fields on the real GlobalRuntime object.
+      automatic.outcome = automatic.frame = automatic.profile = automatic.validation = None
+      automatic.eligible = False
+    # Detach only optional hooks. Native gains/PID/filter state and every core
+    # controller/authority gate remain owned by their existing callers.
+    for name in ('automatic_flm_stages', 'automatic_flm_centre', 'automatic_flm_observation', 'automatic_flm_adapter'):
+      self.LaC.__dict__.pop(name, None)
+
   def state_control(self, *, lane_centering: LaneCenteringRequest | None = None):
     CS = self.sm['carState']
+    self.flm_native_witness = None
     if self.lateral_gain_owner is not None:
       self.lateral_gain_owner.refresh()
 
@@ -162,7 +174,7 @@ class Controls:
     self.curvature = -self.VM.calc_curvature(steer_angle_without_offset, CS.vEgo, lp.roll)
 
     # Update Torque Params
-    if self.CP.lateralTuning.which() == 'torque' and self.torque_host is None and self.torque_learning_allowed:
+    if isinstance(self.LaC, LatControlTorque) and self.torque_host is None and self.torque_learning_allowed:
       torque_params = self.sm['lateralTorqueParameters']
       if self.sm.all_checks(['lateralTorqueParameters']) and torque_params.useParams:
         self.LaC.update_torque_parameters(torque_params.latAccelFactorFiltered, torque_params.latAccelOffsetFiltered,
@@ -185,6 +197,7 @@ class Controls:
       axis = current_axis(self.sm, now_ns=now_ns)
       native = current_native(self.sm, self.CP, now_ns=now_ns,
                               axis_session_id=str(axis.sessionId) if axis is not None else None)
+      self.flm_native_witness = native
       acknowledged = axis is not None and native is not None and axis.nativeAcknowledged
       lateral_requested = bool(axis.desiredLateral) if axis is not None else None
       CC.latActive = bool(acknowledged and axis.lateralActive and
@@ -200,7 +213,8 @@ class Controls:
       now_ns = int(self.sm.logMonoTime['carState']) if os.getenv('REPLAY') == '1' else time.monotonic_ns()
       CC.latActive = bool(CC.latActive and CS.canValid and not CS.canTimeout and
                           ordinary_axis_request_allowed(self.CP, CS) and
-                          ordinary_axis_acknowledged(self.sm, self.CP, now_ns=now_ns))
+                          ordinary_axis_acknowledged(self.sm, self.CP, now_ns=now_ns,
+                            on_validated_native=lambda native: setattr(self, 'flm_native_witness', native)))
 
     fault_latch = getattr(self, 'hyundai_lateral_fault', None)
     if fault_latch is not None:
@@ -227,28 +241,11 @@ class Controls:
 
     CC.latActive = bool(CC.latActive and pause_allowed)
 
-    automatic_tune = None
-    automatic_learning = getattr(self, 'automatic_learning', None)
-    if automatic_learning is not None:
-      automatic_tune = automatic_learning.sample(self.sm, now_ns=time.monotonic_ns(),
-        lat_active=bool(CC.latActive and CS.canValid and not CS.canTimeout))
-      if automatic_tune is not None and self.torque_host is None:
-        # One host owns native/manual/automatic updates; admission occurs only
-        # after a qualified result, preserving untouched startup tuning.
-        try:
-          host = TorqueHost(self.params, self.CP, allow_learning=self.torque_learning_allowed,
-                            automatic_interface=self.CI, automatic_controller=self.lateral_controller_selection.mode)
-          host.adopt_linear_controller(self.LaC)
-        except (AttributeError, TypeError, ValueError, OverflowError):
-          automatic_tune = None
-        else:
-          self.torque_host = host
-
     if self.torque_host is not None:
       # The optional source must not keep an active torque request through lost car state.
       CC.latActive = bool(CC.latActive and CS.canValid and not CS.canTimeout)
       now_ns = int(self.sm.logMonoTime['carState']) if os.getenv('REPLAY') == '1' else time.monotonic_ns()
-      tune = self.torque_host.sample(self.sm, now_ns=now_ns, lat_active=bool(CC.latActive), automatic=automatic_tune)
+      tune = self.torque_host.sample(self.sm, now_ns=now_ns, lat_active=bool(CC.latActive))
       self.torque_host.apply(self.LaC, tune)
       if not CC.latActive:
         self.LaC.pid.reset()
@@ -332,6 +329,28 @@ class Controls:
     lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 
     actuators.curvature = self.desired_curvature
+    automatic = getattr(self, 'global_learning', None)
+    if automatic is not None:
+      try:
+        automatic.prepare(self.sm, now_ns=time.monotonic_ns(), active=bool(CC.latActive),
+          healthy=bool(CS.canValid and not CS.canTimeout and not CS.steerFaultTemporary and
+                       not CS.steerFaultPermanent and not CS.accFaulted and not CS.steeringPressed and
+                       not CS.brakePressed and not CS.gasPressed and not CS.regenBraking and
+                       not any(str(button.type) == 'cancel' for button in CS.buttonEvents) and
+                       not any(event.softDisable or event.immediateDisable for event in self.sm['onroadEvents']) and
+                       not self.sm['driverMonitoringState'].noResponseForceDecel), controller=self.LaC,
+          native_required=bool(self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False)),
+          native_witness=getattr(self, 'flm_native_witness', None),
+          manual_current=bool(self.torque_host is not None and
+            (self.torque_host.settings.user_factor is not None or self.torque_host.settings.user_friction is not None) or
+            self.lateral_gain_owner is not None and self.lateral_gain_owner.current_table != self.lateral_gain_owner.basis.source_table))
+        automatic.begin_frame(CS, self.VM, lp, active=bool(CC.latActive),
+          safety_limited=self.steer_limited_by_safety, desired_curvature=self.desired_curvature,
+          curvature_limited=curvature_limited, lat_delay=lat_delay,
+          raw_model_curvature=model_v2.action.desiredCurvature, model_source_ns=int(self.sm.logMonoTime['modelV2']))
+      except Exception:
+        self._discard_global_learning()
+        automatic = None
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                      self.steer_limited_by_safety, self.desired_curvature,
                                                      curvature_limited, lat_delay)
@@ -350,6 +369,16 @@ class Controls:
         cloudlog.error(f"actuators.{p} not finite {actuators.to_dict()}")
         setattr(actuators, p, 0.0)
 
+    if automatic is not None:
+      try:
+        requested = (actuators.curvature if self.CP.steerControlType == car.CarParams.SteerControlType.curvature else
+                     actuators.steeringAngleDeg if self.CP.steerControlType == car.CarParams.SteerControlType.angle else actuators.torque)
+        automatic.finish_frame(CS, self.VM, lp, lac_log, desired_curvature=self.desired_curvature,
+          curvature_limited=curvature_limited, lat_delay=lat_delay, requested=requested,
+          selected_command=(lateral_output if self.CP.steerControlType in
+            (car.CarParams.SteerControlType.angle, car.CarParams.SteerControlType.curvature) else steer))
+      except Exception:
+        self._discard_global_learning()
     self.aol_previous_lateral_active = bool(CC.latActive)
     return CC, lac_log
 
@@ -435,10 +464,24 @@ class Controls:
     cc_send.valid = CS.canValid
     cc_send.carControl = CC
     self.pm.send('carControl', cc_send)
-    self.pm.send('starpilotLateralState', feedback_message(
+    feedback = feedback_message(
       self.last_lane_centering_result, self.lane_centering_applied, CC.latActive,
       model_mono_time=self.sm.logMonoTime['modelV2'], car_control_mono_time=cc_send.logMonoTime,
-      valid=bool(CS.canValid and self.sm.all_checks(['modelV2']))))
+      valid=bool(CS.canValid and self.sm.all_checks(['modelV2'])))
+    automatic = getattr(self, 'global_learning', None)
+    if automatic is not None:
+      try:
+        learning_feedback = feedback.as_reader().as_builder()
+        written = control_message(learning_feedback, self.LaC, CC, control_ns=cc_send.logMonoTime,
+                                  state_ns=self.sm.logMonoTime['carState'], limited=self.steer_limited_by_safety)
+        if written is False:
+          raise ValueError('optional control evidence write failed')
+        if automatic.outcome is not None:
+          write_application(learning_feedback.starpilotLateralState, automatic.outcome)
+        feedback = learning_feedback
+      except Exception:
+        self._discard_global_learning()
+    self.pm.send('starpilotLateralState', feedback)
 
   def run(self):
     rk = Ratekeeper(100, print_delay_threshold=None)

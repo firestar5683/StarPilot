@@ -261,7 +261,7 @@ def main(demo=False):
 
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
 
-  pm = messaging.PubMaster(['lateralTorqueParameters', 'autoSteeringLearning'])
+  pm = messaging.PubMaster(['lateralTorqueParameters'])
   sm = messaging.SubMaster(['carControl', 'carOutput', 'carState', 'extrinsicsCalibration',
                             'deviceMotion', 'lateralDelay', 'controlsState'], poll='deviceMotion')
 
@@ -269,11 +269,6 @@ def main(demo=False):
   CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
   estimator = TorqueEstimator(CP, allow_learning=learning_allowed(params, CP))
 
-  try:
-    from openpilot.starpilot.flm.learning_producer import AutomaticLearningProducer
-    automatic = AutomaticLearningProducer(CP, params)
-  except Exception:
-    automatic = None
   native_sources = ['carControl', 'carOutput', 'carState', 'extrinsicsCalibration', 'deviceMotion', 'lateralDelay']
 
   while True:
@@ -284,19 +279,9 @@ def main(demo=False):
           t = sm.logMonoTime[which] * 1e-9
           estimator.handle_log(t, which, sm[which])
 
-    if automatic is not None:
-      automatic.update(sm, estimator)
-
     # 4Hz driven by deviceMotion
     if sm.frame % 5 == 0:
       pm.send('lateralTorqueParameters', estimator.get_msg(valid=sm.all_checks(native_sources), with_points=DEBUG))
-      if automatic is not None:
-        automatic_msg = automatic.get_msg()
-        if automatic_msg is not None:
-          try:
-            pm.send('autoSteeringLearning', automatic_msg)
-          except Exception:
-            automatic.fail('optional_transport_error')
 
     # Cache points every 60 seconds while onroad
     if sm.frame % 240 == 0 and estimator.learning_allowed:

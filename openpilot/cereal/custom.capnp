@@ -130,7 +130,10 @@ struct StarPilotCarParams @0xaedffd8f31e7b55d {
     heldoutCandidateLoss @18 :Float64;
 
     enum Status { unavailable @0; collecting @1; candidate @2; rejected @3; qualifiedFit @4; }
-    enum Family { none @0; linearFactor @1; }
+    enum Family { none @0; linearFactor @1; runtimeProfile @2; }
+    runtimeProfile @19 :AutomaticRuntimeProfile;
+    sourceReceipt @20 :AutomaticLearningSourceReceipt;
+    centreApplicationWitness @21 :CentreApplicationWitness;
     struct Identity {
       vehicle @0 :Text;
       brand @1 :Text;
@@ -183,6 +186,9 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
   gps @31 :Gps;
   lateralAuthorityUnavailable @32 :Bool;
   sourceCarStateMonoTime @33 :UInt64;
+  appliedEvidence @34 :LearningAppliedEvidence;
+  fordLearningEvidence @35 :FordLearningEvidence;
+  learningApplication @36 :LearningApplication;
 
   struct Gps {
     sourceMonoTime @0 :UInt64;  # CAN observation converted to CLOCK_MONOTONIC
@@ -765,6 +771,8 @@ struct StarPilotLateralState @0xc2243c65e0340384 {
   lowSpeedFactor @6 :Float32;
   unwindDetected @7 :Bool;
   laneCentering @8 :LaneCentering;
+  learningEvidence @9 :LearningControlEvidence;
+  learningApplication @10 :LearningApplication;
 
   struct LaneCentering {
     version @0 :UInt16;
@@ -1105,4 +1113,237 @@ struct MapdOut @0xa4f1eb3323f5f582 {
     residential @12;
     livingStreet @13;
   }
+}
+
+# Automatic FLM adds children only to existing reserved fork carriers.
+# All evidence clocks are explicitly MONOTONIC; default/version0 is invalid.
+struct LearningControlEvidence {
+  version @0 :UInt16;
+  identity @1 :Text;
+  generation @2 :UInt64;
+  controlMonoTime @3 :UInt64;
+  sourceStateMonoTime @4 :UInt64;
+  domain @5 :Text;
+  stageRevision @6 :Text;
+  responseRevision @7 :Text;
+  requested @8 :Float64;
+  features @9 :List(Float64);
+  baselinePrediction @10 :Float64;
+  enabled @11 :Bool;
+  manual @12 :Bool;
+  active @13 :Bool;
+  valid @14 :Bool;
+  override @15 :Bool;
+  fault @16 :Bool;
+  saturated @17 :Bool;
+  limited @18 :Bool;
+  modelWobble @19 :Bool;
+  controllerChatter @20 :Bool;
+  stageSchemaRevision @21 :Text;
+  stageValues @22 :List(StageValue);
+  appliedCoordinates @23 :List(Float64);
+  sourceEpoch @24 :Text;
+  sourceReceiptMonoTime @25 :UInt64;
+  controllerMode @26 :Text;
+  policy @27 :Text;
+  baselineRevision @28 :Text;
+  baselineValues @29 :List(Float64);
+  controllerRevision @30 :Text;
+  replaySnapshot @31 :List(NamedValue);
+  replayInputs @32 :List(NamedValue);
+  snapshotSequence @33 :UInt64;
+  turnAssist @34 :Bool;
+  appliedParameterNames @35 :List(Text);
+  nativeRequired @36 :Bool;
+  nativeObservedMonoTime @37 :UInt64;
+  nativeValidUntilMonoTime @38 :UInt64;
+  nativeAllowed @39 :Bool;
+  nativeIdentity @40 :Text;
+  appliedProfileSequence @41 :UInt64;
+  appliedProfileObservedMonoTime @42 :UInt64;
+  appliedProfileValidUntilMonoTime @43 :UInt64;
+  struct NamedValue {
+    name @0 :Text;
+    union { number @1 :Float64; text @2 :Text; boolean @3 :Bool; }
+  }
+  struct StageValue { name @0 :Text; value @1 :Float64; }
+}
+struct LearningAppliedEvidence {
+  version @0 :UInt16;
+  controlMonoTime @1 :UInt64;
+  sourceStateMonoTime @2 :UInt64;
+  appliedMonoTime @3 :UInt64;
+  domain @4 :Text;
+  applied @5 :Float64;
+  valid @6 :Bool;
+  active @7 :Bool;
+  override @8 :Bool;
+  fault @9 :Bool;
+  limited @10 :Bool;
+  nativeAllowed @11 :Bool;
+  projection @12 :LearningTorqueProjection;
+  # Carrier continuity only; never a command/physical/native lease timestamp.
+  carrierFrame @13 :UInt64;
+  carrierObservedMonoTime @14 :UInt64;
+}
+struct AutomaticRuntimeProfile {
+  version @0 :UInt16;
+  identity @1 :Text;
+  sequence @2 :UInt64;
+  observedMonoTime @3 :UInt64;
+  validUntilMonoTime @4 :UInt64;
+  policy @5 :Text;
+  parameters @6 :List(Parameter);
+  coefficients @7 :List(Float64);
+  trainIds @8 :List(Text);
+  heldoutIds @9 :List(Text);
+  baselineLoss @10 :Float64;
+  candidateLoss @11 :Float64;
+  cohortImprovements @12 :List(CohortImprovement);
+  replay @13 :ReplayValidation;
+  struct ReplayValidation {
+    baselineRevision @0 :Text;
+    physicalModelRevision @1 :Text;
+    noSaturationRegression @2 :Bool;
+    noSlewRegression @3 :Bool;
+    worstCohortImprovement @4 :Float64;
+  }
+  struct Parameter {
+    name @0 :Text;
+    stageRevision @1 :Text;
+    low @2 :Float64;
+    high @3 :Float64;
+    maxStep @4 :Float64;
+    slewPerS @5 :Float64;
+    excitationFloor @6 :Float64 = 0.01;
+  }
+  struct CohortImprovement {
+    name @0 :Text;
+    lowerBound @1 :Float64;
+  }
+}
+
+struct AutomaticLearningSourceReceipt {
+  version @0 :UInt16;
+  enabled @1 :Bool;
+  manual @2 :Bool;
+  resetGeneration @3 :Text;
+  sourceEpoch @4 :Text;
+  observedMonoTime @5 :UInt64;
+  validUntilMonoTime @6 :UInt64;
+  cpSha256 @7 :Text;
+  calibrationBasis @8 :List(Float64);
+}
+
+struct LearningApplication {
+  version @0 :UInt16;
+  identity @1 :Text;
+  profileSequence @2 :UInt64;
+  observedMonoTime @3 :UInt64;
+  status @4 :Text;
+  actualCoordinates @5 :List(Float64);
+  reason @6 :Text;
+  baselineRevision @7 :Text;
+  physicalModelRevision @8 :Text;
+}
+
+
+struct FordLearningEvidence {
+  version @0 :UInt16;
+  identity @1 :Text;
+  generation @2 :UInt64;
+  sourceEpoch @3 :Text;
+  baselineRevision @4 :Text;
+  baselineValues @5 :List(Float64);
+  controllerRevision @6 :Text;
+  cpSha256 @7 :Text;
+  controllerMode @8 :Text;
+  policy @9 :Text;
+  conversionRevision @10 :Text;
+  stageRevision @11 :Text;
+  sourceReceiptMonoTime @12 :UInt64;
+  sourceValidUntilMonoTime @13 :UInt64;
+  enabled @14 :Bool;
+  manual @15 :Bool;
+  rows @16 :List(FordLearningEvent);
+  dropped @17 :UInt64;
+  appliedProfileSequence @18 :UInt64;
+  appliedProfileObservedMonoTime @19 :UInt64;
+  appliedProfileValidUntilMonoTime @20 :UInt64;
+}
+
+struct FordLearningEvent {
+  eventMonoTime @0 :UInt64;
+  sequence @1 :UInt64;
+  kind @2 :Text;
+  inputs @3 :List(LearningControlEvidence.NamedValue);
+  appliedCoefficient @4 :Float64;
+  actualPending @5 :List(Float64);
+  actualCommand @6 :List(Float64);
+  controlMonoTime @7 :UInt64;
+  pendingControlMonoTime @8 :UInt64;
+  announcedControlMonoTime @9 :UInt64;
+  carStateMonoTime @10 :UInt64;
+  nativeAllowed @11 :Bool;
+  fault @12 :Bool;
+  override @13 :Bool;
+  limited @14 :Bool;
+  hasWirePath @15 :Bool;
+  actualWirePath @16 :Float64;
+  checkpoint @17 :List(LearningControlEvidence.NamedValue);
+  checkpointSequence @18 :UInt64;
+  sourceReceiptMonoTime @19 :UInt64;
+  sourceValidUntilMonoTime @20 :UInt64;
+  appliedProfileSequence @21 :UInt64;
+  appliedProfileObservedMonoTime @22 :UInt64;
+  appliedProfileValidUntilMonoTime @23 :UInt64;
+  nativeIdentity @24 :Text;
+  nativeObservedMonoTime @25 :UInt64;
+  nativeValidUntilMonoTime @26 :UInt64;
+  nativeValidatedMonoTime @27 :UInt64;
+  nativeCommandMonoTime @28 :UInt64;
+  announcedCoefficient @29 :Float64;
+}
+
+
+struct CentreApplicationWitness {
+  version @0 :UInt16;
+  identity @1 :Text;
+  sourceEpoch @2 :Text;
+  controlMonoTime @3 :UInt64;
+  profileSequence @4 :UInt64;
+  actualCoordinates @5 :List(Float64);
+  baselineRevision @6 :Text;
+  physicalModelRevision @7 :Text;
+  originalObservedMonoTime @8 :UInt64;
+  originalValidUntilMonoTime @9 :UInt64;
+  baselineFriction @10 :Float64;
+  actualFriction @11 :Float64;
+}
+
+struct LearningTorqueProjection {
+  version @0 :UInt16;
+  family @1 :Text;
+  fingerprint @2 :Text;
+  flags @3 :UInt64;
+  codecId @4 :Text;
+  mappingKind @5 :Text;
+  frame @6 :UInt64;
+  requestedTorque @7 :Float64;
+  codecInputTorque @8 :Float64;
+  unlimitedRaw @9 :Int32;
+  finalRaw @10 :Int32;
+  effectiveMax @11 :Float64;
+  lookupX @12 :List(Float64);
+  lookupY @13 :List(Float64);
+  limiterKind @14 :Text;
+  previousTorque @15 :Float64;
+  measuredTorque @16 :Float64;
+  limits @17 :List(LearningControlEvidence.StageValue);
+  shape @18 :List(LearningControlEvidence.NamedValue);
+  steerRequested @19 :Bool;
+  canAddress @20 :UInt32;
+  canBus @21 :UInt16;
+  canData @22 :Data;
+  reportedTorque @23 :Float64;
 }

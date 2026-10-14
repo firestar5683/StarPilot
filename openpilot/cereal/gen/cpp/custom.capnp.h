@@ -68,6 +68,7 @@ CAPNP_DECLARE_SCHEMA(b03bf8f7c878937a);
 enum class Family_b03bf8f7c878937a: uint16_t {
   NONE,
   LINEAR_FACTOR,
+  RUNTIME_PROFILE,
 };
 CAPNP_DECLARE_ENUM(Family, b03bf8f7c878937a);
 CAPNP_DECLARE_SCHEMA(af3712fe799c76ce);
@@ -405,6 +406,20 @@ enum class HighwayClass_d18274dcdc63c41d: uint16_t {
   LIVING_STREET,
 };
 CAPNP_DECLARE_ENUM(HighwayClass, d18274dcdc63c41d);
+CAPNP_DECLARE_SCHEMA(f2447170bb68f358);
+CAPNP_DECLARE_SCHEMA(ddd8eb0f1a3fb843);
+CAPNP_DECLARE_SCHEMA(e7b005eb931864bc);
+CAPNP_DECLARE_SCHEMA(bab0f51a74ffee6e);
+CAPNP_DECLARE_SCHEMA(ef38d302825641e3);
+CAPNP_DECLARE_SCHEMA(c67bb160599bcae3);
+CAPNP_DECLARE_SCHEMA(f967f623f65d7dba);
+CAPNP_DECLARE_SCHEMA(ccffb4ab144bf131);
+CAPNP_DECLARE_SCHEMA(9fe2d23e75805149);
+CAPNP_DECLARE_SCHEMA(82b6c8ea6a6efabd);
+CAPNP_DECLARE_SCHEMA(d1dfbadb6a811fee);
+CAPNP_DECLARE_SCHEMA(b276dede9e6b2cc4);
+CAPNP_DECLARE_SCHEMA(ab0b33cac682523e);
+CAPNP_DECLARE_SCHEMA(f078f562cbce49ad);
 
 }  // namespace schemas
 }  // namespace capnp
@@ -553,7 +568,7 @@ struct StarPilotCarParams::AutoSteeringLearning {
   struct Identity;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(8d023a280a4db1b1, 12, 4)
+    CAPNP_DECLARE_STRUCT_HEADER(8d023a280a4db1b1, 12, 7)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -584,7 +599,7 @@ struct StarPilotCarState {
   struct Gps;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(f35cc4560bbf6ec2, 3, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(f35cc4560bbf6ec2, 3, 4)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -1102,7 +1117,7 @@ struct StarPilotLateralState {
   struct LaneCentering;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(c2243c65e0340384, 4, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(c2243c65e0340384, 4, 3)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -1343,6 +1358,226 @@ struct MapdOut {
 
   struct _capnpPrivate {
     CAPNP_DECLARE_STRUCT_HEADER(a4f1eb3323f5f582, 14, 6)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct LearningControlEvidence {
+  LearningControlEvidence() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+  struct NamedValue;
+  struct StageValue;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(f2447170bb68f358, 13, 18)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct LearningControlEvidence::NamedValue {
+  NamedValue() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+  enum Which: uint16_t {
+    NUMBER,
+    TEXT,
+    BOOLEAN,
+  };
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(ddd8eb0f1a3fb843, 2, 2)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct LearningControlEvidence::StageValue {
+  StageValue() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(e7b005eb931864bc, 1, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct LearningAppliedEvidence {
+  LearningAppliedEvidence() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(bab0f51a74ffee6e, 7, 2)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct AutomaticRuntimeProfile {
+  AutomaticRuntimeProfile() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+  struct ReplayValidation;
+  struct Parameter;
+  struct CohortImprovement;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(ef38d302825641e3, 6, 8)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct AutomaticRuntimeProfile::ReplayValidation {
+  ReplayValidation() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(c67bb160599bcae3, 2, 2)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct AutomaticRuntimeProfile::Parameter {
+  Parameter() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(f967f623f65d7dba, 5, 2)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct AutomaticRuntimeProfile::CohortImprovement {
+  CohortImprovement() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(ccffb4ab144bf131, 1, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct AutomaticLearningSourceReceipt {
+  AutomaticLearningSourceReceipt() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(9fe2d23e75805149, 3, 4)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct LearningApplication {
+  LearningApplication() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(82b6c8ea6a6efabd, 3, 6)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct FordLearningEvidence {
+  FordLearningEvidence() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(d1dfbadb6a811fee, 8, 11)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct FordLearningEvent {
+  FordLearningEvent() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(b276dede9e6b2cc4, 20, 6)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct CentreApplicationWitness {
+  CentreApplicationWitness() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(ab0b33cac682523e, 7, 5)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct LearningTorqueProjection {
+  LearningTorqueProjection() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(f078f562cbce49ad, 11, 10)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -2274,6 +2509,15 @@ public:
 
   inline double getHeldoutCandidateLoss() const;
 
+  inline bool hasRuntimeProfile() const;
+  inline  ::cereal::AutomaticRuntimeProfile::Reader getRuntimeProfile() const;
+
+  inline bool hasSourceReceipt() const;
+  inline  ::cereal::AutomaticLearningSourceReceipt::Reader getSourceReceipt() const;
+
+  inline bool hasCentreApplicationWitness() const;
+  inline  ::cereal::CentreApplicationWitness::Reader getCentreApplicationWitness() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -2375,6 +2619,27 @@ public:
   inline double getHeldoutCandidateLoss();
   inline void setHeldoutCandidateLoss(double value);
 
+  inline bool hasRuntimeProfile();
+  inline  ::cereal::AutomaticRuntimeProfile::Builder getRuntimeProfile();
+  inline void setRuntimeProfile( ::cereal::AutomaticRuntimeProfile::Reader value);
+  inline  ::cereal::AutomaticRuntimeProfile::Builder initRuntimeProfile();
+  inline void adoptRuntimeProfile(::capnp::Orphan< ::cereal::AutomaticRuntimeProfile>&& value);
+  inline ::capnp::Orphan< ::cereal::AutomaticRuntimeProfile> disownRuntimeProfile();
+
+  inline bool hasSourceReceipt();
+  inline  ::cereal::AutomaticLearningSourceReceipt::Builder getSourceReceipt();
+  inline void setSourceReceipt( ::cereal::AutomaticLearningSourceReceipt::Reader value);
+  inline  ::cereal::AutomaticLearningSourceReceipt::Builder initSourceReceipt();
+  inline void adoptSourceReceipt(::capnp::Orphan< ::cereal::AutomaticLearningSourceReceipt>&& value);
+  inline ::capnp::Orphan< ::cereal::AutomaticLearningSourceReceipt> disownSourceReceipt();
+
+  inline bool hasCentreApplicationWitness();
+  inline  ::cereal::CentreApplicationWitness::Builder getCentreApplicationWitness();
+  inline void setCentreApplicationWitness( ::cereal::CentreApplicationWitness::Reader value);
+  inline  ::cereal::CentreApplicationWitness::Builder initCentreApplicationWitness();
+  inline void adoptCentreApplicationWitness(::capnp::Orphan< ::cereal::CentreApplicationWitness>&& value);
+  inline ::capnp::Orphan< ::cereal::CentreApplicationWitness> disownCentreApplicationWitness();
+
 private:
   ::capnp::_::StructBuilder _builder;
   template <typename, ::capnp::Kind>
@@ -2394,6 +2659,9 @@ public:
       : _typeless(kj::mv(typeless)) {}
 
   inline  ::cereal::StarPilotCarParams::AutoSteeringLearning::Identity::Pipeline getIdentity();
+  inline  ::cereal::AutomaticRuntimeProfile::Pipeline getRuntimeProfile();
+  inline  ::cereal::AutomaticLearningSourceReceipt::Pipeline getSourceReceipt();
+  inline  ::cereal::CentreApplicationWitness::Pipeline getCentreApplicationWitness();
 private:
   ::capnp::AnyPointer::Pipeline _typeless;
   friend class ::capnp::PipelineHook;
@@ -2680,6 +2948,15 @@ public:
 
   inline  ::uint64_t getSourceCarStateMonoTime() const;
 
+  inline bool hasAppliedEvidence() const;
+  inline  ::cereal::LearningAppliedEvidence::Reader getAppliedEvidence() const;
+
+  inline bool hasFordLearningEvidence() const;
+  inline  ::cereal::FordLearningEvidence::Reader getFordLearningEvidence() const;
+
+  inline bool hasLearningApplication() const;
+  inline  ::cereal::LearningApplication::Reader getLearningApplication() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -2814,6 +3091,27 @@ public:
   inline  ::uint64_t getSourceCarStateMonoTime();
   inline void setSourceCarStateMonoTime( ::uint64_t value);
 
+  inline bool hasAppliedEvidence();
+  inline  ::cereal::LearningAppliedEvidence::Builder getAppliedEvidence();
+  inline void setAppliedEvidence( ::cereal::LearningAppliedEvidence::Reader value);
+  inline  ::cereal::LearningAppliedEvidence::Builder initAppliedEvidence();
+  inline void adoptAppliedEvidence(::capnp::Orphan< ::cereal::LearningAppliedEvidence>&& value);
+  inline ::capnp::Orphan< ::cereal::LearningAppliedEvidence> disownAppliedEvidence();
+
+  inline bool hasFordLearningEvidence();
+  inline  ::cereal::FordLearningEvidence::Builder getFordLearningEvidence();
+  inline void setFordLearningEvidence( ::cereal::FordLearningEvidence::Reader value);
+  inline  ::cereal::FordLearningEvidence::Builder initFordLearningEvidence();
+  inline void adoptFordLearningEvidence(::capnp::Orphan< ::cereal::FordLearningEvidence>&& value);
+  inline ::capnp::Orphan< ::cereal::FordLearningEvidence> disownFordLearningEvidence();
+
+  inline bool hasLearningApplication();
+  inline  ::cereal::LearningApplication::Builder getLearningApplication();
+  inline void setLearningApplication( ::cereal::LearningApplication::Reader value);
+  inline  ::cereal::LearningApplication::Builder initLearningApplication();
+  inline void adoptLearningApplication(::capnp::Orphan< ::cereal::LearningApplication>&& value);
+  inline ::capnp::Orphan< ::cereal::LearningApplication> disownLearningApplication();
+
 private:
   ::capnp::_::StructBuilder _builder;
   template <typename, ::capnp::Kind>
@@ -2833,6 +3131,9 @@ public:
       : _typeless(kj::mv(typeless)) {}
 
   inline  ::cereal::StarPilotCarState::Gps::Pipeline getGps();
+  inline  ::cereal::LearningAppliedEvidence::Pipeline getAppliedEvidence();
+  inline  ::cereal::FordLearningEvidence::Pipeline getFordLearningEvidence();
+  inline  ::cereal::LearningApplication::Pipeline getLearningApplication();
 private:
   ::capnp::AnyPointer::Pipeline _typeless;
   friend class ::capnp::PipelineHook;
@@ -7237,6 +7538,12 @@ public:
   inline bool hasLaneCentering() const;
   inline  ::cereal::StarPilotLateralState::LaneCentering::Reader getLaneCentering() const;
 
+  inline bool hasLearningEvidence() const;
+  inline  ::cereal::LearningControlEvidence::Reader getLearningEvidence() const;
+
+  inline bool hasLearningApplication() const;
+  inline  ::cereal::LearningApplication::Reader getLearningApplication() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -7296,6 +7603,20 @@ public:
   inline void adoptLaneCentering(::capnp::Orphan< ::cereal::StarPilotLateralState::LaneCentering>&& value);
   inline ::capnp::Orphan< ::cereal::StarPilotLateralState::LaneCentering> disownLaneCentering();
 
+  inline bool hasLearningEvidence();
+  inline  ::cereal::LearningControlEvidence::Builder getLearningEvidence();
+  inline void setLearningEvidence( ::cereal::LearningControlEvidence::Reader value);
+  inline  ::cereal::LearningControlEvidence::Builder initLearningEvidence();
+  inline void adoptLearningEvidence(::capnp::Orphan< ::cereal::LearningControlEvidence>&& value);
+  inline ::capnp::Orphan< ::cereal::LearningControlEvidence> disownLearningEvidence();
+
+  inline bool hasLearningApplication();
+  inline  ::cereal::LearningApplication::Builder getLearningApplication();
+  inline void setLearningApplication( ::cereal::LearningApplication::Reader value);
+  inline  ::cereal::LearningApplication::Builder initLearningApplication();
+  inline void adoptLearningApplication(::capnp::Orphan< ::cereal::LearningApplication>&& value);
+  inline ::capnp::Orphan< ::cereal::LearningApplication> disownLearningApplication();
+
 private:
   ::capnp::_::StructBuilder _builder;
   template <typename, ::capnp::Kind>
@@ -7315,6 +7636,8 @@ public:
       : _typeless(kj::mv(typeless)) {}
 
   inline  ::cereal::StarPilotLateralState::LaneCentering::Pipeline getLaneCentering();
+  inline  ::cereal::LearningControlEvidence::Pipeline getLearningEvidence();
+  inline  ::cereal::LearningApplication::Pipeline getLearningApplication();
 private:
   ::capnp::AnyPointer::Pipeline _typeless;
   friend class ::capnp::PipelineHook;
@@ -9200,6 +9523,2405 @@ private:
 };
 #endif  // !CAPNP_LITE
 
+class LearningControlEvidence::Reader {
+public:
+  typedef LearningControlEvidence Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion() const;
+
+  inline bool hasIdentity() const;
+  inline  ::capnp::Text::Reader getIdentity() const;
+
+  inline  ::uint64_t getGeneration() const;
+
+  inline  ::uint64_t getControlMonoTime() const;
+
+  inline  ::uint64_t getSourceStateMonoTime() const;
+
+  inline bool hasDomain() const;
+  inline  ::capnp::Text::Reader getDomain() const;
+
+  inline bool hasStageRevision() const;
+  inline  ::capnp::Text::Reader getStageRevision() const;
+
+  inline bool hasResponseRevision() const;
+  inline  ::capnp::Text::Reader getResponseRevision() const;
+
+  inline double getRequested() const;
+
+  inline bool hasFeatures() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getFeatures() const;
+
+  inline double getBaselinePrediction() const;
+
+  inline bool getEnabled() const;
+
+  inline bool getManual() const;
+
+  inline bool getActive() const;
+
+  inline bool getValid() const;
+
+  inline bool getOverride() const;
+
+  inline bool getFault() const;
+
+  inline bool getSaturated() const;
+
+  inline bool getLimited() const;
+
+  inline bool getModelWobble() const;
+
+  inline bool getControllerChatter() const;
+
+  inline bool hasStageSchemaRevision() const;
+  inline  ::capnp::Text::Reader getStageSchemaRevision() const;
+
+  inline bool hasStageValues() const;
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Reader getStageValues() const;
+
+  inline bool hasAppliedCoordinates() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getAppliedCoordinates() const;
+
+  inline bool hasSourceEpoch() const;
+  inline  ::capnp::Text::Reader getSourceEpoch() const;
+
+  inline  ::uint64_t getSourceReceiptMonoTime() const;
+
+  inline bool hasControllerMode() const;
+  inline  ::capnp::Text::Reader getControllerMode() const;
+
+  inline bool hasPolicy() const;
+  inline  ::capnp::Text::Reader getPolicy() const;
+
+  inline bool hasBaselineRevision() const;
+  inline  ::capnp::Text::Reader getBaselineRevision() const;
+
+  inline bool hasBaselineValues() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getBaselineValues() const;
+
+  inline bool hasControllerRevision() const;
+  inline  ::capnp::Text::Reader getControllerRevision() const;
+
+  inline bool hasReplaySnapshot() const;
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader getReplaySnapshot() const;
+
+  inline bool hasReplayInputs() const;
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader getReplayInputs() const;
+
+  inline  ::uint64_t getSnapshotSequence() const;
+
+  inline bool getTurnAssist() const;
+
+  inline bool hasAppliedParameterNames() const;
+  inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader getAppliedParameterNames() const;
+
+  inline bool getNativeRequired() const;
+
+  inline  ::uint64_t getNativeObservedMonoTime() const;
+
+  inline  ::uint64_t getNativeValidUntilMonoTime() const;
+
+  inline bool getNativeAllowed() const;
+
+  inline bool hasNativeIdentity() const;
+  inline  ::capnp::Text::Reader getNativeIdentity() const;
+
+  inline  ::uint64_t getAppliedProfileSequence() const;
+
+  inline  ::uint64_t getAppliedProfileObservedMonoTime() const;
+
+  inline  ::uint64_t getAppliedProfileValidUntilMonoTime() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class LearningControlEvidence::Builder {
+public:
+  typedef LearningControlEvidence Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion();
+  inline void setVersion( ::uint16_t value);
+
+  inline bool hasIdentity();
+  inline  ::capnp::Text::Builder getIdentity();
+  inline void setIdentity( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initIdentity(unsigned int size);
+  inline void adoptIdentity(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownIdentity();
+
+  inline  ::uint64_t getGeneration();
+  inline void setGeneration( ::uint64_t value);
+
+  inline  ::uint64_t getControlMonoTime();
+  inline void setControlMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getSourceStateMonoTime();
+  inline void setSourceStateMonoTime( ::uint64_t value);
+
+  inline bool hasDomain();
+  inline  ::capnp::Text::Builder getDomain();
+  inline void setDomain( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initDomain(unsigned int size);
+  inline void adoptDomain(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownDomain();
+
+  inline bool hasStageRevision();
+  inline  ::capnp::Text::Builder getStageRevision();
+  inline void setStageRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initStageRevision(unsigned int size);
+  inline void adoptStageRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownStageRevision();
+
+  inline bool hasResponseRevision();
+  inline  ::capnp::Text::Builder getResponseRevision();
+  inline void setResponseRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initResponseRevision(unsigned int size);
+  inline void adoptResponseRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownResponseRevision();
+
+  inline double getRequested();
+  inline void setRequested(double value);
+
+  inline bool hasFeatures();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getFeatures();
+  inline void setFeatures( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setFeatures(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initFeatures(unsigned int size);
+  inline void adoptFeatures(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownFeatures();
+
+  inline double getBaselinePrediction();
+  inline void setBaselinePrediction(double value);
+
+  inline bool getEnabled();
+  inline void setEnabled(bool value);
+
+  inline bool getManual();
+  inline void setManual(bool value);
+
+  inline bool getActive();
+  inline void setActive(bool value);
+
+  inline bool getValid();
+  inline void setValid(bool value);
+
+  inline bool getOverride();
+  inline void setOverride(bool value);
+
+  inline bool getFault();
+  inline void setFault(bool value);
+
+  inline bool getSaturated();
+  inline void setSaturated(bool value);
+
+  inline bool getLimited();
+  inline void setLimited(bool value);
+
+  inline bool getModelWobble();
+  inline void setModelWobble(bool value);
+
+  inline bool getControllerChatter();
+  inline void setControllerChatter(bool value);
+
+  inline bool hasStageSchemaRevision();
+  inline  ::capnp::Text::Builder getStageSchemaRevision();
+  inline void setStageSchemaRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initStageSchemaRevision(unsigned int size);
+  inline void adoptStageSchemaRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownStageSchemaRevision();
+
+  inline bool hasStageValues();
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Builder getStageValues();
+  inline void setStageValues( ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Reader value);
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Builder initStageValues(unsigned int size);
+  inline void adoptStageValues(::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>> disownStageValues();
+
+  inline bool hasAppliedCoordinates();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getAppliedCoordinates();
+  inline void setAppliedCoordinates( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setAppliedCoordinates(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initAppliedCoordinates(unsigned int size);
+  inline void adoptAppliedCoordinates(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownAppliedCoordinates();
+
+  inline bool hasSourceEpoch();
+  inline  ::capnp::Text::Builder getSourceEpoch();
+  inline void setSourceEpoch( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initSourceEpoch(unsigned int size);
+  inline void adoptSourceEpoch(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownSourceEpoch();
+
+  inline  ::uint64_t getSourceReceiptMonoTime();
+  inline void setSourceReceiptMonoTime( ::uint64_t value);
+
+  inline bool hasControllerMode();
+  inline  ::capnp::Text::Builder getControllerMode();
+  inline void setControllerMode( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initControllerMode(unsigned int size);
+  inline void adoptControllerMode(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownControllerMode();
+
+  inline bool hasPolicy();
+  inline  ::capnp::Text::Builder getPolicy();
+  inline void setPolicy( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initPolicy(unsigned int size);
+  inline void adoptPolicy(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownPolicy();
+
+  inline bool hasBaselineRevision();
+  inline  ::capnp::Text::Builder getBaselineRevision();
+  inline void setBaselineRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initBaselineRevision(unsigned int size);
+  inline void adoptBaselineRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownBaselineRevision();
+
+  inline bool hasBaselineValues();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getBaselineValues();
+  inline void setBaselineValues( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setBaselineValues(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initBaselineValues(unsigned int size);
+  inline void adoptBaselineValues(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownBaselineValues();
+
+  inline bool hasControllerRevision();
+  inline  ::capnp::Text::Builder getControllerRevision();
+  inline void setControllerRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initControllerRevision(unsigned int size);
+  inline void adoptControllerRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownControllerRevision();
+
+  inline bool hasReplaySnapshot();
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder getReplaySnapshot();
+  inline void setReplaySnapshot( ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader value);
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder initReplaySnapshot(unsigned int size);
+  inline void adoptReplaySnapshot(::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>> disownReplaySnapshot();
+
+  inline bool hasReplayInputs();
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder getReplayInputs();
+  inline void setReplayInputs( ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader value);
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder initReplayInputs(unsigned int size);
+  inline void adoptReplayInputs(::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>> disownReplayInputs();
+
+  inline  ::uint64_t getSnapshotSequence();
+  inline void setSnapshotSequence( ::uint64_t value);
+
+  inline bool getTurnAssist();
+  inline void setTurnAssist(bool value);
+
+  inline bool hasAppliedParameterNames();
+  inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder getAppliedParameterNames();
+  inline void setAppliedParameterNames( ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader value);
+  inline void setAppliedParameterNames(::kj::ArrayPtr<const  ::capnp::Text::Reader> value);
+  inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder initAppliedParameterNames(unsigned int size);
+  inline void adoptAppliedParameterNames(::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>> disownAppliedParameterNames();
+
+  inline bool getNativeRequired();
+  inline void setNativeRequired(bool value);
+
+  inline  ::uint64_t getNativeObservedMonoTime();
+  inline void setNativeObservedMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getNativeValidUntilMonoTime();
+  inline void setNativeValidUntilMonoTime( ::uint64_t value);
+
+  inline bool getNativeAllowed();
+  inline void setNativeAllowed(bool value);
+
+  inline bool hasNativeIdentity();
+  inline  ::capnp::Text::Builder getNativeIdentity();
+  inline void setNativeIdentity( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initNativeIdentity(unsigned int size);
+  inline void adoptNativeIdentity(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownNativeIdentity();
+
+  inline  ::uint64_t getAppliedProfileSequence();
+  inline void setAppliedProfileSequence( ::uint64_t value);
+
+  inline  ::uint64_t getAppliedProfileObservedMonoTime();
+  inline void setAppliedProfileObservedMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getAppliedProfileValidUntilMonoTime();
+  inline void setAppliedProfileValidUntilMonoTime( ::uint64_t value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class LearningControlEvidence::Pipeline {
+public:
+  typedef LearningControlEvidence Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class LearningControlEvidence::NamedValue::Reader {
+public:
+  typedef NamedValue Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline Which which() const;
+  inline bool hasName() const;
+  inline  ::capnp::Text::Reader getName() const;
+
+  inline bool isNumber() const;
+  inline double getNumber() const;
+
+  inline bool isText() const;
+  inline bool hasText() const;
+  inline  ::capnp::Text::Reader getText() const;
+
+  inline bool isBoolean() const;
+  inline bool getBoolean() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class LearningControlEvidence::NamedValue::Builder {
+public:
+  typedef NamedValue Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline Which which();
+  inline bool hasName();
+  inline  ::capnp::Text::Builder getName();
+  inline void setName( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initName(unsigned int size);
+  inline void adoptName(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownName();
+
+  inline bool isNumber();
+  inline double getNumber();
+  inline void setNumber(double value);
+
+  inline bool isText();
+  inline bool hasText();
+  inline  ::capnp::Text::Builder getText();
+  inline void setText( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initText(unsigned int size);
+  inline void adoptText(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownText();
+
+  inline bool isBoolean();
+  inline bool getBoolean();
+  inline void setBoolean(bool value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class LearningControlEvidence::NamedValue::Pipeline {
+public:
+  typedef NamedValue Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class LearningControlEvidence::StageValue::Reader {
+public:
+  typedef StageValue Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasName() const;
+  inline  ::capnp::Text::Reader getName() const;
+
+  inline double getValue() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class LearningControlEvidence::StageValue::Builder {
+public:
+  typedef StageValue Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasName();
+  inline  ::capnp::Text::Builder getName();
+  inline void setName( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initName(unsigned int size);
+  inline void adoptName(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownName();
+
+  inline double getValue();
+  inline void setValue(double value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class LearningControlEvidence::StageValue::Pipeline {
+public:
+  typedef StageValue Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class LearningAppliedEvidence::Reader {
+public:
+  typedef LearningAppliedEvidence Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion() const;
+
+  inline  ::uint64_t getControlMonoTime() const;
+
+  inline  ::uint64_t getSourceStateMonoTime() const;
+
+  inline  ::uint64_t getAppliedMonoTime() const;
+
+  inline bool hasDomain() const;
+  inline  ::capnp::Text::Reader getDomain() const;
+
+  inline double getApplied() const;
+
+  inline bool getValid() const;
+
+  inline bool getActive() const;
+
+  inline bool getOverride() const;
+
+  inline bool getFault() const;
+
+  inline bool getLimited() const;
+
+  inline bool getNativeAllowed() const;
+
+  inline bool hasProjection() const;
+  inline  ::cereal::LearningTorqueProjection::Reader getProjection() const;
+
+  inline  ::uint64_t getCarrierFrame() const;
+
+  inline  ::uint64_t getCarrierObservedMonoTime() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class LearningAppliedEvidence::Builder {
+public:
+  typedef LearningAppliedEvidence Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion();
+  inline void setVersion( ::uint16_t value);
+
+  inline  ::uint64_t getControlMonoTime();
+  inline void setControlMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getSourceStateMonoTime();
+  inline void setSourceStateMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getAppliedMonoTime();
+  inline void setAppliedMonoTime( ::uint64_t value);
+
+  inline bool hasDomain();
+  inline  ::capnp::Text::Builder getDomain();
+  inline void setDomain( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initDomain(unsigned int size);
+  inline void adoptDomain(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownDomain();
+
+  inline double getApplied();
+  inline void setApplied(double value);
+
+  inline bool getValid();
+  inline void setValid(bool value);
+
+  inline bool getActive();
+  inline void setActive(bool value);
+
+  inline bool getOverride();
+  inline void setOverride(bool value);
+
+  inline bool getFault();
+  inline void setFault(bool value);
+
+  inline bool getLimited();
+  inline void setLimited(bool value);
+
+  inline bool getNativeAllowed();
+  inline void setNativeAllowed(bool value);
+
+  inline bool hasProjection();
+  inline  ::cereal::LearningTorqueProjection::Builder getProjection();
+  inline void setProjection( ::cereal::LearningTorqueProjection::Reader value);
+  inline  ::cereal::LearningTorqueProjection::Builder initProjection();
+  inline void adoptProjection(::capnp::Orphan< ::cereal::LearningTorqueProjection>&& value);
+  inline ::capnp::Orphan< ::cereal::LearningTorqueProjection> disownProjection();
+
+  inline  ::uint64_t getCarrierFrame();
+  inline void setCarrierFrame( ::uint64_t value);
+
+  inline  ::uint64_t getCarrierObservedMonoTime();
+  inline void setCarrierObservedMonoTime( ::uint64_t value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class LearningAppliedEvidence::Pipeline {
+public:
+  typedef LearningAppliedEvidence Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+  inline  ::cereal::LearningTorqueProjection::Pipeline getProjection();
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class AutomaticRuntimeProfile::Reader {
+public:
+  typedef AutomaticRuntimeProfile Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion() const;
+
+  inline bool hasIdentity() const;
+  inline  ::capnp::Text::Reader getIdentity() const;
+
+  inline  ::uint64_t getSequence() const;
+
+  inline  ::uint64_t getObservedMonoTime() const;
+
+  inline  ::uint64_t getValidUntilMonoTime() const;
+
+  inline bool hasPolicy() const;
+  inline  ::capnp::Text::Reader getPolicy() const;
+
+  inline bool hasParameters() const;
+  inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>::Reader getParameters() const;
+
+  inline bool hasCoefficients() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getCoefficients() const;
+
+  inline bool hasTrainIds() const;
+  inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader getTrainIds() const;
+
+  inline bool hasHeldoutIds() const;
+  inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader getHeldoutIds() const;
+
+  inline double getBaselineLoss() const;
+
+  inline double getCandidateLoss() const;
+
+  inline bool hasCohortImprovements() const;
+  inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>::Reader getCohortImprovements() const;
+
+  inline bool hasReplay() const;
+  inline  ::cereal::AutomaticRuntimeProfile::ReplayValidation::Reader getReplay() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class AutomaticRuntimeProfile::Builder {
+public:
+  typedef AutomaticRuntimeProfile Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion();
+  inline void setVersion( ::uint16_t value);
+
+  inline bool hasIdentity();
+  inline  ::capnp::Text::Builder getIdentity();
+  inline void setIdentity( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initIdentity(unsigned int size);
+  inline void adoptIdentity(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownIdentity();
+
+  inline  ::uint64_t getSequence();
+  inline void setSequence( ::uint64_t value);
+
+  inline  ::uint64_t getObservedMonoTime();
+  inline void setObservedMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getValidUntilMonoTime();
+  inline void setValidUntilMonoTime( ::uint64_t value);
+
+  inline bool hasPolicy();
+  inline  ::capnp::Text::Builder getPolicy();
+  inline void setPolicy( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initPolicy(unsigned int size);
+  inline void adoptPolicy(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownPolicy();
+
+  inline bool hasParameters();
+  inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>::Builder getParameters();
+  inline void setParameters( ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>::Reader value);
+  inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>::Builder initParameters(unsigned int size);
+  inline void adoptParameters(::capnp::Orphan< ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>> disownParameters();
+
+  inline bool hasCoefficients();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getCoefficients();
+  inline void setCoefficients( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setCoefficients(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initCoefficients(unsigned int size);
+  inline void adoptCoefficients(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownCoefficients();
+
+  inline bool hasTrainIds();
+  inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder getTrainIds();
+  inline void setTrainIds( ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader value);
+  inline void setTrainIds(::kj::ArrayPtr<const  ::capnp::Text::Reader> value);
+  inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder initTrainIds(unsigned int size);
+  inline void adoptTrainIds(::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>> disownTrainIds();
+
+  inline bool hasHeldoutIds();
+  inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder getHeldoutIds();
+  inline void setHeldoutIds( ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader value);
+  inline void setHeldoutIds(::kj::ArrayPtr<const  ::capnp::Text::Reader> value);
+  inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder initHeldoutIds(unsigned int size);
+  inline void adoptHeldoutIds(::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>> disownHeldoutIds();
+
+  inline double getBaselineLoss();
+  inline void setBaselineLoss(double value);
+
+  inline double getCandidateLoss();
+  inline void setCandidateLoss(double value);
+
+  inline bool hasCohortImprovements();
+  inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>::Builder getCohortImprovements();
+  inline void setCohortImprovements( ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>::Reader value);
+  inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>::Builder initCohortImprovements(unsigned int size);
+  inline void adoptCohortImprovements(::capnp::Orphan< ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>> disownCohortImprovements();
+
+  inline bool hasReplay();
+  inline  ::cereal::AutomaticRuntimeProfile::ReplayValidation::Builder getReplay();
+  inline void setReplay( ::cereal::AutomaticRuntimeProfile::ReplayValidation::Reader value);
+  inline  ::cereal::AutomaticRuntimeProfile::ReplayValidation::Builder initReplay();
+  inline void adoptReplay(::capnp::Orphan< ::cereal::AutomaticRuntimeProfile::ReplayValidation>&& value);
+  inline ::capnp::Orphan< ::cereal::AutomaticRuntimeProfile::ReplayValidation> disownReplay();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class AutomaticRuntimeProfile::Pipeline {
+public:
+  typedef AutomaticRuntimeProfile Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+  inline  ::cereal::AutomaticRuntimeProfile::ReplayValidation::Pipeline getReplay();
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class AutomaticRuntimeProfile::ReplayValidation::Reader {
+public:
+  typedef ReplayValidation Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasBaselineRevision() const;
+  inline  ::capnp::Text::Reader getBaselineRevision() const;
+
+  inline bool hasPhysicalModelRevision() const;
+  inline  ::capnp::Text::Reader getPhysicalModelRevision() const;
+
+  inline bool getNoSaturationRegression() const;
+
+  inline bool getNoSlewRegression() const;
+
+  inline double getWorstCohortImprovement() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class AutomaticRuntimeProfile::ReplayValidation::Builder {
+public:
+  typedef ReplayValidation Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasBaselineRevision();
+  inline  ::capnp::Text::Builder getBaselineRevision();
+  inline void setBaselineRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initBaselineRevision(unsigned int size);
+  inline void adoptBaselineRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownBaselineRevision();
+
+  inline bool hasPhysicalModelRevision();
+  inline  ::capnp::Text::Builder getPhysicalModelRevision();
+  inline void setPhysicalModelRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initPhysicalModelRevision(unsigned int size);
+  inline void adoptPhysicalModelRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownPhysicalModelRevision();
+
+  inline bool getNoSaturationRegression();
+  inline void setNoSaturationRegression(bool value);
+
+  inline bool getNoSlewRegression();
+  inline void setNoSlewRegression(bool value);
+
+  inline double getWorstCohortImprovement();
+  inline void setWorstCohortImprovement(double value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class AutomaticRuntimeProfile::ReplayValidation::Pipeline {
+public:
+  typedef ReplayValidation Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class AutomaticRuntimeProfile::Parameter::Reader {
+public:
+  typedef Parameter Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasName() const;
+  inline  ::capnp::Text::Reader getName() const;
+
+  inline bool hasStageRevision() const;
+  inline  ::capnp::Text::Reader getStageRevision() const;
+
+  inline double getLow() const;
+
+  inline double getHigh() const;
+
+  inline double getMaxStep() const;
+
+  inline double getSlewPerS() const;
+
+  inline double getExcitationFloor() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class AutomaticRuntimeProfile::Parameter::Builder {
+public:
+  typedef Parameter Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasName();
+  inline  ::capnp::Text::Builder getName();
+  inline void setName( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initName(unsigned int size);
+  inline void adoptName(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownName();
+
+  inline bool hasStageRevision();
+  inline  ::capnp::Text::Builder getStageRevision();
+  inline void setStageRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initStageRevision(unsigned int size);
+  inline void adoptStageRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownStageRevision();
+
+  inline double getLow();
+  inline void setLow(double value);
+
+  inline double getHigh();
+  inline void setHigh(double value);
+
+  inline double getMaxStep();
+  inline void setMaxStep(double value);
+
+  inline double getSlewPerS();
+  inline void setSlewPerS(double value);
+
+  inline double getExcitationFloor();
+  inline void setExcitationFloor(double value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class AutomaticRuntimeProfile::Parameter::Pipeline {
+public:
+  typedef Parameter Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class AutomaticRuntimeProfile::CohortImprovement::Reader {
+public:
+  typedef CohortImprovement Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasName() const;
+  inline  ::capnp::Text::Reader getName() const;
+
+  inline double getLowerBound() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class AutomaticRuntimeProfile::CohortImprovement::Builder {
+public:
+  typedef CohortImprovement Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasName();
+  inline  ::capnp::Text::Builder getName();
+  inline void setName( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initName(unsigned int size);
+  inline void adoptName(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownName();
+
+  inline double getLowerBound();
+  inline void setLowerBound(double value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class AutomaticRuntimeProfile::CohortImprovement::Pipeline {
+public:
+  typedef CohortImprovement Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class AutomaticLearningSourceReceipt::Reader {
+public:
+  typedef AutomaticLearningSourceReceipt Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion() const;
+
+  inline bool getEnabled() const;
+
+  inline bool getManual() const;
+
+  inline bool hasResetGeneration() const;
+  inline  ::capnp::Text::Reader getResetGeneration() const;
+
+  inline bool hasSourceEpoch() const;
+  inline  ::capnp::Text::Reader getSourceEpoch() const;
+
+  inline  ::uint64_t getObservedMonoTime() const;
+
+  inline  ::uint64_t getValidUntilMonoTime() const;
+
+  inline bool hasCpSha256() const;
+  inline  ::capnp::Text::Reader getCpSha256() const;
+
+  inline bool hasCalibrationBasis() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getCalibrationBasis() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class AutomaticLearningSourceReceipt::Builder {
+public:
+  typedef AutomaticLearningSourceReceipt Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion();
+  inline void setVersion( ::uint16_t value);
+
+  inline bool getEnabled();
+  inline void setEnabled(bool value);
+
+  inline bool getManual();
+  inline void setManual(bool value);
+
+  inline bool hasResetGeneration();
+  inline  ::capnp::Text::Builder getResetGeneration();
+  inline void setResetGeneration( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initResetGeneration(unsigned int size);
+  inline void adoptResetGeneration(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownResetGeneration();
+
+  inline bool hasSourceEpoch();
+  inline  ::capnp::Text::Builder getSourceEpoch();
+  inline void setSourceEpoch( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initSourceEpoch(unsigned int size);
+  inline void adoptSourceEpoch(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownSourceEpoch();
+
+  inline  ::uint64_t getObservedMonoTime();
+  inline void setObservedMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getValidUntilMonoTime();
+  inline void setValidUntilMonoTime( ::uint64_t value);
+
+  inline bool hasCpSha256();
+  inline  ::capnp::Text::Builder getCpSha256();
+  inline void setCpSha256( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initCpSha256(unsigned int size);
+  inline void adoptCpSha256(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownCpSha256();
+
+  inline bool hasCalibrationBasis();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getCalibrationBasis();
+  inline void setCalibrationBasis( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setCalibrationBasis(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initCalibrationBasis(unsigned int size);
+  inline void adoptCalibrationBasis(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownCalibrationBasis();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class AutomaticLearningSourceReceipt::Pipeline {
+public:
+  typedef AutomaticLearningSourceReceipt Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class LearningApplication::Reader {
+public:
+  typedef LearningApplication Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion() const;
+
+  inline bool hasIdentity() const;
+  inline  ::capnp::Text::Reader getIdentity() const;
+
+  inline  ::uint64_t getProfileSequence() const;
+
+  inline  ::uint64_t getObservedMonoTime() const;
+
+  inline bool hasStatus() const;
+  inline  ::capnp::Text::Reader getStatus() const;
+
+  inline bool hasActualCoordinates() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getActualCoordinates() const;
+
+  inline bool hasReason() const;
+  inline  ::capnp::Text::Reader getReason() const;
+
+  inline bool hasBaselineRevision() const;
+  inline  ::capnp::Text::Reader getBaselineRevision() const;
+
+  inline bool hasPhysicalModelRevision() const;
+  inline  ::capnp::Text::Reader getPhysicalModelRevision() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class LearningApplication::Builder {
+public:
+  typedef LearningApplication Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion();
+  inline void setVersion( ::uint16_t value);
+
+  inline bool hasIdentity();
+  inline  ::capnp::Text::Builder getIdentity();
+  inline void setIdentity( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initIdentity(unsigned int size);
+  inline void adoptIdentity(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownIdentity();
+
+  inline  ::uint64_t getProfileSequence();
+  inline void setProfileSequence( ::uint64_t value);
+
+  inline  ::uint64_t getObservedMonoTime();
+  inline void setObservedMonoTime( ::uint64_t value);
+
+  inline bool hasStatus();
+  inline  ::capnp::Text::Builder getStatus();
+  inline void setStatus( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initStatus(unsigned int size);
+  inline void adoptStatus(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownStatus();
+
+  inline bool hasActualCoordinates();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getActualCoordinates();
+  inline void setActualCoordinates( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setActualCoordinates(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initActualCoordinates(unsigned int size);
+  inline void adoptActualCoordinates(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownActualCoordinates();
+
+  inline bool hasReason();
+  inline  ::capnp::Text::Builder getReason();
+  inline void setReason( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initReason(unsigned int size);
+  inline void adoptReason(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownReason();
+
+  inline bool hasBaselineRevision();
+  inline  ::capnp::Text::Builder getBaselineRevision();
+  inline void setBaselineRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initBaselineRevision(unsigned int size);
+  inline void adoptBaselineRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownBaselineRevision();
+
+  inline bool hasPhysicalModelRevision();
+  inline  ::capnp::Text::Builder getPhysicalModelRevision();
+  inline void setPhysicalModelRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initPhysicalModelRevision(unsigned int size);
+  inline void adoptPhysicalModelRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownPhysicalModelRevision();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class LearningApplication::Pipeline {
+public:
+  typedef LearningApplication Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class FordLearningEvidence::Reader {
+public:
+  typedef FordLearningEvidence Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion() const;
+
+  inline bool hasIdentity() const;
+  inline  ::capnp::Text::Reader getIdentity() const;
+
+  inline  ::uint64_t getGeneration() const;
+
+  inline bool hasSourceEpoch() const;
+  inline  ::capnp::Text::Reader getSourceEpoch() const;
+
+  inline bool hasBaselineRevision() const;
+  inline  ::capnp::Text::Reader getBaselineRevision() const;
+
+  inline bool hasBaselineValues() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getBaselineValues() const;
+
+  inline bool hasControllerRevision() const;
+  inline  ::capnp::Text::Reader getControllerRevision() const;
+
+  inline bool hasCpSha256() const;
+  inline  ::capnp::Text::Reader getCpSha256() const;
+
+  inline bool hasControllerMode() const;
+  inline  ::capnp::Text::Reader getControllerMode() const;
+
+  inline bool hasPolicy() const;
+  inline  ::capnp::Text::Reader getPolicy() const;
+
+  inline bool hasConversionRevision() const;
+  inline  ::capnp::Text::Reader getConversionRevision() const;
+
+  inline bool hasStageRevision() const;
+  inline  ::capnp::Text::Reader getStageRevision() const;
+
+  inline  ::uint64_t getSourceReceiptMonoTime() const;
+
+  inline  ::uint64_t getSourceValidUntilMonoTime() const;
+
+  inline bool getEnabled() const;
+
+  inline bool getManual() const;
+
+  inline bool hasRows() const;
+  inline  ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>::Reader getRows() const;
+
+  inline  ::uint64_t getDropped() const;
+
+  inline  ::uint64_t getAppliedProfileSequence() const;
+
+  inline  ::uint64_t getAppliedProfileObservedMonoTime() const;
+
+  inline  ::uint64_t getAppliedProfileValidUntilMonoTime() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class FordLearningEvidence::Builder {
+public:
+  typedef FordLearningEvidence Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion();
+  inline void setVersion( ::uint16_t value);
+
+  inline bool hasIdentity();
+  inline  ::capnp::Text::Builder getIdentity();
+  inline void setIdentity( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initIdentity(unsigned int size);
+  inline void adoptIdentity(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownIdentity();
+
+  inline  ::uint64_t getGeneration();
+  inline void setGeneration( ::uint64_t value);
+
+  inline bool hasSourceEpoch();
+  inline  ::capnp::Text::Builder getSourceEpoch();
+  inline void setSourceEpoch( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initSourceEpoch(unsigned int size);
+  inline void adoptSourceEpoch(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownSourceEpoch();
+
+  inline bool hasBaselineRevision();
+  inline  ::capnp::Text::Builder getBaselineRevision();
+  inline void setBaselineRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initBaselineRevision(unsigned int size);
+  inline void adoptBaselineRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownBaselineRevision();
+
+  inline bool hasBaselineValues();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getBaselineValues();
+  inline void setBaselineValues( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setBaselineValues(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initBaselineValues(unsigned int size);
+  inline void adoptBaselineValues(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownBaselineValues();
+
+  inline bool hasControllerRevision();
+  inline  ::capnp::Text::Builder getControllerRevision();
+  inline void setControllerRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initControllerRevision(unsigned int size);
+  inline void adoptControllerRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownControllerRevision();
+
+  inline bool hasCpSha256();
+  inline  ::capnp::Text::Builder getCpSha256();
+  inline void setCpSha256( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initCpSha256(unsigned int size);
+  inline void adoptCpSha256(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownCpSha256();
+
+  inline bool hasControllerMode();
+  inline  ::capnp::Text::Builder getControllerMode();
+  inline void setControllerMode( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initControllerMode(unsigned int size);
+  inline void adoptControllerMode(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownControllerMode();
+
+  inline bool hasPolicy();
+  inline  ::capnp::Text::Builder getPolicy();
+  inline void setPolicy( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initPolicy(unsigned int size);
+  inline void adoptPolicy(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownPolicy();
+
+  inline bool hasConversionRevision();
+  inline  ::capnp::Text::Builder getConversionRevision();
+  inline void setConversionRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initConversionRevision(unsigned int size);
+  inline void adoptConversionRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownConversionRevision();
+
+  inline bool hasStageRevision();
+  inline  ::capnp::Text::Builder getStageRevision();
+  inline void setStageRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initStageRevision(unsigned int size);
+  inline void adoptStageRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownStageRevision();
+
+  inline  ::uint64_t getSourceReceiptMonoTime();
+  inline void setSourceReceiptMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getSourceValidUntilMonoTime();
+  inline void setSourceValidUntilMonoTime( ::uint64_t value);
+
+  inline bool getEnabled();
+  inline void setEnabled(bool value);
+
+  inline bool getManual();
+  inline void setManual(bool value);
+
+  inline bool hasRows();
+  inline  ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>::Builder getRows();
+  inline void setRows( ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>::Reader value);
+  inline  ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>::Builder initRows(unsigned int size);
+  inline void adoptRows(::capnp::Orphan< ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>> disownRows();
+
+  inline  ::uint64_t getDropped();
+  inline void setDropped( ::uint64_t value);
+
+  inline  ::uint64_t getAppliedProfileSequence();
+  inline void setAppliedProfileSequence( ::uint64_t value);
+
+  inline  ::uint64_t getAppliedProfileObservedMonoTime();
+  inline void setAppliedProfileObservedMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getAppliedProfileValidUntilMonoTime();
+  inline void setAppliedProfileValidUntilMonoTime( ::uint64_t value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class FordLearningEvidence::Pipeline {
+public:
+  typedef FordLearningEvidence Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class FordLearningEvent::Reader {
+public:
+  typedef FordLearningEvent Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint64_t getEventMonoTime() const;
+
+  inline  ::uint64_t getSequence() const;
+
+  inline bool hasKind() const;
+  inline  ::capnp::Text::Reader getKind() const;
+
+  inline bool hasInputs() const;
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader getInputs() const;
+
+  inline double getAppliedCoefficient() const;
+
+  inline bool hasActualPending() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getActualPending() const;
+
+  inline bool hasActualCommand() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getActualCommand() const;
+
+  inline  ::uint64_t getControlMonoTime() const;
+
+  inline  ::uint64_t getPendingControlMonoTime() const;
+
+  inline  ::uint64_t getAnnouncedControlMonoTime() const;
+
+  inline  ::uint64_t getCarStateMonoTime() const;
+
+  inline bool getNativeAllowed() const;
+
+  inline bool getFault() const;
+
+  inline bool getOverride() const;
+
+  inline bool getLimited() const;
+
+  inline bool getHasWirePath() const;
+
+  inline double getActualWirePath() const;
+
+  inline bool hasCheckpoint() const;
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader getCheckpoint() const;
+
+  inline  ::uint64_t getCheckpointSequence() const;
+
+  inline  ::uint64_t getSourceReceiptMonoTime() const;
+
+  inline  ::uint64_t getSourceValidUntilMonoTime() const;
+
+  inline  ::uint64_t getAppliedProfileSequence() const;
+
+  inline  ::uint64_t getAppliedProfileObservedMonoTime() const;
+
+  inline  ::uint64_t getAppliedProfileValidUntilMonoTime() const;
+
+  inline bool hasNativeIdentity() const;
+  inline  ::capnp::Text::Reader getNativeIdentity() const;
+
+  inline  ::uint64_t getNativeObservedMonoTime() const;
+
+  inline  ::uint64_t getNativeValidUntilMonoTime() const;
+
+  inline  ::uint64_t getNativeValidatedMonoTime() const;
+
+  inline  ::uint64_t getNativeCommandMonoTime() const;
+
+  inline double getAnnouncedCoefficient() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class FordLearningEvent::Builder {
+public:
+  typedef FordLearningEvent Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint64_t getEventMonoTime();
+  inline void setEventMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getSequence();
+  inline void setSequence( ::uint64_t value);
+
+  inline bool hasKind();
+  inline  ::capnp::Text::Builder getKind();
+  inline void setKind( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initKind(unsigned int size);
+  inline void adoptKind(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownKind();
+
+  inline bool hasInputs();
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder getInputs();
+  inline void setInputs( ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader value);
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder initInputs(unsigned int size);
+  inline void adoptInputs(::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>> disownInputs();
+
+  inline double getAppliedCoefficient();
+  inline void setAppliedCoefficient(double value);
+
+  inline bool hasActualPending();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getActualPending();
+  inline void setActualPending( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setActualPending(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initActualPending(unsigned int size);
+  inline void adoptActualPending(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownActualPending();
+
+  inline bool hasActualCommand();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getActualCommand();
+  inline void setActualCommand( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setActualCommand(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initActualCommand(unsigned int size);
+  inline void adoptActualCommand(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownActualCommand();
+
+  inline  ::uint64_t getControlMonoTime();
+  inline void setControlMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getPendingControlMonoTime();
+  inline void setPendingControlMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getAnnouncedControlMonoTime();
+  inline void setAnnouncedControlMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getCarStateMonoTime();
+  inline void setCarStateMonoTime( ::uint64_t value);
+
+  inline bool getNativeAllowed();
+  inline void setNativeAllowed(bool value);
+
+  inline bool getFault();
+  inline void setFault(bool value);
+
+  inline bool getOverride();
+  inline void setOverride(bool value);
+
+  inline bool getLimited();
+  inline void setLimited(bool value);
+
+  inline bool getHasWirePath();
+  inline void setHasWirePath(bool value);
+
+  inline double getActualWirePath();
+  inline void setActualWirePath(double value);
+
+  inline bool hasCheckpoint();
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder getCheckpoint();
+  inline void setCheckpoint( ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader value);
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder initCheckpoint(unsigned int size);
+  inline void adoptCheckpoint(::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>> disownCheckpoint();
+
+  inline  ::uint64_t getCheckpointSequence();
+  inline void setCheckpointSequence( ::uint64_t value);
+
+  inline  ::uint64_t getSourceReceiptMonoTime();
+  inline void setSourceReceiptMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getSourceValidUntilMonoTime();
+  inline void setSourceValidUntilMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getAppliedProfileSequence();
+  inline void setAppliedProfileSequence( ::uint64_t value);
+
+  inline  ::uint64_t getAppliedProfileObservedMonoTime();
+  inline void setAppliedProfileObservedMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getAppliedProfileValidUntilMonoTime();
+  inline void setAppliedProfileValidUntilMonoTime( ::uint64_t value);
+
+  inline bool hasNativeIdentity();
+  inline  ::capnp::Text::Builder getNativeIdentity();
+  inline void setNativeIdentity( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initNativeIdentity(unsigned int size);
+  inline void adoptNativeIdentity(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownNativeIdentity();
+
+  inline  ::uint64_t getNativeObservedMonoTime();
+  inline void setNativeObservedMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getNativeValidUntilMonoTime();
+  inline void setNativeValidUntilMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getNativeValidatedMonoTime();
+  inline void setNativeValidatedMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getNativeCommandMonoTime();
+  inline void setNativeCommandMonoTime( ::uint64_t value);
+
+  inline double getAnnouncedCoefficient();
+  inline void setAnnouncedCoefficient(double value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class FordLearningEvent::Pipeline {
+public:
+  typedef FordLearningEvent Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class CentreApplicationWitness::Reader {
+public:
+  typedef CentreApplicationWitness Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion() const;
+
+  inline bool hasIdentity() const;
+  inline  ::capnp::Text::Reader getIdentity() const;
+
+  inline bool hasSourceEpoch() const;
+  inline  ::capnp::Text::Reader getSourceEpoch() const;
+
+  inline  ::uint64_t getControlMonoTime() const;
+
+  inline  ::uint64_t getProfileSequence() const;
+
+  inline bool hasActualCoordinates() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getActualCoordinates() const;
+
+  inline bool hasBaselineRevision() const;
+  inline  ::capnp::Text::Reader getBaselineRevision() const;
+
+  inline bool hasPhysicalModelRevision() const;
+  inline  ::capnp::Text::Reader getPhysicalModelRevision() const;
+
+  inline  ::uint64_t getOriginalObservedMonoTime() const;
+
+  inline  ::uint64_t getOriginalValidUntilMonoTime() const;
+
+  inline double getBaselineFriction() const;
+
+  inline double getActualFriction() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class CentreApplicationWitness::Builder {
+public:
+  typedef CentreApplicationWitness Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion();
+  inline void setVersion( ::uint16_t value);
+
+  inline bool hasIdentity();
+  inline  ::capnp::Text::Builder getIdentity();
+  inline void setIdentity( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initIdentity(unsigned int size);
+  inline void adoptIdentity(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownIdentity();
+
+  inline bool hasSourceEpoch();
+  inline  ::capnp::Text::Builder getSourceEpoch();
+  inline void setSourceEpoch( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initSourceEpoch(unsigned int size);
+  inline void adoptSourceEpoch(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownSourceEpoch();
+
+  inline  ::uint64_t getControlMonoTime();
+  inline void setControlMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getProfileSequence();
+  inline void setProfileSequence( ::uint64_t value);
+
+  inline bool hasActualCoordinates();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getActualCoordinates();
+  inline void setActualCoordinates( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setActualCoordinates(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initActualCoordinates(unsigned int size);
+  inline void adoptActualCoordinates(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownActualCoordinates();
+
+  inline bool hasBaselineRevision();
+  inline  ::capnp::Text::Builder getBaselineRevision();
+  inline void setBaselineRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initBaselineRevision(unsigned int size);
+  inline void adoptBaselineRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownBaselineRevision();
+
+  inline bool hasPhysicalModelRevision();
+  inline  ::capnp::Text::Builder getPhysicalModelRevision();
+  inline void setPhysicalModelRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initPhysicalModelRevision(unsigned int size);
+  inline void adoptPhysicalModelRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownPhysicalModelRevision();
+
+  inline  ::uint64_t getOriginalObservedMonoTime();
+  inline void setOriginalObservedMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getOriginalValidUntilMonoTime();
+  inline void setOriginalValidUntilMonoTime( ::uint64_t value);
+
+  inline double getBaselineFriction();
+  inline void setBaselineFriction(double value);
+
+  inline double getActualFriction();
+  inline void setActualFriction(double value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class CentreApplicationWitness::Pipeline {
+public:
+  typedef CentreApplicationWitness Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class LearningTorqueProjection::Reader {
+public:
+  typedef LearningTorqueProjection Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion() const;
+
+  inline bool hasFamily() const;
+  inline  ::capnp::Text::Reader getFamily() const;
+
+  inline bool hasFingerprint() const;
+  inline  ::capnp::Text::Reader getFingerprint() const;
+
+  inline  ::uint64_t getFlags() const;
+
+  inline bool hasCodecId() const;
+  inline  ::capnp::Text::Reader getCodecId() const;
+
+  inline bool hasMappingKind() const;
+  inline  ::capnp::Text::Reader getMappingKind() const;
+
+  inline  ::uint64_t getFrame() const;
+
+  inline double getRequestedTorque() const;
+
+  inline double getCodecInputTorque() const;
+
+  inline  ::int32_t getUnlimitedRaw() const;
+
+  inline  ::int32_t getFinalRaw() const;
+
+  inline double getEffectiveMax() const;
+
+  inline bool hasLookupX() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getLookupX() const;
+
+  inline bool hasLookupY() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getLookupY() const;
+
+  inline bool hasLimiterKind() const;
+  inline  ::capnp::Text::Reader getLimiterKind() const;
+
+  inline double getPreviousTorque() const;
+
+  inline double getMeasuredTorque() const;
+
+  inline bool hasLimits() const;
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Reader getLimits() const;
+
+  inline bool hasShape() const;
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader getShape() const;
+
+  inline bool getSteerRequested() const;
+
+  inline  ::uint32_t getCanAddress() const;
+
+  inline  ::uint16_t getCanBus() const;
+
+  inline bool hasCanData() const;
+  inline  ::capnp::Data::Reader getCanData() const;
+
+  inline double getReportedTorque() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class LearningTorqueProjection::Builder {
+public:
+  typedef LearningTorqueProjection Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint16_t getVersion();
+  inline void setVersion( ::uint16_t value);
+
+  inline bool hasFamily();
+  inline  ::capnp::Text::Builder getFamily();
+  inline void setFamily( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initFamily(unsigned int size);
+  inline void adoptFamily(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownFamily();
+
+  inline bool hasFingerprint();
+  inline  ::capnp::Text::Builder getFingerprint();
+  inline void setFingerprint( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initFingerprint(unsigned int size);
+  inline void adoptFingerprint(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownFingerprint();
+
+  inline  ::uint64_t getFlags();
+  inline void setFlags( ::uint64_t value);
+
+  inline bool hasCodecId();
+  inline  ::capnp::Text::Builder getCodecId();
+  inline void setCodecId( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initCodecId(unsigned int size);
+  inline void adoptCodecId(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownCodecId();
+
+  inline bool hasMappingKind();
+  inline  ::capnp::Text::Builder getMappingKind();
+  inline void setMappingKind( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initMappingKind(unsigned int size);
+  inline void adoptMappingKind(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownMappingKind();
+
+  inline  ::uint64_t getFrame();
+  inline void setFrame( ::uint64_t value);
+
+  inline double getRequestedTorque();
+  inline void setRequestedTorque(double value);
+
+  inline double getCodecInputTorque();
+  inline void setCodecInputTorque(double value);
+
+  inline  ::int32_t getUnlimitedRaw();
+  inline void setUnlimitedRaw( ::int32_t value);
+
+  inline  ::int32_t getFinalRaw();
+  inline void setFinalRaw( ::int32_t value);
+
+  inline double getEffectiveMax();
+  inline void setEffectiveMax(double value);
+
+  inline bool hasLookupX();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getLookupX();
+  inline void setLookupX( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setLookupX(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initLookupX(unsigned int size);
+  inline void adoptLookupX(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownLookupX();
+
+  inline bool hasLookupY();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getLookupY();
+  inline void setLookupY( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setLookupY(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initLookupY(unsigned int size);
+  inline void adoptLookupY(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownLookupY();
+
+  inline bool hasLimiterKind();
+  inline  ::capnp::Text::Builder getLimiterKind();
+  inline void setLimiterKind( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initLimiterKind(unsigned int size);
+  inline void adoptLimiterKind(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownLimiterKind();
+
+  inline double getPreviousTorque();
+  inline void setPreviousTorque(double value);
+
+  inline double getMeasuredTorque();
+  inline void setMeasuredTorque(double value);
+
+  inline bool hasLimits();
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Builder getLimits();
+  inline void setLimits( ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Reader value);
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Builder initLimits(unsigned int size);
+  inline void adoptLimits(::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>> disownLimits();
+
+  inline bool hasShape();
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder getShape();
+  inline void setShape( ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader value);
+  inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder initShape(unsigned int size);
+  inline void adoptShape(::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>> disownShape();
+
+  inline bool getSteerRequested();
+  inline void setSteerRequested(bool value);
+
+  inline  ::uint32_t getCanAddress();
+  inline void setCanAddress( ::uint32_t value);
+
+  inline  ::uint16_t getCanBus();
+  inline void setCanBus( ::uint16_t value);
+
+  inline bool hasCanData();
+  inline  ::capnp::Data::Builder getCanData();
+  inline void setCanData( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initCanData(unsigned int size);
+  inline void adoptCanData(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownCanData();
+
+  inline double getReportedTorque();
+  inline void setReportedTorque(double value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class LearningTorqueProjection::Pipeline {
+public:
+  typedef LearningTorqueProjection Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
 // =======================================================================================
 
 inline bool StarPilotCarControl::Reader::hasHudControl() const {
@@ -10485,6 +13207,123 @@ inline void StarPilotCarParams::AutoSteeringLearning::Builder::setHeldoutCandida
       ::capnp::bounded<11>() * ::capnp::ELEMENTS, value);
 }
 
+inline bool StarPilotCarParams::AutoSteeringLearning::Reader::hasRuntimeProfile() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool StarPilotCarParams::AutoSteeringLearning::Builder::hasRuntimeProfile() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::AutomaticRuntimeProfile::Reader StarPilotCarParams::AutoSteeringLearning::Reader::getRuntimeProfile() const {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::cereal::AutomaticRuntimeProfile::Builder StarPilotCarParams::AutoSteeringLearning::Builder::getRuntimeProfile() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::AutomaticRuntimeProfile::Pipeline StarPilotCarParams::AutoSteeringLearning::Pipeline::getRuntimeProfile() {
+  return  ::cereal::AutomaticRuntimeProfile::Pipeline(_typeless.getPointerField(4));
+}
+#endif  // !CAPNP_LITE
+inline void StarPilotCarParams::AutoSteeringLearning::Builder::setRuntimeProfile( ::cereal::AutomaticRuntimeProfile::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::AutomaticRuntimeProfile::Builder StarPilotCarParams::AutoSteeringLearning::Builder::initRuntimeProfile() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void StarPilotCarParams::AutoSteeringLearning::Builder::adoptRuntimeProfile(
+    ::capnp::Orphan< ::cereal::AutomaticRuntimeProfile>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::AutomaticRuntimeProfile> StarPilotCarParams::AutoSteeringLearning::Builder::disownRuntimeProfile() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+
+inline bool StarPilotCarParams::AutoSteeringLearning::Reader::hasSourceReceipt() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline bool StarPilotCarParams::AutoSteeringLearning::Builder::hasSourceReceipt() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::AutomaticLearningSourceReceipt::Reader StarPilotCarParams::AutoSteeringLearning::Reader::getSourceReceipt() const {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticLearningSourceReceipt>::get(_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline  ::cereal::AutomaticLearningSourceReceipt::Builder StarPilotCarParams::AutoSteeringLearning::Builder::getSourceReceipt() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticLearningSourceReceipt>::get(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::AutomaticLearningSourceReceipt::Pipeline StarPilotCarParams::AutoSteeringLearning::Pipeline::getSourceReceipt() {
+  return  ::cereal::AutomaticLearningSourceReceipt::Pipeline(_typeless.getPointerField(5));
+}
+#endif  // !CAPNP_LITE
+inline void StarPilotCarParams::AutoSteeringLearning::Builder::setSourceReceipt( ::cereal::AutomaticLearningSourceReceipt::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::AutomaticLearningSourceReceipt>::set(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::AutomaticLearningSourceReceipt::Builder StarPilotCarParams::AutoSteeringLearning::Builder::initSourceReceipt() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticLearningSourceReceipt>::init(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline void StarPilotCarParams::AutoSteeringLearning::Builder::adoptSourceReceipt(
+    ::capnp::Orphan< ::cereal::AutomaticLearningSourceReceipt>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::AutomaticLearningSourceReceipt>::adopt(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::AutomaticLearningSourceReceipt> StarPilotCarParams::AutoSteeringLearning::Builder::disownSourceReceipt() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticLearningSourceReceipt>::disown(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+
+inline bool StarPilotCarParams::AutoSteeringLearning::Reader::hasCentreApplicationWitness() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline bool StarPilotCarParams::AutoSteeringLearning::Builder::hasCentreApplicationWitness() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::CentreApplicationWitness::Reader StarPilotCarParams::AutoSteeringLearning::Reader::getCentreApplicationWitness() const {
+  return ::capnp::_::PointerHelpers< ::cereal::CentreApplicationWitness>::get(_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline  ::cereal::CentreApplicationWitness::Builder StarPilotCarParams::AutoSteeringLearning::Builder::getCentreApplicationWitness() {
+  return ::capnp::_::PointerHelpers< ::cereal::CentreApplicationWitness>::get(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::CentreApplicationWitness::Pipeline StarPilotCarParams::AutoSteeringLearning::Pipeline::getCentreApplicationWitness() {
+  return  ::cereal::CentreApplicationWitness::Pipeline(_typeless.getPointerField(6));
+}
+#endif  // !CAPNP_LITE
+inline void StarPilotCarParams::AutoSteeringLearning::Builder::setCentreApplicationWitness( ::cereal::CentreApplicationWitness::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::CentreApplicationWitness>::set(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::CentreApplicationWitness::Builder StarPilotCarParams::AutoSteeringLearning::Builder::initCentreApplicationWitness() {
+  return ::capnp::_::PointerHelpers< ::cereal::CentreApplicationWitness>::init(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline void StarPilotCarParams::AutoSteeringLearning::Builder::adoptCentreApplicationWitness(
+    ::capnp::Orphan< ::cereal::CentreApplicationWitness>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::CentreApplicationWitness>::adopt(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::CentreApplicationWitness> StarPilotCarParams::AutoSteeringLearning::Builder::disownCentreApplicationWitness() {
+  return ::capnp::_::PointerHelpers< ::cereal::CentreApplicationWitness>::disown(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+
 inline bool StarPilotCarParams::AutoSteeringLearning::Identity::Reader::hasVehicle() const {
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
@@ -11396,6 +14235,123 @@ inline  ::uint64_t StarPilotCarState::Builder::getSourceCarStateMonoTime() {
 inline void StarPilotCarState::Builder::setSourceCarStateMonoTime( ::uint64_t value) {
   _builder.setDataField< ::uint64_t>(
       ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool StarPilotCarState::Reader::hasAppliedEvidence() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool StarPilotCarState::Builder::hasAppliedEvidence() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::LearningAppliedEvidence::Reader StarPilotCarState::Reader::getAppliedEvidence() const {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningAppliedEvidence>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::cereal::LearningAppliedEvidence::Builder StarPilotCarState::Builder::getAppliedEvidence() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningAppliedEvidence>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::LearningAppliedEvidence::Pipeline StarPilotCarState::Pipeline::getAppliedEvidence() {
+  return  ::cereal::LearningAppliedEvidence::Pipeline(_typeless.getPointerField(1));
+}
+#endif  // !CAPNP_LITE
+inline void StarPilotCarState::Builder::setAppliedEvidence( ::cereal::LearningAppliedEvidence::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::LearningAppliedEvidence>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::LearningAppliedEvidence::Builder StarPilotCarState::Builder::initAppliedEvidence() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningAppliedEvidence>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void StarPilotCarState::Builder::adoptAppliedEvidence(
+    ::capnp::Orphan< ::cereal::LearningAppliedEvidence>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::LearningAppliedEvidence>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::LearningAppliedEvidence> StarPilotCarState::Builder::disownAppliedEvidence() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningAppliedEvidence>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool StarPilotCarState::Reader::hasFordLearningEvidence() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool StarPilotCarState::Builder::hasFordLearningEvidence() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::FordLearningEvidence::Reader StarPilotCarState::Reader::getFordLearningEvidence() const {
+  return ::capnp::_::PointerHelpers< ::cereal::FordLearningEvidence>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::cereal::FordLearningEvidence::Builder StarPilotCarState::Builder::getFordLearningEvidence() {
+  return ::capnp::_::PointerHelpers< ::cereal::FordLearningEvidence>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::FordLearningEvidence::Pipeline StarPilotCarState::Pipeline::getFordLearningEvidence() {
+  return  ::cereal::FordLearningEvidence::Pipeline(_typeless.getPointerField(2));
+}
+#endif  // !CAPNP_LITE
+inline void StarPilotCarState::Builder::setFordLearningEvidence( ::cereal::FordLearningEvidence::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::FordLearningEvidence>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::FordLearningEvidence::Builder StarPilotCarState::Builder::initFordLearningEvidence() {
+  return ::capnp::_::PointerHelpers< ::cereal::FordLearningEvidence>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void StarPilotCarState::Builder::adoptFordLearningEvidence(
+    ::capnp::Orphan< ::cereal::FordLearningEvidence>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::FordLearningEvidence>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::FordLearningEvidence> StarPilotCarState::Builder::disownFordLearningEvidence() {
+  return ::capnp::_::PointerHelpers< ::cereal::FordLearningEvidence>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool StarPilotCarState::Reader::hasLearningApplication() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool StarPilotCarState::Builder::hasLearningApplication() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::LearningApplication::Reader StarPilotCarState::Reader::getLearningApplication() const {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::cereal::LearningApplication::Builder StarPilotCarState::Builder::getLearningApplication() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::LearningApplication::Pipeline StarPilotCarState::Pipeline::getLearningApplication() {
+  return  ::cereal::LearningApplication::Pipeline(_typeless.getPointerField(3));
+}
+#endif  // !CAPNP_LITE
+inline void StarPilotCarState::Builder::setLearningApplication( ::cereal::LearningApplication::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::LearningApplication::Builder StarPilotCarState::Builder::initLearningApplication() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void StarPilotCarState::Builder::adoptLearningApplication(
+    ::capnp::Orphan< ::cereal::LearningApplication>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::LearningApplication> StarPilotCarState::Builder::disownLearningApplication() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
 }
 
 inline  ::uint64_t StarPilotCarState::Gps::Reader::getSourceMonoTime() const {
@@ -18368,6 +21324,84 @@ inline ::capnp::Orphan< ::cereal::StarPilotLateralState::LaneCentering> StarPilo
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 
+inline bool StarPilotLateralState::Reader::hasLearningEvidence() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool StarPilotLateralState::Builder::hasLearningEvidence() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::LearningControlEvidence::Reader StarPilotLateralState::Reader::getLearningEvidence() const {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningControlEvidence>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::cereal::LearningControlEvidence::Builder StarPilotLateralState::Builder::getLearningEvidence() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningControlEvidence>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::LearningControlEvidence::Pipeline StarPilotLateralState::Pipeline::getLearningEvidence() {
+  return  ::cereal::LearningControlEvidence::Pipeline(_typeless.getPointerField(1));
+}
+#endif  // !CAPNP_LITE
+inline void StarPilotLateralState::Builder::setLearningEvidence( ::cereal::LearningControlEvidence::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::LearningControlEvidence>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::LearningControlEvidence::Builder StarPilotLateralState::Builder::initLearningEvidence() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningControlEvidence>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void StarPilotLateralState::Builder::adoptLearningEvidence(
+    ::capnp::Orphan< ::cereal::LearningControlEvidence>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::LearningControlEvidence>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::LearningControlEvidence> StarPilotLateralState::Builder::disownLearningEvidence() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningControlEvidence>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool StarPilotLateralState::Reader::hasLearningApplication() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool StarPilotLateralState::Builder::hasLearningApplication() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::LearningApplication::Reader StarPilotLateralState::Reader::getLearningApplication() const {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::cereal::LearningApplication::Builder StarPilotLateralState::Builder::getLearningApplication() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::LearningApplication::Pipeline StarPilotLateralState::Pipeline::getLearningApplication() {
+  return  ::cereal::LearningApplication::Pipeline(_typeless.getPointerField(2));
+}
+#endif  // !CAPNP_LITE
+inline void StarPilotLateralState::Builder::setLearningApplication( ::cereal::LearningApplication::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::LearningApplication::Builder StarPilotLateralState::Builder::initLearningApplication() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void StarPilotLateralState::Builder::adoptLearningApplication(
+    ::capnp::Orphan< ::cereal::LearningApplication>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::LearningApplication> StarPilotLateralState::Builder::disownLearningApplication() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningApplication>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
 inline  ::uint16_t StarPilotLateralState::LaneCentering::Reader::getVersion() const {
   return _reader.getDataField< ::uint16_t>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS);
@@ -21006,6 +24040,4461 @@ inline  ::uint64_t MapdOut::Builder::getProducerSession() {
 inline void MapdOut::Builder::setProducerSession( ::uint64_t value) {
   _builder.setDataField< ::uint64_t>(
       ::capnp::bounded<13>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint16_t LearningControlEvidence::Reader::getVersion() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t LearningControlEvidence::Builder::getVersion() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setVersion( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::hasIdentity() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasIdentity() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getIdentity() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setIdentity( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initIdentity(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptIdentity(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t LearningControlEvidence::Reader::getGeneration() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningControlEvidence::Builder::getGeneration() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setGeneration( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningControlEvidence::Reader::getControlMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningControlEvidence::Builder::getControlMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setControlMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningControlEvidence::Reader::getSourceStateMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningControlEvidence::Builder::getSourceStateMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setSourceStateMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::hasDomain() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasDomain() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getDomain() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getDomain() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setDomain( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initDomain(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptDomain(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownDomain() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasStageRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasStageRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getStageRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getStageRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setStageRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initStageRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptStageRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownStageRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasResponseRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasResponseRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getResponseRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getResponseRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setResponseRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initResponseRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptResponseRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownResponseRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline double LearningControlEvidence::Reader::getRequested() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningControlEvidence::Builder::getRequested() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setRequested(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::hasFeatures() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasFeatures() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader LearningControlEvidence::Reader::getFeatures() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningControlEvidence::Builder::getFeatures() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setFeatures( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline void LearningControlEvidence::Builder::setFeatures(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningControlEvidence::Builder::initFeatures(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptFeatures(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> LearningControlEvidence::Builder::disownFeatures() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+
+inline double LearningControlEvidence::Reader::getBaselinePrediction() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningControlEvidence::Builder::getBaselinePrediction() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setBaselinePrediction(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getEnabled() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getEnabled() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setEnabled(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getManual() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getManual() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setManual(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getActive() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getActive() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setActive(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getValid() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getValid() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setValid(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getOverride() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<20>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getOverride() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<20>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setOverride(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<20>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getFault() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<21>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getFault() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<21>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setFault(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<21>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getSaturated() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<22>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getSaturated() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<22>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setSaturated(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<22>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getLimited() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<23>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getLimited() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<23>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setLimited(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<23>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getModelWobble() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<24>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getModelWobble() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<24>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setModelWobble(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<24>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getControllerChatter() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<25>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getControllerChatter() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<25>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setControllerChatter(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<25>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::hasStageSchemaRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasStageSchemaRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getStageSchemaRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getStageSchemaRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setStageSchemaRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initStageSchemaRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptStageSchemaRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownStageSchemaRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasStageValues() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasStageValues() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Reader LearningControlEvidence::Reader::getStageValues() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::get(_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Builder LearningControlEvidence::Builder::getStageValues() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::get(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setStageValues( ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::set(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Builder LearningControlEvidence::Builder::initStageValues(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::init(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptStageValues(
+    ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>> LearningControlEvidence::Builder::disownStageValues() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasAppliedCoordinates() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasAppliedCoordinates() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader LearningControlEvidence::Reader::getAppliedCoordinates() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningControlEvidence::Builder::getAppliedCoordinates() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setAppliedCoordinates( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), value);
+}
+inline void LearningControlEvidence::Builder::setAppliedCoordinates(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningControlEvidence::Builder::initAppliedCoordinates(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptAppliedCoordinates(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> LearningControlEvidence::Builder::disownAppliedCoordinates() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasSourceEpoch() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasSourceEpoch() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getSourceEpoch() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getSourceEpoch() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setSourceEpoch( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initSourceEpoch(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptSourceEpoch(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownSourceEpoch() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t LearningControlEvidence::Reader::getSourceReceiptMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningControlEvidence::Builder::getSourceReceiptMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setSourceReceiptMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::hasControllerMode() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasControllerMode() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getControllerMode() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getControllerMode() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setControllerMode( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initControllerMode(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptControllerMode(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownControllerMode() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasPolicy() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasPolicy() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getPolicy() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getPolicy() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setPolicy( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initPolicy(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptPolicy(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownPolicy() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasBaselineRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasBaselineRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getBaselineRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getBaselineRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setBaselineRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initBaselineRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptBaselineRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownBaselineRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasBaselineValues() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<12>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasBaselineValues() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<12>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader LearningControlEvidence::Reader::getBaselineValues() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<12>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningControlEvidence::Builder::getBaselineValues() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<12>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setBaselineValues( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<12>() * ::capnp::POINTERS), value);
+}
+inline void LearningControlEvidence::Builder::setBaselineValues(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<12>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningControlEvidence::Builder::initBaselineValues(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<12>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptBaselineValues(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<12>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> LearningControlEvidence::Builder::disownBaselineValues() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<12>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasControllerRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<13>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasControllerRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<13>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getControllerRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<13>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getControllerRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<13>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setControllerRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<13>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initControllerRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<13>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptControllerRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<13>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownControllerRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<13>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasReplaySnapshot() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<14>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasReplaySnapshot() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<14>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader LearningControlEvidence::Reader::getReplaySnapshot() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::get(_reader.getPointerField(
+      ::capnp::bounded<14>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder LearningControlEvidence::Builder::getReplaySnapshot() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::get(_builder.getPointerField(
+      ::capnp::bounded<14>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setReplaySnapshot( ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::set(_builder.getPointerField(
+      ::capnp::bounded<14>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder LearningControlEvidence::Builder::initReplaySnapshot(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::init(_builder.getPointerField(
+      ::capnp::bounded<14>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptReplaySnapshot(
+    ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<14>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>> LearningControlEvidence::Builder::disownReplaySnapshot() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<14>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::hasReplayInputs() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<15>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasReplayInputs() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<15>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader LearningControlEvidence::Reader::getReplayInputs() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::get(_reader.getPointerField(
+      ::capnp::bounded<15>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder LearningControlEvidence::Builder::getReplayInputs() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::get(_builder.getPointerField(
+      ::capnp::bounded<15>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setReplayInputs( ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::set(_builder.getPointerField(
+      ::capnp::bounded<15>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder LearningControlEvidence::Builder::initReplayInputs(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::init(_builder.getPointerField(
+      ::capnp::bounded<15>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptReplayInputs(
+    ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<15>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>> LearningControlEvidence::Builder::disownReplayInputs() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<15>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t LearningControlEvidence::Reader::getSnapshotSequence() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningControlEvidence::Builder::getSnapshotSequence() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setSnapshotSequence( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getTurnAssist() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<26>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getTurnAssist() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<26>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setTurnAssist(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<26>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::hasAppliedParameterNames() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<16>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasAppliedParameterNames() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<16>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader LearningControlEvidence::Reader::getAppliedParameterNames() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::get(_reader.getPointerField(
+      ::capnp::bounded<16>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder LearningControlEvidence::Builder::getAppliedParameterNames() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::get(_builder.getPointerField(
+      ::capnp::bounded<16>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setAppliedParameterNames( ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::set(_builder.getPointerField(
+      ::capnp::bounded<16>() * ::capnp::POINTERS), value);
+}
+inline void LearningControlEvidence::Builder::setAppliedParameterNames(::kj::ArrayPtr<const  ::capnp::Text::Reader> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::set(_builder.getPointerField(
+      ::capnp::bounded<16>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder LearningControlEvidence::Builder::initAppliedParameterNames(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::init(_builder.getPointerField(
+      ::capnp::bounded<16>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptAppliedParameterNames(
+    ::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<16>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>> LearningControlEvidence::Builder::disownAppliedParameterNames() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::disown(_builder.getPointerField(
+      ::capnp::bounded<16>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::Reader::getNativeRequired() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<27>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getNativeRequired() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<27>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setNativeRequired(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<27>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningControlEvidence::Reader::getNativeObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningControlEvidence::Builder::getNativeObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setNativeObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningControlEvidence::Reader::getNativeValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningControlEvidence::Builder::getNativeValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setNativeValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::getNativeAllowed() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<28>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::Builder::getNativeAllowed() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<28>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setNativeAllowed(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<28>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::Reader::hasNativeIdentity() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<17>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::Builder::hasNativeIdentity() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<17>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::Reader::getNativeIdentity() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<17>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::getNativeIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<17>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::Builder::setNativeIdentity( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<17>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::Builder::initNativeIdentity(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<17>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::Builder::adoptNativeIdentity(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<17>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::Builder::disownNativeIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<17>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t LearningControlEvidence::Reader::getAppliedProfileSequence() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningControlEvidence::Builder::getAppliedProfileSequence() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setAppliedProfileSequence( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningControlEvidence::Reader::getAppliedProfileObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningControlEvidence::Builder::getAppliedProfileObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setAppliedProfileObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningControlEvidence::Reader::getAppliedProfileValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<12>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningControlEvidence::Builder::getAppliedProfileValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<12>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::Builder::setAppliedProfileValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<12>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::LearningControlEvidence::NamedValue::Which LearningControlEvidence::NamedValue::Reader::which() const {
+  return _reader.getDataField<Which>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+inline  ::cereal::LearningControlEvidence::NamedValue::Which LearningControlEvidence::NamedValue::Builder::which() {
+  return _builder.getDataField<Which>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::NamedValue::Reader::hasName() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::NamedValue::Builder::hasName() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::NamedValue::Reader::getName() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::NamedValue::Builder::getName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::NamedValue::Builder::setName( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::NamedValue::Builder::initName(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::NamedValue::Builder::adoptName(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::NamedValue::Builder::disownName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::NamedValue::Reader::isNumber() const {
+  return which() == LearningControlEvidence::NamedValue::NUMBER;
+}
+inline bool LearningControlEvidence::NamedValue::Builder::isNumber() {
+  return which() == LearningControlEvidence::NamedValue::NUMBER;
+}
+inline double LearningControlEvidence::NamedValue::Reader::getNumber() const {
+  KJ_IREQUIRE((which() == LearningControlEvidence::NamedValue::NUMBER),
+              "Must check which() before get()ing a union member.");
+  return _reader.getDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningControlEvidence::NamedValue::Builder::getNumber() {
+  KJ_IREQUIRE((which() == LearningControlEvidence::NamedValue::NUMBER),
+              "Must check which() before get()ing a union member.");
+  return _builder.getDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::NamedValue::Builder::setNumber(double value) {
+  _builder.setDataField<LearningControlEvidence::NamedValue::Which>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, LearningControlEvidence::NamedValue::NUMBER);
+  _builder.setDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::NamedValue::Reader::isText() const {
+  return which() == LearningControlEvidence::NamedValue::TEXT;
+}
+inline bool LearningControlEvidence::NamedValue::Builder::isText() {
+  return which() == LearningControlEvidence::NamedValue::TEXT;
+}
+inline bool LearningControlEvidence::NamedValue::Reader::hasText() const {
+  if (which() != LearningControlEvidence::NamedValue::TEXT) return false;
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::NamedValue::Builder::hasText() {
+  if (which() != LearningControlEvidence::NamedValue::TEXT) return false;
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::NamedValue::Reader::getText() const {
+  KJ_IREQUIRE((which() == LearningControlEvidence::NamedValue::TEXT),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::NamedValue::Builder::getText() {
+  KJ_IREQUIRE((which() == LearningControlEvidence::NamedValue::TEXT),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::NamedValue::Builder::setText( ::capnp::Text::Reader value) {
+  _builder.setDataField<LearningControlEvidence::NamedValue::Which>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, LearningControlEvidence::NamedValue::TEXT);
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::NamedValue::Builder::initText(unsigned int size) {
+  _builder.setDataField<LearningControlEvidence::NamedValue::Which>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, LearningControlEvidence::NamedValue::TEXT);
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::NamedValue::Builder::adoptText(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  _builder.setDataField<LearningControlEvidence::NamedValue::Which>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, LearningControlEvidence::NamedValue::TEXT);
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::NamedValue::Builder::disownText() {
+  KJ_IREQUIRE((which() == LearningControlEvidence::NamedValue::TEXT),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool LearningControlEvidence::NamedValue::Reader::isBoolean() const {
+  return which() == LearningControlEvidence::NamedValue::BOOLEAN;
+}
+inline bool LearningControlEvidence::NamedValue::Builder::isBoolean() {
+  return which() == LearningControlEvidence::NamedValue::BOOLEAN;
+}
+inline bool LearningControlEvidence::NamedValue::Reader::getBoolean() const {
+  KJ_IREQUIRE((which() == LearningControlEvidence::NamedValue::BOOLEAN),
+              "Must check which() before get()ing a union member.");
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningControlEvidence::NamedValue::Builder::getBoolean() {
+  KJ_IREQUIRE((which() == LearningControlEvidence::NamedValue::BOOLEAN),
+              "Must check which() before get()ing a union member.");
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::NamedValue::Builder::setBoolean(bool value) {
+  _builder.setDataField<LearningControlEvidence::NamedValue::Which>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, LearningControlEvidence::NamedValue::BOOLEAN);
+  _builder.setDataField<bool>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningControlEvidence::StageValue::Reader::hasName() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningControlEvidence::StageValue::Builder::hasName() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningControlEvidence::StageValue::Reader::getName() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::StageValue::Builder::getName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void LearningControlEvidence::StageValue::Builder::setName( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningControlEvidence::StageValue::Builder::initName(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void LearningControlEvidence::StageValue::Builder::adoptName(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningControlEvidence::StageValue::Builder::disownName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline double LearningControlEvidence::StageValue::Reader::getValue() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningControlEvidence::StageValue::Builder::getValue() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void LearningControlEvidence::StageValue::Builder::setValue(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint16_t LearningAppliedEvidence::Reader::getVersion() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t LearningAppliedEvidence::Builder::getVersion() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setVersion( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningAppliedEvidence::Reader::getControlMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningAppliedEvidence::Builder::getControlMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setControlMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningAppliedEvidence::Reader::getSourceStateMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningAppliedEvidence::Builder::getSourceStateMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setSourceStateMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningAppliedEvidence::Reader::getAppliedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningAppliedEvidence::Builder::getAppliedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setAppliedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningAppliedEvidence::Reader::hasDomain() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningAppliedEvidence::Builder::hasDomain() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningAppliedEvidence::Reader::getDomain() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningAppliedEvidence::Builder::getDomain() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void LearningAppliedEvidence::Builder::setDomain( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningAppliedEvidence::Builder::initDomain(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void LearningAppliedEvidence::Builder::adoptDomain(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningAppliedEvidence::Builder::disownDomain() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline double LearningAppliedEvidence::Reader::getApplied() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningAppliedEvidence::Builder::getApplied() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setApplied(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningAppliedEvidence::Reader::getValid() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningAppliedEvidence::Builder::getValid() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setValid(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningAppliedEvidence::Reader::getActive() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningAppliedEvidence::Builder::getActive() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setActive(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningAppliedEvidence::Reader::getOverride() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningAppliedEvidence::Builder::getOverride() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setOverride(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningAppliedEvidence::Reader::getFault() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningAppliedEvidence::Builder::getFault() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setFault(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningAppliedEvidence::Reader::getLimited() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<20>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningAppliedEvidence::Builder::getLimited() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<20>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setLimited(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<20>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningAppliedEvidence::Reader::getNativeAllowed() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<21>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningAppliedEvidence::Builder::getNativeAllowed() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<21>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setNativeAllowed(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<21>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningAppliedEvidence::Reader::hasProjection() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningAppliedEvidence::Builder::hasProjection() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::LearningTorqueProjection::Reader LearningAppliedEvidence::Reader::getProjection() const {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningTorqueProjection>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::cereal::LearningTorqueProjection::Builder LearningAppliedEvidence::Builder::getProjection() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningTorqueProjection>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::LearningTorqueProjection::Pipeline LearningAppliedEvidence::Pipeline::getProjection() {
+  return  ::cereal::LearningTorqueProjection::Pipeline(_typeless.getPointerField(1));
+}
+#endif  // !CAPNP_LITE
+inline void LearningAppliedEvidence::Builder::setProjection( ::cereal::LearningTorqueProjection::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::LearningTorqueProjection>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::LearningTorqueProjection::Builder LearningAppliedEvidence::Builder::initProjection() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningTorqueProjection>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void LearningAppliedEvidence::Builder::adoptProjection(
+    ::capnp::Orphan< ::cereal::LearningTorqueProjection>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::LearningTorqueProjection>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::LearningTorqueProjection> LearningAppliedEvidence::Builder::disownProjection() {
+  return ::capnp::_::PointerHelpers< ::cereal::LearningTorqueProjection>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t LearningAppliedEvidence::Reader::getCarrierFrame() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningAppliedEvidence::Builder::getCarrierFrame() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setCarrierFrame( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningAppliedEvidence::Reader::getCarrierObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningAppliedEvidence::Builder::getCarrierObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void LearningAppliedEvidence::Builder::setCarrierObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint16_t AutomaticRuntimeProfile::Reader::getVersion() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t AutomaticRuntimeProfile::Builder::getVersion() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::Builder::setVersion( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutomaticRuntimeProfile::Reader::hasIdentity() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::Builder::hasIdentity() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticRuntimeProfile::Reader::getIdentity() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::Builder::getIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::Builder::setIdentity( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::Builder::initIdentity(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::Builder::adoptIdentity(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticRuntimeProfile::Builder::disownIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t AutomaticRuntimeProfile::Reader::getSequence() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AutomaticRuntimeProfile::Builder::getSequence() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::Builder::setSequence( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t AutomaticRuntimeProfile::Reader::getObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AutomaticRuntimeProfile::Builder::getObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::Builder::setObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t AutomaticRuntimeProfile::Reader::getValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AutomaticRuntimeProfile::Builder::getValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::Builder::setValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutomaticRuntimeProfile::Reader::hasPolicy() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::Builder::hasPolicy() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticRuntimeProfile::Reader::getPolicy() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::Builder::getPolicy() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::Builder::setPolicy( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::Builder::initPolicy(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::Builder::adoptPolicy(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticRuntimeProfile::Builder::disownPolicy() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticRuntimeProfile::Reader::hasParameters() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::Builder::hasParameters() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>::Reader AutomaticRuntimeProfile::Reader::getParameters() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>::Builder AutomaticRuntimeProfile::Builder::getParameters() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::Builder::setParameters( ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>::Builder AutomaticRuntimeProfile::Builder::initParameters(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::Builder::adoptParameters(
+    ::capnp::Orphan< ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>> AutomaticRuntimeProfile::Builder::disownParameters() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::Parameter,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticRuntimeProfile::Reader::hasCoefficients() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::Builder::hasCoefficients() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader AutomaticRuntimeProfile::Reader::getCoefficients() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder AutomaticRuntimeProfile::Builder::getCoefficients() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::Builder::setCoefficients( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline void AutomaticRuntimeProfile::Builder::setCoefficients(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder AutomaticRuntimeProfile::Builder::initCoefficients(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::Builder::adoptCoefficients(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> AutomaticRuntimeProfile::Builder::disownCoefficients() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticRuntimeProfile::Reader::hasTrainIds() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::Builder::hasTrainIds() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader AutomaticRuntimeProfile::Reader::getTrainIds() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder AutomaticRuntimeProfile::Builder::getTrainIds() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::Builder::setTrainIds( ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline void AutomaticRuntimeProfile::Builder::setTrainIds(::kj::ArrayPtr<const  ::capnp::Text::Reader> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder AutomaticRuntimeProfile::Builder::initTrainIds(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::Builder::adoptTrainIds(
+    ::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>> AutomaticRuntimeProfile::Builder::disownTrainIds() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticRuntimeProfile::Reader::hasHeldoutIds() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::Builder::hasHeldoutIds() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader AutomaticRuntimeProfile::Reader::getHeldoutIds() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::get(_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder AutomaticRuntimeProfile::Builder::getHeldoutIds() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::get(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::Builder::setHeldoutIds( ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::set(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), value);
+}
+inline void AutomaticRuntimeProfile::Builder::setHeldoutIds(::kj::ArrayPtr<const  ::capnp::Text::Reader> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::set(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>::Builder AutomaticRuntimeProfile::Builder::initHeldoutIds(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::init(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::Builder::adoptHeldoutIds(
+    ::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>> AutomaticRuntimeProfile::Builder::disownHeldoutIds() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Text,  ::capnp::Kind::BLOB>>::disown(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+
+inline double AutomaticRuntimeProfile::Reader::getBaselineLoss() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+
+inline double AutomaticRuntimeProfile::Builder::getBaselineLoss() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::Builder::setBaselineLoss(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutomaticRuntimeProfile::Reader::getCandidateLoss() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline double AutomaticRuntimeProfile::Builder::getCandidateLoss() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::Builder::setCandidateLoss(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutomaticRuntimeProfile::Reader::hasCohortImprovements() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::Builder::hasCohortImprovements() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>::Reader AutomaticRuntimeProfile::Reader::getCohortImprovements() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>>::get(_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>::Builder AutomaticRuntimeProfile::Builder::getCohortImprovements() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>>::get(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::Builder::setCohortImprovements( ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>>::set(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>::Builder AutomaticRuntimeProfile::Builder::initCohortImprovements(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>>::init(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::Builder::adoptCohortImprovements(
+    ::capnp::Orphan< ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>> AutomaticRuntimeProfile::Builder::disownCohortImprovements() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::AutomaticRuntimeProfile::CohortImprovement,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticRuntimeProfile::Reader::hasReplay() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::Builder::hasReplay() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::AutomaticRuntimeProfile::ReplayValidation::Reader AutomaticRuntimeProfile::Reader::getReplay() const {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile::ReplayValidation>::get(_reader.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+inline  ::cereal::AutomaticRuntimeProfile::ReplayValidation::Builder AutomaticRuntimeProfile::Builder::getReplay() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile::ReplayValidation>::get(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::AutomaticRuntimeProfile::ReplayValidation::Pipeline AutomaticRuntimeProfile::Pipeline::getReplay() {
+  return  ::cereal::AutomaticRuntimeProfile::ReplayValidation::Pipeline(_typeless.getPointerField(7));
+}
+#endif  // !CAPNP_LITE
+inline void AutomaticRuntimeProfile::Builder::setReplay( ::cereal::AutomaticRuntimeProfile::ReplayValidation::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile::ReplayValidation>::set(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::AutomaticRuntimeProfile::ReplayValidation::Builder AutomaticRuntimeProfile::Builder::initReplay() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile::ReplayValidation>::init(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::Builder::adoptReplay(
+    ::capnp::Orphan< ::cereal::AutomaticRuntimeProfile::ReplayValidation>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile::ReplayValidation>::adopt(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::AutomaticRuntimeProfile::ReplayValidation> AutomaticRuntimeProfile::Builder::disownReplay() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutomaticRuntimeProfile::ReplayValidation>::disown(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticRuntimeProfile::ReplayValidation::Reader::hasBaselineRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::ReplayValidation::Builder::hasBaselineRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticRuntimeProfile::ReplayValidation::Reader::getBaselineRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::ReplayValidation::Builder::getBaselineRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::ReplayValidation::Builder::setBaselineRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::ReplayValidation::Builder::initBaselineRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::ReplayValidation::Builder::adoptBaselineRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticRuntimeProfile::ReplayValidation::Builder::disownBaselineRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticRuntimeProfile::ReplayValidation::Reader::hasPhysicalModelRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::ReplayValidation::Builder::hasPhysicalModelRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticRuntimeProfile::ReplayValidation::Reader::getPhysicalModelRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::ReplayValidation::Builder::getPhysicalModelRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::ReplayValidation::Builder::setPhysicalModelRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::ReplayValidation::Builder::initPhysicalModelRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::ReplayValidation::Builder::adoptPhysicalModelRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticRuntimeProfile::ReplayValidation::Builder::disownPhysicalModelRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticRuntimeProfile::ReplayValidation::Reader::getNoSaturationRegression() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline bool AutomaticRuntimeProfile::ReplayValidation::Builder::getNoSaturationRegression() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::ReplayValidation::Builder::setNoSaturationRegression(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutomaticRuntimeProfile::ReplayValidation::Reader::getNoSlewRegression() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline bool AutomaticRuntimeProfile::ReplayValidation::Builder::getNoSlewRegression() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::ReplayValidation::Builder::setNoSlewRegression(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutomaticRuntimeProfile::ReplayValidation::Reader::getWorstCohortImprovement() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline double AutomaticRuntimeProfile::ReplayValidation::Builder::getWorstCohortImprovement() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::ReplayValidation::Builder::setWorstCohortImprovement(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutomaticRuntimeProfile::Parameter::Reader::hasName() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::Parameter::Builder::hasName() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticRuntimeProfile::Parameter::Reader::getName() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::Parameter::Builder::getName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::Parameter::Builder::setName( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::Parameter::Builder::initName(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::Parameter::Builder::adoptName(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticRuntimeProfile::Parameter::Builder::disownName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticRuntimeProfile::Parameter::Reader::hasStageRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::Parameter::Builder::hasStageRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticRuntimeProfile::Parameter::Reader::getStageRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::Parameter::Builder::getStageRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::Parameter::Builder::setStageRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::Parameter::Builder::initStageRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::Parameter::Builder::adoptStageRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticRuntimeProfile::Parameter::Builder::disownStageRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline double AutomaticRuntimeProfile::Parameter::Reader::getLow() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline double AutomaticRuntimeProfile::Parameter::Builder::getLow() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::Parameter::Builder::setLow(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutomaticRuntimeProfile::Parameter::Reader::getHigh() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline double AutomaticRuntimeProfile::Parameter::Builder::getHigh() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::Parameter::Builder::setHigh(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutomaticRuntimeProfile::Parameter::Reader::getMaxStep() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline double AutomaticRuntimeProfile::Parameter::Builder::getMaxStep() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::Parameter::Builder::setMaxStep(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutomaticRuntimeProfile::Parameter::Reader::getSlewPerS() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline double AutomaticRuntimeProfile::Parameter::Builder::getSlewPerS() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::Parameter::Builder::setSlewPerS(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutomaticRuntimeProfile::Parameter::Reader::getExcitationFloor() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, 4576918229304087675ull);
+}
+
+inline double AutomaticRuntimeProfile::Parameter::Builder::getExcitationFloor() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, 4576918229304087675ull);
+}
+inline void AutomaticRuntimeProfile::Parameter::Builder::setExcitationFloor(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value, 4576918229304087675ull);
+}
+
+inline bool AutomaticRuntimeProfile::CohortImprovement::Reader::hasName() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticRuntimeProfile::CohortImprovement::Builder::hasName() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticRuntimeProfile::CohortImprovement::Reader::getName() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::CohortImprovement::Builder::getName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void AutomaticRuntimeProfile::CohortImprovement::Builder::setName( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticRuntimeProfile::CohortImprovement::Builder::initName(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticRuntimeProfile::CohortImprovement::Builder::adoptName(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticRuntimeProfile::CohortImprovement::Builder::disownName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline double AutomaticRuntimeProfile::CohortImprovement::Reader::getLowerBound() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline double AutomaticRuntimeProfile::CohortImprovement::Builder::getLowerBound() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticRuntimeProfile::CohortImprovement::Builder::setLowerBound(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint16_t AutomaticLearningSourceReceipt::Reader::getVersion() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t AutomaticLearningSourceReceipt::Builder::getVersion() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticLearningSourceReceipt::Builder::setVersion( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutomaticLearningSourceReceipt::Reader::getEnabled() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+
+inline bool AutomaticLearningSourceReceipt::Builder::getEnabled() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticLearningSourceReceipt::Builder::setEnabled(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutomaticLearningSourceReceipt::Reader::getManual() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+
+inline bool AutomaticLearningSourceReceipt::Builder::getManual() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticLearningSourceReceipt::Builder::setManual(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutomaticLearningSourceReceipt::Reader::hasResetGeneration() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticLearningSourceReceipt::Builder::hasResetGeneration() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticLearningSourceReceipt::Reader::getResetGeneration() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticLearningSourceReceipt::Builder::getResetGeneration() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void AutomaticLearningSourceReceipt::Builder::setResetGeneration( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticLearningSourceReceipt::Builder::initResetGeneration(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticLearningSourceReceipt::Builder::adoptResetGeneration(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticLearningSourceReceipt::Builder::disownResetGeneration() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticLearningSourceReceipt::Reader::hasSourceEpoch() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticLearningSourceReceipt::Builder::hasSourceEpoch() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticLearningSourceReceipt::Reader::getSourceEpoch() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticLearningSourceReceipt::Builder::getSourceEpoch() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void AutomaticLearningSourceReceipt::Builder::setSourceEpoch( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticLearningSourceReceipt::Builder::initSourceEpoch(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticLearningSourceReceipt::Builder::adoptSourceEpoch(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticLearningSourceReceipt::Builder::disownSourceEpoch() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t AutomaticLearningSourceReceipt::Reader::getObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AutomaticLearningSourceReceipt::Builder::getObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticLearningSourceReceipt::Builder::setObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t AutomaticLearningSourceReceipt::Reader::getValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AutomaticLearningSourceReceipt::Builder::getValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void AutomaticLearningSourceReceipt::Builder::setValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutomaticLearningSourceReceipt::Reader::hasCpSha256() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticLearningSourceReceipt::Builder::hasCpSha256() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticLearningSourceReceipt::Reader::getCpSha256() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticLearningSourceReceipt::Builder::getCpSha256() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void AutomaticLearningSourceReceipt::Builder::setCpSha256( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticLearningSourceReceipt::Builder::initCpSha256(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticLearningSourceReceipt::Builder::adoptCpSha256(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticLearningSourceReceipt::Builder::disownCpSha256() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticLearningSourceReceipt::Reader::hasCalibrationBasis() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticLearningSourceReceipt::Builder::hasCalibrationBasis() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader AutomaticLearningSourceReceipt::Reader::getCalibrationBasis() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder AutomaticLearningSourceReceipt::Builder::getCalibrationBasis() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void AutomaticLearningSourceReceipt::Builder::setCalibrationBasis( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline void AutomaticLearningSourceReceipt::Builder::setCalibrationBasis(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder AutomaticLearningSourceReceipt::Builder::initCalibrationBasis(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticLearningSourceReceipt::Builder::adoptCalibrationBasis(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> AutomaticLearningSourceReceipt::Builder::disownCalibrationBasis() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline  ::uint16_t LearningApplication::Reader::getVersion() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t LearningApplication::Builder::getVersion() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void LearningApplication::Builder::setVersion( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningApplication::Reader::hasIdentity() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningApplication::Builder::hasIdentity() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningApplication::Reader::getIdentity() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningApplication::Builder::getIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void LearningApplication::Builder::setIdentity( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningApplication::Builder::initIdentity(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void LearningApplication::Builder::adoptIdentity(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningApplication::Builder::disownIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t LearningApplication::Reader::getProfileSequence() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningApplication::Builder::getProfileSequence() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void LearningApplication::Builder::setProfileSequence( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t LearningApplication::Reader::getObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningApplication::Builder::getObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void LearningApplication::Builder::setObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningApplication::Reader::hasStatus() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningApplication::Builder::hasStatus() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningApplication::Reader::getStatus() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningApplication::Builder::getStatus() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void LearningApplication::Builder::setStatus( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningApplication::Builder::initStatus(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void LearningApplication::Builder::adoptStatus(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningApplication::Builder::disownStatus() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool LearningApplication::Reader::hasActualCoordinates() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningApplication::Builder::hasActualCoordinates() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader LearningApplication::Reader::getActualCoordinates() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningApplication::Builder::getActualCoordinates() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void LearningApplication::Builder::setActualCoordinates( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline void LearningApplication::Builder::setActualCoordinates(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningApplication::Builder::initActualCoordinates(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void LearningApplication::Builder::adoptActualCoordinates(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> LearningApplication::Builder::disownActualCoordinates() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool LearningApplication::Reader::hasReason() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningApplication::Builder::hasReason() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningApplication::Reader::getReason() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningApplication::Builder::getReason() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void LearningApplication::Builder::setReason( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningApplication::Builder::initReason(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void LearningApplication::Builder::adoptReason(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningApplication::Builder::disownReason() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline bool LearningApplication::Reader::hasBaselineRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningApplication::Builder::hasBaselineRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningApplication::Reader::getBaselineRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningApplication::Builder::getBaselineRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void LearningApplication::Builder::setBaselineRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningApplication::Builder::initBaselineRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), size);
+}
+inline void LearningApplication::Builder::adoptBaselineRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningApplication::Builder::disownBaselineRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+
+inline bool LearningApplication::Reader::hasPhysicalModelRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningApplication::Builder::hasPhysicalModelRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningApplication::Reader::getPhysicalModelRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningApplication::Builder::getPhysicalModelRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline void LearningApplication::Builder::setPhysicalModelRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningApplication::Builder::initPhysicalModelRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), size);
+}
+inline void LearningApplication::Builder::adoptPhysicalModelRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningApplication::Builder::disownPhysicalModelRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+
+inline  ::uint16_t FordLearningEvidence::Reader::getVersion() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t FordLearningEvidence::Builder::getVersion() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvidence::Builder::setVersion( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvidence::Reader::hasIdentity() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasIdentity() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvidence::Reader::getIdentity() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::getIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setIdentity( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::initIdentity(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptIdentity(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvidence::Builder::disownIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t FordLearningEvidence::Reader::getGeneration() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvidence::Builder::getGeneration() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvidence::Builder::setGeneration( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvidence::Reader::hasSourceEpoch() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasSourceEpoch() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvidence::Reader::getSourceEpoch() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::getSourceEpoch() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setSourceEpoch( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::initSourceEpoch(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptSourceEpoch(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvidence::Builder::disownSourceEpoch() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool FordLearningEvidence::Reader::hasBaselineRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasBaselineRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvidence::Reader::getBaselineRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::getBaselineRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setBaselineRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::initBaselineRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptBaselineRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvidence::Builder::disownBaselineRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool FordLearningEvidence::Reader::hasBaselineValues() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasBaselineValues() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader FordLearningEvidence::Reader::getBaselineValues() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder FordLearningEvidence::Builder::getBaselineValues() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setBaselineValues( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline void FordLearningEvidence::Builder::setBaselineValues(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder FordLearningEvidence::Builder::initBaselineValues(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptBaselineValues(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> FordLearningEvidence::Builder::disownBaselineValues() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline bool FordLearningEvidence::Reader::hasControllerRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasControllerRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvidence::Reader::getControllerRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::getControllerRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setControllerRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::initControllerRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptControllerRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvidence::Builder::disownControllerRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+
+inline bool FordLearningEvidence::Reader::hasCpSha256() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasCpSha256() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvidence::Reader::getCpSha256() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::getCpSha256() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setCpSha256( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::initCpSha256(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptCpSha256(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvidence::Builder::disownCpSha256() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+
+inline bool FordLearningEvidence::Reader::hasControllerMode() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasControllerMode() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvidence::Reader::getControllerMode() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::getControllerMode() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setControllerMode( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::initControllerMode(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptControllerMode(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvidence::Builder::disownControllerMode() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+
+inline bool FordLearningEvidence::Reader::hasPolicy() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasPolicy() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvidence::Reader::getPolicy() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::getPolicy() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setPolicy( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::initPolicy(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptPolicy(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvidence::Builder::disownPolicy() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+
+inline bool FordLearningEvidence::Reader::hasConversionRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasConversionRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvidence::Reader::getConversionRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::getConversionRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setConversionRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::initConversionRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptConversionRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvidence::Builder::disownConversionRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+
+inline bool FordLearningEvidence::Reader::hasStageRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasStageRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvidence::Reader::getStageRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::getStageRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setStageRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvidence::Builder::initStageRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptStageRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvidence::Builder::disownStageRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t FordLearningEvidence::Reader::getSourceReceiptMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvidence::Builder::getSourceReceiptMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvidence::Builder::setSourceReceiptMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvidence::Reader::getSourceValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvidence::Builder::getSourceValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvidence::Builder::setSourceValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvidence::Reader::getEnabled() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+
+inline bool FordLearningEvidence::Builder::getEnabled() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvidence::Builder::setEnabled(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvidence::Reader::getManual() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+
+inline bool FordLearningEvidence::Builder::getManual() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvidence::Builder::setManual(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvidence::Reader::hasRows() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvidence::Builder::hasRows() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>::Reader FordLearningEvidence::Reader::getRows() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>>::get(_reader.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>::Builder FordLearningEvidence::Builder::getRows() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>>::get(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvidence::Builder::setRows( ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>>::set(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>::Builder FordLearningEvidence::Builder::initRows(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>>::init(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvidence::Builder::adoptRows(
+    ::capnp::Orphan< ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>> FordLearningEvidence::Builder::disownRows() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::FordLearningEvent,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t FordLearningEvidence::Reader::getDropped() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvidence::Builder::getDropped() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvidence::Builder::setDropped( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvidence::Reader::getAppliedProfileSequence() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvidence::Builder::getAppliedProfileSequence() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvidence::Builder::setAppliedProfileSequence( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvidence::Reader::getAppliedProfileObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvidence::Builder::getAppliedProfileObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvidence::Builder::setAppliedProfileObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvidence::Reader::getAppliedProfileValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvidence::Builder::getAppliedProfileValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvidence::Builder::setAppliedProfileValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getEventMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getEventMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setEventMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getSequence() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getSequence() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setSequence( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvent::Reader::hasKind() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvent::Builder::hasKind() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvent::Reader::getKind() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvent::Builder::getKind() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvent::Builder::setKind( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvent::Builder::initKind(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvent::Builder::adoptKind(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvent::Builder::disownKind() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool FordLearningEvent::Reader::hasInputs() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvent::Builder::hasInputs() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader FordLearningEvent::Reader::getInputs() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder FordLearningEvent::Builder::getInputs() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvent::Builder::setInputs( ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder FordLearningEvent::Builder::initInputs(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvent::Builder::adoptInputs(
+    ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>> FordLearningEvent::Builder::disownInputs() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline double FordLearningEvent::Reader::getAppliedCoefficient() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline double FordLearningEvent::Builder::getAppliedCoefficient() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setAppliedCoefficient(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvent::Reader::hasActualPending() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvent::Builder::hasActualPending() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader FordLearningEvent::Reader::getActualPending() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder FordLearningEvent::Builder::getActualPending() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvent::Builder::setActualPending( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline void FordLearningEvent::Builder::setActualPending(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder FordLearningEvent::Builder::initActualPending(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvent::Builder::adoptActualPending(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> FordLearningEvent::Builder::disownActualPending() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool FordLearningEvent::Reader::hasActualCommand() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvent::Builder::hasActualCommand() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader FordLearningEvent::Reader::getActualCommand() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder FordLearningEvent::Builder::getActualCommand() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvent::Builder::setActualCommand( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline void FordLearningEvent::Builder::setActualCommand(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder FordLearningEvent::Builder::initActualCommand(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvent::Builder::adoptActualCommand(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> FordLearningEvent::Builder::disownActualCommand() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getControlMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getControlMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setControlMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getPendingControlMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getPendingControlMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setPendingControlMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getAnnouncedControlMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getAnnouncedControlMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setAnnouncedControlMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getCarStateMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getCarStateMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setCarStateMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvent::Reader::getNativeAllowed() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<448>() * ::capnp::ELEMENTS);
+}
+
+inline bool FordLearningEvent::Builder::getNativeAllowed() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<448>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setNativeAllowed(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<448>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvent::Reader::getFault() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<449>() * ::capnp::ELEMENTS);
+}
+
+inline bool FordLearningEvent::Builder::getFault() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<449>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setFault(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<449>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvent::Reader::getOverride() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<450>() * ::capnp::ELEMENTS);
+}
+
+inline bool FordLearningEvent::Builder::getOverride() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<450>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setOverride(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<450>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvent::Reader::getLimited() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<451>() * ::capnp::ELEMENTS);
+}
+
+inline bool FordLearningEvent::Builder::getLimited() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<451>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setLimited(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<451>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvent::Reader::getHasWirePath() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<452>() * ::capnp::ELEMENTS);
+}
+
+inline bool FordLearningEvent::Builder::getHasWirePath() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<452>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setHasWirePath(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<452>() * ::capnp::ELEMENTS, value);
+}
+
+inline double FordLearningEvent::Reader::getActualWirePath() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+
+inline double FordLearningEvent::Builder::getActualWirePath() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setActualWirePath(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvent::Reader::hasCheckpoint() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvent::Builder::hasCheckpoint() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader FordLearningEvent::Reader::getCheckpoint() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder FordLearningEvent::Builder::getCheckpoint() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvent::Builder::setCheckpoint( ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder FordLearningEvent::Builder::initCheckpoint(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvent::Builder::adoptCheckpoint(
+    ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>> FordLearningEvent::Builder::disownCheckpoint() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getCheckpointSequence() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getCheckpointSequence() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setCheckpointSequence( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getSourceReceiptMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getSourceReceiptMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setSourceReceiptMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getSourceValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getSourceValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setSourceValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getAppliedProfileSequence() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<12>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getAppliedProfileSequence() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<12>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setAppliedProfileSequence( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<12>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getAppliedProfileObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<13>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getAppliedProfileObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<13>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setAppliedProfileObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<13>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getAppliedProfileValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getAppliedProfileValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setAppliedProfileValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool FordLearningEvent::Reader::hasNativeIdentity() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline bool FordLearningEvent::Builder::hasNativeIdentity() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader FordLearningEvent::Reader::getNativeIdentity() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder FordLearningEvent::Builder::getNativeIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline void FordLearningEvent::Builder::setNativeIdentity( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder FordLearningEvent::Builder::initNativeIdentity(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), size);
+}
+inline void FordLearningEvent::Builder::adoptNativeIdentity(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> FordLearningEvent::Builder::disownNativeIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getNativeObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getNativeObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setNativeObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getNativeValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getNativeValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setNativeValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getNativeValidatedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getNativeValidatedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setNativeValidatedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t FordLearningEvent::Reader::getNativeCommandMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t FordLearningEvent::Builder::getNativeCommandMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setNativeCommandMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS, value);
+}
+
+inline double FordLearningEvent::Reader::getAnnouncedCoefficient() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+
+inline double FordLearningEvent::Builder::getAnnouncedCoefficient() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+inline void FordLearningEvent::Builder::setAnnouncedCoefficient(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint16_t CentreApplicationWitness::Reader::getVersion() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t CentreApplicationWitness::Builder::getVersion() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void CentreApplicationWitness::Builder::setVersion( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CentreApplicationWitness::Reader::hasIdentity() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool CentreApplicationWitness::Builder::hasIdentity() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader CentreApplicationWitness::Reader::getIdentity() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder CentreApplicationWitness::Builder::getIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void CentreApplicationWitness::Builder::setIdentity( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder CentreApplicationWitness::Builder::initIdentity(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void CentreApplicationWitness::Builder::adoptIdentity(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> CentreApplicationWitness::Builder::disownIdentity() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool CentreApplicationWitness::Reader::hasSourceEpoch() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool CentreApplicationWitness::Builder::hasSourceEpoch() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader CentreApplicationWitness::Reader::getSourceEpoch() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder CentreApplicationWitness::Builder::getSourceEpoch() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void CentreApplicationWitness::Builder::setSourceEpoch( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder CentreApplicationWitness::Builder::initSourceEpoch(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void CentreApplicationWitness::Builder::adoptSourceEpoch(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> CentreApplicationWitness::Builder::disownSourceEpoch() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t CentreApplicationWitness::Reader::getControlMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t CentreApplicationWitness::Builder::getControlMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void CentreApplicationWitness::Builder::setControlMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t CentreApplicationWitness::Reader::getProfileSequence() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t CentreApplicationWitness::Builder::getProfileSequence() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void CentreApplicationWitness::Builder::setProfileSequence( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CentreApplicationWitness::Reader::hasActualCoordinates() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool CentreApplicationWitness::Builder::hasActualCoordinates() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader CentreApplicationWitness::Reader::getActualCoordinates() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder CentreApplicationWitness::Builder::getActualCoordinates() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void CentreApplicationWitness::Builder::setActualCoordinates( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline void CentreApplicationWitness::Builder::setActualCoordinates(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder CentreApplicationWitness::Builder::initActualCoordinates(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void CentreApplicationWitness::Builder::adoptActualCoordinates(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> CentreApplicationWitness::Builder::disownActualCoordinates() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool CentreApplicationWitness::Reader::hasBaselineRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool CentreApplicationWitness::Builder::hasBaselineRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader CentreApplicationWitness::Reader::getBaselineRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder CentreApplicationWitness::Builder::getBaselineRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void CentreApplicationWitness::Builder::setBaselineRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder CentreApplicationWitness::Builder::initBaselineRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void CentreApplicationWitness::Builder::adoptBaselineRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> CentreApplicationWitness::Builder::disownBaselineRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline bool CentreApplicationWitness::Reader::hasPhysicalModelRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool CentreApplicationWitness::Builder::hasPhysicalModelRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader CentreApplicationWitness::Reader::getPhysicalModelRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder CentreApplicationWitness::Builder::getPhysicalModelRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void CentreApplicationWitness::Builder::setPhysicalModelRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder CentreApplicationWitness::Builder::initPhysicalModelRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), size);
+}
+inline void CentreApplicationWitness::Builder::adoptPhysicalModelRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> CentreApplicationWitness::Builder::disownPhysicalModelRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t CentreApplicationWitness::Reader::getOriginalObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t CentreApplicationWitness::Builder::getOriginalObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void CentreApplicationWitness::Builder::setOriginalObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t CentreApplicationWitness::Reader::getOriginalValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t CentreApplicationWitness::Builder::getOriginalValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+inline void CentreApplicationWitness::Builder::setOriginalValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
+}
+
+inline double CentreApplicationWitness::Reader::getBaselineFriction() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline double CentreApplicationWitness::Builder::getBaselineFriction() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void CentreApplicationWitness::Builder::setBaselineFriction(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline double CentreApplicationWitness::Reader::getActualFriction() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline double CentreApplicationWitness::Builder::getActualFriction() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void CentreApplicationWitness::Builder::setActualFriction(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint16_t LearningTorqueProjection::Reader::getVersion() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t LearningTorqueProjection::Builder::getVersion() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setVersion( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningTorqueProjection::Reader::hasFamily() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningTorqueProjection::Builder::hasFamily() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningTorqueProjection::Reader::getFamily() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningTorqueProjection::Builder::getFamily() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void LearningTorqueProjection::Builder::setFamily( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningTorqueProjection::Builder::initFamily(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void LearningTorqueProjection::Builder::adoptFamily(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningTorqueProjection::Builder::disownFamily() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool LearningTorqueProjection::Reader::hasFingerprint() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningTorqueProjection::Builder::hasFingerprint() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningTorqueProjection::Reader::getFingerprint() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningTorqueProjection::Builder::getFingerprint() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void LearningTorqueProjection::Builder::setFingerprint( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningTorqueProjection::Builder::initFingerprint(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void LearningTorqueProjection::Builder::adoptFingerprint(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningTorqueProjection::Builder::disownFingerprint() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t LearningTorqueProjection::Reader::getFlags() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningTorqueProjection::Builder::getFlags() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setFlags( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningTorqueProjection::Reader::hasCodecId() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningTorqueProjection::Builder::hasCodecId() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningTorqueProjection::Reader::getCodecId() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningTorqueProjection::Builder::getCodecId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void LearningTorqueProjection::Builder::setCodecId( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningTorqueProjection::Builder::initCodecId(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void LearningTorqueProjection::Builder::adoptCodecId(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningTorqueProjection::Builder::disownCodecId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool LearningTorqueProjection::Reader::hasMappingKind() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningTorqueProjection::Builder::hasMappingKind() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningTorqueProjection::Reader::getMappingKind() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningTorqueProjection::Builder::getMappingKind() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void LearningTorqueProjection::Builder::setMappingKind( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningTorqueProjection::Builder::initMappingKind(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void LearningTorqueProjection::Builder::adoptMappingKind(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningTorqueProjection::Builder::disownMappingKind() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t LearningTorqueProjection::Reader::getFrame() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t LearningTorqueProjection::Builder::getFrame() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setFrame( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline double LearningTorqueProjection::Reader::getRequestedTorque() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningTorqueProjection::Builder::getRequestedTorque() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setRequestedTorque(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline double LearningTorqueProjection::Reader::getCodecInputTorque() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningTorqueProjection::Builder::getCodecInputTorque() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setCodecInputTorque(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::int32_t LearningTorqueProjection::Reader::getUnlimitedRaw() const {
+  return _reader.getDataField< ::int32_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::int32_t LearningTorqueProjection::Builder::getUnlimitedRaw() {
+  return _builder.getDataField< ::int32_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setUnlimitedRaw( ::int32_t value) {
+  _builder.setDataField< ::int32_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::int32_t LearningTorqueProjection::Reader::getFinalRaw() const {
+  return _reader.getDataField< ::int32_t>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+
+inline  ::int32_t LearningTorqueProjection::Builder::getFinalRaw() {
+  return _builder.getDataField< ::int32_t>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setFinalRaw( ::int32_t value) {
+  _builder.setDataField< ::int32_t>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS, value);
+}
+
+inline double LearningTorqueProjection::Reader::getEffectiveMax() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningTorqueProjection::Builder::getEffectiveMax() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setEffectiveMax(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningTorqueProjection::Reader::hasLookupX() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningTorqueProjection::Builder::hasLookupX() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader LearningTorqueProjection::Reader::getLookupX() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningTorqueProjection::Builder::getLookupX() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void LearningTorqueProjection::Builder::setLookupX( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline void LearningTorqueProjection::Builder::setLookupX(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningTorqueProjection::Builder::initLookupX(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), size);
+}
+inline void LearningTorqueProjection::Builder::adoptLookupX(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> LearningTorqueProjection::Builder::disownLookupX() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+
+inline bool LearningTorqueProjection::Reader::hasLookupY() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningTorqueProjection::Builder::hasLookupY() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader LearningTorqueProjection::Reader::getLookupY() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningTorqueProjection::Builder::getLookupY() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline void LearningTorqueProjection::Builder::setLookupY( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), value);
+}
+inline void LearningTorqueProjection::Builder::setLookupY(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder LearningTorqueProjection::Builder::initLookupY(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), size);
+}
+inline void LearningTorqueProjection::Builder::adoptLookupY(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> LearningTorqueProjection::Builder::disownLookupY() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+
+inline bool LearningTorqueProjection::Reader::hasLimiterKind() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningTorqueProjection::Builder::hasLimiterKind() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader LearningTorqueProjection::Reader::getLimiterKind() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder LearningTorqueProjection::Builder::getLimiterKind() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline void LearningTorqueProjection::Builder::setLimiterKind( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder LearningTorqueProjection::Builder::initLimiterKind(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), size);
+}
+inline void LearningTorqueProjection::Builder::adoptLimiterKind(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> LearningTorqueProjection::Builder::disownLimiterKind() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+
+inline double LearningTorqueProjection::Reader::getPreviousTorque() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningTorqueProjection::Builder::getPreviousTorque() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setPreviousTorque(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
+}
+
+inline double LearningTorqueProjection::Reader::getMeasuredTorque() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningTorqueProjection::Builder::getMeasuredTorque() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setMeasuredTorque(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningTorqueProjection::Reader::hasLimits() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningTorqueProjection::Builder::hasLimits() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Reader LearningTorqueProjection::Reader::getLimits() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::get(_reader.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Builder LearningTorqueProjection::Builder::getLimits() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::get(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+inline void LearningTorqueProjection::Builder::setLimits( ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::set(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>::Builder LearningTorqueProjection::Builder::initLimits(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::init(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), size);
+}
+inline void LearningTorqueProjection::Builder::adoptLimits(
+    ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>> LearningTorqueProjection::Builder::disownLimits() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::StageValue,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+
+inline bool LearningTorqueProjection::Reader::hasShape() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningTorqueProjection::Builder::hasShape() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader LearningTorqueProjection::Reader::getShape() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::get(_reader.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder LearningTorqueProjection::Builder::getShape() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::get(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+inline void LearningTorqueProjection::Builder::setShape( ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::set(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>::Builder LearningTorqueProjection::Builder::initShape(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::init(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), size);
+}
+inline void LearningTorqueProjection::Builder::adoptShape(
+    ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>> LearningTorqueProjection::Builder::disownShape() {
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::LearningControlEvidence::NamedValue,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+
+inline bool LearningTorqueProjection::Reader::getSteerRequested() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+
+inline bool LearningTorqueProjection::Builder::getSteerRequested() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setSteerRequested(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint32_t LearningTorqueProjection::Reader::getCanAddress() const {
+  return _reader.getDataField< ::uint32_t>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint32_t LearningTorqueProjection::Builder::getCanAddress() {
+  return _builder.getDataField< ::uint32_t>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setCanAddress( ::uint32_t value) {
+  _builder.setDataField< ::uint32_t>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint16_t LearningTorqueProjection::Reader::getCanBus() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<36>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t LearningTorqueProjection::Builder::getCanBus() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<36>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setCanBus( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<36>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool LearningTorqueProjection::Reader::hasCanData() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS).isNull();
+}
+inline bool LearningTorqueProjection::Builder::hasCanData() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Data::Reader LearningTorqueProjection::Reader::getCanData() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Data::Builder LearningTorqueProjection::Builder::getCanData() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+inline void LearningTorqueProjection::Builder::setCanData( ::capnp::Data::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Data::Builder LearningTorqueProjection::Builder::initCanData(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), size);
+}
+inline void LearningTorqueProjection::Builder::adoptCanData(
+    ::capnp::Orphan< ::capnp::Data>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Data> LearningTorqueProjection::Builder::disownCanData() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+
+inline double LearningTorqueProjection::Reader::getReportedTorque() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+
+inline double LearningTorqueProjection::Builder::getReportedTorque() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+inline void LearningTorqueProjection::Builder::setReportedTorque(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS, value);
 }
 
 }  // namespace

@@ -61,6 +61,9 @@ class CarController(CarControllerBase):
     self.hca_mitigation = HCAMitigation(self.CCP)
 
   def update(self, CC, CS, now_nanos):
+    _projection = self.learning_projection_observer
+    if _projection is not None:
+      _projection.begin(CC.actuators.torque, self.frame)
     actuators = CC.actuators
     hud_control = CC.hudControl
     can_sends = []
@@ -106,12 +109,16 @@ class CarController(CarControllerBase):
       else:
         if CC.latActive:
           new_torque = int(round(actuators.torque * self.CCP.STEER_MAX))
+          if _projection is not None:
+            _projection.input(new_torque, self.CCP.STEER_MAX, self.apply_torque_last, CS.out.steeringTorque, self.CCP, limiter='driver')
           apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.CCP)
 
         apply_torque = self.hca_mitigation.update(apply_torque, self.apply_torque_last)
         hca_enabled = apply_torque != 0
         self.apply_torque_last = apply_torque
         can_sends.append(self.CCS.create_steering_control(self.packer_pt, self.CAN.pt, apply_torque, hca_enabled))
+        if _projection is not None:
+          _projection.emit('volkswagen.HCA_TORQUE', apply_torque, hca_enabled, can_sends[-1])
 
       if self.CP.flags & VolkswagenFlags.STOCK_HCA_PRESENT:
         # Pacify VW Emergency Assist driver inactivity detection by changing its view of driver steering input torque
@@ -209,4 +216,6 @@ class CarController(CarControllerBase):
     self.lead_distance_bars_last = hud_control.leadDistanceBars
     self.gra_acc_counter_last = CS.gra_stock_values["COUNTER"]
     self.frame += 1
+    if _projection is not None:
+      _projection.finish(new_actuators.torque)
     return new_actuators, can_sends

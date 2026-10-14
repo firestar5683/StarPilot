@@ -75,6 +75,9 @@ class CarController(CarControllerBase):
     return msg
 
   def update(self, CC, CS, now_nanos):
+    _projection = self.learning_projection_observer
+    if _projection is not None:
+      _projection.begin(CC.actuators.torque, self.frame)
     actuators = CC.actuators
     hud_control = CC.hudControl
     pcm_cancel_cmd = CC.cruiseControl.cancel
@@ -114,6 +117,8 @@ class CarController(CarControllerBase):
         # limits due to driver torque
 
         new_torque = int(round(apply_torque))
+        if _projection is not None:
+          _projection.input(new_torque, self.p.STEER_MAX, self.apply_torque_last, CS.out.steeringTorque, self.p, limiter='driver')
         apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.p)
 
         if not CC.latActive:
@@ -121,6 +126,8 @@ class CarController(CarControllerBase):
 
         if self.CP.flags & SubaruFlags.PREGLOBAL:
           can_sends.append(subarucan.create_preglobal_steering_control(self.packer, self.frame // self.p.STEER_STEP, apply_torque, CC.latActive))
+          if _projection is not None:
+            _projection.emit('subaru.PREGLOBAL_ES_LKAS', apply_torque, CC.latActive, can_sends[-1])
         else:
           apply_steer_req = CC.latActive
 
@@ -131,6 +138,8 @@ class CarController(CarControllerBase):
                                      self.steer_rate_counter, MAX_STEER_RATE_FRAMES)
 
           can_sends.append(subarucan.create_steering_control(self.packer, apply_torque, apply_steer_req))
+          if _projection is not None:
+            _projection.emit('subaru.ES_LKAS', apply_torque, apply_steer_req, can_sends[-1])
 
         self.apply_torque_last = apply_torque
 
@@ -223,4 +232,6 @@ class CarController(CarControllerBase):
       new_actuators.steeringAngleDeg = self.apply_angle_last
 
     self.frame += 1
+    if _projection is not None:
+      _projection.finish(new_actuators.torque)
     return new_actuators, can_sends
