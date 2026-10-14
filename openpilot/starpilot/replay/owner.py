@@ -223,10 +223,18 @@ class ReplayOwner:
     if type(request) is not dict or type(request.get('op')) is not str or self.closed:
       raise Rejected('unavailable' if self.closed else 'invalid_request')
     op = request['op']
-    if op == 'catalog' and set(request) == {'op'}:
-      return self.catalog.catalog()
-    if op == 'detail' and set(request) == {'op', 'routeId'}:
-      return self.catalog.detail(request['routeId'])
+    if (op == 'catalog' and set(request) == {'op'} or
+        op == 'detail' and set(request) == {'op', 'routeId'}):
+      result = self.catalog.catalog() if op == 'catalog' else self.catalog.detail(request['routeId'])
+      routes = result['routes'] if op == 'catalog' else [result]
+      try:
+        from openpilot.starpilot.galaxy.drive_stats import DriveStatsOwner
+        dates = DriveStatsOwner(root=self.catalog.root).recording_dates(route['routeId'] for route in routes)
+      except (OSError, RuntimeError, ValueError):
+        dates = {}  # Optional dates must not hide usable recordings.
+      for route in routes:
+        route['startTime'] = dates.get(route['routeId'])
+      return result
     with self.lock:
       if op == 'status' and set(request) <= {'op', 'clientId'}:
         return self._snapshot(self._touch(request))

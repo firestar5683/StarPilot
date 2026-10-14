@@ -1,6 +1,7 @@
 """Native route picker and passive replay viewer; the shared owner runs playback."""
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from html import escape, unescape
 import math
 import time
@@ -13,6 +14,7 @@ from openpilot.selfdrive.ui.ui_state import device, ui_state
 from openpilot.starpilot.ui.clip import placed_at
 from openpilot.starpilot.ui.feature_settings import FeatureSettingsView
 from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, feature_scroll
+from openpilot.starpilot.ui.onroad_customization import read_customization
 from openpilot.starpilot.ui.presentation import FontRole, Profile
 from openpilot.starpilot.ui.settings_geometry import (ACCENT, CONTROL_BG, CONTROL_BORDER, CONTROL_PRESSED_BG,
                                                      PANEL_BG, TEXT_MUTED, TEXT_PRIMARY, draw_rounded_fill,
@@ -41,6 +43,23 @@ def duration(value):
     return 'Unavailable'
   minutes, seconds = divmod(round(value), 60)
   return f'{minutes}:{seconds:02d}'
+
+
+def route_date(route, profile, clock24_hour=False):
+  for key in ('startTime', 'fileTime'):
+    value = route.get(key)
+    if type(value) not in (int, float):
+      continue
+    try:
+      if not math.isfinite(value) or value <= 0:
+        continue
+      date = datetime.fromtimestamp(value).astimezone()
+      calendar = date.strftime('%a, %b %-d, %Y' if profile == Profile.LARGE else '%b %-d, %Y')
+      clock = date.strftime('%H:%M') if clock24_hour else date.strftime('%I:%M %p').lstrip('0')
+      return calendar, clock, date.tzname() or '', 'File date' if key == 'fileTime' else ''
+    except (OSError, OverflowError, ValueError):
+      continue
+  return 'Date unavailable', '', '', ''
 
 
 class ReplayController:
@@ -275,6 +294,9 @@ class ReplayPage(Widget):
     self.card_signature = None
     self.route_rows = ()
     self.route_source = None
+    self.clock24_hour = read_customization(ui_state.params).get('clock24Hour', False)
+    self.detail_source = None
+    self.detail_text = ('Recorded route', 'Date unavailable', '')
     self.texture = None
     self.frame_key = None
     self.press = None
@@ -330,10 +352,29 @@ class ReplayPage(Widget):
     owner = self.controller
     if self.route_source is not owner.routes:
       self.route_source = owner.routes
-      self.route_rows = tuple(FeatureRow(route['routeId'], route.get('displayName', route['routeId']),
-                                        f"{route.get('segmentCount', 0)} segments", available=True,
-                                        reason=route.get('reason') or route.get('availability', ''), actions=(('DETAILS', True),))
-                              for route in owner.routes)
+      rows = []
+      for route in owner.routes:
+        calendar, clock, _, source = route_date(route, self.profile, self.clock24_hour)
+        identifier = route['routeId']
+        name = route.get('displayName') or identifier
+        named = name != identifier
+        count = route.get('segmentCount', 0)
+        segments = f'{count} segment' + ('s' if count != 1 else '')
+        label = name if named or not clock else calendar + (f' - {clock}' if self.profile == Profile.LARGE else '')
+        if self.profile == Profile.LARGE:
+          summary = f'{calendar} - {clock}' if named and clock else identifier
+          if not clock:
+            summary = calendar
+          value = ' - '.join(part for part in (summary, source, segments) if part)
+        else:
+          value = f'{calendar}\n{clock}' if named and clock else f'{clock or calendar}\n{source or segments}'
+          if named and clock and source:
+            value += f' - {source}'
+        reason = route.get('reason') or (route.get('availability', '') if route.get('availability') != 'ready' else '')
+        if self.profile == Profile.COMPACT and named and source and not route.get('reason'):
+          reason = ''  # Keep the date source visible within the card's two subtitle lines.
+        rows.append(FeatureRow(identifier, label, value, available=True, reason=reason, actions=(('DETAILS', True),)))
+      self.route_rows = tuple(rows)
     return self.route_rows or (FeatureRow('', 'No recorded routes' if owner.catalog_loaded else 'Loading recorded routes', ''),)
 
   def _warnings(self):
@@ -416,9 +457,23 @@ class ReplayPage(Widget):
     large = self.profile == Profile.LARGE
     if large:
       draw_settings_header(self.fonts, False, 'Replay', 'Recorded Routes', back=True)
-    title = route.get('displayName', owner.selected_route or 'Recorded route')
+    if self.detail_source is not owner.detail:
+      self.detail_source = owner.detail
+      calendar, clock, zone, source = route_date(route, self.profile, self.clock24_hour)
+      identifier = route.get('routeId') or owner.selected_route or ''
+      name = route.get('displayName') or identifier
+      named = name != identifier
+      date_line = ' - '.join(part for part in (source, calendar if named or not clock else '',
+                                               f'{clock} {zone}'.strip()) if part)
+      title = name if named else calendar if clock else 'Recorded route'
+      self.detail_text = title, date_line, identifier
+    title, date_line, identifier = self.detail_text
     size, width, x, y = (58, 2016, 72, 180) if large else (22, 412, 112, 30)
     self.fonts.draw(elide_text(self.fonts, title, FontRole.SEMI_BOLD, size, width), FontRole.SEMI_BOLD, size, x, y, TEXT_PRIMARY)
+    size, width, x, y = (32, 2016, 72, 264) if large else (15, 412, 112, 59)
+    self.fonts.draw(elide_text(self.fonts, date_line, FontRole.NORMAL, size, width), FontRole.NORMAL, size, x, y, TEXT_MUTED)
+    size, width, x, y = (28, 2016, 72, 308) if large else (12, 512, 12, 167)
+    self.fonts.draw(elide_text(self.fonts, identifier, FontRole.NORMAL, size, width), FontRole.NORMAL, size, x, y, TEXT_MUTED)
     reason = owner.error or route.get('reason') or ('Loading route details...' if owner.busy else '')
     if not reason and not self._play_available():
       reason = 'Replay is available while offroad and no other player is active'
@@ -470,6 +525,7 @@ class ReplayPage(Widget):
       detail = ' - '.join(part for part in (row.value, row.reason) if part).lower()
       if row.actions:
         button = BigButton(row.label.lower(), detail, scroll=True)
+        button._sub_label.set_font_size(30)
         button.set_enabled(row.available and not self.controller.busy)
         button.set_click_callback(lambda row=row: self._action(FeatureUiAction('action', row=row)))
       else:

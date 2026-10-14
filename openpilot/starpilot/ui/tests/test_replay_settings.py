@@ -8,12 +8,92 @@ from unittest.mock import Mock
 import pyray as rl
 import pytest
 
-from openpilot.starpilot.ui.replay_settings import ReplayCompactPage, ReplayController, ReplayPage, duration
+from openpilot.starpilot.ui.replay_settings import ReplayCompactPage, ReplayController, ReplayPage, duration, route_date
 from openpilot.starpilot.ui.presentation import Profile
 
 
 ROUTE = {'routeId': '00000001--0123456789', 'displayName': 'Recorded route', 'segmentCount': 2,
          'availability': 'ready', 'playable': True, 'reason': None, 'warnings': []}
+STAMP = 1_791_986_730  # 2026-10-14 14:05:30 UTC
+
+
+@pytest.fixture
+def utc(monkeypatch):
+  with monkeypatch.context() as patch:
+    patch.setenv('TZ', 'UTC')
+    time.tzset()
+    yield
+  time.tzset()
+
+
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+def test_route_date_prefers_recorded_start_and_formats_native_clock(utc, profile):
+  route = {'startTime': STAMP, 'fileTime': STAMP + 60}
+  calendar, clock, zone, source = route_date(route, profile)
+  assert calendar == ('Wed, Oct 14, 2026' if profile == Profile.LARGE else 'Oct 14, 2026')
+  assert (clock, zone, source) == ('2:05 PM', 'UTC', '')
+  assert route_date(route, profile, True)[1] == '14:05'
+
+
+@pytest.mark.parametrize('invalid', [None, True, '2026-10-14', 0, -1, float('nan'), float('inf'), 10**400])
+def test_route_date_falls_back_and_handles_missing_or_unrepresentable_dates(utc, invalid):
+  route = {'startTime': invalid, 'fileTime': STAMP + 60}
+  assert route_date(route, Profile.COMPACT)[1:] == ('2:06 PM', 'UTC', 'File date')
+  route['fileTime'] = invalid
+  assert route_date(route, Profile.COMPACT) == ('Date unavailable', '', '', '')
+
+
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+@pytest.mark.parametrize('named', [False, True])
+def test_route_rows_prioritize_dates_preserve_names_and_keep_route_identity(utc, profile, named):
+  page, owner = page_for_input()
+  page.profile = profile
+  owner.routes = [{**ROUTE, 'displayName': 'School run' if named else ROUTE['routeId'],
+                   'startTime': STAMP}]
+  row = page._rows()[0]
+  assert row.key == ROUTE['routeId']
+  assert row.label == ('School run' if named else 'Wed, Oct 14, 2026 - 2:05 PM' if profile == Profile.LARGE else 'Oct 14, 2026')
+  assert '2:05 PM' in row.label + row.value
+  assert row.reason == ''
+  if profile == Profile.COMPACT:
+    assert row.value.count('\n') == 1
+  else:
+    assert '2 segments' in row.value
+  assert page._rows()[0] is row
+
+
+def test_compact_file_date_is_explicit_and_unavailable_reason_is_retained(utc):
+  page, owner = page_for_input()
+  page.profile = Profile.COMPACT
+  owner.routes = [{**ROUTE, 'displayName': ROUTE['routeId'], 'fileTime': STAMP,
+                   'availability': 'unavailable', 'reason': 'No road camera footage'}]
+  row = page._rows()[0]
+  assert row.value == '2:05 PM\nFile date'
+  assert row.reason == 'No road camera footage'
+  owner.routes = [{**ROUTE, 'displayName': 'School run', 'fileTime': STAMP, 'availability': 'limited'}]
+  row = page._rows()[0]
+  assert row.value == 'Oct 14, 2026\n2:05 PM - File date'
+  assert row.reason == ''
+
+
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+@pytest.mark.parametrize('named', [False, True])
+def test_details_show_source_timezone_and_full_id_without_reformatting_each_frame(utc, route_detail, monkeypatch, profile, named):
+  from openpilot.starpilot.ui import replay_settings as module
+  page, owner = route_detail
+  page.profile = profile
+  owner.detail = {**owner.detail, 'displayName': 'School run' if named else ROUTE['routeId'], 'fileTime': STAMP}
+  formatter = Mock(wraps=route_date)
+  monkeypatch.setattr(module, 'route_date', formatter)
+  monkeypatch.setattr(module, 'draw_settings_header', Mock())
+  page._button = Mock()
+  page._render_detail()
+  page._render_detail()
+  formatter.assert_called_once()
+  texts = [call.args[0] for call in page.fonts.draw.call_args_list]
+  assert ROUTE['routeId'] in texts
+  assert any('File date' in text and '2:05 PM UTC' in text for text in texts)
+  assert ('School run' if named else 'Wed, Oct 14, 2026' if profile == Profile.LARGE else 'Oct 14, 2026') in texts
 
 
 class Backend:
@@ -690,7 +770,8 @@ def test_compact_route_card_shows_segment_count_and_availability(route_detail, m
   monkeypatch.setattr(module, 'BigButton', factory)
   monkeypatch.setattr(module.gui_app, '_mouse_events', [])
   page._compact_cards()
-  assert factory.call_args.args[1] == '2 segments - ready'
+  assert factory.call_args.args[1] == 'date unavailable\n2 segments'
+  factory.return_value._sub_label.set_font_size.assert_called_once_with(30)
 
 
 def test_compact_underlying_buttons_are_disabled_during_overlays_and_back_gestures(monkeypatch):
