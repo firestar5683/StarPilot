@@ -33,7 +33,6 @@ def test_underflow_counters_preserve_signal_and_log_on_service_thread():
             1_170_666_666, 1_171_666_666, 1_256_000_000, 1_257_000_000]
   with patch.object(soundd.cloudlog, "warning") as warning, patch.object(soundd.cloudlog, "error") as error, \
        patch.object(soundd, "monotonic_ns", side_effect=clocks), \
-       patch.object(soundd, "get_native_id", return_value=42), \
        patch.object(soundd.time, "monotonic", return_value=2.), \
        patch.object(soundd, "_callback_thread_snapshot", return_value={"tid": 42}) as snapshot:
     for status in (underflow, underflow, other, None):
@@ -164,8 +163,7 @@ def test_thread_snapshot_is_post_event_and_proc_failure_keeps_underflow_report(t
                     "runtime_ns": 100, "runqueue_ns": 200, "timeslices": 3, "policy": 0, "affinity": [1, 3]}
   daemon, samples = make_daemon()
   output = np.empty((4, 1), dtype=np.float32)
-  with patch.object(soundd, "get_native_id", return_value=42), patch("pathlib.Path.open", side_effect=FileNotFoundError), \
-       patch.object(soundd.cloudlog, "error") as error:
+  with patch("pathlib.Path.open", side_effect=FileNotFoundError), patch.object(soundd.cloudlog, "error") as error:
     daemon.callback(output, 4, None, SimpleNamespace(output_underflow=True))
     assert output[:, 0].tobytes() == samples.tobytes()
     error.assert_not_called()

@@ -16,7 +16,7 @@ from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.system import micd
-from openpilot.common.hardware import HARDWARE, PC
+from openpilot.common.hardware import HARDWARE
 from openpilot.common.params import Params
 from openpilot.starpilot.aol.wire import INTENT_SERVICE
 from openpilot.starpilot.audio.alert_volume import AUTO, VOLUMES, effective_volume, read_volume
@@ -200,8 +200,6 @@ class Soundd:
     self.last_callback_work_ns = None
     self.last_native_audio_time = None
     self.callback_tid = None
-    self.callback_scheduling_tid = None
-    self.pending_callback_scheduling_status = None
     self.callback_scheduler_history = _CallbackSchedulerHistory()
     self.underflow_timing = None
     self.axis_alerts = AxisAlerts()
@@ -266,8 +264,8 @@ class Soundd:
     dac_time = _native_audio_time(time, "outputBufferDacTime")
     native_gap = (native_time - previous_native_time if native_time is not None and
                   previous_native_time is not None and native_time >= previous_native_time else None)
-    self.callback_tid = get_native_id()
-    self.configure_current_callback_thread()
+    if getattr(self, "callback_tid", None) is None:
+      self.callback_tid = get_native_id()
     self.last_callback_start_ns = started_ns
     self.last_native_audio_time = native_time
     try:
@@ -285,38 +283,6 @@ class Soundd:
         self.pending_stream_status = status
         self.stream_status_count += 1
         self.output_underflow_count += int(underflow)
-
-  def configure_current_callback_thread(self) -> None:
-    tid = self.callback_tid
-    if not hasattr(self, "callback_scheduling_tid") or self.callback_scheduling_tid == tid:
-      return
-    self.callback_scheduling_tid = tid
-    if PC:
-      return
-    try:
-      # PID 0 means this calling thread: a cached/reused TID can never select another thread.
-      policy = os.sched_getscheduler(0)
-      if policy != os.SCHED_OTHER:
-        self.pending_callback_scheduling_status = (self.callback_tid, "preserved", policy)
-        return
-      os.sched_setscheduler(0, os.SCHED_RR, os.sched_param(1))
-    except (OSError, AttributeError, ValueError) as error:
-      self.pending_callback_scheduling_status = (self.callback_tid, "unavailable", error)
-    else:
-      self.pending_callback_scheduling_status = (self.callback_tid, "configured", None)
-
-  def log_callback_scheduling_status(self) -> None:
-    status = getattr(self, "pending_callback_scheduling_status", None)
-    if status is None:
-      return
-    self.pending_callback_scheduling_status = None
-    tid, result, detail = status
-    if result == "unavailable":
-      cloudlog.warning(f"soundd callback scheduling unavailable: tid={tid} error={detail}")
-    else:
-      policy = detail if result == "preserved" else "SCHED_RR"
-      priority = 1 if result == "configured" else "unchanged"
-      cloudlog.info(f"soundd callback scheduling: tid={tid} result={result} policy={policy} priority={priority}")
 
   def log_pending_stream_status(self, stream=None) -> None:
     status = self.pending_stream_status
@@ -431,7 +397,6 @@ class Soundd:
       while True:
         sm.update(0)
         self.callback_scheduler_history.sample(self.callback_tid)
-        self.log_callback_scheduling_status()
         self.log_pending_stream_status(stream)
         self.refresh_saved_volumes(time.monotonic())
         self.load_sounds()
