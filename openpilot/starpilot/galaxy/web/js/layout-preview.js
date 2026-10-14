@@ -1,7 +1,8 @@
 import { widgetArtMetadata } from "./widget-art.js"
 // hiddenOn: screens where the scene looks exactly like another one. The Small screen has no text for these
-// speed-limit states, so they match Longitudinal only or Cruise off there.
+// speed-limit states, so they match Engaged there.
 export const PREVIEW_SCENES = [
+  { id: "general", label: "General edit" },
   { id: "engaged", label: "Engaged" },
   { id: "aol", label: "Lateral only" },
   { id: "long_only", label: "Longitudinal only" },
@@ -21,6 +22,39 @@ export const PREVIEW_SCENES = [
   { id: "slc_display", label: "Display-only speed limit", hiddenOn: ["compact"] },
 ]
 const SCENES = PREVIEW_SCENES.map(({ id }) => id)
+
+// Keep the sketch and its eye controls aligned with sample_state and the native onroad view.
+export function previewScene(scene) {
+  const off = scene === "slc_disengaged"
+  const lateral = !off && scene !== "long_only"
+  const longitudinal = !off && scene !== "aol"
+  const experimental = scene === "experimental" || scene.startsWith("cem_")
+  return { lateral, longitudinal, experimental,
+    border: off ? "#122839" : experimental ? "#da6f25" : !longitudinal ? "#0abab5" : !lateral ? "#ff69b4" : "#167f40",
+    mode: off ? "Disengaged" : !longitudinal ? "Always On Lateral" : experimental ? "ACC - Experimental" : "ACC - Chill" }
+}
+
+export function sceneHidesWidget(scene, profile, id, layout = {}, widgets = {}) {
+  if (scene === "general") return false
+  const { lateral, longitudinal } = previewScene(scene)
+  if (id === "stopped_timer") return scene !== "stopped"
+  if (id === "cem_gauge") return !scene.startsWith("cem_")
+  if (id === "torque_bar" || profile === "compact" && id === "steering_wheel") return !lateral
+  if (profile === "compact" && id === "max_speed") return !longitudinal
+  if (id === "speed_limit_actions") return !longitudinal || scene === "slc_unavailable" || scene === "slc_display" ||
+    profile === "compact" && scene !== "slc_pending"
+  const overlaps = (a, b) => a && b && a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+  const box = key => layout[key]?.enabled && widgets[key] ? { ...widgets[key], ...layout[key] } : null
+  if (profile === "compact" && id === "driver_monitor" && longitudinal) return !!overlaps(box(id), box("max_speed"))
+  if (profile === "compact" && id === "speed_limit") {
+    if (scene === "slc_unavailable") return true
+    const actions = box("speed_limit_actions")
+    if (scene !== "slc_pending" || !actions) return false
+    const inset = actions.visualInsetTop || 0
+    return !!overlaps(box(id), { ...actions, y: actions.y >= inset ? actions.y - inset : actions.y, height: actions.height + inset })
+  }
+  return false
+}
 
 export class LayoutPreviewFeed {
   constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
@@ -86,7 +120,7 @@ export class LayoutPreviewFeed {
     if (this.art) {
       const cached = this.artCache.get(profile)
       this.currentUrl = cached?.url || null
-      this.publish({ url: this.currentUrl, sprites: cached?.sprites || null })
+      this.publish({ url: this.currentUrl, sprites: cached?.sprites || null, scene: cached?.scene || null })
       if (cached?.key === renderKey) {
         this.publish({ status: "ready", error: "" })
         return
@@ -135,9 +169,9 @@ export class LayoutPreviewFeed {
         if (!this.active || item.version !== this.version || request.signal.aborted) return
         const previousUrl = this.art ? this.artCache.get(item.profile)?.url : this.currentUrl
         this.currentUrl = this.urls.createObjectURL(blob)
-        if (this.art) this.artCache.set(item.profile, { key: item.renderKey, url: this.currentUrl, sprites })
+        if (this.art) this.artCache.set(item.profile, { key: item.renderKey, url: this.currentUrl, sprites, scene: item.scene })
         this.failures = 0
-        this.publish({ status: "ready", error: "", url: this.currentUrl, ...(this.art ? {sprites} : {}) })
+        this.publish({ status: "ready", error: "", url: this.currentUrl, scene: item.scene, profile: item.profile, ...(this.art ? {sprites} : {}) })
         if (previousUrl) this.urls.revokeObjectURL(previousUrl)
       })()])
     } catch {

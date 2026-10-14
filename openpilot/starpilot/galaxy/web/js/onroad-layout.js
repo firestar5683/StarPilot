@@ -2,7 +2,7 @@ import { GxState } from "./state.js"
 import { guardUnload } from "./unload-guard.js"
 import { PollTimer, connectionError } from "./polling.js"
 import { reactive, watch } from "../vendor/vue/vue.esm-browser.js"
-import { LayoutPreviewFeed, PREVIEW_SCENES } from "./layout-preview.js"
+import { LayoutPreviewFeed, PREVIEW_SCENES, previewScene, sceneHidesWidget } from "./layout-preview.js"
 import { LEAD_INFO, PROJECTION_WORDMARK, editorSnapshot, projectionPayload } from "./projection-layout.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { GxNotice } from "./notice.js"
@@ -13,17 +13,19 @@ import { snapTargets, snapMove, snapResize, snapThreshold } from "./layout-snap.
 import { PROFILES, ROAD_COLORS, PATH_MODES, HEX, PROJECTION_DISPLAY_SWITCHES, layoutDocument, withDisplay, orderedWidgetIds, widgetPalette, withAlpha, widgetSize, placementLimits, clampBox, clampPlacement, overlapsReserved, previewPoint, validDocument, validSnapshot } from "./onroad-layout-document.js"
 export { layoutDocument, withDisplay, orderedWidgetIds, widgetPalette, withAlpha, widgetSize, placementLimits, clampBox, clampPlacement, overlapsReserved, previewPoint, validDocument, validSnapshot } from "./onroad-layout-document.js"
 
-const previewVisibilityKey = projection => "gx-layout-preview-visibility-v1:" + (projection ? "android-auto" : "comma")
+const previewVisibilityKey = projection => "gx-layout-preview-visibility-v2:" + (projection ? "android-auto" : "comma")
 function loadPreviewVisibility(projection) {
-  const hidden = { large: { stopped_timer: true }, compact: { stopped_timer: true } }
+  const hidden = { large: {}, compact: {} }
   try {
-    const saved = JSON.parse(localStorage.getItem(previewVisibilityKey(projection)))
+    const raw = localStorage.getItem(previewVisibilityKey(projection))
+    const legacy = raw === null
+    const saved = JSON.parse(raw ?? localStorage.getItem(previewVisibilityKey(projection).replace('-v2:', '-v1:')))
     for (const profile of PROFILES) {
       const widgets = saved?.[profile]
       if (!widgets || typeof widgets !== "object" || Array.isArray(widgets)) continue
       hidden[profile] = {
         ...hidden[profile], ...Object.fromEntries(Object.entries(widgets)
-          .filter(([id, value]) => typeof value === "boolean" && !(projection && id === "car_exit")))
+          .filter(([id, value]) => typeof value === "boolean" && !(projection && id === "car_exit") && !(legacy && id === "stopped_timer")))
       }
     }
   } catch { /* Preview controls still work when browser storage is unavailable. */ }
@@ -147,16 +149,16 @@ export const LayoutWidgetPreview = {
   methods: {
     withAlpha,
     modeLines(scene, profile) {
-      const aol = scene === "aol"
-      const experimental = ["experimental", "cem_stop_light", "cem_lead", "cem_curve"].includes(scene)
+      const { mode, experimental } = previewScene(scene), aol = scene === "aol"
       if (profile === "compact" && (aol || experimental)) return aol ? ["Always On", "Lateral"] : ["ACC -", "Experimental"]
-      return [aol ? "Always On Lateral" : experimental ? "ACC - Experimental" : "ACC - Chill"]
+      return [mode]
     },
+    pending(scene) { return scene === "general" || scene === "slc_pending" },
   },
   template: `
     <g aria-hidden="true" class="gx-layout-widget-art" :fill="palette.text || '#ffffff'">
       <template v-if="native">
-        <svg v-if="art?.url && art.sprites?.sprites?.[widget.id]"
+        <svg v-if="art?.url && art.scene === scene && art.sprites?.sprites?.[widget.id]"
           :x="art.sprites.sprites[widget.id].offsetX || 0" :y="art.sprites.sprites[widget.id].offsetY || 0"
           :width="art.sprites.sprites[widget.id].width" :height="art.sprites.sprites[widget.id].height"
           :viewBox="[art.sprites.sprites[widget.id].x, art.sprites.sprites[widget.id].y, art.sprites.sprites[widget.id].width, art.sprites.sprites[widget.id].height].join(' ')"
@@ -176,7 +178,7 @@ export const LayoutWidgetPreview = {
             :y="widget.height / 2 + (index - (modeLines(scene, profile).length - 1) / 2) * 25">{{ line }}</tspan>
         </text>
       </template>
-      <template v-else-if="widget.kind === 'stopped_timer'">
+      <template v-else-if="widget.kind === 'stopped_timer' && ['general', 'stopped'].includes(scene)">
         <text :x="widget.width / 2" :y="widget.height * 53 / 112" text-anchor="middle" dominant-baseline="middle" :font-size="widget.height * 64 / 112" font-weight="700" fill="#b67129"
           style="filter: drop-shadow(2px 2px 1px #000000aa)">2 minutes</text>
         <text :x="widget.width / 2" :y="widget.height * 101 / 112" text-anchor="middle" dominant-baseline="middle" :font-size="widget.height * 30 / 112" font-weight="500" fill="#fffffff2"
@@ -191,14 +193,18 @@ export const LayoutWidgetPreview = {
         <rect x="10" y="8" width="100" height="116" rx="14" fill="none" stroke="white" stroke-width="2" />
         <text x="60" y="18" dominant-baseline="text-before-edge" text-anchor="middle" font-size="20" font-weight="600" fill="white">SPEED</text>
         <text x="60" y="36" dominant-baseline="text-before-edge" text-anchor="middle" font-size="20" font-weight="600" fill="white">LIMIT</text>
-        <text x="60" y="66" dominant-baseline="text-before-edge" text-anchor="middle" font-size="50" font-weight="700" fill="white">65</text>
+        <text x="60" y="66" dominant-baseline="text-before-edge" text-anchor="middle" font-size="50" font-weight="700" fill="white">45</text>
       </template>
       <template v-else-if="widget.kind === 'speed_limit_actions'">
-        <text v-if="profile === 'compact'" x="6" :y="widget.visualHeaderY ?? -32" dominant-baseline="text-before-edge" font-size="20" font-weight="600" fill="white">NEW LIMIT 55</text>
-        <text v-if="profile === 'large'" x="0" y="28" font-size="37" fill="white">New road limit 35</text>
-        <g v-for="(label, index) in (profile === 'large' ? ['Apply 39', 'Keep'] : ['ACCEPT', 'REJECT'])" :key="label" :transform="'translate(' + index * (widget.width / 2 + 4) + ' ' + (profile === 'large' ? 44 : 0) + ')'">
+        <text v-if="profile === 'compact' && pending(scene)" x="6" :y="widget.visualHeaderY ?? -32" dominant-baseline="text-before-edge" font-size="20" font-weight="600" fill="white">NEW LIMIT 49</text>
+        <text v-if="profile === 'large' && pending(scene)" x="0" y="28" font-size="37" fill="white">New road limit 49</text>
+        <template v-if="pending(scene)"><g v-for="(label, index) in (profile === 'large' ? ['Apply 54', 'Keep 49'] : ['ACCEPT', 'REJECT'])" :key="label" :transform="'translate(' + index * (widget.width / 2 + 4) + ' ' + (profile === 'large' ? 44 : 0) + ')'">
           <rect :width="widget.width / 2 - 4" :height="profile === 'large' ? widget.height - 44 : widget.height" rx="12" :fill="palette.cardFill" :stroke="palette.cardBorder" stroke-width="2" />
           <text :x="widget.width / 4 - 2" :y="(profile === 'large' ? widget.height - 44 : widget.height) / 2 + 7" text-anchor="middle" :font-size="profile === 'large' ? 40 : 20" :font-weight="profile === 'large' ? 500 : 600" :fill="palette.text">{{ label }}</text>
+        </g></template>
+        <g v-else-if="profile === 'large'">
+          <rect :width="widget.width" :height="widget.height - 44" rx="12" :fill="palette.cardFill" :stroke="palette.cardBorder" stroke-width="2" />
+          <text :x="widget.width / 2" :y="(widget.height - 44) / 2 + 7" text-anchor="middle" font-size="40" :fill="palette.text">Use limit 49</text>
         </g>
       </template>
       <g v-else-if="widget.kind === 'torque_bar'" fill="none" stroke="white" stroke-linecap="round">
@@ -278,10 +284,10 @@ export const OnroadLayoutPage = {
   setup(props) {
     const state = reactive({
       status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
-      profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
+      profile: "large", scene: "general", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
       inspectorPanel: ["widgets", "edit", "road", "display"].includes(props.initialPanel) && !props.projection ? props.initialPanel : "widgets", showFavoriteZones: false, showEditingAids: loadAidsPreference(),
       aboutOpen: false, tipsOpen: false, moreOpen: false, widgetsHelpOpen: false, stuck: { leaveBar: false, pinned: false, sections: false }, openColor: null, art: { status: "idle", error: "", url: null, sprites: null }, backdrop: { status: "idle", error: "", url: null },
-      hiddenPreviewWidgets: loadPreviewVisibility(props.projection), snapEnabled: loadSnapPreference(), snapGuides: [], history: { undo: [], redo: [], group: null }
+      hiddenPreviewWidgets: loadPreviewVisibility(props.projection), sceneHiddenPreviewWidgets: {}, snapEnabled: loadSnapPreference(), snapGuides: [], history: { undo: [], redo: [], group: null }
     })
     let deferred = null
     const apply = (update) => {
@@ -381,9 +387,12 @@ export const OnroadLayoutPage = {
       return this.scenes.filter(scene => !scene.hiddenOn?.includes(screen))
     },
     sceneGroups() {
-      return [["Driving", scene => !/^(cem|slc)_/.test(scene.id)], ["Conditional experimental", scene => scene.id.startsWith("cem_")],
+      return [["Editing", scene => scene.id === "general"], ["Driving", scene => scene.id !== "general" && !/^(cem|slc)_/.test(scene.id)], ["Conditional experimental", scene => scene.id.startsWith("cem_")],
         ["Speed limit", scene => scene.id.startsWith("slc_")]].map(([label, test]) => ({ label, scenes: this.availableScenes.filter(test) }))
     },
+    sceneBorder() { return previewScene(this.state.scene).border },
+    nativeBackdropReady() { return !!this.state.backdrop.url && this.state.backdrop.scene === this.state.scene &&
+      this.state.backdrop.profile === (this.projection ? "projection" : this.state.profile) },
     layout() { return this.state.draft?.layouts[this.state.profile] },
     projectionHasPipWidget() {
       return ["pip_left", "pip_right"].some(id => this.state.draft?.layouts?.large?.[id]?.enabled === true)
@@ -492,12 +501,26 @@ export const OnroadLayoutPage = {
       this.state.showEditingAids = !this.state.showEditingAids
       try { localStorage.setItem(aidsPreferenceKey, this.state.showEditingAids ? "1" : "0") } catch { }
     },
-    previewHidden(id) { return !(this.projection && id === "car_exit") && this.state.hiddenPreviewWidgets[this.state.profile]?.[id] === true },
+    sceneHidden(id) { return sceneHidesWidget(this.state.scene, this.state.profile, id, this.layout, this.profile?.widgets) },
+    previewHidden(id) {
+      if (this.projection && id === "car_exit") return false
+      if (this.sceneHidden(id)) return true
+      const hidden = this.state.scene === "general" ? this.state.hiddenPreviewWidgets : this.state.sceneHiddenPreviewWidgets[this.state.scene]
+      return hidden?.[this.state.profile]?.[id] === true
+    },
+    visibilityTitle(id, label) {
+      return this.sceneHidden(id) ? label + ' is hidden in this scene. Choose General edit to arrange it.' :
+        (this.previewHidden(id) ? 'Show ' : 'Hide ') + label + ' in this preview only'
+    },
     togglePreviewVisibility(id) {
-      if (this.state.drag || this.state.layerDrag || (this.projection && id === "car_exit")) return
-      const hidden = this.state.hiddenPreviewWidgets[this.state.profile] ||= {}
+      if (this.state.drag || this.state.layerDrag || (this.projection && id === "car_exit") || this.sceneHidden(id)) return
+      const preferences = this.state.scene === "general" ? this.state.hiddenPreviewWidgets :
+        (this.state.sceneHiddenPreviewWidgets[this.state.scene] ||= {})
+      const hidden = preferences[this.state.profile] ||= {}
       hidden[id] = !hidden[id]
-      try { localStorage.setItem(previewVisibilityKey(this.projection), JSON.stringify(this.state.hiddenPreviewWidgets)) } catch { }
+      if (this.state.scene === "general") {
+        try { localStorage.setItem(previewVisibilityKey(this.projection), JSON.stringify(this.state.hiddenPreviewWidgets)) } catch { }
+      }
     },
     selectWidget(id) {
       this.state.selected = id
@@ -728,7 +751,7 @@ export const OnroadLayoutPage = {
       this.state.profile = profile
       this.state.selected = Object.keys(this.profile.widgets)[0] || null
       this.state.placementError = ""
-      if (!this.availableScenes.some(scene => scene.id === this.state.scene)) this.state.scene = "engaged"
+      if (!this.availableScenes.some(scene => scene.id === this.state.scene)) this.state.scene = "general"
     },
     changePosition(id, x, y) {
       if (!this.editable) return
@@ -745,6 +768,7 @@ export const OnroadLayoutPage = {
       if (!this.editable || this.state.drag || !Object.hasOwn(this.profile.widgets, id)) return
       const before = clone(this.state.draft)
       this.layout[id].enabled = true
+      if (this.sceneHidden(id)) this.state.scene = "general"
       this.recordChange(before)
       this.state.selected = id
       this.state.notice = ""
@@ -905,6 +929,7 @@ export const OnroadLayoutPage = {
     },
     startDrag(id, event, fromTray = false) {
       if (!this.editable || event.button > 0 || this.state.drag || !Object.hasOwn(this.profile.widgets, id)) return
+      if (fromTray && this.sceneHidden(id)) this.state.scene = "general"
       const point = previewPoint(event, this.$refs.preview.getBoundingClientRect(), this.profile)
       if (!point) return
       const position = this.layout[id], widget = this.profile.widgets[id]
@@ -1252,7 +1277,8 @@ export const OnroadLayoutPage = {
                 <button v-if="!projection && profile.inputZones?.length" class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.showFavoriteZones" aria-label="Show Favorite tap areas" title="Show Favorite tap areas" @click="state.showFavoriteZones = !state.showFavoriteZones"><i class="bi bi-grid-3x3-gap" aria-hidden="true"></i></button>
                 <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-expanded="state.tipsOpen" aria-controls="gx-layout-tips" aria-label="Preview tips and display behavior" title="Preview tips and display behavior" @click="state.tipsOpen = !state.tipsOpen"><i class="bi bi-question-circle" aria-hidden="true"></i></button>
               </div>
-              <p v-if="state.backdrop.status === 'unavailable'" class="gx-note" role="status">{{ state.backdrop.url ? 'The comma screen could not refresh. Showing the last one.' : 'The comma screen is unavailable. Showing a sketch.' }}</p>
+              <p class="gx-note">{{ state.scene === 'general' ? 'Arrange all enabled widgets with sample readings. Use a driving scene to check when they appear.' : 'Eyes follow this driving scene. Choose General edit to arrange widgets hidden here.' }}</p>
+              <p v-if="state.backdrop.status === 'unavailable'" class="gx-note" role="status">{{ nativeBackdropReady ? 'The comma screen could not refresh. Showing the last one.' : 'The comma screen is unavailable. Showing a sketch.' }}</p>
               <p v-if="state.art.status === 'unavailable'" class="gx-note" role="status">{{ state.art.url ? 'Widget preview could not refresh. Showing the last preview.' : 'Widget preview unavailable. Placement controls remain available.' }}</p>
               <div class="gx-layout__stage">
               <span v-if="state.showEditingAids && state.snapGuides.length && !snapInBar" class="gx-layout__stage-chip gx-layout__stage-chip--start" :class="{'gx-layout__stage-chip--with-tap-areas': !projection && state.showFavoriteZones && state.profile !== 'compact'}" aria-hidden="true">{{ snapSummary }}</span>
@@ -1260,7 +1286,7 @@ export const OnroadLayoutPage = {
               <svg ref="preview" class="gx-layout__preview" :style="{'--layout-glow': state.profile === 'compact' ? '4px' : '14px'}" :viewBox="'0 0 ' + profile.width + ' ' + profile.height" :width="profile.width" :height="profile.height"
                 @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag"
                 role="group" :aria-label="projection ? 'Android Auto layout preview' : (state.profile === 'large' ? 'Big' : 'Small') + ' layout preview'">
-                <image v-if="state.backdrop.url" :href="state.backdrop.url" :width="profile.width" :height="profile.height" preserveAspectRatio="none" data-preview-source="device-backdrop" />
+                <image v-if="nativeBackdropReady" :href="state.backdrop.url" :width="profile.width" :height="profile.height" preserveAspectRatio="none" data-preview-source="device-backdrop" />
                 <template v-else>
                 <rect width="100%" height="100%" fill="#252b32" />
                 <polygon :points="roadPoints([[0,1],[.4,.45],[.55,.45],[.83,1]])" fill="#303943" />
@@ -1289,6 +1315,10 @@ export const OnroadLayoutPage = {
                   </g>
                 </g>
                 </template>
+                <rect v-if="!nativeBackdropReady" data-preview-source="scene-border"
+                  :x="state.profile === 'compact' ? 4 : profile.bounds.x" :y="state.profile === 'compact' ? 4 : profile.bounds.y"
+                  :width="state.profile === 'compact' ? 468 : profile.bounds.width" :height="state.profile === 'compact' ? 232 : profile.bounds.height"
+                  :rx="state.profile === 'compact' ? 14 : 61" fill="none" :stroke="sceneBorder" :stroke-width="state.profile === 'compact' ? 8 : 30" />
                 <rect v-if="state.showEditingAids" :x="profile.bounds.x" :y="profile.bounds.y" :width="profile.bounds.width" :height="profile.bounds.height" fill="none" stroke="#8495a855" stroke-width="2" stroke-dasharray="8 8" />
                 <g v-if="!projection && state.showFavoriteZones && state.showEditingAids" aria-hidden="true" pointer-events="none">
                   <g v-for="zone in profile.inputZones || []" :key="zone.id">
@@ -1305,12 +1335,6 @@ export const OnroadLayoutPage = {
                   @pointerdown="startDrag(widget.id, $event)">
                   <rect class="gx-layout__hit" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="transparent" />
                   <LayoutWidgetPreview :widget="widget" :palette="widgetColors(widget.id)" :profile="state.profile" :scene="state.scene" :clock24-hour="!!state.draft.clock24Hour" :native="runtimeWidget(widget.id)" :art="state.art" />
-                  <!-- The car draws the CEM gauge only in Conditional Experimental scenes; mark where it sits otherwise. -->
-                  <g v-if="widget.kind === 'cem_gauge' && state.showEditingAids && !state.scene.startsWith('cem_')" class="gx-layout__hint" data-preview-source="cem-hint" pointer-events="none">
-                    <rect x="2" y="2" :width="widget.width - 4" :height="widget.height - 4" rx="16" fill="#0c182066" stroke="#a6dfbe88" stroke-width="3" stroke-dasharray="10 8" />
-                    <text :x="widget.width / 2" :y="widget.height / 2 - 6" text-anchor="middle" font-size="30" font-weight="600" fill="#ffffffd9">{{ widget.label }}</text>
-                    <text :x="widget.width / 2" :y="widget.height / 2 + 30" text-anchor="middle" font-size="22" fill="#a6dfbe">Shows in CEM scenes</text>
-                  </g>
                   <rect class="gx-layout__selection" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="none" stroke="#b799ff" :stroke-width="state.profile === 'large' ? 5 : 1.5" stroke-dasharray="6 4" />
                   <g v-if="widget.box && state.selected === widget.id && editable" class="gx-layout__resize" role="button" :aria-label="'Resize ' + widget.label"
                     :transform="'translate(' + widget.width + ' ' + widget.height + ')'" @pointerdown="startResize(widget.id, $event)">
@@ -1318,7 +1342,7 @@ export const OnroadLayoutPage = {
                     <path d="M-6 6 L6 -6 M0 6 L6 0" stroke="#16121f" stroke-width="3" stroke-linecap="round" />
                   </g>
                 </g>
-                <g v-if="projection && !state.backdrop.url" data-preview-source="fixed-wordmark" role="img" aria-label="StarPilot, fixed logo" pointer-events="none"
+                <g v-if="projection && !nativeBackdropReady" data-preview-source="fixed-wordmark" role="img" aria-label="StarPilot, fixed logo" pointer-events="none"
                   :transform="'translate(' + (profile.width - projectionWordmark.right) + ' ' + (profile.height - projectionWordmark.bottom) + ') scale(' + projectionWordmark.scale + ')'">
                   <svg v-for="(glyph, index) in projectionWordmark.glyphs" :key="index" :x="glyph.offsetX" :y="glyph.offsetY"
                     :width="glyph.width" :height="glyph.height" :viewBox="[glyph.x, glyph.y, glyph.width, glyph.height].join(' ')" aria-hidden="true">
@@ -1338,7 +1362,8 @@ export const OnroadLayoutPage = {
               <div v-show="state.tipsOpen" id="gx-layout-tips" class="gx-layout__tips">
                 <p class="gx-note">Drag widgets to place them. Behind them is the comma's own screen for the chosen scene, including its border, road and alerts. Readings are samples.</p>
                 <p class="gx-note">Widgets snap to the screen edges, the centre and other widgets. Turn snapping off with the magnet button, or hold Option (Alt) while dragging.</p>
-                <p class="gx-note">Choose Stopped timer to preview its minutes and seconds at rest. Turn off editing aids to see the screen without outlines and guides.</p>
+              <p class="gx-note">General edit shows samples of all enabled widgets together. Driving scenes hide widgets that would be absent, and the eyes follow the scene. Eye changes stay with that scene; your General edit eyes are remembered.</p>
+              <p class="gx-note">The stopped timer appears in General edit and Stopped timer. Turn off editing aids to see the screen without outlines and guides.</p>
               <p class="gx-note">The steering wheel can be resized in each layout{{ projection ? ', and the map overlay takes any size and opacity' : '' }}. Existing display preferences and driving state still control when widgets appear.</p>
               <p v-if="!projection" class="gx-note">Small speed-limit signs can overlap confirmation actions. Live confirmations hide an overlapping sign until the decision ends. Select either widget in the list to edit it.</p>
               <p v-if="!projection && state.showFavoriteZones" class="gx-note">Favorite tap areas apply to enabled slots. Speed-limit controls and the steering wheel take priority when the drawer is closed.</p>
@@ -1356,7 +1381,7 @@ export const OnroadLayoutPage = {
               <div ref="widgetsHelp" class="gx-layout__subhead gx-layout__help-anchor"><h3>Widgets</h3><span>{{ activeWidgets.length }} active</span>
                 <button class="gx-icon-btn gx-layout__info" type="button" :aria-expanded="state.widgetsHelpOpen" aria-controls="gx-layout-widgets-help" aria-label="How the widget list works" title="How the widget list works" @click="toggleFloating('widgetsHelpOpen', 'widgetsHelp')"><i class="bi bi-info-circle" aria-hidden="true"></i></button>
                 <div v-show="state.widgetsHelpOpen" id="gx-layout-widgets-help" class="gx-layout__popover" @click="closeFloating('widgetsHelpOpen')" @keydown.esc="closeFloating('widgetsHelpOpen')">
-                  <p>Tap a widget to edit it.</p><p>Drag ⠿ to reorder. The top row is in front, and alerts stay above all widgets.</p><p>The eye hides a widget in this preview only. The driving screen doesn't change.</p>
+                  <p>Tap a widget to edit it.</p><p>Drag ⠿ to reorder. The top row is in front, and alerts stay above all widgets.</p><p>The eyes follow the chosen scene. Choose General edit to arrange every enabled widget. Hiding a widget with the eye affects only this scene's preview.</p>
                 </div>
               </div>
               <div class="gx-layout__widget-list"><div v-for="widget in listWidgets" :key="widget.id" class="gx-layout__layer" :data-layer-id="widget.id"
@@ -1370,9 +1395,9 @@ export const OnroadLayoutPage = {
                   @keydown="layerKey($event, widget.id)" @click="layerClick($event, widget.id)"><span aria-hidden="true">{{ widget.frontmost ? '↑' : '⠿' }}</span></button>
                 <button class="gx-layout__layer-name" type="button" :aria-pressed="state.selected === widget.id" :disabled="!!state.drag || !!state.layerDrag"
                   @click="selectWidget(widget.id)">{{ widget.label }}</button>
-                <button v-if="!projection || widget.id !== 'car_exit'" class="gx-layout__visibility gx-icon-btn" type="button" :disabled="!!state.drag || !!state.layerDrag"
-                  :aria-label="(previewHidden(widget.id) ? 'Show ' : 'Hide ') + widget.label + ' in arrangement preview'"
-                  :title="(previewHidden(widget.id) ? 'Show ' : 'Hide ') + widget.label + ' in arrangement preview only'"
+                <button v-if="!projection || widget.id !== 'car_exit'" class="gx-layout__visibility gx-icon-btn" type="button" :disabled="!!state.drag || !!state.layerDrag || sceneHidden(widget.id)"
+                  :aria-label="visibilityTitle(widget.id, widget.label)"
+                  :title="visibilityTitle(widget.id, widget.label)"
                   :aria-pressed="!previewHidden(widget.id)" @click="togglePreviewVisibility(widget.id)">
                   <i class="bi" :class="previewHidden(widget.id) ? 'bi-eye-slash' : 'bi-eye'" aria-hidden="true"></i>
                 </button>
@@ -1403,6 +1428,7 @@ export const OnroadLayoutPage = {
                   <option v-for="widget in widgets" :key="widget.id" :value="widget.id">{{ widget.label }}{{ layout[widget.id].enabled ? '' : ' · Inactive' }}</option>
                 </GalaxySelect></label>
                 <div v-if="selectedWidget && !selectedPosition.enabled" class="gx-layout__panel"><p class="gx-note">Add this widget to edit its position and colors.</p><button class="gx-btn" :disabled="!editAvailable" @click="add(state.selected)">Add to layout</button></div>
+              <p v-if="selectedWidget && selectedPosition.enabled && sceneHidden(state.selected)" class="gx-note">This widget is hidden in this driving scene. <button class="gx-btn gx-btn--tonal" type="button" :disabled="!!state.drag || !!state.layerDrag" @click="state.scene = 'general'">Edit in General edit</button></p>
               <div v-if="selectedWidget && selectedPosition.enabled" class="gx-layout__position">
                 <label v-if="selectedWidget.resizable">Size
                   <input class="gx-field" type="number" step="1" :min="selectedWidget.resizable.min" :max="selectedWidget.resizable.max"

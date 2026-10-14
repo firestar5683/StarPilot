@@ -17,8 +17,12 @@ function image(metadata=meta){
     chunk('IDAT',deflateSync(Buffer.from([0,255,255,255,255,0,0,0,0]))),chunk('IEND',Buffer.alloc(0))])],{type:'image/png'})
 }
 assert.deepEqual(await widgetArtMetadata(image()),meta)
+const withHeader={...meta,sprites:{speed_limit_actions:{x:0,y:0,width:2,height:1,offsetY:-32.5}}}
+assert.deepEqual(await widgetArtMetadata(image(withHeader)),withHeader,'Native action sprites include the heading above the buttons')
 for(const bad of [{...meta,width:3},{...meta,sprites:{conditional_mode:{x:1,y:0,width:2,height:1}}},
  {...meta,sprites:{conditional_mode:{x:0,y:0,width:NaN,height:1}}},
+ {...meta,sprites:{speed_limit_actions:{x:0,y:0,width:2,height:1,offsetY:-33}}},
+ {...meta,sprites:{conditional_mode:{x:0,y:0,width:2,height:1,offsetY:-32}}},
  {...meta,sprites:{conditional_mode:{x:0,y:0,width:2,height:1,offsetX:1}}}])await assert.rejects(widgetArtMetadata(image(bad)))
 await assert.rejects(widgetArtMetadata(new Blob(['not PNG'])))
 const flush=async()=>{for(let i=0;i<20;i++)await Promise.resolve()}

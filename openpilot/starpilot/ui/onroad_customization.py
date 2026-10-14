@@ -157,8 +157,8 @@ OPTIONAL_WIDGETS = frozenset({MODE_WIDGET, CLOCK_WIDGET, STOPPED_TIMER_WIDGET, C
 
 # These editor sprites use the runtime components and their canonical assets/fonts.
 RUNTIME_PREVIEW_WIDGETS = {
-  "large": ("current_speed", "cruise_limits", CEM_GAUGE_WIDGET, "steering_wheel", "driver_monitor"),
-  "compact": ("max_speed", "steering_wheel", "conditional_mode", "following_distance", "model_confidence", "driver_monitor"),
+  "large": ("current_speed", "cruise_limits", CEM_GAUGE_WIDGET, "steering_wheel", "driver_monitor", "speed_limit_actions"),
+  "compact": ("max_speed", "steering_wheel", "conditional_mode", "following_distance", "model_confidence", "driver_monitor", "speed_limit_actions"),
 }
 
 _FRAME_COLORS = {"cardFill": "#00000000", "cardBorder": "#00000000"}

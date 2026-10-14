@@ -417,7 +417,7 @@ assert.equal(torqueEditor.layout.torque_bar.enabled, true)
 const { vm, event, emitted, calls, backdropCalls, captures } = editor()
 // The comma's real screen loads behind the arrangement with the editor.
 assert.deepEqual(backdropCalls.map((call) => Array.isArray(call) ? call[0] : call).slice(-2), ["start", "update"])
-assert.deepEqual(backdropCalls.at(-1).slice(2, 5), ["large", "engaged", false])
+assert.deepEqual(backdropCalls.at(-1).slice(2, 5), ["large", "general", false])
 assert.equal(vm.dirty, false)
 vm.changePosition("current_speed", 700, 200)
 vm.selectProfile("compact")
@@ -481,18 +481,18 @@ assert.equal(vm.selectedColors.text, "#FFFFFFFF")
 vm.colorRgb("text", { target: { value: "#abcdef" } })
 vm.colorAlpha("text", { target: { value: "128" } })
 assert.equal(vm.selectedColors.text, "#ABCDEF80")
-// The CEM gauge is marked outside CEM scenes, as an editing aid only.
-assert.match(OnroadLayoutPage.template, /v-if="widget\.kind === 'cem_gauge' && state\.showEditingAids && !state\.scene\.startsWith\('cem_'\)"/)
+// Driving scenes do not leave a CEM editing placeholder behind.
+assert.doesNotMatch(OnroadLayoutPage.template, /data-preview-source="cem-hint"/)
 // The Small screen shows the tap-areas chip under the layout instead of over it.
 assert.match(OnroadLayoutPage.template, /state\.profile !== 'compact'" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"><\/i>Tap areas/)
 assert.match(OnroadLayoutPage.template, /state\.profile === 'compact'" class="gx-layout__stage-chip gx-layout__stage-chip--below"/)
 // One scene dropdown, grouped, with every scene exactly once.
-assert.deepEqual(vm.sceneGroups.map(group => group.label), ["Driving", "Conditional experimental", "Speed limit"])
+assert.deepEqual(vm.sceneGroups.map(group => group.label), ["Editing", "Driving", "Conditional experimental", "Speed limit"])
 assert.deepEqual(vm.sceneGroups.flatMap(group => group.scenes.map(scene => scene.id)).sort(), vm.scenes.map(scene => scene.id).sort())
-// The Small screen only offers scenes that look different there; a hidden pick falls back to Engaged.
+// The Small screen only offers scenes that look different there; a hidden pick falls back to General edit.
 vm.state.scene = "slc_display"
 vm.selectProfile("compact")
-assert.equal(vm.state.scene, "engaged")
+assert.equal(vm.state.scene, "general")
 const smallScenes = vm.sceneGroups.flatMap(group => group.scenes.map(scene => scene.id))
 for (const id of ["slc_pedal", "slc_retained", "slc_display"]) assert.ok(!smallScenes.includes(id), id)
 assert.ok(smallScenes.includes("slc_unavailable") && smallScenes.includes("slc_disengaged"))
@@ -803,7 +803,7 @@ assert.match(appSource, /requestLeave\(proceed, presentation\)/)
 assert.match(appSource, /@click="goFromMenu\(item\.path\)"/)
 assert.match(editorSource, /<LayoutWidgetPreview :widget="widget"/)
 assert.doesNotMatch(editorSource, /<LayoutWidgetPreview v-if="!state\.preview\.url"/)
-assert.match(editorSource, /<image v-if="state\.backdrop\.url" :href="state\.backdrop\.url"/)
+assert.match(editorSource, /<image v-if="nativeBackdropReady" :href="state\.backdrop\.url"/)
 assert.doesNotMatch(editorSource, /devicePreviewOpen|gx-layout__device|selectPreview/)
 const loadedCatalog = await loadCatalog({ fetcher: async (url) => ({ ok: true,
   json: async () => url.endsWith("catalog.json") ? catalog : { schemaVersion: 1, monitor: "local" },
