@@ -120,6 +120,44 @@ def control(value, action, field, item, request_id='2' * 32):
           'expectedRevision': state['revision'], 'action': action, field: item}
 
 
+def test_catalog_and_detail_reuse_validated_dates_without_starting_analysis(owner, tmp_path, monkeypatch):
+  from openpilot.starpilot.galaxy.drive_stats import DriveStatsOwner
+  value, catalog, _, _ = owner
+  monkeypatch.setattr('openpilot.starpilot.galaxy.drive_stats.galaxy_storage_root', lambda: tmp_path)
+  def unexpected_analysis(_):
+    raise AssertionError('Listing dates must not start analysis')
+  monkeypatch.setattr(DriveStatsOwner, 'start', unexpected_analysis)
+  record = {'routeId': ROUTE, 'startTime': 1_792_008_330, 'complete': False, 'ignored': False,
+            'segmentCount': 2, 'sourceSignature': 'fixture'}
+  path = tmp_path / 'drive-stats.json'
+  def save():
+    path.write_text(json.dumps({'schemaVersion': 1, 'routes': {ROUTE: record}}))
+  save()
+  loads = []
+  load = DriveStatsOwner._load
+  def counted_load(reader):
+    loads.append(reader)
+    load(reader)
+  monkeypatch.setattr(DriveStatsOwner, '_load', counted_load)
+  original = catalog.catalog
+  monkeypatch.setattr(catalog, 'catalog', lambda: {**original(), 'routes': [catalog.detail(ROUTE),
+                                                                         {'routeId': '00000002--bbbbbbbbbb', 'fileTime': 1_792_008_360}]})
+  result = value.dispatch({'op': 'catalog'})
+  assert len(loads) == 1
+  assert result['routes'][0]['startTime'] == record['startTime']
+  assert result['routes'][1]['startTime'] is None
+  assert result['routes'][1]['fileTime'] == 1_792_008_360
+  record['startTime'] += 60
+  save()
+  assert value.dispatch({'op': 'detail', 'routeId': ROUTE})['startTime'] == record['startTime']
+  record['startTime'] = 'invalid'
+  save()
+  assert value.dispatch({'op': 'catalog'})['routes'][0]['startTime'] is None
+  path.write_text('{')
+  assert value.dispatch({'op': 'detail', 'routeId': ROUTE})['playable']
+  assert value.worker is None
+
+
 @pytest.mark.parametrize('segment', [True, -1, 1000000, '2', 1])
 def test_start_rejects_invalid_or_missing_segment_before_spawning(owner, segment):
   value, _, _, children = owner
@@ -333,6 +371,15 @@ def test_strict_revision_numbers_and_request_identity(owner):
     value.dispatch(dict(control(value, 'pause', 'paused', False, '7' * 32), expectedRevision=accepted['revision'] - 1))
 
 
+@pytest.mark.parametrize('ranges', [None, [[0]], [[0, True]], [[0, float('nan')]], [[20, 10]],
+                                   [[0, 101]], [[0, 20], [10, 30]]])
+def test_worker_seek_ranges_reject_malformed_or_overlapping_bounds(owner, tmp_path, ranges):
+  value, _, _, _ = owner
+  status = {**value._idle(), 'event': 'status', 'state': 'paused', 'end': 100., 'seekRanges': ranges}
+  with pytest.raises(Rejected, match='worker failed'):
+    value._observe(status, tmp_path)
+
+
 def test_gap_seek_is_rejected_without_losing_owned_viewer(owner):
   value, _, _, children = owner
   start(value)
@@ -355,7 +402,8 @@ def test_real_machine_uses_owner_created_clock_and_cleans_it(tmp_path, monkeypat
 
   binary = Path(BASEDIR) / 'openpilot/tools/replay/replay'
   if not binary.is_file():
-    pytest.skip(reason='Build the isolated replay engine first')
+    # shortcut: ty drops pytest's reason argument; remove the ignore when its callable binding is fixed.
+    pytest.skip('Build the isolated replay engine first')  # ty: ignore[too-many-positional-arguments]
   routes = tmp_path / 'routes'
   routes.mkdir()
   segment(routes, 0, [.1, .2, 10], compressed=True)

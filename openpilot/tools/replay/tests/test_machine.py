@@ -97,8 +97,9 @@ class Machine:
     self.process = subprocess.Popen(self.command, env=self.env, stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE, stderr=self.stderr, text=True)
     def reader():
-      assert self.process.stdout is not None
-      for line in self.process.stdout:
+      stdout = self.process.stdout
+      assert stdout is not None
+      for line in stdout:
         try:
           self.statuses.put(json.loads(line))
         except ValueError as error:
@@ -276,6 +277,7 @@ class TestMachine(unittest.TestCase):
 
   @unittest.skipUnless(FFMPEG, "installed system ffmpeg fixture encoder required")
   def test_shared_decoder_returns_correct_pixels(self):
+    assert FFMPEG is not None
     native_test = BINARY.parent / "tests/test_route"
     self.assertTrue(native_test.is_file())
     with tempfile.TemporaryDirectory(prefix="replay-decode-") as temporary:
@@ -284,7 +286,6 @@ class TestMachine(unittest.TestCase):
       for name, levels in (("a", (30, 90, 120)), ("b", (200, 220, 240))):
         raw, clip = root / (name + ".yuv"), root / (name + ".ts")
         raw.write_bytes(b"".join(bytes([level]) * (32 * 18) + bytes([128]) * (32 * 18 // 2) for level in levels))
-        assert FFMPEG is not None
         subprocess.run([FFMPEG, "-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "yuv420p",
                         "-s", "32x18", "-r", "20", "-i", str(raw), "-c:v", "libx264", "-qp", "0", "-bf", "0",
                         "-g", "100", "-tune", "zerolatency", "-f", "mpegts", str(clip)], check=True, timeout=10)

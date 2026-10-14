@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Protocol
+from typing import TYPE_CHECKING
 
 import pyray as rl
 
@@ -12,6 +12,9 @@ from openpilot.starpilot.ui.camera_availability import CameraAvailability
 from openpilot.starpilot.ui.pip_shaders import PIP_CURVED_FRAGMENT_SHADER, PIP_FRAGMENT_SHADER, PIP_VERTEX_SHADER
 from openpilot.starpilot.ui.pip_sidecam import Mask, PiPStream, Rect, Signals, bubble_rect, selected_sides
 from openpilot.system.ui.lib.egl import EGLImage, bind_egl_image_to_texture, create_egl_image, destroy_egl_image, init_egl
+
+if TYPE_CHECKING:
+  from openpilot.starpilot.replay.render import ReplayCameraStream
 
 
 def _external_shader(fragment: str) -> str:
@@ -27,18 +30,10 @@ def _external_shader(fragment: str) -> str:
   return result.replace(yuv, "vec3 rgb = pow(texture(texture0, uv).rgb, vec3(1.0/1.28));")
 
 
-class PiPStreamSource(Protocol):
-  @property
-  def generation(self) -> int: ...
-  def set_active(self, active: bool) -> None: ...
-  def poll(self, now: float) -> object | None: ...
-  def release_retired(self) -> None: ...
-
-
 class PiPRenderer:
   """One renderer; close it on onroad exit or when the owning shell closes."""
 
-  def __init__(self, shape: str, stream: PiPStreamSource | None = None, *, frame_availability=None):
+  def __init__(self, shape: str, stream: PiPStream | ReplayCameraStream | None = None, *, frame_availability=None):
     if shape not in ("bubble", "curved"):
       raise ValueError("unknown PiP shape")
     self.frame_availability = frame_availability if frame_availability is not None else CameraAvailability()

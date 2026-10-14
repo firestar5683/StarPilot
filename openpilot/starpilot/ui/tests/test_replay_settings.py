@@ -1,29 +1,121 @@
 """Fake transport exercises native ownership, cancellation and passive input."""
-from typing import Any
 
 from types import SimpleNamespace as NS
 import threading
 import time
+from typing import Any
 from unittest.mock import Mock
 
 import pyray as rl
 import pytest
 
-from openpilot.starpilot.ui.replay_settings import ReplayCompactPage, ReplayController, ReplayPage, duration
+from openpilot.starpilot.ui.replay_settings import ReplayCompactPage, ReplayController, ReplayPage, duration, route_date
 from openpilot.starpilot.ui.presentation import Profile
 
 
 ROUTE = {'routeId': '00000001--0123456789', 'displayName': 'Recorded route', 'segmentCount': 2,
          'availability': 'ready', 'playable': True, 'reason': None, 'warnings': []}
+STAMP = 1_791_986_730  # 2026-10-14 14:05:30 UTC
+
+
+@pytest.fixture
+def utc(monkeypatch):
+  with monkeypatch.context() as patch:
+    patch.setenv('TZ', 'UTC')
+    time.tzset()
+    yield
+  time.tzset()
+
+
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+def test_route_date_prefers_recorded_start_and_formats_native_clock(utc, profile):
+  route = {'startTime': STAMP, 'fileTime': STAMP + 60}
+  calendar, clock, zone, source = route_date(route, profile)
+  assert calendar == ('Wed, Oct 14, 2026' if profile == Profile.LARGE else 'Oct 14, 2026')
+  assert (clock, zone, source) == ('2:05 PM', 'UTC', '')
+  assert route_date(route, profile, True)[1] == '14:05'
+
+
+@pytest.mark.parametrize('invalid', [None, True, '2026-10-14', 0, -1, float('nan'), float('inf'), 10**400])
+def test_route_date_falls_back_and_handles_missing_or_unrepresentable_dates(utc, invalid):
+  route = {'startTime': invalid, 'fileTime': STAMP + 60}
+  assert route_date(route, Profile.COMPACT)[1:] == ('2:06 PM', 'UTC', 'File date')
+  route['fileTime'] = invalid
+  assert route_date(route, Profile.COMPACT) == ('Date unavailable', '', '', '')
+
+
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+@pytest.mark.parametrize('named', [False, True])
+def test_route_rows_prioritize_dates_preserve_names_and_keep_route_identity(utc, profile, named):
+  page, owner = page_for_input()
+  page.profile = profile
+  owner.routes = [{**ROUTE, 'displayName': 'School run' if named else ROUTE['routeId'],
+                   'startTime': STAMP}]
+  row = page._rows()[0]
+  assert row.key == ROUTE['routeId']
+  assert row.label == ('School run' if named else 'Wed, Oct 14, 2026 - 2:05 PM' if profile == Profile.LARGE else 'Oct 14, 2026')
+  assert '2:05 PM' in row.label + row.value
+  assert row.reason == ''
+  if profile == Profile.COMPACT:
+    assert row.value.count('\n') == 1
+  else:
+    assert '2 segments' in row.value
+  assert page._rows()[0] is row
+
+
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+def test_route_rows_show_newest_first_without_reordering_catalog(profile):
+  page, owner = page_for_input()
+  page.profile = profile
+  owner.routes = [{**ROUTE, 'routeId': f'{number:08d}--0123456789'} for number in (1, 2, 3)]
+  identifiers = [route['routeId'] for route in owner.routes]
+  rows = page._rows()
+  assert [row.key for row in rows] == identifiers[::-1]
+  assert [route['routeId'] for route in owner.routes] == identifiers
+  assert page._rows() is rows
+
+
+def test_compact_file_date_is_explicit_and_unavailable_reason_is_retained(utc):
+  page, owner = page_for_input()
+  page.profile = Profile.COMPACT
+  owner.routes = [{**ROUTE, 'displayName': ROUTE['routeId'], 'fileTime': STAMP,
+                   'availability': 'unavailable', 'reason': 'No road camera footage'}]
+  row = page._rows()[0]
+  assert row.value == '2:05 PM\nFile date'
+  assert row.reason == 'No road camera footage'
+  owner.routes = [{**ROUTE, 'displayName': 'School run', 'fileTime': STAMP, 'availability': 'limited'}]
+  row = page._rows()[0]
+  assert row.value == 'Oct 14, 2026\n2:05 PM - File date'
+  assert row.reason == ''
+
+
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+@pytest.mark.parametrize('named', [False, True])
+def test_details_show_source_timezone_and_full_id_without_reformatting_each_frame(utc, route_detail, monkeypatch, profile, named):
+  from openpilot.starpilot.ui import replay_settings as module
+  page, owner = route_detail
+  page.profile = profile
+  owner.detail = {**owner.detail, 'displayName': 'School run' if named else ROUTE['routeId'], 'fileTime': STAMP}
+  formatter = Mock(wraps=route_date)
+  monkeypatch.setattr(module, 'route_date', formatter)
+  monkeypatch.setattr(module, 'draw_settings_header', Mock())
+  page._button = Mock()
+  page._render_detail()
+  page._render_detail()
+  formatter.assert_called_once()
+  texts = [call.args[0] for call in page.fonts.draw.call_args_list]
+  assert ROUTE['routeId'] in texts
+  assert any('File date' in text and '2:05 PM UTC' in text for text in texts)
+  assert ('School run' if named else 'Wed, Oct 14, 2026' if profile == Profile.LARGE else 'Oct 14, 2026') in texts
 
 
 class Backend:
   def __init__(self):
     self.calls = []
     self.status: dict[str, Any] = {'schemaVersion': 1, 'ownerId': 'a' * 32, 'sessionId': None, 'state': 'idle',
-                   'routeId': None, 'profile': 'large', 'revision': 0, 'epoch': 0,
-                   'position': 0.0, 'start': 0.0, 'end': 120.0, 'rate': 1.0, 'paused': True,
-                   'frameReady': False, 'errorCode': None, 'owned': False, 'offroad': True}
+                                 'routeId': None, 'profile': 'large', 'revision': 0, 'epoch': 0,
+                                 'position': 0.0, 'start': 0.0, 'end': 120.0, 'rate': 1.0, 'paused': True,
+                                 'frameReady': False, 'errorCode': None, 'owned': False, 'offroad': True}
     self.start_gate = None
 
   def __call__(self, payload):
@@ -63,7 +155,8 @@ def pump(owner, predicate):
     if predicate():
       return
     time.sleep(0.001)
-  pytest.fail('fake replay operation did not finish')
+  # shortcut: ty drops pytest's reason argument; remove the ignore when its callable binding is fixed.
+  pytest.fail('fake replay operation did not finish')  # ty: ignore[invalid-argument-type]
 
 
 @pytest.fixture
@@ -94,6 +187,15 @@ def test_owned_start_and_controls_bind_revision_and_client(playback):
   assert command['expectedRevision'] == 1
   assert command['sessionId'] == owner.own_session
   assert not owner.seek(float('nan'))
+
+
+@pytest.mark.parametrize('bounds', [(None, 120), (0, None), (False, 120), (0, True), ('0', 120), (120, 0)])
+def test_seek_rejects_missing_or_invalid_bounds_without_sending_controls(playback, bounds):
+  owner, backend, _, _ = playback
+  owner.status['start'], owner.status['end'] = bounds
+  count = len(backend.calls)
+  assert not owner.seek(30)
+  assert len(backend.calls) == count
 
 
 @pytest.fixture(params=[Profile.LARGE, Profile.COMPACT])
@@ -256,7 +358,7 @@ def page_for_input():
 def test_timeline_commits_only_on_release_and_epoch_change_cancels():
   page, controller = page_for_input()
   page._handle_mouse_press(NS(x=100, y=940))
-  page._handle_mouse_event(NS(left_down=True, left_released=False, pos=NS(x=1570, y=940), t=1))
+  page._handle_mouse_event(mouse_event=NS(left_down=True, left_released=False, pos=NS(x=1570, y=940), t=1))
   controller.seek.assert_not_called()
   page._handle_mouse_release(NS(x=1570, y=940))
   controller.seek.assert_called_once_with(90)
@@ -674,7 +776,7 @@ def test_compact_swipe_down_goes_back_one_level_and_is_blocked_during_playback(m
   page.content.page = page_name
   page.content.press = (200, 40, 'held button', 1, True)
   for y, pressed, down, released in [(40, True, True, False), (160, False, True, False), (160, False, False, True)]:
-    page._handle_mouse_event(NS(pos=NS(x=200, y=y), left_pressed=pressed, left_down=down, left_released=released))
+    page._handle_mouse_event(mouse_event=NS(pos=NS(x=200, y=y), left_pressed=pressed, left_down=down, left_released=released))
   assert page._playing_dismiss_animation is dismisses
   assert page.content.page == ('routes' if returns_to_routes else page_name)
   if returns_to_routes:
@@ -691,7 +793,8 @@ def test_compact_route_card_shows_segment_count_and_availability(route_detail, m
   monkeypatch.setattr(module, 'BigButton', factory)
   monkeypatch.setattr(module.gui_app, '_mouse_events', [])
   page._compact_cards()
-  assert factory.call_args.args[1] == '2 segments - ready'
+  assert factory.call_args.args[1] == 'date unavailable\n2 segments'
+  factory.return_value._sub_label.set_font_size.assert_called_once_with(30)
 
 
 def test_compact_underlying_buttons_are_disabled_during_overlays_and_back_gestures(monkeypatch):

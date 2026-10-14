@@ -6,7 +6,7 @@ import math
 import os
 from pathlib import Path
 import re
-from typing import Any
+from typing import TypedDict
 
 MAX_FRAGMENT_BYTES = 1024 * 1024
 MAX_MEDIA_BYTES = 8 * 1024 * 1024
@@ -101,6 +101,15 @@ class MediaMux:
       self.lib.replay_mux_close(handle)
 
 
+class MediaFragment(TypedDict):
+  sequence: int
+  mediaPath: str
+  length: int
+  firstPosition: float | None
+  lastPosition: float | None
+  keyframe: bool
+
+
 class MediaStore:
   def __init__(self, session_dir: Path, session_id: str, width: int, height: int):
     self.root = Path(session_dir) / 'media'
@@ -109,8 +118,8 @@ class MediaStore:
     self.session_id, self.width, self.height = session_id, width, height
     self.epoch = 0
     self.codec = ''
-    self.init: dict[str, Any] | None = None
-    self.fragments: deque[dict[str, Any]] = deque()
+    self.init: MediaFragment | None = None
+    self.fragments: deque[MediaFragment] = deque()
     self.sequence = 0
 
   def _write(self, name: str, data: bytes):
@@ -140,16 +149,17 @@ class MediaStore:
       Path(previous['mediaPath']).parent.rmdir()
 
   def publish(self, data: bytes, *, position: float, keyframe: bool):
+    init = self.init
+    if init is None:
+      raise ValueError('Replay media has not been initialized')
     if not self.fragments and not keyframe:
       raise ValueError('Replay media must begin with a keyframe')
-    if self.init is None:
-      raise RuntimeError("Replay media epoch has not begun")
     self.sequence += 1
-    item = {'sequence': self.sequence, 'mediaPath': self._write(f'{self.sequence}.m4s', data), 'length': len(data),
-            'firstPosition': position, 'lastPosition': position, 'keyframe': bool(keyframe)}
+    item: MediaFragment = {'sequence': self.sequence, 'mediaPath': self._write(f'{self.sequence}.m4s', data), 'length': len(data),
+                           'firstPosition': position, 'lastPosition': position, 'keyframe': bool(keyframe)}
     self.fragments.append(item)
     while (len(self.fragments) > MAX_FRAGMENTS or
-           sum(row['length'] for row in self.fragments) + self.init['length'] > MAX_MEDIA_BYTES):
+           sum(row['length'] for row in self.fragments) + init['length'] > MAX_MEDIA_BYTES):
       following = next((i for i, row in enumerate(self.fragments) if i and row['keyframe']), None)
       if following is None:
         raise RuntimeError('Replay GOP exceeds the media memory budget')

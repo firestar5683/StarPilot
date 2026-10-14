@@ -1,5 +1,4 @@
 """Persistent read connections must never reuse an unread body or partial response."""
-from typing import Any
 
 import http.client
 from contextlib import closing
@@ -7,6 +6,7 @@ import os
 import socket
 import threading
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
@@ -24,7 +24,7 @@ def server(tmp_path):
   media = directory / 'init.mp4'
   media.write_bytes(b'x' * (65536 + 5))
   state: dict[str, Any] = {'requests': [], 'chunks': 0, 'revoke_after': None, 'expire_session': False, 'expired': False,
-           'recording_checks': 0, 'change_recording': False}
+                           'recording_checks': 0, 'change_recording': False}
 
   def owner(payload):
     if payload['op'] == 'media':

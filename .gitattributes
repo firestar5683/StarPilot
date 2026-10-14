@@ -34,6 +34,7 @@ tinygrad_repo/** !filter !diff !merge -text
 *.so.* -text
 openpilot/cereal/messaging/bridge -text
 openpilot/selfdrive/pandad/pandad -text
+openpilot/tools/replay/replay -text
 openpilot/system/camerad/camerad -text
 openpilot/system/loggerd/bootlog -text
 openpilot/system/loggerd/encoderd -text
@@ -41,5 +42,3 @@ openpilot/system/loggerd/loggerd -text
 openpilot/starpilot/galaxy/bin/frpc_linux_arm64 -text
 openpilot/starpilot/maps/provider/mapd -text
 openpilot/selfdrive/test/process_replay/refs/starpilot/*.zst -text
-
-openpilot/tools/replay/replay -text

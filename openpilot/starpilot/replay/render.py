@@ -13,10 +13,13 @@ import subprocess
 import sys
 import threading
 import time
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from openpilot.starpilot.replay.frames import ReplayFramePublisher, SESSION
 from openpilot.starpilot.replay.media import MediaMux, MediaStore
+
+if TYPE_CHECKING:
+  from openpilot.selfdrive.ui.mici.onroad.augmented_road_view import AugmentedRoadView as CompactRoadView
 
 SIZES = {'native': {'large': (1600, 800), 'compact': (536, 240)},
          'web': {'large': (1280, 640), 'compact': (536, 240)}}
@@ -52,7 +55,7 @@ def frame_matches(client, frame, state, stamp: int, now_ns: int | None) -> bool:
 
 
 def recorded_wall_clock(sample, wall_minus_mono_ns: int | None):
-  if sample is None or not sample.valid or type(wall_minus_mono_ns) is not int:
+  if sample is None or not sample.valid or sample.now_ns is None or type(wall_minus_mono_ns) is not int:
     return None
   try:
     return datetime.fromtimestamp((sample.now_ns + wall_minus_mono_ns) / 1e9).astimezone()
@@ -171,6 +174,7 @@ class Engine:
     environment = dict(os.environ, SP_REPLAY_PARENT_PID=str(os.getpid()))
     self.process = subprocess.Popen(command, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr,
                                     text=True, bufsize=1, close_fds=True)
+    assert self.process.stdin is not None and self.process.stdout is not None
     self.status = None
     self.error = None
     self.write_lock = threading.Lock()
@@ -343,19 +347,20 @@ class Compositor:
     updates = original | {name: sm.seen[name] and receipt != self.render_receipts.get(name)
                           for name, receipt in receipts.items()}
     sample = self.ui.replay_sample
-    updates['extrinsicsCalibration'] = bool(updates['extrinsicsCalibration'] and sample and sample.valid and sample.now_ns is not None and
+    updates['extrinsicsCalibration'] = bool(updates['extrinsicsCalibration'] and sample and sample.valid and
+                                         sample.now_ns is not None and
                                          sm.valid['extrinsicsCalibration'] and
                                          0 < sm.logMonoTime['extrinsicsCalibration'] <= sample.now_ns)
     flags = DrawUpdates(updates)
     sm.updated = flags
     try:
       if self.profile == 'compact':
-        from openpilot.selfdrive.ui.mici.onroad.augmented_road_view import AugmentedRoadView as CompactRoadView
-        cast(CompactRoadView, self.camera).render_camera_model_layer(rect, camera_view=state.appearance.camera_view,
-                                             reverse_driver=state.reverse_driver_camera,
-                                             lead_indicator=state.appearance.show_lead_indicator and state.lead_indicator_source_fresh,
-                                             lead_info_mode=state.appearance.lead_info_mode, lead_info_metric=state.appearance.lead_info_metric,
-                                             lateral_active=state.lateral_active, road_style=state.customization['roadColors']['compact'])
+        camera = cast('CompactRoadView', self.camera)
+        camera.render_camera_model_layer(rect, camera_view=state.appearance.camera_view,
+                                         reverse_driver=state.reverse_driver_camera,
+                                         lead_indicator=state.appearance.show_lead_indicator and state.lead_indicator_source_fresh,
+                                         lead_info_mode=state.appearance.lead_info_mode, lead_info_metric=state.appearance.lead_info_metric,
+                                         lateral_active=state.lateral_active, road_style=state.customization['roadColors']['compact'])
       else:
         self.camera.render_camera_model_layer(rect, road_style=state.customization['roadColors']['large'])
     finally:
@@ -384,11 +389,9 @@ class Compositor:
              VisionStreamType.VISION_STREAM_WIDE_ROAD: 'wideRoadEncodeIdx',
              VisionStreamType.VISION_STREAM_CABIN: 'cabinEncodeIdx'}
     name = names.get(self.camera.stream_type)
-    if name is None:
-      return False
     sm, sample = self.ui.sm, self.ui.replay_sample
     state = sm[name] if name is not None and sm.seen[name] and sm.valid[name] else None
-    return bool(sample and sample.valid and state is not None and frame_matches(
+    return bool(sample and sample.valid and name is not None and state is not None and frame_matches(
       self.camera.client, self.camera.frame, state, sm.logMonoTime[name], sample.boot_ns))
 
   def _receive_primary(self):
@@ -404,7 +407,8 @@ class Compositor:
     from openpilot.starpilot.ui.runtime_snapshot import display_message
     from openpilot.starpilot.ui.presentation import FontRole
     saved = self.pip_saved
-    if saved.enabled is not True or saved.mask is None or None in (saved.on_blinker, saved.on_bsm, saved.invert):
+    if (saved.enabled is not True or saved.mask is None or
+        saved.on_blinker is None or saved.on_bsm is None or saved.invert is None):
       self.pip.deactivate()
       return
     now = state.observed_ns or 0
@@ -417,7 +421,6 @@ class Compositor:
       if position['enabled']:
         width, height = widget_size(state.customization, self.profile, key)
         positions[side] = Rect(position['x'], position['y'], width, height)
-    assert saved.on_blinker is not None and saved.on_bsm is not None and saved.invert is not None
     status = self.pip.render(rect, saved.mask, signals, enabled=self.cabin, on_blinker=saved.on_blinker,
                              on_bsm=saved.on_bsm, invert=saved.invert, now=now / 1e9, placements=positions, submit=submit)
     if not self.cabin or status not in ('rendered', 'inactive'):
@@ -506,14 +509,14 @@ class Compositor:
 
   def draw(self, epoch: int, position: float, now_ns: int):
     sample = self.ui.replay_sample
+    if sample is None or sample.now_ns is None:
+      return False
     key = epoch, sample.now_ns
     if key == self.last_route_frame:
       return False
     from openpilot.starpilot.system.android_auto import gpu_nv12
     from openpilot.starpilot.ui.shell import ShellMode
     rl = self.rl
-    if sample.now_ns is None:
-      return False
     self.context.begin_frame(sample.now_ns / 1e9)
     self.placement.maintain(now_ns / 1e9)
     snapshot = self.adapter.build(ShellMode.ONROAD)
@@ -554,7 +557,8 @@ class Compositor:
     try:
       pixels = self.readback.finish()
       sample = self.ui.replay_clock.sample()
-      yield (pixels, self.meta) if self.meta is not None and sample.valid and sample.epoch == self.meta[0] else None
+      meta = self.meta
+      yield (pixels, meta) if meta is not None and sample.valid and sample.epoch == meta[0] else None
     finally:
       self.readback.release()
 
@@ -638,7 +642,7 @@ def run(session_dir: Path, route_id: str, data_dir: Path, target: str, profile: 
         core.wall_minus_mono_ns = parse_wall_offset(status.get('wallMinusMonoNs'))
       sample = core.update()
       now = time.monotonic()
-      valid = bool(status and sample is not None and sample.valid and sample.epoch == status.get('epoch'))
+      valid = bool(status and sample is not None and sample.valid and sample.now_ns is not None and sample.epoch == status.get('epoch'))
       ready_frames = []
       if pending_frame is not None and (not status or pending_frame[2] != status.get('epoch')):
         pending_frame = None
@@ -691,7 +695,8 @@ def run(session_dir: Path, route_id: str, data_dir: Path, target: str, profile: 
           core.ui.replay_needs_reprime = False
           valid = False
       interval = FRAME_INTERVAL
-      if valid and status is not None and sample.now_ns is not None and not core.readback.pending and now - last_draw >= interval:
+      if (valid and status is not None and sample is not None and sample.now_ns is not None and
+          not core.readback.pending and now - last_draw >= interval):
         origin = status.get('routeStartNs')
         if type(origin) is not int:
           raise RuntimeError('Replay engine did not expose its route clock origin')

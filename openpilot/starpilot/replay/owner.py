@@ -21,8 +21,8 @@ import subprocess
 import sys
 import threading
 import time
-import uuid
 from typing import cast
+import uuid
 
 from openpilot.starpilot.replay.client import MAX_REQUEST, MAX_RESPONSE, encode, parse, receive, replay_root
 from openpilot.tools.replay.display_clock import RECORD
@@ -224,10 +224,18 @@ class ReplayOwner:
     if type(request) is not dict or type(request.get('op')) is not str or self.closed:
       raise Rejected('unavailable' if self.closed else 'invalid_request')
     op = request['op']
-    if op == 'catalog' and set(request) == {'op'}:
-      return self.catalog.catalog()
-    if op == 'detail' and set(request) == {'op', 'routeId'}:
-      return self.catalog.detail(request['routeId'])
+    if (op == 'catalog' and set(request) == {'op'} or
+        op == 'detail' and set(request) == {'op', 'routeId'}):
+      result = self.catalog.catalog() if op == 'catalog' else self.catalog.detail(request['routeId'])
+      routes = result['routes'] if op == 'catalog' else [result]
+      try:
+        from openpilot.starpilot.galaxy.drive_stats import DriveStatsOwner
+        dates = DriveStatsOwner(root=self.catalog.root).recording_dates(route['routeId'] for route in routes)
+      except (OSError, RuntimeError, ValueError):
+        dates = {}  # Optional dates must not hide usable recordings.
+      for route in routes:
+        route['startTime'] = dates.get(route['routeId'])
+      return result
     with self.lock:
       if op == 'status' and set(request) <= {'op', 'clientId'}:
         return self._snapshot(self._touch(request))
@@ -339,9 +347,10 @@ class ReplayOwner:
     if self.status.get('target') != 'web' or request['epoch'] != self.status['epoch'] or not self.status.get('mediaReady'):
       raise Rejected('epoch_changed')
     from openpilot.starpilot.replay.media import media_descriptor
-    if self.session_dir is None:
-      raise Rejected("epoch_changed")
-    return media_descriptor(self.session_dir, request['epoch'], request['sequence'], count)
+    directory = self.session_dir
+    if directory is None:
+      raise Rejected('session_changed')
+    return media_descriptor(directory, request['epoch'], request['sequence'], count)
 
   def _stop(self, reason):
     if self.worker is not None:
@@ -391,8 +400,10 @@ class ReplayOwner:
       ranges = value.get('seekRanges', [])
       if (type(ranges) is not list or len(ranges) > 512 or
           any(type(item) is not list or len(item) != 2 or not all(_finite(number) for number in item) or
-              not value['start'] <= item[0] <= item[1] <= value['end'] for item in ranges) or
-          any(before[1] > after[0] for before, after in zip(cast(list[list[float]], ranges), cast(list[list[float]], ranges)[1:], strict=False))):
+              not value['start'] <= item[0] <= item[1] <= value['end'] for item in ranges)):
+        raise Rejected('worker_failed')
+      ranges = cast(list[list[float]], ranges)
+      if any(before[1] > after[0] for before, after in zip(ranges, ranges[1:], strict=False)):
         raise Rejected('worker_failed')
       self.status['seekRanges'] = ranges
       warnings = value.get('sourceWarnings', [])

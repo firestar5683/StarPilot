@@ -18,6 +18,7 @@ def test_coherent_epoch_and_viewer_close_preserves_owned_file(tmp_path):
     publisher.publish(b'\x22' * 32, epoch=2, position=2, captured_ns=456)
     assert reader.latest().epoch == 2
     reader.close()
+    assert reader.latest() is None
     assert path.exists()
   finally:
     reader.close()

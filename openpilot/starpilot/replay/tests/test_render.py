@@ -1,12 +1,14 @@
 from contextlib import nullcontext
 from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
 from openpilot.starpilot.replay import render
 from openpilot.starpilot.replay.render import Compositor, Engine, camera_options, frame_matches, parse_wall_offset
+from openpilot.starpilot.ui.presentation import Profile
 
 
 def test_camera_selection_uses_selected_sources_and_current_preferences():
@@ -49,11 +51,20 @@ def test_camera_matches_recorded_identity_across_distinct_clock_domains():
 
 
 def test_paused_same_route_clock_never_advances_filters_or_gpu():
-  core = object.__new__(Compositor)
-  vars(core)['ui'] = SimpleNamespace(replay_sample=SimpleNamespace(now_ns=100))
+  core: Any = object.__new__(Compositor)
+  core.ui = SimpleNamespace(replay_sample=SimpleNamespace(now_ns=100))
   core.last_route_frame = (2, 100)
   core.context = Mock()
   assert core.draw(2, 0, 9_000_000_000) is False
+  core.context.begin_frame.assert_not_called()
+
+
+@pytest.mark.parametrize('sample', [None, SimpleNamespace(now_ns=None)])
+def test_missing_route_clock_never_submits_a_gpu_frame(sample):
+  core: Any = object.__new__(Compositor)
+  core.ui = SimpleNamespace(replay_sample=sample)
+  core.context = Mock()
+  assert core.draw(1, 0., 100) is False
   core.context.begin_frame.assert_not_called()
 
 
@@ -64,8 +75,8 @@ def test_recorded_camera_preview_does_not_require_initial_device_state(frame_rea
     camera_available: bool = False
     viewport_width: int = 0
 
-  core = object.__new__(Compositor)
-  vars(core)['ui'] = SimpleNamespace(replay_sample=SimpleNamespace(now_ns=100),
+  core: Any = object.__new__(Compositor)
+  core.ui = SimpleNamespace(replay_sample=SimpleNamespace(now_ns=100),
                             sm=SimpleNamespace(seen={'extrinsicsCalibration': False}))
   core.last_route_frame = None
   core.context = core.placement = Mock()
@@ -74,10 +85,10 @@ def test_recorded_camera_preview_does_not_require_initial_device_state(frame_rea
   core._primary_matches = Mock(return_value=frame_ready)
   core._optional_placeholder_ready = Mock(return_value=False)
   core.rl = Mock()
-  vars(core)['gui'] = SimpleNamespace(_render_prepare=[], _frame=0)
+  core.gui = SimpleNamespace(_render_prepare=[], _frame=0)
   core.content = Mock()
   core.scale = 1
-  vars(core)['profile'] = SimpleNamespace(size=(1600, 800))
+  core.profile = Profile.LARGE
   core.view = Mock()
   core.view.render.side_effect = lambda state: setattr(core, 'primary_ready', state.camera_available)
   core.output = None
@@ -225,7 +236,7 @@ def test_published_readiness_survives_delivery_jitter_but_expires_and_rejects_ol
 def test_epoch_reset_preserves_native_camera_stream_and_eligible_paused_frame(monkeypatch, matching_frame):
   monkeypatch.setattr('openpilot.starpilot.ui.runtime_snapshot.RuntimeSnapshotAdapter', Mock())
   monkeypatch.setattr('openpilot.starpilot.ui.pip_render.PiPRenderer', Mock())
-  core = object.__new__(Compositor)
+  core: Any = object.__new__(Compositor)
   streams = {0, 2}
   client = Mock(frame_id=5 if matching_frame else 4, timestamp_sof=9_000_000_000, timestamp_eof=9_010_000_000)
   client.is_connected.return_value = True
@@ -242,7 +253,7 @@ def test_epoch_reset_preserves_native_camera_stream_and_eligible_paused_frame(mo
   sm.__getitem__ = Mock(return_value=idx)
   sm.seen = sm.valid = {'narrowRoadEncodeIdx': True}
   sm.logMonoTime = {'narrowRoadEncodeIdx': 9_020_000_000}
-  vars(core)['ui'] = SimpleNamespace(replay_sample=SimpleNamespace(valid=True, boot_ns=9_050_000_000), sm=sm)
+  core.ui = SimpleNamespace(replay_sample=SimpleNamespace(valid=True, boot_ns=9_050_000_000), sm=sm)
   core.render_receipts = {'modelV2': 1}
   core.reset_epoch(3)
   assert core.render_receipts == {}
@@ -301,7 +312,7 @@ def test_early_camera_subscriber_is_polled_before_paused_reprime():
   # The first receive synchronizes with a publisher created after this client.
   client.recv.side_effect = [None, frame]
   core = object.__new__(Compositor)
-  vars(core)['ui'] = Mock(replay_sample=sample, sm=sm)
+  core.ui = Mock(replay_sample=sample, sm=sm)
   core.epoch, core.cabin = 1, False
   core.camera = Mock(client=client, frame=None, stream_type=VisionStreamType.VISION_STREAM_NARROW_ROAD)
   core.camera._ensure_connection.return_value = True
@@ -316,6 +327,7 @@ def test_recorded_wall_clock_uses_only_verified_route_pair():
   sample = SimpleNamespace(valid=True, now_ns=10_000_000_000)
   assert recorded_wall_clock(sample, None) is None
   assert recorded_wall_clock(SimpleNamespace(valid=False), 1_000_000_000) is None
+  assert recorded_wall_clock(SimpleNamespace(valid=True, now_ns=None), 1_000_000_000) is None
   instant = recorded_wall_clock(sample, 1_000_000_000_000_000_000)
   assert instant.timestamp() == 1_000_000_010
 
@@ -333,9 +345,9 @@ def test_camera_reprime_cannot_overwrite_an_unacknowledged_user_action():
   import io
   import json
   import threading
-  engine = object.__new__(Engine)
+  engine: Any = object.__new__(Engine)
   engine.write_lock = threading.Lock()
-  vars(engine)['process'] = SimpleNamespace(stdin=io.StringIO())
+  engine.process = SimpleNamespace(stdin=io.StringIO())
   engine.last_request_id = engine.seek_request = None
   request = {'op': 'seek', 'position': 65, 'requestId': 'a' * 32}
   assert engine.command(request)
@@ -384,9 +396,9 @@ def test_replay_draw_retains_updates_until_stock_consumers_read_them(monkeypatch
   camera._target_stream_type, camera._switching = None, False
   camera.available_streams, camera.frame = {camera.stream_type}, object()
   camera.model_renderer = camera._model_renderer = renderer
-  core = object.__new__(Compositor)
-  vars(core)['ui'], core.camera = ui, camera
-  vars(core)['profile'] = 'compact' if profile == 'mici.onroad' else 'large'
+  core: Any = object.__new__(Compositor)
+  core.ui, core.camera = ui, camera
+  core.profile = Profile.COMPACT if profile == 'mici.onroad' else Profile.LARGE
   core.cabin = core.wide = False
   core.render_receipts = {}
   core._primary_matches = Mock(return_value=True)
@@ -474,19 +486,20 @@ def test_replay_draw_retains_updates_until_stock_consumers_read_them(monkeypatch
   assert sm.updated is original and core.render_receipts == before
 
 
-@pytest.mark.parametrize('valid,epoch', [(True, 1), (False, 1), (True, 2)])
-def test_finished_frame_is_borrowed_until_delivery_finishes(valid, epoch):
-  core = object.__new__(Compositor)
+@pytest.mark.parametrize('valid,epoch,meta', [(True, 1, (1, 0., 100)), (False, 1, (1, 0., 100)),
+                                            (True, 2, (1, 0., 100)), (True, 1, None)])
+def test_finished_frame_is_borrowed_until_delivery_finishes(valid, epoch, meta):
+  core: Any = object.__new__(Compositor)
   pixels = memoryview(bytearray(b'pixels'))
   core.readback = Mock(pending=True)
   core.readback.finish.return_value = pixels
-  vars(core)['ui'] = SimpleNamespace(replay_clock=Mock())
+  core.ui = SimpleNamespace(replay_clock=Mock())
   core.ui.replay_clock.sample.return_value = SimpleNamespace(valid=valid, epoch=epoch)
-  vars(core)['meta'] = 1, 0., 100
+  core.meta = meta
   with pytest.raises(RuntimeError, match='delivery failed'):
     with core.finish() as finished:
       core.readback.release.assert_not_called()
-      assert finished == ((pixels, core.meta) if valid and epoch == 1 else None)
+      assert finished == ((pixels, meta) if meta is not None and valid and epoch == 1 else None)
       if finished:
         assert finished[0] is pixels
       raise RuntimeError('delivery failed')

@@ -14,6 +14,14 @@ def store(tmp_path):
   return MediaStore(session, session.name, 1280, 640)
 
 
+def test_publish_requires_initialization_without_creating_fragments(tmp_path):
+  media = store(tmp_path)
+  with pytest.raises(ValueError, match='initialized'):
+    media.publish(b'frame', position=0., keyframe=True)
+  assert media.sequence == 0 and not media.fragments
+  assert not media.manifest.exists() and not list(media.root.iterdir())
+
+
 def test_bounded_fragments_evict_whole_gop_and_keep_init(tmp_path):
   media = store(tmp_path)
   media.begin(1, 'avc1.42c01f', b'initialization')
@@ -93,11 +101,11 @@ def test_descriptor_rejects_hard_linked_metadata(tmp_path):
 def test_mux_copy_has_explicit_pts_and_independent_initialization(tmp_path):
   root = Path(__file__).parents[4]
   library = Path(os.environ.get('SP_REPLAY_TEST_MUX_LIBRARY', root / 'openpilot/tools/replay/libmedia_mux.so'))
-  import ffmpeg as ffmpeg_package
-  ffmpeg = Path(ffmpeg_package.__file__).resolve().parent / 'install/bin/ffmpeg'
+  ffmpeg = root / '.venv/lib/python3.12/site-packages/ffmpeg/install/bin/ffmpeg'
   ffprobe = ffmpeg.with_name('ffprobe')
   if not library.exists() or not ffmpeg.exists() or not ffprobe.exists():
-    pytest.skip(reason='Host replay muxer and bundled FFmpeg must be built')
+    # shortcut: ty drops pytest's reason argument; remove the ignore when its callable binding is fixed.
+    pytest.skip('Host replay muxer and bundled FFmpeg must be built')  # ty: ignore[too-many-positional-arguments]
   source = tmp_path / 'fixture.ts'
   subprocess.run([str(ffmpeg), '-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'rawvideo', '-pixel_format', 'yuv420p',
                   '-video_size', '32x18', '-framerate', '20', '-i', 'pipe:0',
