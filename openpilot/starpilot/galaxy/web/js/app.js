@@ -3,6 +3,7 @@ import { toggleHaptic } from "./haptics.js"
 import { GxState } from "./state.js"
 import { BottomNav, NAV, primaryTab } from "./bottom-nav.js"
 import { UpdateRestart, UPDATE_RESTART_MESSAGE } from "./update-restart.js"
+import { DeviceRestartWatch } from "./device-restart.js"
 import { GalaxyLoading } from "./loading-screen.js"
 import { GxNotice } from "./notice.js"
 import { createApp, reactive, defineAsyncComponent } from "../vendor/vue/vue.esm-browser.js"
@@ -69,6 +70,7 @@ const state = reactive({
   searchPage: "",
 })
 const updateRestart = new UpdateRestart({ publish: waiting => { state.updateRestarting = waiting } })
+const deviceRestart = new DeviceRestartWatch({ paused: () => state.updateRestarting })
 const authState = reactive({ status: "checking", error: "", localAccess: false, gatewayAccess: false })
 const authForm = reactive({ password: "" })
 const auth = new LocalAuth({ publish: (update) => {
@@ -143,11 +145,13 @@ createApp({
   mounted() {
     document.documentElement.dataset.theme = state.theme
     this.visibility = () => {
+      if (!document.hidden) deviceRestart.wake()
       clearTimeout(reconnectTimer)
       reconnectTimer = null
       if (!document.hidden && (state.error || authState.status === "unavailable") && !initializing) initialize()
     }
     document.addEventListener("visibilitychange", this.visibility)
+    window.addEventListener("pageshow", this.visibility)
     setRouteLeaveGuard((proceed, { back } = {}) => {
       if (back && this.$refs.activeSettings?.navigateBack()) return
       if (back && state.searchPage) { this.returnFromSearch(); return }
@@ -163,6 +167,8 @@ createApp({
     clearTimeout(reconnectTimer)
     startupGeneration++
     document.removeEventListener("visibilitychange", this.visibility)
+    window.removeEventListener("pageshow", this.visibility)
+    deviceRestart.stop()
   },
   template: `
     <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned}" @change.capture="toggleHaptic">
@@ -223,7 +229,7 @@ createApp({
         <OnroadLayoutPage ref="activeLayout" v-else-if="['/theme_maker', '/theme_maker/android_auto', '/appearance'].includes(route.path)" :key="route.path" :projection="route.path === '/theme_maker/android_auto'" :initial-panel="route.path === '/appearance' ? 'display' : 'widgets'" :mode="state.monitorMode" :unauthorized="sessionExpired" @target="go($event === 'projection' ? '/theme_maker/android_auto' : '/theme_maker')" @close="routeBack" />
         <SettingsRecoveryPage v-else-if="route.path === '/settings/recovery'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <Logs v-else-if="route.path === '/logs' || route.path.startsWith('/logs/') || ['/troubleshoot', '/manage_tmux'].includes(route.path)" :path="route.path === '/troubleshoot' ? '/logs/troubleshoot' : route.path === '/manage_tmux' ? '/logs/tmux' : route.path" :mode="state.monitorMode" :unauthorized="sessionExpired" />
-        <SoftwarePage v-else-if="route.path === '/system'" :mode="state.monitorMode" :unauthorized="sessionExpired" :restarting="baseline => updateRestart.start(baseline)" />
+        <SoftwarePage v-else-if="route.path === '/system'" :mode="state.monitorMode" :unauthorized="sessionExpired" :restarting="baseline => updateRestart.start({ ...baseline, instance: deviceRestart.instance })" />
         <NavigationPage v-else-if="['/navigation', '/navigation/maps', '/navigation/setup'].includes(route.path)" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go"
           :initial-tab="route.path === '/navigation/maps' ? 'maps' : route.path === '/navigation/setup' ? 'setup' : 'route'" />
         <ModelsPage v-else-if="route.path === '/manage_models'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
@@ -282,6 +288,7 @@ async function initialize() {
     const catalog = await loadCatalog()
     if (generation !== startupGeneration) return
     state.monitorMode = catalog.mode
+    deviceRestart.track(catalog.instance)
     state.tools = catalog.tools
     state.error = ""
     if (state.monitorMode === "local") await auth.check()

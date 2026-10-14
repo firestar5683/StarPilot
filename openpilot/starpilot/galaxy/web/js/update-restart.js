@@ -25,7 +25,7 @@ export class UpdateRestart {
 
   start(baseline) {
     if (this.baseline) {
-      this.baseline = { ...this.baseline, ...baseline }
+      this.baseline = { ...this.baseline, ...baseline, instance: this.baseline.instance ?? baseline.instance }
       try { this.storage.setItem(UPDATE_RESTART_KEY, JSON.stringify(this.baseline)) } catch {}
       return
     }
@@ -44,7 +44,9 @@ export class UpdateRestart {
       if (data?.schemaVersion !== 1 || !installed || !data.operations) throw new Error("Status unavailable")
       const changed = installed.commit && (installed.commit !== this.baseline.commit || installed.branch !== this.baseline.branch)
       const finished = request?.state === "failed" || request?.outcome === "up_to_date"
-      const returned = !request && data.updater?.state === "idle" && changed
+      const restarted = typeof this.baseline.instance === "string" && typeof data.instance === "string" &&
+        data.instance !== this.baseline.instance
+      const returned = !request && data.updater?.state === "idle" && (changed || restarted)
       if (finished || returned) {
         this.baseline = null
         if (this.retry !== null) this.cancel(this.retry)

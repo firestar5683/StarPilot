@@ -48,9 +48,10 @@ assert.ok(initializer.startsWith("let startupGeneration = 0"))
 const state = { tools: [], loading: true, error: "", monitorMode: "sample" }
 const authState = { status: "checking" }
 let fail = true, checks = 0
-const initialize = new Function("loadCatalog", "state", "authState", "auth", "document", `${initializer}; return initialize`)(
+const tracked = []
+const initialize = new Function("loadCatalog", "state", "authState", "auth", "document", "deviceRestart", `${initializer}; return initialize`)(
   async () => { if (fail) throw new Error("offline"); return loaded }, state, authState,
-  { async check() { checks++; authState.status = "authenticated" } }, { hidden: false },
+  { async check() { checks++; authState.status = "authenticated" } }, { hidden: false }, { track: instance => tracked.push(instance) },
 )
 await initialize()
 assert.match(state.error, /could not connect/)
@@ -61,10 +62,11 @@ assert.equal(state.error, "")
 assert.equal(state.loading, false)
 assert.equal(checks, 1)
 assert.equal(authState.status, "authenticated")
+assert.deepEqual(tracked, [loaded.instance])
 
 const queued = []
-const raced = new Function("loadCatalog", "state", "authState", "auth", "document", `${initializer}; return initialize`)(
-  () => new Promise(resolve => queued.push(resolve)), state, authState, { async check() {} }, { hidden: false },
+const raced = new Function("loadCatalog", "state", "authState", "auth", "document", "deviceRestart", `${initializer}; return initialize`)(
+  () => new Promise(resolve => queued.push(resolve)), state, authState, { async check() {} }, { hidden: false }, { track() {} },
 )
 const old = raced(), current = raced()
 queued[0]({ tools: [], mode: "sample" })
@@ -92,10 +94,11 @@ const sessionAuth = new LocalAuth({
   },
 })
 const unmountBody = app.match(/  beforeUnmount\(\) \{([\s\S]*?)\n  \},/)[1]
-const harness = new Function("loadCatalog", "state", "authState", "auth", "document", "setTimeout", "clearTimeout",
+const harness = new Function("loadCatalog", "state", "authState", "auth", "document", "setTimeout", "clearTimeout", "deviceRestart", "window",
   `${initializer}; return { expire() { ${expiryBody} }, initialize, stop() { ${unmountBody} } }`)(
     async () => loaded, transientState, transientAuth, sessionAuth, visibility,
     (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id }, id => timers.delete(id),
+    { track() {}, stop() {} }, { removeEventListener() {} },
   )
 const expiredFeed = new SnapshotFeed({ publish: () => {}, unauthorized: () => harness.expire(),
   fetcher: async () => ({ ok: false, status: 401 }) })
