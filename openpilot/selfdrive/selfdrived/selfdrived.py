@@ -1308,7 +1308,7 @@ class SelfdriveD:
         companion is not None and companion.integrity_epoch == proof[5] and
         decision.native_acknowledged and not self.aol_authority_lost and
         getattr(self, 'aol_fault_reason', 'none') == 'none' and
-        not user_disable and not any(self.events.contains(kind) for kind in (ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) and
+        not user_disable and not self.events.contains(ET.IMMEDIATE_DISABLE) and
         (not decision.longitudinal_active or self.enabled and self.active)):
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
       prior_native = getattr(self, 'aol_published_input_native', None)
@@ -1317,7 +1317,9 @@ class SelfdriveD:
           tuple(slot.hardwareSerial for slot in native.pandaInventory) ==
           tuple(slot.hardwareSerial for slot in prior_native.pandaInventory) and
           (not decision.lateral_active or native.requestedLateral and native.lateralAllowed) and
-          (not decision.longitudinal_active or native.requestedLongitudinal and native.longitudinalAllowed)):
+          (not decision.longitudinal_active or native.requestedLongitudinal and native.longitudinalAllowed) and
+          (not self.events.contains(ET.SOFT_DISABLE) or
+           fresh_ordinary_lag_continuation(self, CS, intent, native, now_ns))):
         # The old lease still expires at consumers. A newly validated source
         # supplies its own permission without restoring a disengaged state.
         return False
