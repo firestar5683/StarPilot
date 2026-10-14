@@ -442,6 +442,76 @@
           "openpilot/selfdrive/test/process_replay/process_replay.py": "a6f18da56ba8521328d5a2ac57de5426ef2a3bf62f9e7887ff76ba1c52491c09"
         }
       }
+    },
+    {
+      "segment": "regenAA0FC4ED71E|2025-04-08--22-57-50--0",
+      "process": "plannerd",
+      "file": "regenAA0FC4ED71E_2025-04-08--22-57-50--0_plannerd.zst",
+      "bytes": 233061,
+      "sha256": "b0fef64d4b5552854599211244f8eae0dce62399438d62711cf3b5241574a47e",
+      "input_sha256": "0b6734026f7c775f7fd648ef76130f9b9a672c5236c6a328eff31ec9cc3c5343",
+      "input_bytes": 11873030,
+      "official_baseline_commit": "ec95db3f1fa19f76940497fedfdb62e09ea19912",
+      "official_artifact_commit": "9ae451c262c7402c9623f3baa1580c6242d6777b",
+      "official_baseline_url": "https://raw.githubusercontent.com/commaai/ci-artifacts/9ae451c262c7402c9623f3baa1580c6242d6777b/regenAA0FC4ED71E_2025-04-08--22-57-50--0_plannerd_ec95db3f1fa19f76940497fedfdb62e09ea19912.zst",
+      "official_baseline_bytes": 231754,
+      "official_baseline_sha256": "14183eef58152a35f9767bfa50d05b1713d43f07634562f8714b1826285f995d",
+      "config_sha256": "2e09141ab13550128aa942951a7183b77f9e598fda920dd345f16a57b749b2f1",
+      "car_fingerprint": "HYUNDAI_SONATA",
+      "contract": "Intentional native cruise deceleration floor -0.5 from commit fb11095365199196e6f5aa3f037db5b48506164e. Thirteen changed aTarget samples reach that cruise floor; two remain below it under the unchanged minimum-candidate selection. The prior target seeds the next MPC state, explaining dependent acceleration and jerk trajectory changes. All other fields retain the original replay comparisons and tolerance.",
+      "producing_source_snapshot": "d23b405-native-cruise-floor",
+      "review_evidence": {
+        "ci_run": 38620302207,
+        "ci_job": 116045781355,
+        "ci_artifact": 11921128716,
+        "ci_artifact_sha256": "6943b01e08d09926189e3226111a4410950564eed1fd1fc9033668e1654e48bc",
+        "comparison_reference_sha256": "14183eef58152a35f9767bfa50d05b1713d43f07634562f8714b1826285f995d",
+        "difference_count": 147,
+        "difference_fields": {
+          "longitudinalPlan.aTarget": 15,
+          "longitudinalPlan.accels.0": 10,
+          "longitudinalPlan.accels.1": 10,
+          "longitudinalPlan.accels.2": 10,
+          "longitudinalPlan.accels.3": 9,
+          "longitudinalPlan.accels.4": 9,
+          "longitudinalPlan.accels.5": 9,
+          "longitudinalPlan.accels.6": 7,
+          "longitudinalPlan.jerks.0": 9,
+          "longitudinalPlan.jerks.1": 9,
+          "longitudinalPlan.jerks.2": 6,
+          "longitudinalPlan.jerks.3": 7,
+          "longitudinalPlan.jerks.4": 7,
+          "longitudinalPlan.jerks.5": 7,
+          "longitudinalPlan.jerks.6": 8,
+          "longitudinalPlan.jerks.7": 9,
+          "longitudinalPlan.jerks.8": 6
+        },
+        "difference_sha256": "a72d9be140fe0faa8f64fd58280ff7f268d5f5f67e37426f67f5cfed0291198c",
+        "difference_encoding": "SHA256 of UTF-8 json.dumps(ordered comparison tuples, separators=(\",\", \":\")); JSON represents tuples as arrays.",
+        "full_diff_sha256": "6a8e4495f5aabd3616440dcf9ee5f42f56067d5a0fdfff3e98dfce93cf7966e6",
+        "prior_comparison_run": 38617186370,
+        "matches_prior_ordered_differences": true,
+        "behavior_proof": {
+          "changed_aTarget_samples": 15,
+          "changed_aTarget_samples_equal_minus_0_5": 13,
+          "remaining_changed_aTarget_values": [
+            -0.6002245545387268,
+            -0.5540239214897156
+          ],
+          "changed_acceleration_samples": 64,
+          "changed_jerk_samples": 68,
+          "official_and_current_framed_message_count": 2400,
+          "full_replay_comparison_pairs": 66,
+          "unchanged_comparison_pairs": 65,
+          "comparison_errors": 0,
+          "full_test": true,
+          "recorded_input_count": 16
+        },
+        "regression_tests": {
+          "openpilot/starpilot/longitudinal/tests/test_profile_runtime.py": "8cb408d927f1c67a0357b42eddc97b67c481cb4298dd800b63244813841a9786"
+        },
+        "review_method": "Verified immutable baseline and captured output hashes, evaluated configuration signature, every hosted comparison tuple, unchanged comparison implementation, and cruise-floor/MPC state flow. No independent local solver execution or native counterfactual replay was performed."
+      }
     }
   ],
   "source_snapshots": {
@@ -555,6 +625,21 @@
         "kind": "file"
       },
       "scope": "Actual current checkout plus explicitly root-approved staged source epoch; selected replay dependencies pinned; full source/import/artifact association in outer descriptors"
+    },
+    "d23b405-native-cruise-floor": {
+      "revision": "d23b4059862910f37a05b99179edb079af3e7640",
+      "sha256": {
+        "openpilot/selfdrive/controls/plannerd.py": "5b00fbe40537a678982ea90947def8631ba88d65c1975aabb0c452f0a8ed89d8",
+        "openpilot/selfdrive/controls/lib/longitudinal_planner.py": "0c8ce4622140c1f775bb829777dfd0aa47d4e8997c8f254a0859fb14e466542e",
+        "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/long_mpc.py": "dbd13f1abb852b6e6a69bc2a5789899a58125271b814128fff983ba239687844",
+        "openpilot/selfdrive/test/process_replay/test_processes.py": "559f228029d430f1c6d30ea0ccc9c60ebb98cf48df0fe1a7f80ef5a7c23394d1",
+        "openpilot/selfdrive/test/process_replay/process_replay.py": "9b6c6f16b5672a99923778bfdf3c388d629bac97ee0c9ae2fcfe426cb5e2365a",
+        "openpilot/selfdrive/test/process_replay/compare_logs.py": "fb923cff883974dcdf2d701a0b8484c9d3c4d2192b018ef2d17aeac39dd24202",
+        "tools/ci/replay_references.py": "75267bb70fc6391bb3a1bc2c9f36af2807cf838b2ffcd72c522ae861fd431832",
+        "tools/ci/replay_fixture_cache.py": "f165d1d228f5e4600760ea41996b923c095964550b3ced6c3135a59ec7625821",
+        "tools/ci/replay-fixture-cache.json": "99fd6ddc839ae2f779c4e3ef0f529359cd6e19fc20f953da1c591b3af8456e15"
+      },
+      "verification": "Hosted CI built and replayed this committed revision using the unchanged production-default replay command. Source digests were independently checked against its immutable Git blobs; no local native replay was run."
     }
   }
 }
