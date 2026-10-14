@@ -63,9 +63,21 @@ class TestRetainedAgnos(unittest.TestCase):
 
   def test_other_branch_auto_policy_uses_current_manifest_location(self):
     self.environment.write_text('export AGNOS_VERSION="19.8"\n')
+    manifest = self.root / "openpilot/common/hardware/comma/agnos.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("[]")
     self.updater.handle_agnos_update()
     self.flash.assert_called_once_with(str(self.root / 'openpilot/common/hardware/comma/agnos.json'), 1, self.updater.cloudlog)
     self.assertTrue((ROOT / 'openpilot/common/hardware/comma/agnos.json').is_file())
+    self.updater.set_consistent_flag.assert_called_once_with(False)
+
+  def test_old_layout_auto_policy_uses_legacy_manifest_without_changing_retain_policy(self):
+    self.environment.write_text('export AGNOS_VERSION="19.8"\n')
+    manifest = self.root / "system/hardware/tici/agnos.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("[]")
+    self.updater.handle_agnos_update()
+    self.flash.assert_called_once_with(str(manifest), 1, self.updater.cloudlog)
     self.updater.set_consistent_flag.assert_called_once_with(False)
 
   def test_invalid_policy_cannot_finalize_or_flash(self):

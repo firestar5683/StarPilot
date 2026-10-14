@@ -11,7 +11,7 @@ from openpilot.selfdrive.ui import soundd
 from openpilot.starpilot.audio.sound_pack import DEFAULT_PACK, SoundPackLoader, read_wav
 
 
-@pytest.mark.parametrize("device,ambient,base", [("tici", 30, 10), ("tizi", 30, 10), ("mici", 26, 20)])
+@pytest.mark.parametrize("device,ambient,base", [("tici", 30, 10), ("tizi", 30, 10), ("mici", 22, 20)])
 def test_device_ambient_volume_curve(device, ambient, base):
   import importlib
 

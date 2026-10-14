@@ -65,8 +65,14 @@ def probe_routes(routes: dict, athena_proxy: list[str]) -> tuple[str | None, dic
     except queue.Empty:
       break
     status[name] = (ms, err)
-    if err is None and (name == "local" or status.get("local", (None, "x"))[1] is not None or "local" not in routes):
-      choice = name
+    if status.get("local", (None, "x"))[1] is None:
+      choice = "local"
+    elif status.get("athena", (None, "x"))[1] is None and ("local" not in routes or "local" in status):
+      choice = "athena"
+
+  # A successful proxy remains usable if the local probe never completes.
+  if choice is None and status.get("athena", (None, "x"))[1] is None:
+    choice = "athena"
 
   for p in procs:
     p.kill()
