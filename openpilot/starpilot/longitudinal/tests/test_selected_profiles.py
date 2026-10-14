@@ -278,6 +278,20 @@ class SelectedProfilesTests(unittest.TestCase):
     self.assertEqual(capped, 0.2)
     self.assertGreater(native, capped)
 
+  def test_selected_acceleration_above_stock_raises_cruise_ceiling(self):
+    # Sport/Standard curves sit above the stock curve; they must replace it, not be clipped by it.
+    v_ego = 10.0
+    stock = float(planner_module.get_max_accel(v_ego))
+    sport = stock + 0.4
+    raised = planner_module.get_cruise_accel(False, 35.0, v_ego, sport, 0.0, self.cp, 0.05,
+                                             0.0, True, selected_acceleration_max=sport)
+    native = planner_module.get_cruise_accel(False, 35.0, v_ego, stock, 0.0, self.cp, 0.05, 0.0, True)
+    self.assertAlmostEqual(raised, sport)
+    self.assertAlmostEqual(native, stock)
+    e2e = planner_module.get_cruise_accel(True, 35.0, v_ego, sport, 0.0, self.cp, 0.05,
+                                          0.0, True, selected_acceleration_max=sport)
+    self.assertAlmostEqual(e2e, sport)
+
 
 if __name__ == '__main__':
   unittest.main()

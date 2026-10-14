@@ -59,6 +59,9 @@ def get_cruise_accel(e2e, v_cruise, v_ego, a_cruise_prev, angle_steers, CP, dt, 
                      profile: AppliedProfile | None = None, cruise_brake_floor: float | None = None,
                      base_brake_floor: float = A_CRUISE_MIN, selected_acceleration_max: float | None = None):
   max_accel = ACCEL_MAX if e2e else get_max_accel(v_ego)
+  if selected_acceleration_max is not None and not e2e:
+    # A selected named curve replaces the stock ceiling (Sport must be able to exceed it).
+    max_accel = selected_acceleration_max
   if profile is not None:
     max_accel = min(max_accel, profile.acceleration_max, ACCEL_MAX)
 
@@ -401,6 +404,8 @@ class LongitudinalPlanner:
     if faster_lead_takeoff:
       # Dom takeoff bypasses the standstill cruise slew, never its final bounds.
       takeoff_max = ACCEL_MAX if sm['selfdriveState'].experimentalMode else get_max_accel(v_ego)
+      if selected_acceleration is not None and not sm['selfdriveState'].experimentalMode:
+        takeoff_max = selected_acceleration
       if cruise_profile is not None:
         takeoff_max = min(takeoff_max, cruise_profile.acceleration_max)
       if selected_acceleration is not None:
