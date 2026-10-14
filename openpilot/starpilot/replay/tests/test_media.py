@@ -104,8 +104,7 @@ def test_mux_copy_has_explicit_pts_and_independent_initialization(tmp_path):
   ffmpeg = root / '.venv/lib/python3.12/site-packages/ffmpeg/install/bin/ffmpeg'
   ffprobe = ffmpeg.with_name('ffprobe')
   if not library.exists() or not ffmpeg.exists() or not ffprobe.exists():
-    # shortcut: ty drops pytest's reason argument; remove the ignore when its callable binding is fixed.
-    pytest.skip('Host replay muxer and bundled FFmpeg must be built')  # ty: ignore[too-many-positional-arguments]
+    pytest.skip('Host replay muxer and bundled FFmpeg must be built')
   source = tmp_path / 'fixture.ts'
   subprocess.run([str(ffmpeg), '-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'rawvideo', '-pixel_format', 'yuv420p',
                   '-video_size', '32x18', '-framerate', '20', '-i', 'pipe:0',

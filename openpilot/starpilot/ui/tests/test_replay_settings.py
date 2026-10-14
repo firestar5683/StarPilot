@@ -155,8 +155,7 @@ def pump(owner, predicate):
     if predicate():
       return
     time.sleep(0.001)
-  # shortcut: ty drops pytest's reason argument; remove the ignore when its callable binding is fixed.
-  pytest.fail('fake replay operation did not finish')  # ty: ignore[invalid-argument-type]
+  pytest.fail('fake replay operation did not finish')
 
 
 @pytest.fixture

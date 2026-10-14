@@ -402,8 +402,7 @@ def test_real_machine_uses_owner_created_clock_and_cleans_it(tmp_path, monkeypat
 
   binary = Path(BASEDIR) / 'openpilot/tools/replay/replay'
   if not binary.is_file():
-    # shortcut: ty drops pytest's reason argument; remove the ignore when its callable binding is fixed.
-    pytest.skip('Build the isolated replay engine first')  # ty: ignore[too-many-positional-arguments]
+    pytest.skip('Build the isolated replay engine first')
   routes = tmp_path / 'routes'
   routes.mkdir()
   segment(routes, 0, [.1, .2, 10], compressed=True)
