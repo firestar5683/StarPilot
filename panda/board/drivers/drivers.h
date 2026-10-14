@@ -47,6 +47,12 @@ extern can_health_t can_health[PANDA_CAN_CNT];
 // Ignition detected from CAN messages
 extern bool ignition_can;
 extern uint32_t ignition_can_cnt;
+extern bool wake_on_can;
+extern uint32_t wake_on_can_cnt;
+#ifdef PANDA_HKG_REMOTE_START
+extern bool hkg_remote_climate_wake;
+extern uint32_t hkg_remote_climate_wake_cnt;
+#endif
 
 extern bool can_silent;
 extern bool can_loopback;

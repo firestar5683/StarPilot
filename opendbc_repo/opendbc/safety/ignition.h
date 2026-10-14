@@ -87,12 +87,12 @@ void ignition_can_hook(const CANPacket_t *msg) {
   if (msg_matches(msg, 0x101U, 0U, 3U)) {
     // Validate Tesla checksum/counter to avoid false positives on overlapping frames.
     int counter = msg->data[1] & 0xFU;
-    int checksum = (((msg->addr & 0xFFU) + ((msg->addr >> 8U) & 0xFFU) + msg->data[0] + msg->data[1]) & 0xFFU);
+    uint32_t checksum = (((msg->addr & 0xFFU) + ((msg->addr >> 8U) & 0xFFU) + msg->data[0] + msg->data[1]) & 0xFFU);
 
     static int prev_counter_tesla_preap = -1;
     if ((msg->data[2] == checksum) && (counter == ((prev_counter_tesla_preap + 1) % 16)) && (prev_counter_tesla_preap != -1)) {
       // GTW_epasPowerMode=1 is DRIVE_ON, which is the only ignition source on pre-AP cars.
-      int power_mode = (msg->data[0] >> 3U) & 0xFU;
+      uint32_t power_mode = (msg->data[0] >> 3U) & 0xFU;
       ignition_can = power_mode == 0x1U;
       ignition_can_cnt = 0U;
     }

@@ -88,6 +88,11 @@ def source_panel_bounds(state, height, viewport):
   candidates = [(left, bottom + GAP), (left, top - GAP - height),
                 (left, card['y'] - GAP - height), (right + GAP, top), (left - GAP - WIDTH, top),
                 (right + GAP, top - GAP - height), (left - GAP - WIDTH, top - GAP - height)]
+  # Keep the aligned choices first; another saved widget can fill that column.
+  # Its edges supply further columns using the same popup gap and clip checks.
+  for occupied_left, _, occupied_right, _ in occupied:
+    candidates.extend(((occupied_right + GAP, top), (occupied_left - GAP - WIDTH, top),
+                       (occupied_right + GAP, top - GAP - height), (occupied_left - GAP - WIDTH, top - GAP - height)))
   for x, y in candidates:
     y = min(max(y, viewport.y), viewport.y + viewport.height - height)
     if not viewport.x <= x <= viewport.x + viewport.width - WIDTH:

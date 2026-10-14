@@ -119,3 +119,29 @@ def test_disengaging_during_receipt_keeps_sources_separate_from_feedback():
   _, top, _, _ = source_toggle_bounds(state)
   assert top >= 447 + 36 + 8
   assert source_panel_bounds(state, 200, N(x=30, y=30, width=1800, height=1020)) is not None
+
+
+def test_sources_popup_moves_past_gauge_and_keeps_enabled_widget_footprints_clear():
+  from openpilot.starpilot.ui.large_speed_geometry import GAP
+  from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, CEM_GAUGE_WIDGET, PROFILES, widget_size
+
+  viewport = N(x=30, y=30, width=1800, height=1020)
+  doc = default_document()
+  doc['layouts']['large']['speed_limit_actions']['y'] = 750
+  state = road(validate_document(doc))
+  bounds = source_panel_bounds(state, 200, viewport)
+  assert bounds is not None
+  x, y, width, height = bounds
+  gauge = state.customization['layouts']['large'][CEM_GAUGE_WIDGET]
+  gauge_width, _ = widget_size(state.customization, 'large', CEM_GAUGE_WIDGET)
+  assert gauge['enabled'] and x >= gauge['x'] + gauge_width + GAP
+  assert viewport.x <= x and x + width <= viewport.x + viewport.width
+  assert viewport.y <= y and y + height <= viewport.y + viewport.height
+  for key in PROFILES['large']['widgets']:
+    saved = state.customization['layouts']['large'][key]
+    if saved['enabled'] and key not in CAMERA_WIDGETS:
+      widget_width, widget_height = widget_size(state.customization, 'large', key)
+      assert (x + width <= saved['x'] or x >= saved['x'] + widget_width or
+              y + height <= saved['y'] or y >= saved['y'] + widget_height), key
+  toggle_left, toggle_top, toggle_right, toggle_bottom = source_toggle_bounds(state)
+  assert (x + width <= toggle_left or x >= toggle_right or y + height <= toggle_top or y >= toggle_bottom)

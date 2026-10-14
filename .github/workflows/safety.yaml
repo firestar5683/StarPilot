@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gate: [coverage, opendbc-misra, panda-misra, panda-host, mutation-list]
+        gate: [coverage, opendbc-misra, panda-misra, panda-host]
     steps:
     - uses: actions/checkout@v7
     - run: ./tools/op.sh setup
@@ -29,21 +29,4 @@ jobs:
       with:
         name: safety-${{ matrix.gate }}
         path: ci-results/safety-${{ matrix.gate }}/
-        if-no-files-found: error
-
-  full_mutation:
-    name: full safety mutation
-    runs-on: ubuntu-24.04
-    timeout-minutes: 360
-    steps:
-    - uses: actions/checkout@v7
-    - run: ./tools/op.sh setup
-    - name: Run all discovered mutants
-      run: .venv/bin/python tools/ci/run_safety_qualification.py --gate mutation-full --output ci-results/safety-mutation-full
-    - name: Save full mutation evidence
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: safety-mutation-full
-        path: ci-results/safety-mutation-full/
         if-no-files-found: error

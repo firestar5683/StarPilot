@@ -27,13 +27,6 @@
 #include "board/obj/gitversion.h"
 
 #include "board/can_comms.h"
-static bool panda_ignition_line(void) {
-  #ifdef PANDA_IGNORE_IGNITION_LINE
-  return false;
-  #else
-  return harness_check_ignition();
-  #endif
-}
 
 #include "board/main_comms.h"
 

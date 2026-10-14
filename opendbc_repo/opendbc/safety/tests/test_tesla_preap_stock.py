@@ -251,3 +251,52 @@ class TestTeslaPreapStock(unittest.TestCase):
         with self.subTest(bus=bus, address=address):
           self.assertEqual(self.safety.safety_fwd_hook(bus, address), -1)
           self.assertTrue(self.safety.safety_test_selected_fwd(bus, address))
+
+
+class TestTeslaPreapIgnition(unittest.TestCase):
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.safety.init_tests()
+
+  @staticmethod
+  def _msg(counter, mode, *, bus=0, address=0x101, length=3, bad_checksum=False):
+    data = bytearray([mode << 3, counter, 0])
+    data[2] = ((address & 0xFF) + (address >> 8) + data[0] + data[1]) & 0xFF
+    if bad_checksum:
+      data[2] ^= 1
+    return make_msg(bus, address, dat=bytes(data) + bytes(length - 3))
+
+  def test_consecutive_counter_and_wrap_admit_drive_on(self):
+    for counter in range(16):
+      with self.subTest(counter=counter):
+        self.safety.init_tests()
+        self.safety.ignition_can_hook(self._msg(counter, 0))
+        self.assertFalse(self.safety.get_ignition_can())
+        self.safety.ignition_can_hook(self._msg((counter + 1) % 16, 1))
+        self.assertTrue(self.safety.get_ignition_can())
+
+  def test_only_drive_on_is_ignition(self):
+    for mode in (0, 2, 3, 15):
+      with self.subTest(mode=mode):
+        self.safety.ignition_can_hook(self._msg(0, 0))
+        self.safety.ignition_can_hook(self._msg(1, 1))
+        self.assertTrue(self.safety.get_ignition_can())
+        self.safety.ignition_can_hook(self._msg(2, mode))
+        self.assertFalse(self.safety.get_ignition_can())
+
+  def test_checksum_counter_jump_and_duplicate_cannot_set_ignition(self):
+    self.safety.ignition_can_hook(self._msg(0, 0))
+    self.assertFalse(self.safety.get_ignition_can())
+    for packet in (self._msg(3, 1), self._msg(3, 1), self._msg(4, 1, bad_checksum=True)):
+      self.safety.ignition_can_hook(packet)
+      self.assertFalse(self.safety.get_ignition_can())
+    self.safety.ignition_can_hook(self._msg(5, 1))
+    self.assertTrue(self.safety.get_ignition_can())
+
+  def test_wrong_bus_address_or_length_cannot_set_ignition(self):
+    for wrong in ({'bus': 1}, {'address': 0x102}, {'length': 4}):
+      with self.subTest(wrong=wrong):
+        self.safety.init_tests()
+        self.safety.ignition_can_hook(self._msg(0, 0))
+        self.safety.ignition_can_hook(self._msg(1, 1, **wrong))
+        self.assertFalse(self.safety.get_ignition_can())

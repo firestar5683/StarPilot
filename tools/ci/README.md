@@ -319,10 +319,13 @@ The JSON `prerequisites` field is `pass`, `fail` or `incomplete`; command exit
 codes are 0, 1 and 2 respectively. Even `pass` is a prerequisite report, never
 a device or driving qualification.
 
-The separate safety-qualification workflow runs C-line coverage, pinned
-opendbc/Panda MISRA analysis, Panda host tests, and mutation inventory/full
-mutation in isolated jobs. It uses the root locked `safety` extra;
-it does not call the nested opendbc or Panda setup scripts, which would sync or
+The separate safety-qualification workflow runs four nonmutation GitHub gates:
+C-line coverage, pinned opendbc MISRA, Panda MISRA, and Panda host tests.
+Mutation inventory and full mutation run locally in a disposable checkout:
+`python tools/ci/run_safety_qualification.py --gate mutation-list --output /new/inventory/dir`
+`python tools/ci/run_safety_qualification.py --gate mutation-full --output /new/mutation/dir`
+Both the workflow and local gates use the root locked `safety` extra;
+they do not call the nested opendbc or Panda setup scripts, which would sync or
 upgrade separate environments. A local disposable checkout can run one gate with
 `python tools/ci/run_safety_qualification.py --gate coverage --output /new/evidence/dir`
 (other gates: `opendbc-misra`, `panda-misra`, `panda-host`, `mutation-list`,

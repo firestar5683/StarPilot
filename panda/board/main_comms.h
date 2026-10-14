@@ -1,5 +1,14 @@
 #pragma once
 
+static bool panda_ignition_line(void) {
+  #ifdef PANDA_IGNORE_IGNITION_LINE
+  return false;
+  #else
+  return harness_check_ignition();
+  #endif
+}
+
+
 extern int _app_start[0xc000]; // Only first 3 sectors of size 0x4000 are used
 
 // Prototypes

@@ -151,13 +151,13 @@ static void params_semantics(const std::string &root) {
   std::this_thread::sleep_for(std::chrono::milliseconds(30));
   check(params.put("LastManagerExitReason", "blocking-read-write") == 0, "blocking put");
   reader.join(); check(got == "blocking-read-write", "actual blocking get/put");
-  const std::vector<std::string> keys{"GitCommit", "GitBranch", "GitRemote", "Version"};
+  const std::vector<std::string> test_keys{"GitCommit", "GitBranch", "GitRemote", "Version"};
   std::vector<std::thread> writers;
-  std::atomic<int> running{int(keys.size())};
-  for (size_t k = 0; k < keys.size(); ++k) writers.emplace_back([&, k] {
+  std::atomic<int> running{int(test_keys.size())};
+  for (size_t k = 0; k < test_keys.size(); ++k) writers.emplace_back([&, k] {
     {
       Params queued(root);
-      for (int n = 0; n < 30; ++n) queued.putNonBlocking(keys[k], std::string(4096, char('A' + k)) + std::to_string(n));
+      for (int n = 0; n < 30; ++n) queued.putNonBlocking(test_keys[k], std::string(4096, char('A' + k)) + std::to_string(n));
       // Actual Params destructor drains the nonblocking queue.
     }
     --running;
@@ -165,8 +165,8 @@ static void params_semantics(const std::string &root) {
   bool complete_reads = true;
   while (running > 0) {
     auto live_batch = params.readAll();
-    for (size_t k = 0; k < keys.size(); ++k) {
-      auto item = live_batch.find(keys[k]);
+    for (size_t k = 0; k < test_keys.size(); ++k) {
+      auto item = live_batch.find(test_keys[k]);
       if (item != live_batch.end()) {
         const auto &value = item->second;
         complete_reads &= (value.size() == 4097 || value.size() == 4098) &&
@@ -177,8 +177,8 @@ static void params_semantics(const std::string &root) {
   for (auto &writer : writers) writer.join();
   check(complete_reads, "concurrent readAll never observes a partial atomic write");
   auto batch = params.readAll();
-  for (size_t k = 0; k < keys.size(); ++k)
-    check(batch.at(keys[k]) == std::string(4096, char('A' + k)) + "29", "queued multiwriter drain and batch visibility");
+  for (size_t k = 0; k < test_keys.size(); ++k)
+    check(batch.at(test_keys[k]) == std::string(4096, char('A' + k)) + "29", "queued multiwriter drain and batch visibility");
   check(params.putBool("IsOffroad", true) == 0 && params.getBool("IsOffroad"), "actual bool put/get");
   params.clearAll(ParamKeyFlag::CLEAR_ON_MANAGER_START);
   check(params.get("IsOffroad").empty(), "actual clearAll under lock");
