@@ -11,7 +11,7 @@ from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.hyundai.carcontroller import CarController
 from opendbc.car.hyundai.carstate import CarState
-from opendbc.car.hyundai.radar_interface import RadarInterface
+from opendbc.car.hyundai.radar_interface import RadarInterface, blended_track_radar
 
 ButtonType = structs.CarState.ButtonEvent.Type
 Ecu = structs.CarParams.Ecu
@@ -250,7 +250,7 @@ class CarInterface(CarInterfaceBase):
     radar_start = KONA_NON_SCC_FCA_RADAR_ADDR if candidate == CAR.HYUNDAI_KONA_NON_SCC else RADAR_START_ADDR
     if DBC[ret.carFingerprint].get(Bus.radar) == HYUNDAI_G90_RADAR_DBC:
       ret.radarUnavailable = not all(fingerprint[1].get(addr) == 8 for addr in range(0x500, 0x520))
-    elif DBC[ret.carFingerprint].get(Bus.radar) == HYUNDAI_GV70_RADAR_DBC:
+    elif blended_track_radar(ret) or DBC[ret.carFingerprint].get(Bus.radar) == HYUNDAI_GV70_RADAR_DBC:
       ret.radarUnavailable = not all(fingerprint[0].get(addr) == 32 for addr in range(0x210, 0x220))
     elif DBC[ret.carFingerprint].get(Bus.radar) == HYUNDAI_MRR30_RADAR_DBC:
       ret.radarUnavailable = fingerprint[radar_bus(ret)].get(MRR30_RADAR_START_ADDR) != 32
@@ -301,6 +301,8 @@ class CarInterface(CarInterfaceBase):
       ret.autoResumeSng = False
       ret.minEnableSpeed = -1.0
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.LONG.value
+      ret.longitudinalTuning.kiBP = [0.0, 3.0, 6.0, 35.0]
+      ret.longitudinalTuning.kiV = [0.07, 0.10, 0.15, 0.24]
 
     if candidate == CAR.KIA_RAY_EV and not ret.openpilotLongitudinalControl:
       ret.dashcamOnly = True

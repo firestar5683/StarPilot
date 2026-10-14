@@ -73,6 +73,7 @@ class SubaruSafetyFlags(IntFlag):
   LKAS_ANGLE = 16
   FIXED_ANGLE_LIMITS = 128
   ANGLE_MAIN_BUS = 32
+  ASCENT_LKAS_ALERT = 2048
 
 
 class SubaruFlags(IntFlag):
@@ -90,6 +91,7 @@ class SubaruFlags(IntFlag):
   PREGLOBAL = 16
   HYBRID = 32
   LKAS_ANGLE = 64
+  ASCENT_LKAS_ALERT = 512
 
 
 GLOBAL_ES_ADDR = 0x787

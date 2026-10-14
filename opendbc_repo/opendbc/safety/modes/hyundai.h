@@ -366,7 +366,7 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
                   (safety_get_ts_elapsed(microsecond_timer_get(), status->last_timestamp) <= 1000000U);
     }
     if (((msg->data[4] & 0x70U) != 0U) || (msg->data[5] != hyundai_ray_pedal_checksum(msg)) ||
-        (enabled && ((track1 < 264U) || (track1 > 473U) || (track2 < 497U) || (track2 > 919U) ||
+        (enabled && ((track1 < 264U) || (track1 > 530U) || (track2 < 497U) || (track2 > 1035U) ||
                      (track_error < -125) || (track_error > 125))) ||
         (!enabled && ((track1 != 0U) || (track2 != 0U))) ||
         (enabled && (!get_longitudinal_allowed() || brake_pressed_prev || !acc_main_on || !rx_valid))) {

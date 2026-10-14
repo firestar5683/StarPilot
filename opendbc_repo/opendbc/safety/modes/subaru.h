@@ -33,6 +33,7 @@
 #define MSG_SUBARU_ES_DashStatus         0x321U
 #define MSG_SUBARU_ES_LKAS_State         0x322U
 #define MSG_SUBARU_ES_Infotainment       0x323U
+#define MSG_SUBARU_ES_LKAS_Alert         0x3C4U
 
 #define SUBARU_MAIN_BUS 0U
 #define SUBARU_ALT_BUS  1U
@@ -206,6 +207,10 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
       }
     }
 
+    if (msg->addr == MSG_SUBARU_ES_LKAS_Alert) {
+      violation |= subaru_get_checksum(msg) != subaru_compute_checksum(msg);
+    }
+
     // check es_distance cruise_throttle limits
     if (msg->addr == MSG_SUBARU_ES_Distance) {
       int cruise_throttle = (GET_BYTES_LE(msg, 2, 2) & 0x1FFFU);
@@ -243,6 +248,13 @@ static safety_config subaru_init(uint16_t param) {
     SUBARU_GEN2_ANGLE_TX_MSGS(SUBARU_MAIN_BUS)
   };
 
+  static const CanMsg SUBARU_ASCENT_ALERT_TX_MSGS[] = {
+    SUBARU_GEN2_ANGLE_TX_MSGS(SUBARU_MAIN_BUS)
+    {MSG_SUBARU_ES_LKAS_Alert, SUBARU_MAIN_BUS, 8, .check_relay = true},
+  };
+
+  const uint16_t SUBARU_PARAM_ASCENT_ALERT = 2048;
+  const bool ascent_alert = param == (1U | 16U | 128U | 32U | SUBARU_PARAM_ASCENT_ALERT);
   const uint16_t SUBARU_PARAM_GEN2 = 1;
   const uint16_t SUBARU_PARAM_LKAS_ANGLE = 16;
   const uint16_t SUBARU_PARAM_FIXED_ANGLE = 128;
@@ -255,7 +267,7 @@ static safety_config subaru_init(uint16_t param) {
   subaru_fixed_angle_limits = GET_FLAG(param, SUBARU_PARAM_FIXED_ANGLE);
   subaru_angle_invalid = (subaru_lkas_angle && (param != (SUBARU_PARAM_GEN2 | SUBARU_PARAM_LKAS_ANGLE)) &&
                           (param != (SUBARU_PARAM_GEN2 | SUBARU_PARAM_LKAS_ANGLE | SUBARU_PARAM_FIXED_ANGLE)) &&
-                          (param != (SUBARU_PARAM_GEN2 | SUBARU_PARAM_LKAS_ANGLE | SUBARU_PARAM_FIXED_ANGLE | SUBARU_PARAM_ANGLE_MAIN_BUS))) ||
+                          (param != (SUBARU_PARAM_GEN2 | SUBARU_PARAM_LKAS_ANGLE | SUBARU_PARAM_FIXED_ANGLE | SUBARU_PARAM_ANGLE_MAIN_BUS)) && !ascent_alert) ||
                          ((subaru_fixed_angle_limits || subaru_angle_main_bus) && !subaru_lkas_angle);
 
   // TODO: re-enable once more work is done on the limits
@@ -266,7 +278,8 @@ static safety_config subaru_init(uint16_t param) {
     static RxCheck subaru_gen2_angle_rx_checks[] = {
       SUBARU_GEN2_ANGLE_RX_CHECKS()
     };
-    ret = subaru_angle_main_bus ? BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_ASCENT_ANGLE_TX_MSGS_LIST) :
+    ret = ascent_alert ? BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_ASCENT_ALERT_TX_MSGS) :
+          subaru_angle_main_bus ? BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_ASCENT_ANGLE_TX_MSGS_LIST) :
                                   BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_GEN2_ANGLE_TX_MSGS_LIST);
   } else if (subaru_gen2) {
     static RxCheck subaru_gen2_rx_checks[] = {

@@ -298,6 +298,7 @@ class CarController(CarControllerBase):
     self.paddle_handoff_frames = 0
     self.bolt_acc_pedal_friction_release_frames = 0
     self.bolt_acc_pedal_friction_low_speed_active = False
+    self.bolt_acc_pedal_stop_hold = False
 
     self.lka_steering_cmd_counter = 0
     self.lka_icon_status_last = (False, False)
@@ -749,6 +750,11 @@ class CarController(CarControllerBase):
         can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 4))
     elif self.CP.flags & GMFlags.PEDAL_LONG.value and self.CP.openpilotLongitudinalControl and self.camera_pedal_profile is None:
       active, stock_ownership_clear, in_regen_gear = self.bolt_pedal_admission(CC, CS, now_nanos)
+      self.bolt_acc_pedal_stop_hold = (
+        self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and is_bolt_pedal_profile(self.CP) and
+        active and actuators.longControlState == LongCtrlState.stopping and not CC.cruiseControl.resume and
+        (self.bolt_acc_pedal_stop_hold or CS.out.standstill)
+      )
       if not active or not in_regen_gear or self.maneuver_paddle_mode == "off":
         self.bolt_regen_hold = False
       elif self.maneuver_paddle_mode == "force":
@@ -808,6 +814,9 @@ class CarController(CarControllerBase):
               bolt_pedal_launch_gas(actuators.accel, CS.out.vEgo, CC.orientationNED if long_pitch else None,
                                     self.CP, acc_tune=self.gm_acc_tune)):
             pedal = 18. / 255.
+        if self.bolt_acc_pedal_stop_hold:
+          pedal = 0.0
+          self.pedal_steady = 0.0
         can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 16))
         if CC.enabled:
           self.paddle_handoff_frames = 2

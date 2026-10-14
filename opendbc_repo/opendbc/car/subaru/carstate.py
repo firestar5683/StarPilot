@@ -13,6 +13,7 @@ class CarState(CarStateBase):
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
     self.shifter_values = can_define.dv["Transmission"]["Gear"]
 
+    self.es_lkas_alert_dat = b""
     self.angle_rate_calulator = CanSignalRateCalculator(50)
 
   def update(self, can_parsers) -> structs.CarState:
@@ -137,6 +138,10 @@ class CarState(CarStateBase):
       self.es_distance_msg = copy.copy(cp_es_distance.vl["ES_Distance"])
 
     self.es_dashstatus_msg = copy.copy(cp_cam.vl["ES_DashStatus"])
+    if self.CP.flags & SubaruFlags.ASCENT_LKAS_ALERT:
+      alert = cp_cam.vl["ES_LKAS_Alert"]
+      self.es_lkas_alert_dat = (bytes((int(alert["CHECKSUM"]), int(alert["COUNTER"]) | (int(alert["Signal1"]) << 4))) +
+                                int(alert["Payload"]).to_bytes(6, "little"))
     if self.CP.flags & SubaruFlags.SEND_INFOTAINMENT:
       self.es_infotainment_msg = copy.copy(cp_cam.vl["ES_Infotainment"])
 
@@ -146,6 +151,6 @@ class CarState(CarStateBase):
   def get_can_parsers(CP):
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.main),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.camera),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [("ES_LKAS_Alert", 0)] if CP.flags & SubaruFlags.ASCENT_LKAS_ALERT else [], CanBus.camera),
       Bus.alt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.alt)
     }

@@ -23,6 +23,7 @@ class CarController(CarControllerBase):
     self.angle_was_active = False
     self.angle_override_frames = 0
     self.ascent_angle_initialized = False
+    self.ascent_lkas_alert_counter_last = None
     self.angle_driver_override = False
     self.angle_handoff_active = False
     self.VM = VehicleModel(CP) if CP.carFingerprint in GEN2_ANGLE_PORTS else None
@@ -62,6 +63,16 @@ class CarController(CarControllerBase):
       self.angle_handoff_active = True
       return False
     return True
+
+  def _ascent_lkas_alert(self, CC, CS):
+    if self.CP.carFingerprint != CAR.SUBARU_ASCENT_2023 or not self.CP.flags & SubaruFlags.ASCENT_LKAS_ALERT:
+      return None
+    dat = CS.es_lkas_alert_dat
+    msg = subarucan.create_ascent_lkas_alert(dat, self.angle_was_active and CC.enabled and CC.latActive, CC.hudControl.visualAlert)
+    if msg is None or (dat[1] & 0xf) == self.ascent_lkas_alert_counter_last:
+      return None
+    self.ascent_lkas_alert_counter_last = dat[1] & 0xf
+    return msg
 
   def update(self, CC, CS, now_nanos):
     actuators = CC.actuators
@@ -140,6 +151,9 @@ class CarController(CarControllerBase):
       cruise_brake = CarControllerParams.BRAKE_MIN
 
     # *** alerts and pcm cancel ***
+    lkas_alert_msg = self._ascent_lkas_alert(CC, CS)
+    if lkas_alert_msg is not None:
+      can_sends.append(lkas_alert_msg)
     if self.CP.flags & SubaruFlags.PREGLOBAL:
       if self.frame % 5 == 0:
         # 1 = main, 2 = set shallow, 3 = set deep, 4 = resume shallow, 5 = resume deep
