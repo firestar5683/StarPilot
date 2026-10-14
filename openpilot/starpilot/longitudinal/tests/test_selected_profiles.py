@@ -279,7 +279,6 @@ class SelectedProfilesTests(unittest.TestCase):
     self.assertGreater(native, capped)
 
   def test_selected_acceleration_above_stock_raises_cruise_ceiling(self):
-    # Sport/Standard curves sit above the stock curve; they must replace it, not be clipped by it.
     v_ego = 10.0
     stock = float(planner_module.get_max_accel(v_ego))
     sport = stock + 0.4
