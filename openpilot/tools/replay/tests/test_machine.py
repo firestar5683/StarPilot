@@ -130,8 +130,8 @@ class Machine:
 
   def close(self):
     if self.process:
+      self.process.stdin.close()
       if self.process.poll() is None:
-        self.process.stdin.close()
         try:
           self.process.wait(timeout=3)
         except subprocess.TimeoutExpired:

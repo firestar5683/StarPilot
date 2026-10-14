@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 from types import ModuleType
 import unittest
 from unittest.mock import patch
@@ -180,6 +181,7 @@ class ReplayCatalogTest(unittest.TestCase):
     source = segment / 'rlog.zst'
     with self.catalog.lease(ROUTE) as lease:
       before = source.stat()
+      time.sleep(0.02)
       os.setxattr(source, 'user.upload', b'1')
       self.assertNotEqual(source.stat().st_ctime_ns, before.st_ctime_ns)
       self.assertTrue(lease.current())

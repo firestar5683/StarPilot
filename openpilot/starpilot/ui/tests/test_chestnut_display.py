@@ -79,7 +79,7 @@ def test_catalog_gpu_fallback_or_stale_output_stays_failed(big, valid, alive, ag
 def test_offroad_status_uses_selected_download(detected, installed, checking, expected):
   sm = Mock()
   sm.__getitem__ = Mock(return_value=SimpleNamespace(chestnutPresent=detected))
-  state = Mock(spec=UIState, sm=sm, started=False, chestnut_compiled=installed, chestnut_checking=checking)
+  state = Mock(spec=UIState, sm=sm, started=False, chestnut_alert=False, chestnut_compiled=installed, chestnut_checking=checking)
   UIState._update_chestnut_state(state)
   assert state.chestnut_state == expected
 
