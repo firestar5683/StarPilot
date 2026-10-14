@@ -52,6 +52,16 @@ def displayed_limit_mps(observation):
   return None
 
 
+def displayed_adjusted_limit_mps(observation):
+  """The informational SLC number, independent of current control authority."""
+  if str(observation.kind) != 'valid':
+    return None
+  candidates = (getattr(observation, 'accepted_adjusted_limit_mps', None), observation.effective_cluster_target_mps)
+  if not positive(observation.accepted_speed_limit_mps) and not positive(observation.pending_speed_limit_mps):
+    candidates += (getattr(observation, 'presentation_adjusted_limit_mps', None),)
+  return next((value for value in candidates if positive(value)), None)
+
+
 def resolve_unified_speed(state) -> UnifiedSpeedPresentation:
   obs = state.speed_limit
   factor = 3.6 if state.metric else 2.2369362921
@@ -67,12 +77,7 @@ def resolve_unified_speed(state) -> UnifiedSpeedPresentation:
   show_max = state.customization.get('showMaxSpeed', True)
   has_slc = valid or str(obs.kind) == 'stale'
   mode = 'split' if show_max and has_slc else 'limit_only' if has_slc else 'max_only' if show_max else 'hidden'
-  target = None
-  if valid:
-    candidates = (getattr(obs, 'accepted_adjusted_limit_mps', None), obs.effective_cluster_target_mps)
-    if not accepted and not pending:
-      candidates += (getattr(obs, 'presentation_adjusted_limit_mps', None),)
-    target = next((value for value in candidates if positive(value)), None)
+  target = displayed_adjusted_limit_mps(obs)
   offset = None
   if state.show_slc_offset and positive(target) and positive(posted):
     adjustment = round((target - posted) * factor)
