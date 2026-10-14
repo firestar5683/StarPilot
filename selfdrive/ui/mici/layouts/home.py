@@ -4,6 +4,8 @@ import time
 from urllib.parse import urlsplit
 
 from cereal import log
+from openpilot.common.basedir import BASEDIR
+from openpilot.common.git import get_origin, get_short_branch
 import pyray as rl
 from collections.abc import Callable
 from importlib.resources import as_file
@@ -255,8 +257,8 @@ class MiciHomeLayout(Widget):
     self._did_long_press = False
 
   def _get_version_text(self) -> tuple[str, str, str, str] | None:
-    self._openpilot_label.set_text(repository_name(ui_state.params.get("GitRemote", encoding="utf-8")))
-    branch = ui_state.params.get("GitBranch", encoding="utf-8")
+    self._openpilot_label.set_text(repository_name(get_origin(BASEDIR) or ui_state.params.get("GitRemote", encoding="utf-8")))
+    branch = get_short_branch(BASEDIR) or ui_state.params.get("GitBranch", encoding="utf-8")
     commit = ui_state.params.get("GitCommit")
 
     if not all((branch, commit)):
