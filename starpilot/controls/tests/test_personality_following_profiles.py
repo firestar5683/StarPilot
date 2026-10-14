@@ -247,6 +247,30 @@ def test_existing_weather_modifier_runs_after_profile_and_retains_maximum_bound(
 
 
 @pytest.mark.parametrize(
+  ("fingerprint", "expected_floor"),
+  [("CHEVROLET_SILVERADO", 1.25), ("CHEVROLET_BOLT_EUV", 1.75)],
+)
+def test_far_lead_coast_receives_vehicle_tune(monkeypatch, fingerprint, expected_floor):
+  calls = []
+  monkeypatch.setattr(following_module, "should_disable_far_lead_throttle", lambda *args: calls.append(args) or False)
+  document = _document()
+  document["profiles"]["standard"]["following"] = {"preset": "custom", "curve": [0.75] * 10}
+  planner = _planner()
+  planner.tracking_lead = True
+  planner.lead_one.status = True
+  planner.lead_one.dRel = 57.0
+  planner.lead_one.vLead = 33.0
+  controller = StarPilotFollowing(planner)
+  sm = _sm()
+  sm["carParams"] = SimpleNamespace(brand="gm", carFingerprint=fingerprint, enableGasInterceptorDEPRECATED=False)
+
+  controller.update(True, 34.0, sm, _toggles(document))
+
+  assert controller.t_follow == pytest.approx(0.75)
+  assert calls[-1][-1] == expected_floor
+
+
+@pytest.mark.parametrize(
   ("personality", "prefix"),
   [
     (Personality.aggressive, "aggressive"),

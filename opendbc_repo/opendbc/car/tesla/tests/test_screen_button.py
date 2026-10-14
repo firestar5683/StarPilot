@@ -124,3 +124,32 @@ def test_button_is_appended_without_changing_cruise_state():
   assert any(event.type == ButtonType.lkas and event.pressed for event in ret.buttonEvents)
   assert not ret.cruiseState.enabled
   assert not ret.cruiseState.available
+
+
+def test_addon_stalk_cancel_events_and_held_state():
+  cp = screen_params()
+  cs = CarState(cp, custom.StarPilotCarParams.new_message())
+  parsers = CarState.get_can_parsers(cp)
+  packer = CANPacker("tesla_model3_vehicle")
+  events = []
+  for i, status in enumerate((0, 1, 1, 2, 0, 3, 4, 0, 2, 0), 1):
+    parsers[Bus.adas].update([[i * 10_000_000, [packer.make_can_msg("SCCM_rightStalk", 1, {"SCCM_rightStalkStatus": status})]]])
+    ret, fp_ret = cs.update(parsers, SimpleNamespace())
+    assert fp_ret.cancelPressed == (status in (1, 2))
+    events.extend(ret.buttonEvents)
+  assert [event.pressed for event in events if event.type == ButtonType.cancel] == [True, False, True, False]
+  parsers[Bus.adas].update([[60_000_000_000, []]])
+  assert parsers[Bus.adas].can_valid
+  assert not parsers[Bus.adas].bus_timeout
+
+
+@pytest.mark.parametrize(("bus", "length"), ((0, 3), (2, 3), (1, 2), (1, 4), (1, 8)))
+def test_wrong_bus_or_length_stalk_frames_do_not_cancel(bus, length):
+  cp = screen_params()
+  cs = CarState(cp, custom.StarPilotCarParams.new_message())
+  parser = CarState.get_can_parsers(cp)[Bus.adas]
+  packer = CANPacker("tesla_model3_vehicle")
+  address, data, _ = packer.make_can_msg("SCCM_rightStalk", bus, {"SCCM_rightStalkStatus": 1})
+  parser.update([[1_000_000_000, [(address, data[:length].ljust(length, b"\x00"), bus)]]])
+  assert cs.update_screen_button(parser) == []
+  assert not cs.screen_cancel_pressed

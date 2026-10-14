@@ -46,6 +46,8 @@ class ConditionalExperimentalMode:
   STOP_LIGHT_OFF_MARGIN = 4.0
   STOP_LIGHT_MODEL_HOLD_STRONG_MARGIN = 10.0
   STOP_LIGHT_LEAD_BLOCK_MARGIN = 15.0
+  STOP_LIGHT_MODEL_BRAKE_MIN = 0.5
+  STOP_LIGHT_MODEL_LEAD_MARGIN = 3.0
   STOP_LIGHT_HANDOFF_MAX_LEAD_SPEED = 2.0
   STOP_LIGHT_DETECTED_HOLD_TIME = 4.0
   STOP_APPROACH_LATCH_TIME = 1.0
@@ -568,6 +570,15 @@ class ConditionalExperimentalMode:
       lead_prob = float(getattr(lead, "modelProb", 1.0 if lead_radar else 0.0))
       tracking_lead = bool(self.starpilot_planner.tracking_lead)
       lead_relevant = bool(getattr(lead, "status", False)) and lead_distance < stop_threshold + self.STOP_LIGHT_LEAD_BLOCK_MARGIN
+      try:
+        model_accel = float(sm["modelV2"].action.desiredAcceleration)
+      except (KeyError, AttributeError, TypeError):
+        model_accel = 0.0
+      model_target_before_lead = bool(
+        model_stopping and lead_relevant and v_ego > CRUISING_SPEED and
+        model_accel <= -self.STOP_LIGHT_MODEL_BRAKE_MIN and
+        self.starpilot_planner.model_length + self.STOP_LIGHT_MODEL_LEAD_MARGIN < lead_distance
+      )
       vision_stop_approach = (
         lead_relevant and
         not lead_radar and
@@ -587,7 +598,7 @@ class ConditionalExperimentalMode:
           stop_approach_latched
         )
       )
-      if handoff_to_stopped_lead:
+      if handoff_to_stopped_lead or model_target_before_lead:
         lead_cleared = True
       else:
         self.lead_clear_filter.update(not lead_relevant)
@@ -602,7 +613,7 @@ class ConditionalExperimentalMode:
       if model_detector_active and model_hold_qualifies:
         self.stop_light_detected_hold_until = now + self.STOP_LIGHT_DETECTED_HOLD_TIME
 
-      hold_context_ok = bool((not lead_relevant) or trackable_stop_approach)
+      hold_context_ok = bool((not lead_relevant) or trackable_stop_approach or model_target_before_lead)
       self.stop_light_detected = bool(
         detector_active or
         (hold_context_ok and now < self.stop_light_detected_hold_until)

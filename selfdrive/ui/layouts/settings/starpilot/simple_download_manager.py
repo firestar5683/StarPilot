@@ -154,6 +154,7 @@ class SimpleDownloadManager(Widget):
 
     self._active_mode = self.MODE_SELECT
     self._downloading = False
+    self.refresh_thread = None
     self._download_progress = ""
     self._finalizing_until = 0.0
     self._pressed_target: str | None = None
@@ -316,6 +317,10 @@ class SimpleDownloadManager(Widget):
 
   def _update_state(self):
     now = time.monotonic()
+    if self.refresh_thread is not None and not self.refresh_thread.is_alive():
+      self.params.invalidate(self.downloadable_list_param)
+      self._refresh_list()
+      self.refresh_thread = None
     if self._pressed_target is not None and not self.is_pressed:
       self._pressed_target = None
     if self._info_message_until > 0 and now >= self._info_message_until:

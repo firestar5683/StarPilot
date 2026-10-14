@@ -421,16 +421,19 @@ class StarPilotCard:
       self.always_on_lateral_allowed = True
 
     if self.tesla_screen_button and getattr(starpilot_toggles, "tesla_aol_screen_tap", False):
-      # Keep the existing cruise path until a gesture explicitly overrides it.
-      if engagement_started or (cruise_available_changed and not carState.cruiseState.available and not carState.brakePressed):
-        if self.tesla_screen_aol_override is not None:
-          self.pause_lateral = False
-        self.tesla_screen_aol_override = None
-      if self.tesla_screen_aol_override is not None:
-        self.always_on_lateral_allowed = self.tesla_screen_aol_override
+      # ACC availability is not a driver request and can flicker at low speed.
+      if carState.cruiseState.enabled and not self.prev_cruise_enabled:
+        self.pause_lateral = False
+        self.tesla_screen_aol_override = True
+        self.tesla_aol_brake_disengaged = False
+      if self.tesla_screen_disengage_on_brake and carState.brakePressed:
+        self.tesla_screen_aol_override = False
+        self.tesla_aol_brake_disengaged = True
+      self.always_on_lateral_allowed = self.tesla_screen_aol_override is True
       if self.tesla_aol_brake_disengaged:
         self.always_on_lateral_allowed = False
-      if cancel_pressed or getattr(carState, "steeringDisengage", False):
+      cruise_cancelled = self.prev_cruise_enabled and not carState.cruiseState.enabled and not carState.brakePressed
+      if cancel_pressed or cruise_cancelled or getattr(carState, "steeringDisengage", False):
         self.tesla_screen_aol_override = False
         self.always_on_lateral_allowed = False
       else:

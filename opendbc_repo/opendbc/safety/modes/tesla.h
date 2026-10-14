@@ -7,6 +7,7 @@ static bool tesla_coop_steering = false;
 static bool tesla_aol_screen_button = false;
 static bool tesla_screen_disengage_on_brake = false;
 static bool tesla_touch_initialized = false;
+static bool tesla_screen_cancel_pressed = false;
 static bool tesla_stock_aeb = false;
 
 #define TESLA_STEERING_DISENGAGE_TORQUE 500  // cNm
@@ -98,12 +99,19 @@ static bool tesla_get_quality_flag_valid(const CANPacket_t *msg) {
 }
 
 static void tesla_rx_all_hook(const CANPacket_t *msg) {
+  if (tesla_aol_screen_button && (msg->bus == 1U) && (msg->addr == 0x229U) && (GET_LEN(msg) == 3)) {
+    const int stalk_status = (msg->data[1] >> 4) & 0x7U;  // SCCM_rightStalkStatus
+    tesla_screen_cancel_pressed = (stalk_status == 1) || (stalk_status == 2);  // UP_1, UP_2
+    if (tesla_screen_cancel_pressed) {
+      lkas_on = false;
+    }
+  }
   // The add-on's UI message is asynchronous, not a required periodic safety input.
   if (tesla_aol_screen_button && (msg->bus == 1U) && (msg->addr == 0x3DFU) && (GET_LEN(msg) == 8)) {
     const bool screen_button = msg->data[3] == 3U;  // UI_activeTouchPoints
-    if (tesla_touch_initialized && screen_button && !lkas_button_prev && !steering_disengage &&
+    if (tesla_touch_initialized && screen_button && !lkas_button_prev && !steering_disengage && !tesla_screen_cancel_pressed &&
         !(tesla_screen_disengage_on_brake && brake_pressed)) {
-      lkas_on = !aol_allowed;
+      lkas_on = !lkas_on;
     }
     // A touch held during startup is not an engagement request.
     tesla_touch_initialized = true;
@@ -187,13 +195,22 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
                             (cruise_state == 7);    // PRE_CANCEL
       cruise_engaged = cruise_engaged && !tesla_autopark;
 
+      const bool cruise_engagement_started = cruise_engaged && !cruise_engaged_prev;
+      const bool cruise_cancelled = cruise_engaged_prev && !cruise_engaged && !brake_pressed;
       pcm_cruise_check(cruise_engaged);
 
       const bool acc_main_on_now = ((cruise_state == 1) || cruise_engaged) && !tesla_autopark;
-      if (tesla_aol_screen_button && acc_main_on && !acc_main_on_now && !brake_pressed) {
-        lkas_on = false;
+      if (tesla_aol_screen_button) {
+        if (cruise_engagement_started && !tesla_screen_cancel_pressed && !steering_disengage &&
+            !(tesla_screen_disengage_on_brake && brake_pressed)) {
+          lkas_on = true;
+        }
+        if (cruise_cancelled) {
+          lkas_on = false;
+        }
       }
-      acc_main_on = acc_main_on_now;
+      // Availability alone is not an engagement request on the screen-toggle path.
+      acc_main_on = !tesla_aol_screen_button && acc_main_on_now;
     }
 
     if (msg->addr == 0x155U) {
@@ -370,6 +387,7 @@ static safety_config tesla_init(uint16_t param) {
   tesla_aol_screen_button = GET_FLAG(param, TESLA_FLAG_AOL_SCREEN_BUTTON);
   tesla_screen_disengage_on_brake = tesla_aol_screen_button && GET_FLAG(param, TESLA_FLAG_AOL_SCREEN_DISENGAGE_ON_BRAKE);
   tesla_touch_initialized = false;
+  tesla_screen_cancel_pressed = false;
 #ifdef ALLOW_DEBUG
   const uint16_t TESLA_FLAG_LONGITUDINAL_CONTROL = 1;
   const uint16_t TESLA_FLAG_COOP_STEERING = 256;

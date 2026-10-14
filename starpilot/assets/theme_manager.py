@@ -242,7 +242,6 @@ class ThemeManager:
       name_candidates = [theme_name]
 
     for extension in extensions:
-      theme_path = download_path.with_suffix(extension)
       theme_urls = []
       for resource_url in resource_urls:
         source_prefix = f"{resource_url}/theme" if "huggingface.co/buckets/" in resource_url else resource_url
@@ -257,11 +256,13 @@ class ThemeManager:
           theme_urls.append(f"{source_prefix}/Themes/{theme_name}/{theme_component}{extension}")
 
       for theme_url in theme_urls:
+        theme_path = download_path.with_suffix(extension)
         delete_file(theme_path)
 
         source = "Hugging Face" if "huggingface.co/buckets/" in theme_url else "GitHub"
         print(f"Downloading theme from {source}: {theme_name}")
-        download_file(CANCEL_DOWNLOAD_PARAM, theme_path, asset_param, self.params_memory, DOWNLOAD_PROGRESS_PARAM, self.session, theme_url)
+        downloaded_path = download_file(CANCEL_DOWNLOAD_PARAM, theme_path, asset_param, self.params_memory, DOWNLOAD_PROGRESS_PARAM, self.session, theme_url)
+        theme_path = downloaded_path or theme_path
 
         if self.params_memory.get_bool(CANCEL_DOWNLOAD_PARAM):
           delete_file(theme_path)
@@ -283,13 +284,13 @@ class ThemeManager:
 
           self.downloading_theme = False
 
-          self.update_themes(starpilot_toggles)
+          self.update_themes(starpilot_toggles, update_assets=False)
           return
 
     handle_error(download_path, asset_param, "Download failed...", "Download failed...", self.params_memory, DOWNLOAD_PROGRESS_PARAM)
     self.downloading_theme = False
 
-  def fetch_assets(self, repo_url, starpilot_toggles):
+  def fetch_assets(self, repo_url, starpilot_toggles, *, update_assets=True):
     is_github = "github" in repo_url
     is_huggingface = "huggingface.co/buckets/" in repo_url
 
@@ -297,7 +298,7 @@ class ThemeManager:
     try:
       def list_files(branch):
         if is_huggingface:
-          response = self.session.get(f"https://huggingface.co/api/buckets/{HF_BUCKET}/tree?recursive=true", timeout=10)
+          response = self.session.get(f"https://huggingface.co/api/buckets/{HF_BUCKET}/tree/theme/{branch}?recursive=true", timeout=10)
           response.raise_for_status()
           prefix = {
             "Themes": "theme/Themes/",
@@ -346,7 +347,7 @@ class ThemeManager:
             assets["wheels"].append(path)
             theme_name = Path(path).stem
             local_files = list((THEME_SAVE_PATH / "steering_wheels").glob(f"{theme_name}.*"))
-            if local_files and size > 0:
+            if update_assets and local_files and size > 0:
               local_size = self.theme_sizes.get("wheels", {}).get(theme_name)
               if local_size != size:
                 self.download_theme("steering_wheels", theme_name, THEME_COMPONENT_PARAMS["steering_wheels"], starpilot_toggles)
@@ -357,7 +358,7 @@ class ThemeManager:
             assets["themes"].setdefault(theme_name, set()).add(component_name)
 
             local_path = THEME_SAVE_PATH / "theme_packs" / theme_name / component_name
-            if local_path.exists() and size > 0:
+            if update_assets and local_path.exists() and size > 0:
               local_size = self.theme_sizes.get("themes", {}).get(theme_name, {}).get(component_name)
               if local_size != size:
                 self.download_theme(component_name, theme_name, THEME_COMPONENT_PARAMS[component_name], starpilot_toggles)
@@ -379,7 +380,7 @@ class ThemeManager:
           assets["boot_logos"].append(sub_path)
           logo_name = Path(sub_path).stem
           local_files = list((THEME_SAVE_PATH / "bootlogos").glob(f"{logo_name}.*"))
-          if local_files and expected_size > 0:
+          if update_assets and local_files and expected_size > 0:
             local_size = self.theme_sizes.get("boot_logos", {}).get(logo_name)
             if local_size != expected_size:
               print(f"boot logo {logo_name} is outdated, redownloading...")
@@ -391,7 +392,7 @@ class ThemeManager:
             assets["themes"].setdefault(theme_name, set()).add(key)
 
             local_path = THEME_SAVE_PATH / "theme_packs" / theme_name / key
-            if local_path.exists():
+            if update_assets and local_path.exists():
               local_size = self.theme_sizes.get("themes", {}).get(theme_name, {}).get(key)
               if local_size != expected_size:
                 print(f"{key} {theme_name} is outdated, redownloading...")
@@ -746,7 +747,7 @@ class ThemeManager:
 
     update_json_file(self.theme_sizes_path, self.theme_sizes)
 
-  def update_themes(self, starpilot_toggles, boot_run=False):
+  def update_themes(self, starpilot_toggles, boot_run=False, *, update_assets=True):
     if self.downloading_theme:
       return
 
@@ -760,7 +761,7 @@ class ThemeManager:
 
     assets = {}
     for repo_url in resource_urls:
-      assets = self.fetch_assets(repo_url, starpilot_toggles)
+      assets = self.fetch_assets(repo_url, starpilot_toggles, update_assets=update_assets)
       if assets:
         break
     if not assets:
@@ -799,7 +800,7 @@ class ThemeManager:
     print(f"Downloadable Distance Icons: {downloadable_distance_icons}")
     print(f"Downloadable Wheels: {downloadable_wheels}")
 
-    if boot_run:
+    if boot_run and update_assets:
       self.validate_themes(downloadable_boot_logos, downloadable_colors, downloadable_distance_icons, downloadable_icons, downloadable_signals, downloadable_sounds, downloadable_wheels, starpilot_toggles)
 
     self.update_theme_params(downloadable_boot_logos, downloadable_colors, downloadable_distance_icons, downloadable_icons, downloadable_signals, downloadable_sounds, downloadable_wheels)

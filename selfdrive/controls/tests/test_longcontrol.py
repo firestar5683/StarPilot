@@ -6,6 +6,7 @@ import pytest
 import openpilot.selfdrive.controls.lib.longcontrol as longcontrol
 import openpilot.selfdrive.controls.lib.longcontrol_vehicle_tunes as vehicle_tunes
 from opendbc.car.gm.values import CAR, GMFlags
+from opendbc.car.ford.values import CAR as FORD_CAR
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR
 from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN_CAR
@@ -42,6 +43,82 @@ def make_longcontrol_cp(**overrides):
     setattr(CP, key, value)
 
   return CP
+
+
+@pytest.mark.parametrize("speed,target,expected", ((2.4, -1.18, -1.33), (1.6, -1.03, -1.18), (0.7, -0.83, -0.98)))
+def test_mach_e_moving_light_stop_follows_easing_target(speed, target, expected):
+  CP = make_longcontrol_cp(brand="ford", carFingerprint=FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.stopping
+  lc.last_output_accel = -2.0
+  CS = car.CarState.new_message(vEgo=speed, aEgo=target)
+  output = lc.update(True, CS, target, True, (-3.5, 2.0), make_toggles(stopAccel=-2.0))
+  assert lc.long_control_state == LongCtrlState.stopping
+  assert output == pytest.approx(expected)
+  assert output <= target - 0.15
+
+
+@pytest.mark.parametrize("speed,target,has_lead,should_stop", (
+  (0.0, -0.2, False, True),
+  (0.1, -0.2, False, True),
+  (3.0, -0.8, False, True),
+  (1.0, -1.5, False, True),
+  (1.0, -3.5, False, True),
+  (1.0, -0.8, True, True),
+  (1.0, -0.8, False, False),
+  (1.0, 0.2, False, True),
+))
+def test_mach_e_stop_tune_preserves_hold_urgent_and_lead_braking(speed, target, has_lead, should_stop):
+  CP = make_longcontrol_cp(brand="ford", carFingerprint=FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  tune = vehicle_tunes.LongControlVehicleTuning(CP)
+  expected = min(-2.0, target) if should_stop and 0.1 < speed < 3.0 and target <= -1.5 else -2.0
+  assert tune.shape_stopping_accel(-2.0, target, should_stop, speed, has_lead, -2.0) == expected
+
+
+def test_mach_e_stop_tune_does_not_ignore_raw_lead_or_change_other_fords():
+  CP = make_longcontrol_cp(brand="ford", carFingerprint=FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  tune = vehicle_tunes.LongControlVehicleTuning(CP)
+  lead = SimpleNamespace(status=True, dRel=4.0, vLead=0.0)
+  assert tune.shape_stopping_accel(-2.0, -0.8, True, 1.0, False, -2.0, leads=(lead,)) == -2.0
+
+  for fingerprint in FORD_CAR:
+    if fingerprint != FORD_CAR.FORD_MUSTANG_MACH_E_MK1:
+      CP.carFingerprint = fingerprint
+      tune = vehicle_tunes.LongControlVehicleTuning(CP)
+      assert tune.shape_stopping_accel(-2.0, -0.8, True, 1.0, False, -2.0) == -2.0
+
+
+@pytest.mark.parametrize("initial_speed", (0.5, 1.0, 2.4))
+@pytest.mark.parametrize("actuator_lag", (0.15, 0.3))
+def test_mach_e_gentle_light_stop_finishes_and_holds(initial_speed, actuator_lag):
+  CP = make_longcontrol_cp(brand="ford", carFingerprint=FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.stopping
+  lc.last_output_accel = -1.2
+  speed, acceleration, distance = initial_speed, -1.2, 0.0
+  toggles = make_toggles(stopAccel=-2.0)
+  for _ in range(800):
+    target = -min(1.2, max(0.3, 0.8 * speed + 0.15))
+    CS = car.CarState.new_message(vEgo=float(speed), aEgo=float(acceleration))
+    output = lc.update(True, CS, target, True, (-3.5, 2.0), toggles)
+    assert output < 0.0
+    acceleration += DT_CTRL / (actuator_lag + DT_CTRL) * (output - acceleration)
+    distance += speed * DT_CTRL
+    speed = max(0.0, speed + acceleration * DT_CTRL)
+  assert speed == 0.0
+  assert distance < 4.5
+  assert output == pytest.approx(-2.0, abs=0.01)
+
+
+def test_mach_e_soft_stop_immediately_honors_urgent_target():
+  CP = make_longcontrol_cp(brand="ford", carFingerprint=FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.stopping
+  lc.last_output_accel = -2.0
+  CS = car.CarState.new_message(vEgo=1.0, aEgo=-0.8)
+  toggles = make_toggles(stopAccel=-2.0)
+  assert lc.update(True, CS, -0.8, True, (-3.5, 2.0), toggles) == pytest.approx(-0.95)
+  assert lc.update(True, CS, -3.5, True, (-3.5, 2.0), toggles, has_lead=True) == -3.5
 
 
 class TestLongControlStateTransition:

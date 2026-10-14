@@ -39,6 +39,7 @@ GM_SILVERADO_EARLY_FOLLOW_MIN_MODEL_PROB = 0.85
 GM_SILVERADO_EARLY_FOLLOW_MAX_LATERAL_OFFSET = 1.2
 DEFAULT_FOLLOW_PREBRAKE_MIN_HEADWAY = 1.25
 GM_SILVERADO_FOLLOW_PREBRAKE_MIN_HEADWAY = 1.25
+GM_SILVERADO_FAR_LEAD_COAST_HEADWAY_FLOOR = 1.25
 FORD_LIGHTNING_FOLLOW_PREBRAKE_MIN_HEADWAY = 0.75
 FORD_LIGHTNING_TRACKED_LEAD_CATCHUP_MIN_HEADWAY_MARGIN = 0.10
 FORD_LIGHTNING_TRACKED_LEAD_CATCHUP_FULL_HEADWAY_MARGIN = 0.25
@@ -764,6 +765,16 @@ def get_follow_prebrake_min_headway(CP, t_follow):
   if CP.brand == "ford" and str(CP.carFingerprint) == "FORD_F_150_LIGHTNING_MK1":
     return max(float(t_follow), FORD_LIGHTNING_FOLLOW_PREBRAKE_MIN_HEADWAY)
   return max(float(t_follow), DEFAULT_FOLLOW_PREBRAKE_MIN_HEADWAY)
+
+
+def get_far_lead_coast_headway_floor(CP):
+  if (
+    getattr(CP, "brand", "") == "gm" and
+    str(getattr(CP, "carFingerprint", "")) in ("CHEVROLET_SILVERADO", "CHEVROLET_SILVERADO_CC") and
+    not bool(getattr(CP, "enableGasInterceptorDEPRECATED", False))
+  ):
+    return GM_SILVERADO_FAR_LEAD_COAST_HEADWAY_FLOOR
+  return 1.75
 
 
 def get_toyota_sienna_post_departure_restop_cap(CP, lead, v_ego, accel_min,

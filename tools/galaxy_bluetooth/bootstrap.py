@@ -11,6 +11,7 @@ import time
 DATA = Path('/data/galaxy-ble')
 BRIDGE = Path(__file__).resolve().parent / 'bridge'
 UNIT = 'galaxy-ble-fork.service'
+LAN_UNIT = 'galaxy-lan-discovery.service'
 
 
 def write_json(path, value):
@@ -45,6 +46,7 @@ class Bootstrap:
     self.verified = None
     self.next_attempt = 0
     self.registered = False
+    self.discovery_registered = False
 
   def status(self, state, message):
     write_json(self.data / 'setup-status.json', {'state': state, 'message': message, 'updated': time.time()})
@@ -73,7 +75,7 @@ class Bootstrap:
         valid = python.exists() and receipt.exists() and receipt.read_text() == digest
         if valid:
           try:
-            self.command([str(python), '-c', 'import dbus_next; from Crypto.Cipher import AES'],
+            self.command([str(python), '-c', 'import dbus_next; import zeroconf; from Crypto.Cipher import AES'],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
           except (subprocess.SubprocessError, OSError):
             valid = False
@@ -82,7 +84,7 @@ class Bootstrap:
             self.status('waiting', 'Park to finish Bluetooth setup')
             return
           self.status('installing', 'Installing Bluetooth bridge. Comma needs internet.')
-          self.run(['sudo', '-n', 'systemctl', 'stop', UNIT], timeout=20, check=False,
+          self.run(['sudo', '-n', 'systemctl', 'stop', UNIT, LAN_UNIT], timeout=20, check=False,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
           log_path = self.data / 'setup.log'
           if log_path.exists() and log_path.stat().st_size > 256 * 1024:
@@ -100,6 +102,16 @@ class Bootstrap:
         self.systemctl('link', '--runtime', str(self.bridge / UNIT), stdout=subprocess.DEVNULL)
         self.systemctl('daemon-reload', stdout=subprocess.DEVNULL)
         self.registered = True
+      # Discovery remains available when Bluetooth is off or the BLE service retries.
+      # An optional discovery failure must not prevent Bluetooth startup.
+      try:
+        if not self.discovery_registered:
+          self.systemctl('link', '--runtime', str(self.bridge / LAN_UNIT), stdout=subprocess.DEVNULL)
+          self.systemctl('daemon-reload', stdout=subprocess.DEVNULL)
+          self.discovery_registered = True
+        self.systemctl('start', LAN_UNIT, stdout=subprocess.DEVNULL)
+      except (OSError, subprocess.SubprocessError):
+        pass
       self.systemctl('start', UNIT, stdout=subprocess.DEVNULL)
       try:
         pid = json.loads((self.data / 'bridge-ready.json').read_text())['pid']
@@ -130,3 +142,4 @@ def main():
 
 if __name__ == '__main__':
   main()
+

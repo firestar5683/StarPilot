@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import get_far_lead_coast_headway_floor
 from openpilot.selfdrive.controls.lib.lead_behavior import (
   get_tracked_lead_catchup_bias,
   is_radarless_matched_follow_window,
@@ -136,6 +139,34 @@ def test_disable_far_lead_throttle_rejects_route_like_highway_stab_case():
 def test_disable_far_lead_throttle_rejects_large_gap_near_pace_matched_case():
   should_disable = should_disable_far_lead_throttle(32.43, 72.4, 56.0, 1.30, False)
   assert not should_disable
+
+
+def test_silverado_far_lead_coast_does_not_cut_throttle_at_hanging_highway_gap():
+  truck = SimpleNamespace(brand="gm", carFingerprint="CHEVROLET_SILVERADO", enableGasInterceptorDEPRECATED=False)
+  # Route 15c: the old coast gate repeatedly closed at roughly 60 m, not 0.75 s.
+  scene = (34.0, 57.0, 43.0, 1.0, False)
+  assert should_disable_far_lead_throttle(*scene)
+  assert not should_disable_far_lead_throttle(*scene, get_far_lead_coast_headway_floor(truck))
+
+
+def test_silverado_far_lead_coast_still_works_near_requested_gap():
+  truck = SimpleNamespace(brand="gm", carFingerprint="CHEVROLET_SILVERADO", enableGasInterceptorDEPRECATED=False)
+  floor = get_far_lead_coast_headway_floor(truck)
+  assert should_disable_far_lead_throttle(34.0, 40.0, 33.0, 0.6, False, floor)
+  assert not should_disable_far_lead_throttle(34.0, 40.0, 33.0, 4.0, False, floor)
+  assert not should_disable_far_lead_throttle(15.0, 24.0, 16.0, 0.6, False, floor)
+  assert not should_disable_far_lead_throttle(34.0, 40.0, 33.0, 0.6, True, floor)
+
+
+def test_far_lead_coast_tune_is_only_for_non_pedal_gm_trucks():
+  for fingerprint in ("CHEVROLET_SILVERADO", "CHEVROLET_SILVERADO_CC"):
+    truck = SimpleNamespace(brand="gm", carFingerprint=fingerprint, enableGasInterceptorDEPRECATED=False)
+    assert get_far_lead_coast_headway_floor(truck) == 1.25
+    truck.enableGasInterceptorDEPRECATED = True
+    assert get_far_lead_coast_headway_floor(truck) == 1.75
+  for brand, fingerprint in (("gm", "CHEVROLET_BOLT_EUV"), ("ford", "FORD_F_150_LIGHTNING_MK1"), ("hyundai", "HYUNDAI_IONIQ_6")):
+    assert get_far_lead_coast_headway_floor(SimpleNamespace(brand=brand, carFingerprint=fingerprint)) == 1.75
+  assert get_far_lead_coast_headway_floor(None) == 1.75
 
 
 def test_should_track_lead_keeps_radar_leads_on_model_horizon():

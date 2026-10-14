@@ -170,7 +170,8 @@ def get_tracked_lead_catchup_bias(v_ego: float, lead_distance: float, desired_ga
 
 
 def should_disable_far_lead_throttle(v_ego: float, lead_distance: float, desired_gap: float,
-                                     closing_speed: float, following_lead: bool) -> bool:
+                                     closing_speed: float, following_lead: bool,
+                                     coast_headway_floor: float = 1.75) -> bool:
   actual_hw = lead_distance / max(v_ego, 1e-3)
   desired_hw = desired_gap / max(v_ego, 1e-3)
 
@@ -178,7 +179,7 @@ def should_disable_far_lead_throttle(v_ego: float, lead_distance: float, desired
     return False
 
   # Don't coast if we're already materially above the requested headway.
-  if actual_hw > max(desired_hw + 0.15, 1.75):
+  if actual_hw > max(desired_hw + 0.15, coast_headway_floor):
     return False
 
   coast_window_open = lead_distance > desired_gap + max(4.0, 0.15 * v_ego)

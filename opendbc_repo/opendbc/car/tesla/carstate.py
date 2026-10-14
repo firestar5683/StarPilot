@@ -21,14 +21,14 @@ TESLA_GAS_PRESS_OFF = 0.4
 
 class TeslaScreenCANParser(CANParser):
   def __init__(self):
-    super().__init__("tesla_model3_vehicle", [("UI_status2", 0)], CANBUS.vehicle)
+    super().__init__("tesla_model3_vehicle", [("UI_status2", 0), ("SCCM_rightStalk", 0)], CANBUS.vehicle)
 
   def update(self, strings, sendcan=False):
     if strings and not isinstance(strings[0], list | tuple):
       strings = [strings]
     # Match Panda's exact-length check before producing engagement button events.
     return super().update([
-      (timestamp, [frame for frame in frames if frame[0] == 0x3DF and len(frame[1]) == 8])
+      (timestamp, [frame for frame in frames if (frame[0], len(frame[1])) in ((0x3DF, 8), (0x229, 3))])
       for timestamp, frames in strings
     ], sendcan)
 
@@ -66,6 +66,7 @@ class CarState(CarStateBase):
     self.prev_cruise_buttons = 0
     self.gas_pressed = False
     self.active_touch_points = None
+    self.screen_cancel_pressed = False
     self.msg_stw_actn_req = None
     self.speed_units = "MPH"
     self.cooperative_steering = any(
@@ -103,6 +104,10 @@ class CarState(CarStateBase):
 
   def update_screen_button(self, cp_vehicle):
     events = []
+    for stalk_status in cp_vehicle.vl_all["SCCM_rightStalk"]["SCCM_rightStalkStatus"]:
+      cancel_pressed = int(stalk_status) in (1, 2)  # UP_1, UP_2
+      events.extend(create_button_events(cancel_pressed, self.screen_cancel_pressed, {True: ButtonType.cancel}))
+      self.screen_cancel_pressed = cancel_pressed
     for touch_points in cp_vehicle.vl_all["UI_status2"]["UI_activeTouchPoints"]:
       touch_points = int(touch_points)
       # Establish a baseline first; a touch already held during boot is not an engagement request.
@@ -213,6 +218,8 @@ class CarState(CarStateBase):
     self.das_control = copy.copy(cp_ap_party.vl["DAS_control"])
 
     fp_ret = custom.StarPilotCarState.new_message()
+    if self.CP.flags & TeslaFlags.AOL_SCREEN_BUTTON:
+      fp_ret.cancelPressed = self.screen_cancel_pressed
 
     return ret, fp_ret
 
