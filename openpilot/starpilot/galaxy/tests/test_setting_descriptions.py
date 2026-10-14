@@ -64,7 +64,7 @@ def test_real_warning_kept_after_purpose_and_false_blanket_next_drive_removed():
                             reason='Use this source first; camera signs require your confirmation before changing cruise speed')
   assert description(confirmation).startswith(purpose(confirmation))
   assert 'require your confirmation' in description(confirmation)
-  ownership = FeatureRow('ForceAutoTuneOff', 'Automatic Steering Learning', 'On',
+  ownership = FeatureRow('ForceAutoTuneOff', 'Use StarPilot Auto Learn', 'On',
                          reason='Saved for this vehicle. StarPilot Controller uses its vehicle tune; automatic learning is currently unavailable.')
   assert 'StarPilot Controller uses its vehicle tune' in description(ownership)
   assert 'Saved for this vehicle' not in description(ownership)

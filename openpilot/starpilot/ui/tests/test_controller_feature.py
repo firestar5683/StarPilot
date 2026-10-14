@@ -76,9 +76,9 @@ class TestControllerFeature(unittest.TestCase):
     self.assertEqual(self.cp.lateralTuning.which(), 'torque')
     self.assertIsNone(self.row())
     learning = self.require_row('ForceAutoTuneOff')
-    self.assertEqual(learning.label, 'Automatic Steering Learning')
+    self.assertEqual(learning.label, 'Use StarPilot Auto Learn')
     self.assertEqual(learning.value, 'On')
-    self.assertIn('compatible, qualified learning results', learning.reason)
+    self.assertEqual(learning.reason, 'StarPilot’s FLM tuning will attempt to automatically correct torque profiles as you drive.')
     self.assertTrue(self.owner.apply(required_change(learning)))
     self.assertFalse(read_preference(self.params, self.cp).enabled)
     self.assertIsNone(self.params.get('ForceAutoTuneOff'))
@@ -249,7 +249,7 @@ class TestControllerFeature(unittest.TestCase):
     import json
     from openpilot.starpilot.lateral.controller_selection import replace_mode
     self.cp = interfaces[TOYOTA.TOYOTA_RAV4_TSS2].get_non_essential_params(TOYOTA.TOYOTA_RAV4_TSS2)
-    for mode, label in ((ControllerMode.STANDARD, "Stock Controller"),
+    for mode, _label in ((ControllerMode.STANDARD, "Stock Controller"),
                         (ControllerMode.STARPILOT, "StarPilot Controller")):
       with self.subTest(mode=mode):
         self.params.put(DOCUMENT_KEY, json.loads(replace_mode(None, self.cp, mode)), block=True)
@@ -257,10 +257,10 @@ class TestControllerFeature(unittest.TestCase):
         learning_rows = [row for row in state.rows if row.key == 'ForceAutoTuneOff']
         self.assertEqual(len(learning_rows), 1)
         row = learning_rows[0]
-        self.assertEqual(row.label, 'Automatic Steering Learning')
+        self.assertEqual(row.label, 'Use StarPilot Auto Learn')
         self.assertTrue(row.available)
         self.assertEqual(row.value, 'On')
-        self.assertEqual(row.reason, f'Saved for this vehicle and next drive. {label} applies compatible, qualified learning results.')
+        self.assertEqual(row.reason, 'StarPilot’s FLM tuning will attempt to automatically correct torque profiles as you drive.')
         from openpilot.starpilot.galaxy.setting_descriptions import description
         self.assertEqual(_projection(row, 'torque')['reason'], description(row))
 

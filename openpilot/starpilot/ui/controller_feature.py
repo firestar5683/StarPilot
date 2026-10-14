@@ -190,10 +190,10 @@ class ControllerFeature:
     compatible = controller_uses_native_learning(selection)
     label = CHOICES[0] if selection.mode == ControllerMode.STANDARD else CHOICES[1]
     value = ('On' if preference.enabled else 'Off') if valid else 'Invalid saved preference'
-    reason = (f'Saved for this vehicle and next drive. {label} applies compatible, qualified learning results.'
+    reason = ('StarPilot’s FLM tuning will attempt to automatically correct torque profiles as you drive.'
               if compatible else f'Saved for this vehicle. {label} uses its vehicle tune; ' +
               'automatic learning is currently unavailable. ' + TUNING_GUIDANCE)
-    return FeatureRow(LEARNING_OFF_KEY, 'Automatic Steering Learning', value, preference.raw, ('Off', 'On') if valid else (),
+    return FeatureRow(LEARNING_OFF_KEY, 'Use StarPilot Auto Learn', value, preference.raw, ('Off', 'On') if valid else (),
                       available=valid and self.authority('preferences'),
                       reason=reason if valid else 'Saved controller or learning preference is unreadable or invalid.',
                       capability=capability, dependencies=((DOCUMENT_KEY, controller), (LEARNING_OFF_KEY, legacy)),

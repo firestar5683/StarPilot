@@ -29,7 +29,7 @@ DESCRIPTIONS = {
   'NostalgiaMode': 'Lets the Ioniq 6 left paddle pause acceleration and braking while Always On Lateral keeps steering.',
   'TurnAssist': 'Uses steering-angle feedback to assist rolling low-speed turns above the vehicle minimum steering speed.',
   'LateralControllerSelection': 'Chooses the stock steering controller or the vehicle-specific StarPilot controller.',
-  'ForceAutoTuneOff': 'Controls whether compatible, qualified automatic steering learning is used for this vehicle.',
+  'ForceAutoTuneOff': 'StarPilot’s FLM tuning will attempt to automatically correct torque profiles as you drive.',
   'torque_prepare_firestar': 'Prepares steering settings for a tuning-request recording. Turning it off restores the previous settings.',
   'SteerLatAccel': 'Sets the legacy lateral-acceleration-to-torque conversion. Review the vehicle-specific tuning profile before applying it.',
   'SteerFriction': 'Sets legacy steering friction compensation. Review the vehicle-specific tuning profile before applying it.',
@@ -60,6 +60,7 @@ DESCRIPTIONS = {
   'slc_adopt': 'Keeps the current speed-limit offset schedule fixed when display units change.',
   'slc_reset': 'Resets saved speed-limit offsets while retaining valid configured speed ranges.',
   'AlwaysAllowUploads': 'Allows queued full logs and videos to upload over metered networks. This uses mobile data.',
+  'ToyotaRadarMode': 'Chooses the supported Toyota front radar configuration, including the optional ARS510 retrofit.',
   'ToyotaAutoHold': ('Holds the brakes after you press the brake for over one second at a complete stop ' +
     'with cruise main on and cruise disengaged. Press the accelerator to release.'),
   'GMPedalLongitudinal': 'Uses a detected compatible pedal interceptor for StarPilot acceleration control.',
@@ -93,6 +94,7 @@ DESCRIPTIONS = {
   'ScreenBrightnessOnroad': 'Sets screen brightness while driving. Auto follows the normal brightness policy.',
   'ScreenTimeout': 'Sets how long the parked screen remains on after interaction.',
   'ScreenTimeoutOnroad': 'Sets the wait after interaction before returning to the driving view or turning off the screen if configured.',
+  'KeepScreenOnGpuLoading': 'Keeps the driving screen visible while an eGPU model loads. Manual Screen Off still works.',
   'TurnOffCommaScreen': 'Pauses comma UI rendering to reduce CPU and GPU use. Tap once to wake the screen.',
   'SoundPack': 'Chooses the sounds used for driving alerts and chimes.',
   'WarningImmediateVolume': 'Sets the starting volume of immediate warnings. These warnings still ramp to full volume.',
@@ -130,6 +132,7 @@ INITIALIZATION = {
   'UseStarPilotLongitudinalPlanner': 'Applies when the planner next starts: each choice runs a different planner process with its own subscriptions and state.',
   'TurnAssist': ('Applies when driving processes next start: the selected torque controller creates its ' +
     'low-speed feedback controller and filter state at initialization.'),
+  'ToyotaRadarMode': 'Chooses the supported Toyota front radar configuration, including the optional ARS510 retrofit.',
   'ToyotaAutoHold': 'Requires the next vehicle startup to configure the brake-hold permission in CarParams and Panda safety.',
   'DisableOpenpilotLongitudinal': 'Requires the next vehicle startup to rebuild cruise ownership and Panda safety configuration.',
   'GMAutoHold': 'First enable requires the next vehicle startup to configure the brake-hold safety permission. An already admitted hold can be disabled live.',
