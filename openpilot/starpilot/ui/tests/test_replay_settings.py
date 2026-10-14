@@ -1,9 +1,10 @@
 """Fake transport exercises native ownership, cancellation and passive input."""
 
+from collections.abc import Callable
 from types import SimpleNamespace as NS
 import threading
 import time
-from typing import Any
+from typing import Any, NoReturn, cast
 from unittest.mock import Mock
 
 import pyray as rl
@@ -158,7 +159,7 @@ def pump(owner, predicate):
     if predicate():
       return
     time.sleep(0.001)
-  pytest.fail('fake replay operation did not finish')
+  cast(Callable[[str], NoReturn], pytest.fail)('fake replay operation did not finish')
 
 
 @pytest.fixture

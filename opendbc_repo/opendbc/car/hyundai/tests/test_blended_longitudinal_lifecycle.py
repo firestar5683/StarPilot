@@ -148,13 +148,14 @@ class TestBlendedLifecycle(unittest.TestCase):
         before = cp.to_dict()
         candidate = candidate_from_stock(cp, alpha_requested=True, native_qualified=True)
         self.assertIsNotNone(candidate)
-        self.assertTrue(candidate.radarUnavailable)
+        expected_radar_unavailable = radar_unavailable if hda2 else True
+        self.assertEqual(candidate.radarUnavailable, expected_radar_unavailable)
         self.assertTrue(candidate.openpilotLongitudinalControl)
         self.assertFalse(candidate.pcmCruise)
         self.assertEqual(candidate.safetyConfigs[0].safetyParam, 0x2014 if hda2 else 0x2004)
         expected = dict(before)
         expected.update(alphaLongitudinalAvailable=True, openpilotLongitudinalControl=True,
-                        pcmCruise=False, radarUnavailable=True, stopAccel=candidate.stopAccel,
+                        pcmCruise=False, radarUnavailable=expected_radar_unavailable, stopAccel=candidate.stopAccel,
                         safetyConfigs=candidate.to_dict()['safetyConfigs'])
         self.assertEqual(candidate.to_dict(), expected)
         self.assertEqual(cp.to_dict(), before)

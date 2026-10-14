@@ -1,8 +1,10 @@
+from collections.abc import Callable
 import json
 import os
 import re
 from pathlib import Path
 import subprocess
+from typing import NoReturn, cast
 import pytest
 
 from openpilot.starpilot.replay.media import MediaMux, MediaStore, codec_string, media_descriptor
@@ -104,7 +106,7 @@ def test_mux_copy_has_explicit_pts_and_independent_initialization(tmp_path):
   ffmpeg = root / '.venv/lib/python3.12/site-packages/ffmpeg/install/bin/ffmpeg'
   ffprobe = ffmpeg.with_name('ffprobe')
   if not library.exists() or not ffmpeg.exists() or not ffprobe.exists():
-    pytest.skip('Host replay muxer and bundled FFmpeg must be built')
+    cast(Callable[[str], NoReturn], pytest.skip)('Host replay muxer and bundled FFmpeg must be built')
   source = tmp_path / 'fixture.ts'
   subprocess.run([str(ffmpeg), '-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'rawvideo', '-pixel_format', 'yuv420p',
                   '-video_size', '32x18', '-framerate', '20', '-i', 'pipe:0',

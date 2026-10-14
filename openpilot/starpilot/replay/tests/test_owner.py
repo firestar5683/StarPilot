@@ -1,5 +1,6 @@
 """Inert owners and one synthetic private engine; never run driving services."""
 
+from collections.abc import Callable
 from pathlib import Path
 import json
 import os
@@ -10,6 +11,7 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
+from typing import NoReturn, cast
 
 import pytest
 
@@ -402,7 +404,7 @@ def test_real_machine_uses_owner_created_clock_and_cleans_it(tmp_path, monkeypat
 
   binary = Path(BASEDIR) / 'openpilot/tools/replay/replay'
   if not binary.is_file():
-    pytest.skip('Build the isolated replay engine first')
+    cast(Callable[[str], NoReturn], pytest.skip)('Build the isolated replay engine first')
   routes = tmp_path / 'routes'
   routes.mkdir()
   segment(routes, 0, [.1, .2, 10], compressed=True)
