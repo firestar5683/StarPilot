@@ -26,7 +26,9 @@ def startup(device="mici", pid="322\n", status="Name:\tspi0\nPPid:\t2\n"):
   exec(compile(ast.Module(body=[method], type_ignores=[]), str(SOURCE), "exec"), namespace)
   hardware = SimpleNamespace(get_device_type=lambda: device,
                              amplifier=SimpleNamespace(initialize_configuration=events.amplifier))
-  return lambda: namespace[method.name](hardware), events
+  initialize = namespace[method.name]
+  assert callable(initialize)
+  return lambda: initialize(hardware), events
 
 
 class TestSpiWorkerPriority(unittest.TestCase):
