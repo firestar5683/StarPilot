@@ -1,6 +1,7 @@
 import datetime
 import re
 import time
+from urllib.parse import urlsplit
 
 from cereal import log
 import pyray as rl
@@ -30,6 +31,17 @@ NETWORK_TYPES = {
   NetworkType.cell5G: "5G",
   NetworkType.ethernet: "Ethernet",
 }
+
+
+def repository_name(remote: str | bytes | None) -> str:
+  if isinstance(remote, bytes):
+    remote = remote.decode("utf-8", errors="replace")
+  remote = (remote or "").strip()
+  path = urlsplit(remote).path if "://" in remote else remote.split(":", 1)[-1]
+  name = path.rstrip("/").rsplit("/", 1)[-1]
+  if name.endswith(".git"):
+    name = name[:-4]
+  return name if re.fullmatch(r"[A-Za-z0-9_.-]+", name or "") and name not in (".", "..") else "StarPilot"
 
 
 class NetworkIcon(Widget):
@@ -177,7 +189,7 @@ class MiciHomeLayout(Widget):
       self._mic_icon,
     ], spacing=18)
 
-    self._openpilot_label = UnifiedLabel("StarPilot", font_size=96, font_weight=FontWeight.BRAND, max_width=480, wrap_text=False)
+    self._openpilot_label = UnifiedLabel("StarPilot", font_size=96, font_weight=FontWeight.BRAND, max_width=480, wrap_text=False, scroll=True)
     self._version_label = UnifiedLabel("", font_size=36, font_weight=FontWeight.ROMAN, max_width=480, wrap_text=False)
     self._large_version_label = UnifiedLabel("", font_size=64, text_color=rl.GRAY, font_weight=FontWeight.ROMAN, max_width=480, wrap_text=False)
     self._date_label = UnifiedLabel("", font_size=36, text_color=rl.GRAY, font_weight=FontWeight.ROMAN, max_width=480, wrap_text=False)
@@ -243,7 +255,8 @@ class MiciHomeLayout(Widget):
     self._did_long_press = False
 
   def _get_version_text(self) -> tuple[str, str, str, str] | None:
-    branch = ui_state.params.get("GitBranch")
+    self._openpilot_label.set_text(repository_name(ui_state.params.get("GitRemote", encoding="utf-8")))
+    branch = ui_state.params.get("GitBranch", encoding="utf-8")
     commit = ui_state.params.get("GitCommit")
 
     if not all((branch, commit)):
@@ -276,7 +289,7 @@ class MiciHomeLayout(Widget):
       self._date_label.render()
 
       self._branch_label.set_max_width(gui_app.width - self._version_label.text_width - self._date_label.text_width - 32)
-      self._branch_label.set_text(" " + self._current_model_name)
+      self._branch_label.set_text(" " + self._version_text[1])
       self._branch_label.set_position(version_pos.x + self._version_label.text_width + self._date_label.text_width + 20, version_pos.y)
       self._branch_label.render()
 
