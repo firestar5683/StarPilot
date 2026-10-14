@@ -16,7 +16,7 @@ from openpilot.starpilot.ui.onroad_state import OnroadState, OnroadInput, SpeedL
 from openpilot.starpilot.ui.presentation import Profile, FontRole
 from openpilot.starpilot.ui.onroad_large_widgets import UnifiedSpeedWidget
 from openpilot.starpilot.ui.runtime_snapshot import display_message
-from openpilot.starpilot.ui.onroad_customization import default_document, validate_document, set_speed_sources
+from openpilot.starpilot.ui.onroad_customization import default_document, validate_document
 from openpilot.starpilot.ui import clip
 
 
@@ -43,7 +43,7 @@ class DrawerNativeTest(unittest.TestCase):
     empty = messaging.new_message('slcState')
     self.assertEqual(len(empty.slcState.sourceReadings), 0)
 
-  def test_drawer_tap_is_preference_only_and_never_accepts_pending(self):
+  def test_sources_have_no_onscreen_tap_target(self):
     obs = SpeedLimitObservation(ObservationKind.VALID, 'dashboard', 25, session_id='drawer', presentation_id=1)
     state = OnroadState(False, False, 20, 100, obs)
     doc = default_document()
@@ -51,20 +51,17 @@ class DrawerNativeTest(unittest.TestCase):
     state = replace(state, customization=doc)
     emitted = []
     touch = OnroadInput(emitted.append, Profile.LARGE)
-    from openpilot.starpilot.ui.large_speed_geometry import source_toggle_bounds
-    left, top, _, _ = source_toggle_bounds(state)
+    from openpilot.starpilot.ui.large_speed_geometry import CARD_HEIGHT
+    card = doc['layouts']['large']['cruise_limits']
+    left, top = card['x'], card['y'] + CARD_HEIGHT + 22
+    # The sources panel follows the Galaxy layout setting only; the old toggle row is not a touch target.
     touch.press(left + 12, top + 12, state)
-    touch.release(left + 12, top + 12, state)
-    self.assertEqual([(r.kind, r.value) for r in emitted], [('set_speed_sources', False)])
-    touch.press(120, 320, state)
     self.assertFalse(touch.claimed)
+    touch.release(left + 12, top + 12, state)
     pending = replace(state, speed_limit=replace(obs, pending_speed_limit_mps=30, decision_id=2))
     touch.press(left + 12, top + 12, pending)
     touch.release(left + 12, top + 12, pending)
-    self.assertEqual(len(emitted), 2)
-    touch.press(left + 12, top + 12, state)
-    touch.release(left + 12, top + 12, replace(state, speed_limit=SpeedLimitObservation()))
-    self.assertEqual(len(emitted), 2)
+    self.assertEqual(emitted, [])
 
   def test_nested_drawer_clip_restores_parent_after_exception(self):
     calls = []
@@ -82,15 +79,6 @@ class DrawerNativeTest(unittest.TestCase):
     doc['speedSources'] = 1
     with self.assertRaises(ValueError):
       validate_document(doc)
-
-  def test_invalid_saved_layout_is_preserved_without_write(self):
-    params = SimpleNamespace(put=lambda *args: self.fail('invalid saved layout overwritten'))
-    with patch('openpilot.starpilot.ui.onroad_customization.read_saved', return_value=(b'{broken', True)):
-      with self.assertRaises(ValueError):
-        set_speed_sources(params, True)
-    with patch('openpilot.starpilot.ui.onroad_customization.read_saved', return_value=(None, False)):
-      with self.assertRaises(ValueError):
-        set_speed_sources(params, True)
 
   def test_expired_producer_and_old_drive_transport_cannot_supply_readings(self):
     sm, cp = replay_inputs()
@@ -149,21 +137,15 @@ class DrawerNativeTest(unittest.TestCase):
     self.assertIn(('Dashboard', FontRole.MEDIUM), drawn)
     self.assertIn(('Vision', FontRole.NORMAL), drawn)
 
-  def test_custom_right_edge_keeps_panel_and_toggle_inside_viewport(self):
-    from openpilot.starpilot.ui.large_speed_geometry import source_toggle_bounds
+  def test_custom_right_edge_keeps_panel_inside_viewport(self):
+    from openpilot.starpilot.ui.large_speed_geometry import source_panel_bounds
     obs = SpeedLimitObservation(ObservationKind.VALID, 'dashboard', 25, session_id='edge')
     doc = default_document()
     doc['speedSources'] = True
     doc['layouts']['large']['cruise_limits']['x'] = 1350
     state = OnroadState(False, False, 20, 100, obs, customization=validate_document(doc))
-    left, top, right, bottom = source_toggle_bounds(state)
-    self.assertLessEqual(right, 1830)
-    self.assertLessEqual(bottom, 1050)
-    emitted = []
-    touch = OnroadInput(emitted.append, Profile.LARGE)
-    touch.press(1850, top + 12, state)
-    touch.release(1850, top + 12, state)
-    self.assertEqual(emitted, [])
-    touch.press(left + 12, top + 12, state)
-    touch.release(left + 12, top + 12, state)
-    self.assertEqual(len(emitted), 1)
+    bounds = source_panel_bounds(state, 200, rl.Rectangle(30, 30, 1800, 1020))
+    self.assertIsNotNone(bounds)
+    x, y, width, height = bounds
+    self.assertLessEqual(x + width, 1830)
+    self.assertLessEqual(y + height, 1050)

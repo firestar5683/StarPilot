@@ -1,7 +1,7 @@
 """Large speed stack dimensions shared by rendering, input and layout metadata."""
 from functools import lru_cache
 
-WIDTH = 344
+WIDTH = 320
 MAX_ROW_HEIGHT = 210
 LIMIT_ROW_HEIGHT = 260
 CARD_HEIGHT = MAX_ROW_HEIGHT + LIMIT_ROW_HEIGHT
@@ -10,7 +10,6 @@ ACTION_X = 88
 ACTION_Y = 75 + CARD_HEIGHT + 22
 ACTION_HEADER_HEIGHT = 44
 GAP = 8
-TOGGLE_HEIGHT = 44
 SOURCE_ROW_HEIGHT = 56
 PADDING = 24
 
@@ -39,22 +38,6 @@ def _action_regions(state):
   return regions
 
 
-def source_toggle_bounds(state):
-  from openpilot.starpilot.ui.onroad_customization import placement
-  from openpilot.starpilot.ui.unified_speed_presentation import resolve_unified_speed
-
-  card = placement(state.customization, 'large', 'cruise_limits')
-  shown = resolve_unified_speed(state)
-  height = card_height(shown.mode)
-  top = card['y'] + height + 22
-  for left, action_top, right, bottom in _action_regions(state):
-    if left < card['x'] + WIDTH and right > card['x'] and action_top < top + TOGGLE_HEIGHT and bottom > top:
-      top = bottom + 22
-  if top + TOGGLE_HEIGHT > 1050:
-    top = card['y'] - GAP - TOGGLE_HEIGHT
-  return card['x'], top, card['x'] + WIDTH, top + TOGGLE_HEIGHT
-
-
 def source_panel_bounds(state, height, viewport):
   """Prefer the aligned column; move the popup only for constrained saved layouts."""
   from openpilot.starpilot.ui.onroad_customization import placement, PROFILES, widget_size, CAMERA_WIDGETS
@@ -62,8 +45,9 @@ def source_panel_bounds(state, height, viewport):
 
   card = placement(state.customization, 'large', 'cruise_limits')
   height_of_card = card_height(resolve_unified_speed(state).mode)
-  left, top, right, bottom = source_toggle_bounds(state)
-  occupied = [(card['x'], card['y'], card['x'] + WIDTH, card['y'] + height_of_card), (left, top, right, bottom)]
+  # The panel opens from the card itself; there is no on-screen toggle row any more.
+  left, top, right, bottom = card['x'], card['y'], card['x'] + WIDTH, card['y'] + height_of_card
+  occupied = [(left, top, right, bottom)]
   occupied.extend(_action_regions(state))
   layouts = state.customization['layouts']['large']
   projected = 'nav_card' in layouts

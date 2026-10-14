@@ -72,7 +72,7 @@ PROFILES: dict[str, LayoutProfile] = {
             "reservedZones": [],
             "widgets": {
               "current_speed": _widget("Current speed", "current_speed", 580, 300, 640, 30),
-              "cruise_limits": _widget("Cruise and speed limit", "cruise_limits", WIDTH, CARD_HEIGHT + 52, 88, 75),
+              "cruise_limits": _widget("Cruise and speed limit", "cruise_limits", WIDTH, CARD_HEIGHT, 88, 75),
               "speed_limit_actions": _widget("Speed limit actions", "speed_limit_actions", WIDTH, ACTION_HEIGHT, ACTION_X, ACTION_Y),
               "steering_wheel": _widget("Steering wheel", "steering_wheel", 192, 192, 1588, 75),
               "driver_monitor": _widget("Driver monitoring", "driver_monitor", 192, 192, 88, 808)}},
@@ -484,15 +484,3 @@ def rgba(document, key, profile=None, widget=None):
 @lru_cache(maxsize=256)
 def _rgba_value(color):
   return tuple(int(color[index:index + 2], 16) for index in (1, 3, 5, 7))
-
-
-def set_speed_sources(params, opened):
-  """Change only a valid saved document; display fallback is not write authority."""
-  if type(opened) is not bool:
-    raise ValueError('Invalid speed source drawer preference')
-  raw, readable = read_saved(params, PARAM_KEY, MAX_BYTES)
-  if not readable:
-    raise ValueError('Saved layout is unreadable')
-  document = decode_document(raw) if raw is not None else default_document()
-  document['speedSources'] = opened
-  params.put(PARAM_KEY, json.dumps(validate_document(document), separators=(',', ':')))

@@ -113,6 +113,9 @@ def layout_metadata_for_viewport(viewport):
   for key in ACTION_WIDGETS:
     widgets[key].update(opacity={'min': CAR_EXIT_MIN_OPACITY if key == CAR_EXIT else 0, 'max': 100, 'default': 100}, backgroundToggle=True)
     widgets[key]['default'].update(opacity=100, background=True)
+  # Background opacity for the cruise and speed-limit card; its text stays solid.
+  widgets['cruise_limits'].update(opacity={'min': 0, 'max': 100, 'default': 100})
+  widgets['cruise_limits']['default'].update(opacity=100)
   profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], STOPPED_TIMER_WIDGET, NAV_CARD, *DISPLAY_WIDGETS, CAR_EXIT]
   return profile
 
@@ -120,7 +123,7 @@ def layout_metadata_for_viewport(viewport):
 # Android Auto display switches, independent of the comma screen's preferences.
 DISPLAY_DEFAULTS = {'blindSpotBorder': False, 'signalBorder': False, 'blindSpotCamera': False,
                     'hidePersonalityAlerts': False, 'wheelPedalFeedback': False,
-                    'leadIndicator': False, 'leadInfo': 'Off'}
+                    'leadIndicator': False, 'leadInfo': 'Off', 'speedSources': False}
 # Lead info shown above the lead marker, in LeadInfoMode order.
 LEAD_INFO_CHOICES = ('Off', 'Distance', 'Speed')
 
@@ -234,9 +237,12 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
     if key in ACTION_WIDGETS and type(placement) is dict:
       placement.setdefault('opacity', 100)
       placement.setdefault('background', True)
+    if key == 'cruise_limits' and type(placement) is dict:
+      placement.setdefault('opacity', 100)
     fields = ({'x', 'y', 'enabled'} | ({'size'} if key == 'steering_wheel' else set()) |
               ({'display'} if key in DISPLAY_WIDGETS else set()) |
               ({'opacity', 'background'} if key in ACTION_WIDGETS else set()) |
+              ({'opacity'} if key == 'cruise_limits' else set()) |
               ({'width', 'height', 'opacity'} if key == NAV_MAP else set()))
     if type(placement) is not dict or set(placement) != fields or type(placement['enabled']) is not bool:
       raise ValueError('Invalid projection widget')
@@ -247,6 +253,8 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
     if key in ACTION_WIDGETS and (type(placement['opacity']) is not int or not 0 <= placement['opacity'] <= 100 or
                                   type(placement['background']) is not bool):
       raise ValueError('Invalid action widget appearance')
+    if key == 'cruise_limits' and (type(placement['opacity']) is not int or not 0 <= placement['opacity'] <= 100):
+      raise ValueError('Invalid cruise card opacity')
     if key == CAR_EXIT and placement['opacity'] < CAR_EXIT_MIN_OPACITY:
       raise ValueError('Exit to car opacity must be at least 25%')
     size = placement.get('size', 192)
@@ -326,4 +334,13 @@ def projection_customization(document, base_customization):
   for key, placement in document['widgets'].items():
     dx, dy = shifts.get(key, (0, 0))
     result['layouts']['large'][key] = {**placement, 'x': placement['x'] - dx, 'y': placement['y'] - dy}
+  from openpilot.starpilot.ui.onroad_customization import rgba
+  # Card opacity is a colour, not a placement: fold it into the fill and keep the native placement shape.
+  opacity = result['layouts']['large'].get('cruise_limits', {}).pop('opacity', 100)
+  if opacity != 100:
+    red, green, blue, alpha = rgba(result, 'cardFill', 'large', 'cruise_limits')
+    fill = f'#{red:02X}{green:02X}{blue:02X}{round(alpha * opacity / 100):02X}'
+    result['widgetColors']['large'].setdefault('cruise_limits', {})['cardFill'] = fill
+  if 'speedSources' in document:
+    result['speedSources'] = document['speedSources']
   return result

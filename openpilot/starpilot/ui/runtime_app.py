@@ -232,7 +232,6 @@ class StarShellSession:
                             native_panels=NATIVE_SETTINGS_PANELS if profile == Profile.LARGE and settings_layer is not None else ())
     if profile == Profile.LARGE:
       self.view.onroad.pressed_action = lambda: self.input.onroad.pressed_action
-      self.view.onroad.unified_speed.source_pressed = lambda: self.input.onroad.source_pressed
     self.selected = Destination.STAR
     self.sidebar_expanded = True
     self._onroad_width = 1860.0
@@ -1357,17 +1356,6 @@ class StarShellSession:
     self._request_emitted = True
     previous_destination = self.selected
     action = request.action
-    if request.source == "onroad" and getattr(action, "kind", None) == "set_speed_sources":
-      from openpilot.starpilot.ui.onroad_customization import set_speed_sources
-      if self._mode == ShellMode.ONROAD and type(action.value) is bool:
-        try:
-          set_speed_sources(self.adapter.ui_state.params, action.value)
-        except (AttributeError, OSError, TypeError, ValueError, UnicodeError, RecursionError):
-          self._unavailable('speed source drawer preference; saved layout needs review')
-        else:
-          self.adapter.invalidate_appearance()
-          self._snapshot_cache = None
-      return
     if request.source == "onroad" and getattr(action, "kind", None) == "set_experimental":
       binding = self._native_favorite_actions().get(EXPERIMENTAL)
       if not (binding is not None and binding.available and binding.invoke is not None and

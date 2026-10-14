@@ -522,7 +522,7 @@ class AppearanceSettingsTests(unittest.TestCase):
     with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card, patch.object(rl, "draw_line_ex"):
       UnifiedSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), base)
       anchor = card.call_args.args[0]
-      self.assertEqual((anchor.x, anchor.y, anchor.width, anchor.height), (88, 75, 344, 210))
+      self.assertEqual((anchor.x, anchor.y, anchor.width, anchor.height), (88, 75, 320, 210))
     for profile in (Profile.LARGE, Profile.COMPACT):
       view = onroad.OnroadView.__new__(onroad.OnroadView)
       view.navigation = Mock()

@@ -481,6 +481,20 @@ assert.equal(vm.selectedColors.text, "#FFFFFFFF")
 vm.colorRgb("text", { target: { value: "#abcdef" } })
 vm.colorAlpha("text", { target: { value: "128" } })
 assert.equal(vm.selectedColors.text, "#ABCDEF80")
+// One scene dropdown, grouped, with every scene exactly once.
+assert.deepEqual(vm.sceneGroups.map(group => group.label), ["Driving", "Conditional experimental", "Speed limit"])
+assert.deepEqual(vm.sceneGroups.flatMap(group => group.scenes.map(scene => scene.id)).sort(), vm.scenes.map(scene => scene.id).sort())
+assert.match(OnroadLayoutPage.template, /<GalaxySelect class="gx-field gx-field--full" aria-label="Preview scene"/)
+// The widget open in Edit glows; the sources panel is a layout setting, not an on-screen toggle.
+assert.match(OnroadLayoutPage.template, /'is-editing': state\.showEditingAids && state\.inspectorPanel === 'edit' && state\.selected === widget\.id/)
+vm.state.selected = "cruise_limits"
+vm.setSpeedSources({ target: { checked: true } })
+assert.equal(vm.state.draft.speedSources, true)
+vm.undo()
+assert.notEqual(vm.state.draft.speedSources, true)
+vm.state.selected = "current_speed"
+vm.setSpeedSources({ target: { checked: true } })
+assert.notEqual(vm.state.draft.speedSources, true) // Only from the cruise widget's own panel.
 // Moving or removing widgets keeps the same backdrop; scene and size changes replace it.
 const backdropCount = backdropCalls.length
 vm.changePosition("current_speed", 720, 220)

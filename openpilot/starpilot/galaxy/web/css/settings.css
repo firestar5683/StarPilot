@@ -341,13 +341,11 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 .gx-layout__subhead > span, .gx-layout__savebar > span { color: var(--on-surface-variant); }
 .gx-layout__zone-toggle { display: flex; align-items: center; gap: 8px; color: var(--on-surface-variant); font-size: var(--fs-sm); }
 .gx-layout__zone-toggle input { accent-color: var(--primary); }
-.gx-layout__scenes button[aria-pressed="true"] { background: var(--primary-container); color: var(--on-primary-container); outline: 2px solid var(--primary); outline-offset: -2px; }
 .gx-layout__workspace { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; min-width: 0; }
 .gx-layout__preview-card, .gx-layout__inspector, .gx-layout__colors, .gx-layout__discard { padding: 20px; display: grid; gap: 16px; min-width: 0; }
 .gx-layout__preview-card { padding: 20px 0; }
 .gx-layout__preview-card > :not(svg) { margin-inline: 20px; }
 .gx-layout__preview { display: block; width: 100%; height: auto; border-block: 1px solid var(--glass-border); touch-action: none; user-select: none; }
-.gx-layout__scenes { display: flex; flex-wrap: wrap; gap: 8px; margin-inline: 20px; }
 .gx-layout__widget { cursor: grab; outline: none; }
 .gx-layout__widget:active { cursor: grabbing; }
 .gx-layout-widget-art { pointer-events: none; font-family: var(--font-body); }
@@ -362,6 +360,8 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 .gx-layout__selection { pointer-events: none; opacity: 0; }
 .gx-layout__widget.is-selected .gx-layout__selection, .gx-layout__widget:focus-visible .gx-layout__selection { opacity: 1; }
 .gx-layout__widget:focus-visible .gx-layout__selection { stroke: #fff; stroke-dasharray: none; }
+/* The widget open in Edit; the glow size is in canvas units, so the stage sets it per layout size. */
+.gx-layout__widget.is-editing .gx-layout__selection { opacity: 1; stroke-dasharray: none; filter: drop-shadow(0 0 var(--layout-glow) #b799ff); }
 .gx-layout__resize { cursor: nwse-resize; touch-action: none; }
 .gx-layout__resize:hover circle:last-of-type { fill: #d4c2ff; }
 .gx-layout__widget-list { display: grid; gap: 8px; }
@@ -401,8 +401,6 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 .gx-layout__savebar .gx-btn { min-height: 40px; padding: 8px 14px; }
 .gx-layout__savebar > span { flex: 1 1 140px; font-size: var(--fs-sm); }
 .gx-layout__help > div { display: grid; gap: 10px; padding-block: 8px; }
-.gx-layout__scenes { flex-wrap: nowrap; overflow-x: auto; padding: 2px; }
-.gx-layout__scenes > button { flex-shrink: 0; }
 .gx-layout__inspector .gx-layout__palette { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
 @container (max-width: 1040px) {
   .gx-layout { max-width: 760px; }

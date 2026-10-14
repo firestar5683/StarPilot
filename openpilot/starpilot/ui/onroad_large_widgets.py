@@ -65,8 +65,7 @@ class UnifiedSpeedWidget:
       self.fonts.draw(value, role, 30, panel.x + panel.width - 32 - value_width, y + (row_height - value_height) / 2, color)
 
   def render(self, content: rl.Rectangle, state: OnroadState) -> None:
-    from openpilot.starpilot.ui.large_speed_geometry import (WIDTH, MAX_ROW_HEIGHT, PADDING, SOURCE_ROW_HEIGHT,
-                                                           card_height, source_toggle_bounds, source_panel_bounds)
+    from openpilot.starpilot.ui.large_speed_geometry import WIDTH, MAX_ROW_HEIGHT, PADDING, card_height
     from openpilot.starpilot.ui.onroad_customization import placement
     shown = resolve_unified_speed(state)
     if shown.mode == 'hidden':
@@ -130,13 +129,22 @@ class UnifiedSpeedWidget:
     if not available:
       self.collapse_sources()
       return
+    # Sources open from the Galaxy layout setting; there is no on-screen toggle.
     now = state.observed_ns / 1e9 if state.observed_ns else time.monotonic()
     self._source_drawer.update(state.customization.get('speedSources', False), now)
-    left, top, right, bottom = source_toggle_bounds(state)
-    if getattr(self, 'source_pressed', lambda: False)():
-      rl.draw_rectangle_rounded(rl.Rectangle(left, top, right - left, bottom - top), .15, 8, rl.Color(197, 163, 255, 35))
-    label('Hide sources' if state.customization.get('speedSources', False) else 'View sources', left + PADDING, top + 11,
-          size=30, role=FontRole.NORMAL)
+    self._draw_sources(content, state, fill, border)
+
+  def render_source_panel(self, content: rl.Rectangle, state: OnroadState) -> None:
+    """Only the open sources panel, for the layout preview, which places the card itself as a movable widget."""
+    shown = resolve_unified_speed(state)
+    if (shown.mode in ('hidden', 'max_only') or state.speed_limit.kind != ObservationKind.VALID or
+        not state.speed_limit.session_id or not state.customization.get('speedSources', False)):
+      return
+    self._draw_sources(content, state, rl.Color(*rgba(state.customization, 'cardFill', 'large', 'cruise_limits')),
+                       rl.Color(*rgba(state.customization, 'cardBorder', 'large', 'cruise_limits')))
+
+  def _draw_sources(self, content: rl.Rectangle, state: OnroadState, fill: rl.Color, border: rl.Color) -> None:
+    from openpilot.starpilot.ui.large_speed_geometry import PADDING, SOURCE_ROW_HEIGHT, source_panel_bounds
     if self._source_drawer.progress <= 0:
       return
     rows = sum(row.enabled for row in state.speed_limit.source_readings)

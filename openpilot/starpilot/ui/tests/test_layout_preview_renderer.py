@@ -120,7 +120,7 @@ class LayoutPreviewRendererTests(unittest.TestCase):
       self.assertEqual(renderer({"document": document, "profile": "compact", "scene": "braking", "art": "backdrop"}), b"png")
     state, scene = canvas.render.call_args.args
     self.assertEqual(scene, "braking")
-    self.assertEqual(canvas.render.call_args.kwargs, {"label": False})
+    self.assertEqual(canvas.render.call_args.kwargs, {"label": False, "source_panel": True})
     # An order naming no widget keeps the ordered path, so no movable widget is drawn.
     self.assertEqual(state.customization["widgetOrder"]["compact"], ["backdrop"])
     self.assertEqual(state.customization["layouts"], document["layouts"])

@@ -290,7 +290,7 @@ def test_large_draw_origins_and_wheel_input_move_together():
   with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card, patch.object(rl, "draw_line_ex"):
     UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
     rect = card.call_args.args[0]
-    assert (rect.x, rect.y, rect.width, rect.height) == (188, 95, 344, 210)
+    assert (rect.x, rect.y, rect.width, rect.height) == (188, 95, 320, 210)
   CurrentSpeedHud(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
   assert fonts.draw.call_args_list[-2].args[3:5] == (965, 112)
   wheel = SteeringWheelWidget.__new__(SteeringWheelWidget)
@@ -323,7 +323,7 @@ def test_speed_limit_actions_move_independently_of_cruise_card_and_keep_touch_pr
                                      presentation_id=2, action_enabled=True)
   state = road(document, speed_limit=observation, longitudinal_active=True, slc_system_long_available=True)
   controls = slc_controls(Profile.LARGE, state)
-  assert controls[0].bounds == (388, 644, 554, 708)
+  assert controls[0].bounds == (388, 644, 542, 708)
   assert slc_controls(Profile.COMPACT, state)[0].bounds == (174, 180, 310, 234)
   emit = Mock()
   inputs = OnroadInput(emit)
@@ -372,7 +372,7 @@ def test_frozen_default_draw_geometry_and_neutral_colors():
   with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card, patch.object(rl, "draw_line_ex"):
     UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
     rect = card.call_args.args[0]
-    assert (rect.x, rect.y, rect.width, rect.height) == (88, 75, 344, 210)
+    assert (rect.x, rect.y, rect.width, rect.height) == (88, 75, 320, 210)
     fill, border = card.call_args.kwargs["fill"], card.call_args.kwargs["border"]
     assert (fill.r, fill.g, fill.b, fill.a) == (16, 25, 31, 255)
     assert (border.r, border.g, border.b, border.a) == (53, 67, 77, 255)

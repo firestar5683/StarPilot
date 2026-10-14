@@ -369,6 +369,10 @@ export const OnroadLayoutPage = {
     saveAvailable() { return !!this.state.data?.editable && !this.state.error && !this.state.needsReload && this.dirty && !this.state.drag && !this.state.layerDrag },
     canSavePending() { return this.saveAvailable && !this.busy },
     profile() { return this.state.data?.metadata.profiles[this.state.profile] },
+    sceneGroups() {
+      return [["Driving", scene => !/^(cem|slc)_/.test(scene.id)], ["Conditional experimental", scene => scene.id.startsWith("cem_")],
+        ["Speed limit", scene => scene.id.startsWith("slc_")]].map(([label, test]) => ({ label, scenes: this.scenes.filter(test) }))
+    },
     layout() { return this.state.draft?.layouts[this.state.profile] },
     projectionHasPipWidget() {
       return ["pip_left", "pip_right"].some(id => this.state.draft?.layouts?.large?.[id]?.enabled === true)
@@ -781,6 +785,13 @@ export const OnroadLayoutPage = {
       if (!this.editable || this.state.drag || this.state.layerDrag || this.selectedWidget?.kind !== "cruise_limits") return
       const before = clone(this.state.draft)
       this.state.draft.showMaxSpeed = event.target.checked
+      this.recordChange(before)
+      this.state.notice = ""
+    },
+    setSpeedSources(event) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || this.selectedWidget?.kind !== "cruise_limits") return
+      const before = clone(this.state.draft)
+      this.state.draft.speedSources = event.target.checked
       this.recordChange(before)
       this.state.notice = ""
     },
@@ -1203,21 +1214,22 @@ export const OnroadLayoutPage = {
             <section ref="pinned" class="gx-card gx-layout__preview-card" :class="{'is-stuck': state.stuck.pinned}" aria-label="Driving screen preview" :style="{'--layout-ratio': profile.width / profile.height}">
               <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ state.layerDrag ? "Adjusting " + selectedWidget.label : state.art.status === 'updating' || state.backdrop.status === 'updating' ? 'Updating preview…' : profile.width + " × " + profile.height }}</span></div>
               <div class="gx-layout__preview-bar">
+                <GalaxySelect class="gx-field gx-field--full" aria-label="Preview scene" :value="state.scene" :disabled="!!state.drag || !!state.layerDrag" @change="state.scene = $event.target.value">
+                  <optgroup v-for="group in sceneGroups" :key="group.label" :label="group.label">
+                    <option v-for="scene in group.scenes" :key="scene.id" :value="scene.id">{{ scene.label }}</option>
+                  </optgroup>
+                </GalaxySelect>
                 <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.snapEnabled" :disabled="!!state.drag || !!state.layerDrag" aria-label="Snap to edges and centres" title="Snap to edges and centres" @click="toggleSnap"><i class="bi bi-magnet" aria-hidden="true"></i></button>
                 <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.showEditingAids" aria-label="Show editing aids" title="Show editing aids" @click="toggleEditingAids"><i class="bi bi-bounding-box" aria-hidden="true"></i></button>
                 <button v-if="!projection && profile.inputZones?.length" class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.showFavoriteZones" aria-label="Show Favorite tap areas" title="Show Favorite tap areas" @click="state.showFavoriteZones = !state.showFavoriteZones"><i class="bi bi-grid-3x3-gap" aria-hidden="true"></i></button>
                 <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-expanded="state.tipsOpen" aria-controls="gx-layout-tips" aria-label="Preview tips and display behavior" title="Preview tips and display behavior" @click="state.tipsOpen = !state.tipsOpen"><i class="bi bi-question-circle" aria-hidden="true"></i></button>
-              </div>
-              <div class="gx-layout__scenes" aria-label="Preview scene">
-                <button v-for="scene in scenes" :key="scene.id" class="gx-btn gx-btn--tonal" type="button" :aria-pressed="state.scene === scene.id"
-                  :disabled="!!state.drag || !!state.layerDrag" @click="state.scene = scene.id">{{ scene.label }}</button>
               </div>
               <p v-if="state.backdrop.status === 'unavailable'" class="gx-note" role="status">{{ state.backdrop.url ? 'The comma screen could not refresh. Showing the last one.' : 'The comma screen is unavailable. Showing a sketch.' }}</p>
               <p v-if="state.art.status === 'unavailable'" class="gx-note" role="status">{{ state.art.url ? 'Widget preview could not refresh. Showing the last preview.' : 'Widget preview unavailable. Placement controls remain available.' }}</p>
               <div class="gx-layout__stage">
               <span v-if="state.showEditingAids && state.snapGuides.length && !snapInBar" class="gx-layout__stage-chip gx-layout__stage-chip--start" :class="{'gx-layout__stage-chip--with-tap-areas': !projection && state.showFavoriteZones}" aria-hidden="true">{{ snapSummary }}</span>
               <span v-if="!projection && state.showFavoriteZones && state.showEditingAids" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i>Tap areas</span>
-              <svg ref="preview" class="gx-layout__preview" :viewBox="'0 0 ' + profile.width + ' ' + profile.height" :width="profile.width" :height="profile.height"
+              <svg ref="preview" class="gx-layout__preview" :style="{'--layout-glow': state.profile === 'compact' ? '4px' : '14px'}" :viewBox="'0 0 ' + profile.width + ' ' + profile.height" :width="profile.width" :height="profile.height"
                 @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag"
                 role="group" :aria-label="projection ? 'Android Auto layout preview' : (state.profile === 'large' ? 'Big' : 'Small') + ' layout preview'">
                 <image v-if="state.backdrop.url" :href="state.backdrop.url" :width="profile.width" :height="profile.height" preserveAspectRatio="none" data-preview-source="device-backdrop" />
@@ -1257,7 +1269,7 @@ export const OnroadLayoutPage = {
                     <text :x="zone.x + zone.width / 2" :y="zone.y + zone.height - 8" text-anchor="middle" :font-size="state.profile === 'large' ? 20 : 10" fill="#d8c8ff">{{ zone.label }}</text>
                   </g>
                 </g>
-                <g v-for="widget in renderWidgets" :key="widget.id" class="gx-layout__widget" :class="{'is-selected': state.drag?.id === widget.id}"
+                <g v-for="widget in renderWidgets" :key="widget.id" class="gx-layout__widget" :class="{'is-selected': state.drag?.id === widget.id, 'is-editing': state.showEditingAids && state.inspectorPanel === 'edit' && state.selected === widget.id}"
                   :transform="'translate(' + layout[widget.id].x + ' ' + layout[widget.id].y + ')'" tabindex="0" role="button"
                   :aria-label="widget.label + ', x ' + layout[widget.id].x + ', y ' + layout[widget.id].y +
                     (widget.frontmost ? '. Arrow keys move; Shift moves ten pixels; required and always frontmost widget.' :
@@ -1363,7 +1375,7 @@ export const OnroadLayoutPage = {
                 <input v-if="selectedWidget.resizable" class="gx-slider" type="range" step="1" aria-label="Size" :min="selectedWidget.resizable.min" :max="selectedWidget.resizable.max"
                   :value="selectedPosition.size" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @input="sizeSlider($event)" @change="finishColorEdit" @blur="finishColorEdit">
                 <template v-if="selectedWidget.opacity">
-                  <label for="layout-widget-opacity">{{ selectedWidget.box ? 'Map opacity' : 'Opacity' }} · {{ selectedPosition.opacity }}%</label>
+                  <label for="layout-widget-opacity">{{ selectedWidget.box ? 'Map opacity' : selectedWidget.kind === 'cruise_limits' ? 'Background opacity' : 'Opacity' }} · {{ selectedPosition.opacity }}%</label>
                   <input id="layout-widget-opacity" class="gx-slider" type="range" step="1" :min="selectedWidget.opacity.min" :max="selectedWidget.opacity.max"
                     :value="selectedPosition.opacity" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @input="opacityInput($event)" @change="finishColorEdit" @blur="finishColorEdit">
                 </template>
@@ -1372,6 +1384,7 @@ export const OnroadLayoutPage = {
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
+                <label v-if="selectedWidget.kind === 'cruise_limits'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.speedSources === true" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setSpeedSources"> Show speed-limit sources</label>
                 <label v-if="!projection && selectedWidget.kind === 'cruise_limits'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.showMaxSpeed !== false" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setShowMaxSpeed"> Show MAX speed</label>
                 <GalaxySettingRow v-if="projection && selectedWidget.kind === 'steering_wheel'" :row="switchRow('Brake and Acceleration Colors', state.draft.wheelPedalFeedback === true)" :index="0"
                   :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('wheelPedalFeedback', value)" />

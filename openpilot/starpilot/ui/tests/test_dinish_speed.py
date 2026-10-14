@@ -7,7 +7,7 @@ from PIL import Image
 import pyray as rl
 
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory, font_filename, font_path, validate_bitmap_font
-from openpilot.starpilot.ui.large_speed_geometry import WIDTH, PADDING, source_panel_bounds, source_toggle_bounds
+from openpilot.starpilot.ui.large_speed_geometry import WIDTH, PADDING, source_panel_bounds
 from openpilot.starpilot.ui.onroad_customization import default_document, validate_document
 from openpilot.starpilot.ui.onroad_state import slc_controls
 from openpilot.starpilot.ui.tests.test_speed_stack import road
@@ -40,12 +40,20 @@ def test_three_digit_values_units_and_long_status_fit_actual_fonts():
     assert rl.is_window_ready(), "Native font fixture requires a real graphics context"
     fonts = BitmapFonts(Profile.LARGE, default_font_directory())
     try:
+      room = WIDTH - 2 * PADDING
+      def fitted(text, role, size, extra=0.):
+        # The card shrinks a line one point at a time until it fits, as UnifiedSpeedWidget.render does.
+        while fonts.measure(text, role, size).width + extra > room:
+          size -= 1
+        return size
       for value in ('88', '99', '100', '110', '120', '199', '–'):
-        for unit in ('mph', 'km/h'):
-          assert fonts.measure(value, FontRole.SPEED, 112).width + 14 + fonts.measure(unit, FontRole.NORMAL, 28).width <= WIDTH - 2 * PADDING
+        # Three-digit mph stays full size; three-digit km/h may shrink slightly.
+        assert fitted(value, FontRole.SPEED, 112, 14 + fonts.measure('mph', FontRole.NORMAL, 28).width) == 112
+        assert fitted(value, FontRole.SPEED, 112, 14 + fonts.measure('km/h', FontRole.NORMAL, 28).width) >= 106
       for status in ('Using accelerator', 'Overridden', 'Above set speed', 'Matches set speed', 'Override saved',
-                     'Using set speed', 'Using speed limit', 'Matches speed limit', 'Unavailable', 'Cruise off'):
-        assert fonts.measure(status, FontRole.NORMAL, 30).width <= WIDTH - 2 * PADDING
+                     'Using set speed', 'Using speed limit', 'Matches speed limit', 'Unavailable', 'Cruise off',
+                     'Set-speed override'):
+        assert fitted(status, FontRole.NORMAL, 30) >= 28
       top, bottom = fonts.vertical_ink('120', FontRole.SPEED, 112)
       assert 85 <= bottom - top <= 90
     finally:
@@ -63,8 +71,8 @@ def test_v5_geometry_migrates_and_keeps_custom_actions_independent():
   doc['layouts']['large']['speed_limit_actions'].update(x=1550, y=954)
   migrated = validate_document(doc)
   assert migrated['version'] == 6
-  assert migrated['layouts']['large']['cruise_limits'] == {'x': 1486, 'y': 528, 'enabled': True}
-  assert migrated['layouts']['large']['speed_limit_actions'] == {'x': 1486, 'y': 942, 'enabled': True}
+  assert migrated['layouts']['large']['cruise_limits'] == {'x': 1510, 'y': 580, 'enabled': True}
+  assert migrated['layouts']['large']['speed_limit_actions'] == {'x': 1510, 'y': 942, 'enabled': True}
   assert migrated['speedSources'] is True
   assert doc['layouts']['large']['cruise_limits']['x'] == 1550
   assert validate_document(migrated) == migrated
@@ -77,9 +85,8 @@ def test_pending_buttons_and_source_popup_do_not_cover_monitor():
   state = road()
   state = replace(state, speed_limit=replace(state.speed_limit, pending_speed_limit_mps=25))
   apply, keep = slc_controls(Profile.LARGE, state)
-  assert apply.bounds == (88, 611, 254, 675)
-  assert keep.bounds == (266, 611, 432, 675)
-  assert source_toggle_bounds(state) == (88, 697, 432, 741)
+  assert apply.bounds == (88, 611, 242, 675)
+  assert keep.bounds == (254, 611, 408, 675)
   panel = source_panel_bounds(state, 200, SimpleNamespace(x=30, y=30, width=1800, height=1020))
   assert panel is not None
   x, y, width, height = panel
@@ -107,8 +114,8 @@ def test_committed_projection_v1_right_edge_is_preserved_and_clamped():
   doc['widgets']['cruise_limits'].update(x=1654, y=75)
   doc['widgets']['speed_limit_actions'].update(x=1654, y=500)
   migrated = validate_layout_for_viewport(doc, viewport)
-  assert migrated['widgets']['cruise_limits']['x'] == 1486
-  assert migrated['widgets']['speed_limit_actions'] == {'x': 1486, 'y': 567, 'enabled': True}
+  assert migrated['widgets']['cruise_limits']['x'] == 1510
+  assert migrated['widgets']['speed_limit_actions'] == {'x': 1510, 'y': 567, 'enabled': True}
 
 
 def test_projected_source_popup_avoids_moved_navigation_card():

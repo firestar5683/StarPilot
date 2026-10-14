@@ -173,6 +173,34 @@ class TestProjectionLayout(unittest.TestCase):
     with self.assertRaises(ValueError):
       decode_layout(b'{"version":1,"version":1}', SCREEN)
 
+  def test_cruise_background_opacity_and_sources_are_android_auto_settings(self):
+    from openpilot.starpilot.system.android_auto.projection_layout import (
+      default_layout_for_viewport, projection_customization, validate_layout_for_viewport)
+    from openpilot.starpilot.ui.onroad_customization import rgba
+    layout = default_layout_for_viewport((1920, 1080))
+    self.assertEqual(layout['widgets']['cruise_limits']['opacity'], 100)
+    self.assertIs(layout['speedSources'], False)
+    base = default_document()
+    solid = rgba(base, 'cardFill', 'large', 'cruise_limits')
+    native = projection_customization(layout, base)
+    self.assertEqual(rgba(native, 'cardFill', 'large', 'cruise_limits'), solid)
+    self.assertNotIn('opacity', native['layouts']['large']['cruise_limits'])
+    layout['widgets']['cruise_limits']['opacity'] = 40
+    layout['speedSources'] = True
+    native = projection_customization(validate_layout_for_viewport(layout, (1920, 1080)), base)
+    self.assertEqual(rgba(native, 'cardFill', 'large', 'cruise_limits'), (*solid[:3], round(solid[3] * .4)))
+    self.assertEqual(rgba(native, 'text', 'large', 'cruise_limits'), rgba(base, 'text', 'large', 'cruise_limits'))
+    self.assertIs(native['speedSources'], True)
+    saved = copy.deepcopy(layout)
+    del saved['widgets']['cruise_limits']['opacity']
+    del saved['speedSources']
+    restored = validate_layout_for_viewport(saved, (1920, 1080))
+    self.assertEqual((restored['widgets']['cruise_limits']['opacity'], restored['speedSources']), (100, False))
+    for bad in (-1, 101, 50.5, True):
+      layout['widgets']['cruise_limits']['opacity'] = bad
+      with self.assertRaises(ValueError):
+        validate_layout_for_viewport(layout, (1920, 1080))
+
   def test_projection_offsets_are_applied_once_and_separate(self):
     base = default_document()
     before = copy.deepcopy(base)
