@@ -63,6 +63,18 @@ def test_route_rows_prioritize_dates_preserve_names_and_keep_route_identity(utc,
   assert page._rows()[0] is row
 
 
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+def test_route_rows_show_newest_first_without_reordering_catalog(profile):
+  page, owner = page_for_input()
+  page.profile = profile
+  owner.routes = [{**ROUTE, 'routeId': f'{number:08d}--0123456789'} for number in (1, 2, 3)]
+  identifiers = [route['routeId'] for route in owner.routes]
+  rows = page._rows()
+  assert [row.key for row in rows] == identifiers[::-1]
+  assert [route['routeId'] for route in owner.routes] == identifiers
+  assert page._rows() is rows
+
+
 def test_compact_file_date_is_explicit_and_unavailable_reason_is_retained(utc):
   page, owner = page_for_input()
   page.profile = Profile.COMPACT

@@ -353,7 +353,7 @@ class ReplayPage(Widget):
     if self.route_source is not owner.routes:
       self.route_source = owner.routes
       rows = []
-      for route in owner.routes:
+      for route in reversed(owner.routes):
         calendar, clock, _, source = route_date(route, self.profile, self.clock24_hour)
         identifier = route['routeId']
         name = route.get('displayName') or identifier
