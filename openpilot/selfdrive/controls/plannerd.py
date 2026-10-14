@@ -41,6 +41,7 @@ from openpilot.starpilot.longitudinal.cruise_ceiling import CurveCeiling
 from openpilot.starpilot.feature_runtime import (enabled as feature_enabled, requested as feature_requested,
                                                slc_runtime_settings, slc_transport_capable, vision_control_enabled)
 import time
+from openpilot.starpilot.speed_limits.runtime_settings import read_params as read_slc_settings
 
 
 class SavedSlcLifecycle:
@@ -56,12 +57,15 @@ class SavedSlcLifecycle:
     if self.last_refresh_ns is not None and 0 <= now_ns - self.last_refresh_ns < 1_000_000_000:
       return self.runtime, False
     self.last_refresh_ns = now_ns
-    admitted = feature_enabled(self.params, self.cp, 'slc', self.environment)
-    settings = slc_runtime_settings(self.params, self.cp, self.environment)
-    vision = admitted and feature_enabled(self.params, self.cp, 'vision', self.environment)
+    # One immutable parsed snapshot owns this refresh. Repeated qualification
+    # used to reopen the same saved keys five times in a due model iteration.
+    saved_slc = read_slc_settings(self.params)
+    admitted = feature_enabled(self.params, self.cp, 'slc', self.environment, saved_slc=saved_slc)
+    settings = slc_runtime_settings(self.params, self.cp, self.environment, saved_slc=saved_slc)
+    vision = admitted and feature_enabled(self.params, self.cp, 'vision', self.environment, saved_slc=saved_slc)
     configuration = (admitted and not settings.errors, settings, vision,
-                     vision_control_enabled(self.params, self.cp),
-                     feature_enabled(self.params, self.cp, 'vision', {}))
+                     vision_control_enabled(self.params, self.cp, saved_slc=saved_slc),
+                     feature_enabled(self.params, self.cp, 'vision', {}, saved_slc=saved_slc))
     if configuration == self.configuration:
       return self.runtime, False
     if self.runtime is not None:
@@ -411,6 +415,12 @@ def starpilot_main():
 
   try:
     while True:
+      if 'REPLAY' not in os.environ:
+        # Due saved-setting verification can block on Params. Complete it
+        # before acquiring the model and fast-source batch, not after that
+        # batch has already begun aging toward the CEM freshness deadline.
+        slc_runtime, _ = slc_lifecycle.refresh(time.monotonic_ns(), pending_actions=pending_slc_actions,
+                                             pending_cruise=pending_slc_cruise)
       sm.update()
       if sm.updated['modelV2']:
         if phase_timing is not None:
@@ -418,8 +428,9 @@ def starpilot_main():
         # Only explicit replay uses the recorded model timeline. In a live host,
         # modelV2 may lag newer inputs in the same SubMaster update.
         now_ns = int(sm.logMonoTime['modelV2']) if 'REPLAY' in os.environ else time.monotonic_ns()
-        slc_runtime, _ = slc_lifecycle.refresh(now_ns, pending_actions=pending_slc_actions,
-                                               pending_cruise=pending_slc_cruise)
+        if 'REPLAY' in os.environ:
+          slc_runtime, _ = slc_lifecycle.refresh(now_ns, pending_actions=pending_slc_actions,
+                                                 pending_cruise=pending_slc_cruise)
         if conditional_host is not None:
           conditional_host.slc_runtime_enabled = slc_runtime is not None
         current_start_ns = (int(sm['deviceState'].startedMonoTime)

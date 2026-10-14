@@ -187,13 +187,11 @@ class SelfdriveLoopTiming:
                      points[-1][2] - points[0][2], context[-1], between))
       if index < len(history) - 3 and index != worst:
         continue
-      phases = [(a[0] + '->' + b[0], b[1] - a[1], b[2] - a[2])
-                for a, b in zip(points, points[1:], strict=False)]
       names = ('cycle_sequence', 'selected_source_ns', 'decision_ns', 'recv_one_source_ns',
                'intent_sm_ns', 'native_sm_ns', 'raw_intent_latest_ns', 'intent_step_drain_count',
                'axis_deferred', 'decision_source_ns', 'prior_output_proof', 'cycle_process_cpu_ns')
       frame = dict(zip(names, context, strict=True))
-      frame.update(points=points, phases=phases, between_loops_ns=between,
+      frame.update(points=points, between_loops_ns=between,
                    rate_before=self._rate_dict(before), rate_after=self._rate_dict(after))
       frames.append(frame)
     report['frames'] = frames
@@ -209,7 +207,7 @@ class SelfdriveLoopTiming:
     report['clock_alignment_columns'] = ('monotonic_before_ns', 'boottime_ns', 'monotonic_after_ns')
     report['proof_columns'] = ('session', 'source_ns', 'published_ns', 'deadline_ns', 'producer', 'epoch',
                                'desired_lateral', 'desired_longitudinal', 'active_lateral', 'active_longitudinal')
-    report['phase_columns'] = ('from_to', 'wall_ns', 'main_thread_cpu_ns')
+    report['phases_derived_from_points'] = True
     return report
 
 

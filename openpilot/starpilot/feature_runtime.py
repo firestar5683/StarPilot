@@ -16,7 +16,7 @@ from openpilot.starpilot.longitudinal.ioniq6_start import eligible as ioniq6_lon
 from openpilot.starpilot.longitudinal.profile_runtime import read_settings as read_profile_settings, selected_profiles_requested, read_global_powertrain_preset
 from openpilot.starpilot.longitudinal.profile_preferences import read_document_value
 from openpilot.starpilot.saved_source import read_saved
-from openpilot.starpilot.speed_limits.runtime_settings import read_params as read_slc_settings
+from openpilot.starpilot.speed_limits.runtime_settings import Settings as SlcSettings, read_params as read_slc_settings
 from openpilot.starpilot.speed_limits.selection import Source
 
 
@@ -27,7 +27,7 @@ def _read(params, key: str, limit: int = 4096) -> tuple[bytes | None, bool]:
     return None, False
 
 
-def requested(params, feature: str, *, include_auxiliary: bool = False) -> bool:
+def requested(params, feature: str, *, include_auxiliary: bool = False, saved_slc: SlcSettings | None = None) -> bool:
   """Read one feature request, including the readable factory CEM default."""
   if feature == 'conditional':
     raw, document_readable = _read(params, 'ConditionalModeConfig')
@@ -54,13 +54,13 @@ def requested(params, feature: str, *, include_auxiliary: bool = False) -> bool:
             (document.valid and isinstance(document.value, dict) and
              selected_profiles_requested(document.value)))
   if feature in ('slc', 'vision'):
-    settings = read_slc_settings(params)
+    settings = read_slc_settings(params) if saved_slc is None else saved_slc
     return (settings.enabled or settings.display) if feature == 'slc' else (
       settings.display and Source.VISION in settings.selection.slots)
   raise ValueError('unknown optional feature')
 
 
-def enabled(params, cp, feature: str, environment: Mapping[str, str]) -> bool:
+def enabled(params, cp, feature: str, environment: Mapping[str, str], *, saved_slc: SlcSettings | None = None) -> bool:
   """Preserve explicit replay opt-ins and each vehicle capability."""
   flags = {'conditional': 'CONDITIONAL_MODE_REPLAY_RUNTIME', 'curve': 'CURVE_REPLAY_RUNTIME',
            'aol': 'AOL_REPLAY_RUNTIME',
@@ -83,7 +83,7 @@ def enabled(params, cp, feature: str, environment: Mapping[str, str]) -> bool:
                                 (feature in ('slc', 'vision') and gm_display_supported(cp)))
   powertrain_requested = (feature == 'profile' and cp is not None and gm_long_supported(cp) and
                           read_document_value(params).valid and read_global_powertrain_preset(params, cp) is not None)
-  return bool(capable and (requested(params, feature) or powertrain_requested))
+  return bool(capable and (requested(params, feature, saved_slc=saved_slc) or powertrain_requested))
 
 
 def slc_transport_capable(cp, environment: Mapping[str, str]) -> bool:
@@ -92,16 +92,16 @@ def slc_transport_capable(cp, environment: Mapping[str, str]) -> bool:
               (cp is not None and (ioniq6_long_eligible(cp) or gm_long_supported(cp) or gm_display_supported(cp))))
 
 
-def slc_runtime_settings(params, cp, environment: Mapping[str, str]):
+def slc_runtime_settings(params, cp, environment: Mapping[str, str], *, saved_slc: SlcSettings | None = None):
   """Stock display startup cannot inherit a saved speed-control request."""
-  settings = read_slc_settings(params)
+  settings = read_slc_settings(params) if saved_slc is None else saved_slc
   if environment.get('SLC_REPLAY_RUNTIME') != '1' and gm_display_supported(cp) and not gm_long_supported(cp):
     return replace(settings, enabled=False, display=settings.display or settings.enabled, acceptance=replace(settings.acceptance, display_only=True))
   return settings
 
 
-def vision_control_enabled(params, cp) -> bool:
+def vision_control_enabled(params, cp, *, saved_slc: SlcSettings | None = None) -> bool:
   """Source selection never turns stock-cruise or display-only sessions into control."""
-  settings = read_slc_settings(params)
+  settings = read_slc_settings(params) if saved_slc is None else saved_slc
   return bool(cp is not None and (ioniq6_long_eligible(cp) or gm_long_supported(cp)) and
               settings.enabled and Source.VISION in settings.selection.slots)
