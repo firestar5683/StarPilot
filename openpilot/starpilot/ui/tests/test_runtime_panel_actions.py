@@ -644,7 +644,8 @@ class TestRuntimePanelActions(unittest.TestCase):
 
   def test_compact_galaxy_is_on_main_menu_and_device_keeps_native_rows(self):
     from openpilot.selfdrive.ui.mici.layouts.settings.device import device_layout as compact_device
-    from openpilot.starpilot.ui import display_compact
+    from openpilot.starpilot.ui import display_compact, replay_settings
+    replay_button = Mock()
     display_entry = object()
     panel = NS(_scroller=NS(add_widgets=Mock()))
     layout = runtime_app.StarMiciMainLayout.__new__(runtime_app.StarMiciMainLayout)
@@ -653,13 +654,20 @@ class TestRuntimePanelActions(unittest.TestCase):
     object.__setattr__(layout, "star", NS(galaxy_flow=galaxy))
     with patch.object(compact_device, "DeviceLayoutMici", return_value=panel) as built, \
          patch.object(display_compact.DisplayCompact, "entry_button", return_value=display_entry), \
+         patch.object(replay_settings, "BigButton", return_value=replay_button) as replay_constructor, \
          patch.object(runtime_app.gui_app, "push_widget") as pushed:
       layout._open_compact_destination(Destination.DEVICE)
     built.assert_called_once_with()
-    panel._scroller.add_widgets.assert_called_once_with([display_entry])
+    panel._scroller.add_widgets.assert_called_once_with([display_entry, replay_button])
     pushed.assert_called_once_with(panel)
     layout._open_compact_destination(Destination.GALAXY)
     galaxy.open_compact.assert_called_once_with()
+
+    replay_constructor.assert_called_once_with("replay", "recorded driving routes on this device")
+    replay_button.set_click_callback.assert_called_once()
+    with patch.object(replay_settings, "open_replay") as open_replay:
+      replay_button.set_click_callback.call_args.args[0]()
+    open_replay.assert_called_once_with(layout.star)
 
   def test_compact_toggles_and_software_keep_only_native_rows(self):
     from openpilot.selfdrive.ui.mici.layouts.settings import toggles, software
@@ -682,6 +690,8 @@ class TestRuntimePanelActions(unittest.TestCase):
     self.assertEqual([call.args[0] for call in pushed.call_args_list], panels)
 
   def test_compact_model_visuals_and_pair_use_existing_owners(self):
+    from openpilot.starpilot.ui import replay_settings
+    replay_button = Mock()
     from openpilot.starpilot.ui import appearance_compact, models_compact, display_compact
     from openpilot.selfdrive.ui.mici.layouts.settings.device import device_layout as compact_device
     layout = runtime_app.StarMiciMainLayout.__new__(runtime_app.StarMiciMainLayout)
@@ -692,6 +702,7 @@ class TestRuntimePanelActions(unittest.TestCase):
          patch.object(appearance_compact.AppearanceCompact, "open") as visuals_open, \
          patch.object(compact_device, "DeviceLayoutMici", return_value=panel), \
          patch.object(display_compact.DisplayCompact, "entry_button", return_value="display entry"), \
+         patch.object(replay_settings, "BigButton", return_value=replay_button) as replay_constructor, \
          patch.object(runtime_app.gui_app, "push_widget") as pushed:
       layout._open_compact_destination(Destination.DRIVING_MODEL)
       layout._open_compact_destination(Destination.APPEARANCE)
@@ -700,7 +711,13 @@ class TestRuntimePanelActions(unittest.TestCase):
     visuals_open.assert_called_once_with()
     pushed.assert_called_once_with(panel)
     panel.scroll_to_pairing.assert_called_once_with()
-    panel._scroller.add_widgets.assert_called_once_with(["display entry"])
+    panel._scroller.add_widgets.assert_called_once_with(["display entry", replay_button])
+
+    replay_constructor.assert_called_once_with("replay", "recorded driving routes on this device")
+    replay_button.set_click_callback.assert_called_once()
+    with patch.object(replay_settings, "open_replay") as open_replay:
+      replay_button.set_click_callback.call_args.args[0]()
+    open_replay.assert_called_once_with(layout.star)
 
   def test_compact_connection_can_be_viewed_while_started_but_not_mutated(self):
     with tempfile.TemporaryDirectory() as directory:

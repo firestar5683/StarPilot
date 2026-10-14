@@ -29,7 +29,7 @@ from openpilot.selfdrive.car.car_events import CarEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.selfdrive.selfdrived.events import Events, ET, Alert, Priority as AlertPriority
 from openpilot.starpilot.longitudinal.force_stop_alert import HoldAlertState, EVENT_TYPE as FORCE_STOP_HOLD
-from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
+from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck, update_big_model_status
 from openpilot.system.manager.process_health import driving_process_failures
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from opendbc.car.gm.aol import native_bootstrap_supported
@@ -268,28 +268,7 @@ class SelfdriveD:
     return False
 
   def update_big_model_status(self) -> bool:
-    big_active = timed_params_read(self, "ChestnutActive")
-    fresh = self.sm.seen['modelV2'] and self.sm.alive['modelV2'] and self.sm.valid['modelV2']
-    published_big = fresh and self.sm['modelV2'].big
-    if published_big and (big_active is True or self.sm['deviceState'].chestnutPresent):
-      self.big_model_chestnut = True
-    model_unavailable = self.big_model_active and self.sm.seen['modelV2'] and not fresh
-    demoted = self.big_model_active and fresh and not published_big
-    chestnut_lost = self.big_model_active and self.big_model_chestnut and not self.sm['deviceState'].chestnutPresent
-    load_mismatch = big_active is True and fresh and not published_big
-    big_failed = (big_active is False and not published_big) or load_mismatch or model_unavailable or demoted or chestnut_lost
-    if big_failed and not self.big_model_failed:
-      self.events.add(EventName.bigModelFailed)
-    self.big_model_failed = big_failed
-    # A successful load is not yet an executed frame; warmup output can be invalid.
-    if published_big:
-      self.big_model_active = True
-    control_current = self.sm.seen['carControl'] and self.sm.alive['carControl'] and self.sm.valid['carControl']
-    axis_active = control_current and (self.sm['carControl'].latActive or self.sm['carControl'].longActive)
-    if not self.enabled and not axis_active and not model_unavailable:
-      self.big_model_active = False
-      self.big_model_chestnut = False
-    return big_failed
+    return update_big_model_status(self)
 
   def _update_steering_authority(self, CS):
     if not monitored_profile(self.CP):

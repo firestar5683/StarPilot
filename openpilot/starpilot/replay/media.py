@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import re
+from typing import Any
 
 MAX_FRAGMENT_BYTES = 1024 * 1024
 MAX_MEDIA_BYTES = 8 * 1024 * 1024
@@ -108,8 +109,8 @@ class MediaStore:
     self.session_id, self.width, self.height = session_id, width, height
     self.epoch = 0
     self.codec = ''
-    self.init = None
-    self.fragments = deque()
+    self.init: dict[str, Any] | None = None
+    self.fragments: deque[dict[str, Any]] = deque()
     self.sequence = 0
 
   def _write(self, name: str, data: bytes):
@@ -141,6 +142,8 @@ class MediaStore:
   def publish(self, data: bytes, *, position: float, keyframe: bool):
     if not self.fragments and not keyframe:
       raise ValueError('Replay media must begin with a keyframe')
+    if self.init is None:
+      raise RuntimeError("Replay media epoch has not begun")
     self.sequence += 1
     item = {'sequence': self.sequence, 'mediaPath': self._write(f'{self.sequence}.m4s', data), 'length': len(data),
             'firstPosition': position, 'lastPosition': position, 'keyframe': bool(keyframe)}

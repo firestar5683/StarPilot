@@ -90,8 +90,8 @@ class ReplayFrameReader:
     if SESSION.fullmatch(session_id) is None or profile is not None and profile not in PROFILES:
       raise ValueError('Invalid replay frame identity')
     self.session_id, self.profile, self.last_key = session_id, profile, None
-    self.mm = None
-    self.fd = None
+    self.mm: mmap.mmap | None = None
+    self.fd: int | None = None
     fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
       info = os.fstat(fd)
@@ -105,7 +105,7 @@ class ReplayFrameReader:
     self.fd = fd
 
   def latest(self) -> ReplayFrame | None:
-    if self.mm is None:
+    if self.mm is None or self.fd is None:
       return None
     try:
       fcntl.flock(self.fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
@@ -117,6 +117,8 @@ class ReplayFrameReader:
       fcntl.flock(self.fd, fcntl.LOCK_UN)
 
   def _latest(self):
+    if self.mm is None:
+      return None
     for _ in range(3):
       seq = SEQ.unpack_from(self.mm, 8)[0]
       if not seq or seq & 1:

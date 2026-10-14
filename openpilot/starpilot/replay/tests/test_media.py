@@ -93,10 +93,11 @@ def test_descriptor_rejects_hard_linked_metadata(tmp_path):
 def test_mux_copy_has_explicit_pts_and_independent_initialization(tmp_path):
   root = Path(__file__).parents[4]
   library = Path(os.environ.get('SP_REPLAY_TEST_MUX_LIBRARY', root / 'openpilot/tools/replay/libmedia_mux.so'))
-  ffmpeg = root / '.venv/lib/python3.12/site-packages/ffmpeg/install/bin/ffmpeg'
+  import ffmpeg as ffmpeg_package
+  ffmpeg = Path(ffmpeg_package.__file__).resolve().parent / 'install/bin/ffmpeg'
   ffprobe = ffmpeg.with_name('ffprobe')
   if not library.exists() or not ffmpeg.exists() or not ffprobe.exists():
-    pytest.skip('Host replay muxer and bundled FFmpeg must be built')
+    pytest.skip(reason='Host replay muxer and bundled FFmpeg must be built')
   source = tmp_path / 'fixture.ts'
   subprocess.run([str(ffmpeg), '-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'rawvideo', '-pixel_format', 'yuv420p',
                   '-video_size', '32x18', '-framerate', '20', '-i', 'pipe:0',

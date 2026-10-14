@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import cast
 
 from openpilot.starpilot.replay.frames import ReplayFramePublisher, SESSION
 from openpilot.starpilot.replay.media import MediaMux, MediaStore
@@ -299,7 +300,7 @@ class Compositor:
         self.resources.callback(rl.unload_render_texture, self.output)
       self.readback = FrameReadback(width * height * (3 if nv12 else 8) // 2, asynchronous=True)
       self.resources.callback(self.readback.close)
-      self.meta = None
+      self.meta: tuple[int, float, int] | None = None
       self.epoch = None
       self.last_route_frame = None
       self.primary_ready = False
@@ -342,14 +343,15 @@ class Compositor:
     updates = original | {name: sm.seen[name] and receipt != self.render_receipts.get(name)
                           for name, receipt in receipts.items()}
     sample = self.ui.replay_sample
-    updates['extrinsicsCalibration'] = bool(updates['extrinsicsCalibration'] and sample and sample.valid and
+    updates['extrinsicsCalibration'] = bool(updates['extrinsicsCalibration'] and sample and sample.valid and sample.now_ns is not None and
                                          sm.valid['extrinsicsCalibration'] and
                                          0 < sm.logMonoTime['extrinsicsCalibration'] <= sample.now_ns)
     flags = DrawUpdates(updates)
     sm.updated = flags
     try:
       if self.profile == 'compact':
-        self.camera.render_camera_model_layer(rect, camera_view=state.appearance.camera_view,
+        from openpilot.selfdrive.ui.mici.onroad.augmented_road_view import AugmentedRoadView as CompactRoadView
+        cast(CompactRoadView, self.camera).render_camera_model_layer(rect, camera_view=state.appearance.camera_view,
                                              reverse_driver=state.reverse_driver_camera,
                                              lead_indicator=state.appearance.show_lead_indicator and state.lead_indicator_source_fresh,
                                              lead_info_mode=state.appearance.lead_info_mode, lead_info_metric=state.appearance.lead_info_metric,
@@ -382,6 +384,8 @@ class Compositor:
              VisionStreamType.VISION_STREAM_WIDE_ROAD: 'wideRoadEncodeIdx',
              VisionStreamType.VISION_STREAM_CABIN: 'cabinEncodeIdx'}
     name = names.get(self.camera.stream_type)
+    if name is None:
+      return False
     sm, sample = self.ui.sm, self.ui.replay_sample
     state = sm[name] if name is not None and sm.seen[name] and sm.valid[name] else None
     return bool(sample and sample.valid and state is not None and frame_matches(
@@ -413,6 +417,7 @@ class Compositor:
       if position['enabled']:
         width, height = widget_size(state.customization, self.profile, key)
         positions[side] = Rect(position['x'], position['y'], width, height)
+    assert saved.on_blinker is not None and saved.on_bsm is not None and saved.invert is not None
     status = self.pip.render(rect, saved.mask, signals, enabled=self.cabin, on_blinker=saved.on_blinker,
                              on_bsm=saved.on_bsm, invert=saved.invert, now=now / 1e9, placements=positions, submit=submit)
     if not self.cabin or status not in ('rendered', 'inactive'):
@@ -507,6 +512,8 @@ class Compositor:
     from openpilot.starpilot.system.android_auto import gpu_nv12
     from openpilot.starpilot.ui.shell import ShellMode
     rl = self.rl
+    if sample.now_ns is None:
+      return False
     self.context.begin_frame(sample.now_ns / 1e9)
     self.placement.maintain(now_ns / 1e9)
     snapshot = self.adapter.build(ShellMode.ONROAD)
@@ -547,7 +554,7 @@ class Compositor:
     try:
       pixels = self.readback.finish()
       sample = self.ui.replay_clock.sample()
-      yield (pixels, self.meta) if sample.valid and sample.epoch == self.meta[0] else None
+      yield (pixels, self.meta) if self.meta is not None and sample.valid and sample.epoch == self.meta[0] else None
     finally:
       self.readback.release()
 
@@ -679,12 +686,12 @@ def run(session_dir: Path, route_id: str, data_dir: Path, target: str, profile: 
         if engine.command({'op': 'seek', 'position': status['position'], 'requestId': status.get('lastRequestId') or '0' * 32}, reprime=True):
           primed_clients.update(unprimed)
           valid = False
-      if valid and getattr(core.ui, 'replay_needs_reprime', False):
+      if valid and status is not None and getattr(core.ui, 'replay_needs_reprime', False):
         if engine.command({'op': 'seek', 'position': status['position'], 'requestId': status.get('lastRequestId') or '0' * 32}, reprime=True):
           core.ui.replay_needs_reprime = False
           valid = False
       interval = FRAME_INTERVAL
-      if valid and not core.readback.pending and now - last_draw >= interval:
+      if valid and status is not None and sample.now_ns is not None and not core.readback.pending and now - last_draw >= interval:
         origin = status.get('routeStartNs')
         if type(origin) is not int:
           raise RuntimeError('Replay engine did not expose its route clock origin')

@@ -14,7 +14,7 @@ import threading
 import time
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from openpilot.starpilot.galaxy.batch_routes import change_drive_state, delete_records, non_default_settings, preview_layout
+from openpilot.starpilot.galaxy.batch_routes import change_drive_state, delete_records, non_default_settings, preview_layout, preview_settings_recovery
 from openpilot.starpilot.galaxy.access import AccessStatus, default_owner
 from openpilot.starpilot.galaxy.auth import LocalSessions
 from openpilot.starpilot.galaxy.http_server import (_LocalHTTPHandler, _LocalHTTPServer, allowed_authority,
@@ -2349,12 +2349,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               result = ToggleBackup(feature_settings(), layout_owner()).restore(
                 payload, identity, authorized=lambda: self.settings_session() == identity)
           elif path == '/api/settings/recovery/preview':
-            if (not isinstance(payload, dict) or set(payload) != {'view', 'selected'} or
-                not isinstance(payload['view'], str) or len(payload['view']) > 64 or
-                not isinstance(payload['selected'], list) or not 1 <= len(payload['selected']) <= 128 or
-                any(type(index) is not int for index in payload['selected'])):
-              raise ValueError('Invalid settings recovery selection')
-            result = settings_recovery().preview(payload['view'], payload['selected'], *identity)
+            result = preview_settings_recovery(payload, settings_recovery, identity)
           elif path == '/api/settings/recovery/confirm':
             if (not isinstance(payload, dict) or set(payload) != {'intent', 'confirmed'} or
                 not isinstance(payload['intent'], str) or len(payload['intent']) > 64 or payload['confirmed'] is not True):

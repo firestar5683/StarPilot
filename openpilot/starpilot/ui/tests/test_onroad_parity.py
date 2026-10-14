@@ -69,7 +69,7 @@ def test_aol_model_geometry_uses_fresh_lateral_display_context(monkeypatch):
       return values[key]
   source = SubMaster()
   source.recv_frame, source.updated, source.valid = sm.recv_frame, sm.updated, sm.valid
-  ui = NS(sm=source, started_frame=1, status=UIStatus.DISENGAGED)
+  ui = NS(sm=source, started_frame=1, status=UIStatus.DISENGAGED, display_time_ns=lambda: 1_000_000_000)
   with patch.object(native_model, 'ui_state', ui):
     renderer._render(rl.Rectangle(0, 0, 476, 240))
     renderer._draw_lane_lines.assert_not_called()
@@ -94,7 +94,7 @@ def test_aol_lane_and_path_colors_do_not_use_disengaged_black(monkeypatch):
   renderer._rainbow_path.refresh_enabled.return_value = False
   renderer._experimental_mode = True
   monkeypatch.setattr(renderer, '_exp_gradient', NS(colors=[]), raising=False)
-  ui = NS(status=UIStatus.DISENGAGED, params=Mock())
+  ui = NS(status=UIStatus.DISENGAGED, params=Mock(), display_time_ns=lambda: 1_000_000_000)
   with patch.object(native_model, 'ui_state', ui), patch.object(native_model, 'draw_polygon') as polygon:
     assert renderer._get_ll_color(0.7, True, True).r == 0
     renderer._draw_path({'longitudinalPlan': NS(allowThrottle=True)})

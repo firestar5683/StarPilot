@@ -41,3 +41,5 @@ openpilot/system/loggerd/loggerd -text
 openpilot/starpilot/galaxy/bin/frpc_linux_arm64 -text
 openpilot/starpilot/maps/provider/mapd -text
 openpilot/selfdrive/test/process_replay/refs/starpilot/*.zst -text
+
+openpilot/tools/replay/replay -text

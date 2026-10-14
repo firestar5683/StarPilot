@@ -1,4 +1,5 @@
 """Fake transport exercises native ownership, cancellation and passive input."""
+from typing import Any
 
 from types import SimpleNamespace as NS
 import threading
@@ -19,7 +20,7 @@ ROUTE = {'routeId': '00000001--0123456789', 'displayName': 'Recorded route', 'se
 class Backend:
   def __init__(self):
     self.calls = []
-    self.status = {'schemaVersion': 1, 'ownerId': 'a' * 32, 'sessionId': None, 'state': 'idle',
+    self.status: dict[str, Any] = {'schemaVersion': 1, 'ownerId': 'a' * 32, 'sessionId': None, 'state': 'idle',
                    'routeId': None, 'profile': 'large', 'revision': 0, 'epoch': 0,
                    'position': 0.0, 'start': 0.0, 'end': 120.0, 'rate': 1.0, 'paused': True,
                    'frameReady': False, 'errorCode': None, 'owned': False, 'offroad': True}

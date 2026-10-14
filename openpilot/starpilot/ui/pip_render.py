@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from typing import Protocol
 
 import pyray as rl
 
@@ -26,10 +27,18 @@ def _external_shader(fragment: str) -> str:
   return result.replace(yuv, "vec3 rgb = pow(texture(texture0, uv).rgb, vec3(1.0/1.28));")
 
 
+class PiPStreamSource(Protocol):
+  @property
+  def generation(self) -> int: ...
+  def set_active(self, active: bool) -> None: ...
+  def poll(self, now: float) -> object | None: ...
+  def release_retired(self) -> None: ...
+
+
 class PiPRenderer:
   """One renderer; close it on onroad exit or when the owning shell closes."""
 
-  def __init__(self, shape: str, stream: PiPStream | None = None, *, frame_availability=None):
+  def __init__(self, shape: str, stream: PiPStreamSource | None = None, *, frame_availability=None):
     if shape not in ("bubble", "curved"):
       raise ValueError("unknown PiP shape")
     self.frame_availability = frame_availability if frame_availability is not None else CameraAvailability()

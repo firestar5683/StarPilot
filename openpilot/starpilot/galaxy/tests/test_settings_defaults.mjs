@@ -29,7 +29,9 @@ assert.equal(requests.length, 4, "an unavailable default cannot be submitted")
 feed.stop()
 assert.ok(GalaxySettingRow.emits.includes("reset-default"))
 
-const render = compile(GalaxySettingRow.template, { decodeEntities: raw => raw })
+const renderTemplate = compile(GalaxySettingRow.template, { decodeEntities: raw => raw })
+const rowContext = context => ({ ...context, presentedRow: GalaxySettingRow.computed.presentedRow.call(context) })
+const render = (context, cache) => renderTemplate(rowContext(context), cache)
 function buttons(node) {
   if (!node || typeof node !== "object") return []
   return [...(node.type === "button" ? [node] : []), ...(Array.isArray(node.children) ? node.children.flatMap(buttons) : [])]
@@ -68,7 +70,7 @@ assert.equal(dependent.at(-1).data.rows[0].value, "On")
 source.stop()
 consumer.stop()
 
-assert.equal(GalaxySettingRow.computed.showDefault.call({ row }), true)
-assert.equal(GalaxySettingRow.computed.showDefault.call({ row: { ...row, value: 'On' } }), false)
-assert.equal(GalaxySettingRow.computed.showDefault.call({ row: { ...row, value: '0.9', defaultValue: '0.90' } }), false)
+assert.equal(GalaxySettingRow.computed.showDefault.call(rowContext({ row })), true)
+assert.equal(GalaxySettingRow.computed.showDefault.call(rowContext({ row: { ...row, value: 'On' } })), false)
+assert.equal(GalaxySettingRow.computed.showDefault.call(rowContext({ row: { ...row, value: '0.9', defaultValue: '0.90' } })), false)
 assert.equal(buttons(render({ ...context, showDefault: false }, [])).some(node => node.children === 'Default'), false)

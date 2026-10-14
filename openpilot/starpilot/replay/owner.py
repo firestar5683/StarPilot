@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 import uuid
+from typing import cast
 
 from openpilot.starpilot.replay.client import MAX_REQUEST, MAX_RESPONSE, encode, parse, receive, replay_root
 from openpilot.tools.replay.display_clock import RECORD
@@ -338,6 +339,8 @@ class ReplayOwner:
     if self.status.get('target') != 'web' or request['epoch'] != self.status['epoch'] or not self.status.get('mediaReady'):
       raise Rejected('epoch_changed')
     from openpilot.starpilot.replay.media import media_descriptor
+    if self.session_dir is None:
+      raise Rejected("epoch_changed")
     return media_descriptor(self.session_dir, request['epoch'], request['sequence'], count)
 
   def _stop(self, reason):
@@ -389,7 +392,7 @@ class ReplayOwner:
       if (type(ranges) is not list or len(ranges) > 512 or
           any(type(item) is not list or len(item) != 2 or not all(_finite(number) for number in item) or
               not value['start'] <= item[0] <= item[1] <= value['end'] for item in ranges) or
-          any(before[1] > after[0] for before, after in zip(ranges, ranges[1:], strict=False))):
+          any(before[1] > after[0] for before, after in zip(cast(list[list[float]], ranges), cast(list[list[float]], ranges)[1:], strict=False))):
         raise Rejected('worker_failed')
       self.status['seekRanges'] = ranges
       warnings = value.get('sourceWarnings', [])
@@ -524,6 +527,7 @@ class ReplayOwner:
       with self.lock:
         self.child, self.child_birth = child, _process_birth(child.pid)
       self._record_session(directory, child)
+      assert child.stdout is not None and child.stderr is not None and child.stdin is not None
       for file in (child.stdout, child.stderr, child.stdin):
         os.set_blocking(file.fileno(), False)
       stdout = bytearray()

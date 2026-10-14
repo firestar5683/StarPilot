@@ -120,7 +120,7 @@ def test_started_presentation_does_not_replace_existing_message_freshness():
 def replay_owner(sample):
   from openpilot.starpilot.ui.tests.test_runtime_snapshot import SubMasterFake
   ui = object.__new__(UIState)
-  ui.sm = SubMasterFake()
+  vars(ui)['sm'] = SubMasterFake()
   ui.sm.sock = {name: object() for name in ('carControl', 'carState', 'selfdriveState')}
   ui.sm.static_freq_services = set(ui.sm.sock)
   ui.sm.data = ui.sm.messages
@@ -244,6 +244,7 @@ def test_replay_boot_time_camera_primer_retention_and_freshness():
   ui.sm.sock['cabinCameraState'] = object()
   ui.sm.static_freq_services.add('cabinCameraState')
   ui.sm.put('cabinCameraState', NS(frameId=42))
+  assert sample.boot_ns is not None
   ui.sm.logMonoTime['cabinCameraState'] = sample.boot_ns - 1_000_000
   ui.sm.replay_sample = sample
   ui._update_replay_alive(sample)

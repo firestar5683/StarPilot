@@ -50,7 +50,7 @@ def test_camera_matches_recorded_identity_across_distinct_clock_domains():
 
 def test_paused_same_route_clock_never_advances_filters_or_gpu():
   core = object.__new__(Compositor)
-  core.ui = SimpleNamespace(replay_sample=SimpleNamespace(now_ns=100))
+  vars(core)['ui'] = SimpleNamespace(replay_sample=SimpleNamespace(now_ns=100))
   core.last_route_frame = (2, 100)
   core.context = Mock()
   assert core.draw(2, 0, 9_000_000_000) is False
@@ -65,7 +65,7 @@ def test_recorded_camera_preview_does_not_require_initial_device_state(frame_rea
     viewport_width: int = 0
 
   core = object.__new__(Compositor)
-  core.ui = SimpleNamespace(replay_sample=SimpleNamespace(now_ns=100),
+  vars(core)['ui'] = SimpleNamespace(replay_sample=SimpleNamespace(now_ns=100),
                             sm=SimpleNamespace(seen={'extrinsicsCalibration': False}))
   core.last_route_frame = None
   core.context = core.placement = Mock()
@@ -74,10 +74,10 @@ def test_recorded_camera_preview_does_not_require_initial_device_state(frame_rea
   core._primary_matches = Mock(return_value=frame_ready)
   core._optional_placeholder_ready = Mock(return_value=False)
   core.rl = Mock()
-  core.gui = SimpleNamespace(_render_prepare=[], _frame=0)
+  vars(core)['gui'] = SimpleNamespace(_render_prepare=[], _frame=0)
   core.content = Mock()
   core.scale = 1
-  core.profile = SimpleNamespace(size=(1600, 800))
+  vars(core)['profile'] = SimpleNamespace(size=(1600, 800))
   core.view = Mock()
   core.view.render.side_effect = lambda state: setattr(core, 'primary_ready', state.camera_available)
   core.output = None
@@ -242,7 +242,7 @@ def test_epoch_reset_preserves_native_camera_stream_and_eligible_paused_frame(mo
   sm.__getitem__ = Mock(return_value=idx)
   sm.seen = sm.valid = {'narrowRoadEncodeIdx': True}
   sm.logMonoTime = {'narrowRoadEncodeIdx': 9_020_000_000}
-  core.ui = SimpleNamespace(replay_sample=SimpleNamespace(valid=True, boot_ns=9_050_000_000), sm=sm)
+  vars(core)['ui'] = SimpleNamespace(replay_sample=SimpleNamespace(valid=True, boot_ns=9_050_000_000), sm=sm)
   core.render_receipts = {'modelV2': 1}
   core.reset_epoch(3)
   assert core.render_receipts == {}
@@ -301,7 +301,7 @@ def test_early_camera_subscriber_is_polled_before_paused_reprime():
   # The first receive synchronizes with a publisher created after this client.
   client.recv.side_effect = [None, frame]
   core = object.__new__(Compositor)
-  core.ui = Mock(replay_sample=sample, sm=sm)
+  vars(core)['ui'] = Mock(replay_sample=sample, sm=sm)
   core.epoch, core.cabin = 1, False
   core.camera = Mock(client=client, frame=None, stream_type=VisionStreamType.VISION_STREAM_NARROW_ROAD)
   core.camera._ensure_connection.return_value = True
@@ -335,7 +335,7 @@ def test_camera_reprime_cannot_overwrite_an_unacknowledged_user_action():
   import threading
   engine = object.__new__(Engine)
   engine.write_lock = threading.Lock()
-  engine.process = SimpleNamespace(stdin=io.StringIO())
+  vars(engine)['process'] = SimpleNamespace(stdin=io.StringIO())
   engine.last_request_id = engine.seek_request = None
   request = {'op': 'seek', 'position': 65, 'requestId': 'a' * 32}
   assert engine.command(request)
@@ -385,8 +385,8 @@ def test_replay_draw_retains_updates_until_stock_consumers_read_them(monkeypatch
   camera.available_streams, camera.frame = {camera.stream_type}, object()
   camera.model_renderer = camera._model_renderer = renderer
   core = object.__new__(Compositor)
-  core.ui, core.camera = ui, camera
-  core.profile = 'compact' if profile == 'mici.onroad' else 'large'
+  vars(core)['ui'], core.camera = ui, camera
+  vars(core)['profile'] = 'compact' if profile == 'mici.onroad' else 'large'
   core.cabin = core.wide = False
   core.render_receipts = {}
   core._primary_matches = Mock(return_value=True)
@@ -480,9 +480,9 @@ def test_finished_frame_is_borrowed_until_delivery_finishes(valid, epoch):
   pixels = memoryview(bytearray(b'pixels'))
   core.readback = Mock(pending=True)
   core.readback.finish.return_value = pixels
-  core.ui = SimpleNamespace(replay_clock=Mock())
+  vars(core)['ui'] = SimpleNamespace(replay_clock=Mock())
   core.ui.replay_clock.sample.return_value = SimpleNamespace(valid=valid, epoch=epoch)
-  core.meta = 1, 0., 100
+  vars(core)['meta'] = 1, 0., 100
   with pytest.raises(RuntimeError, match='delivery failed'):
     with core.finish() as finished:
       core.readback.release.assert_not_called()

@@ -147,3 +147,12 @@ def non_default_settings(self, settings_recovery):
       self.json(200, result)
     else:
       self.json(401, {'error': 'Sign in to Galaxy'})
+
+
+def preview_settings_recovery(payload, settings_recovery, identity):
+  if (not isinstance(payload, dict) or set(payload) != {'view', 'selected'} or
+      not isinstance(payload['view'], str) or len(payload['view']) > 64 or
+      not isinstance(payload['selected'], list) or not 1 <= len(payload['selected']) <= 128 or
+      any(type(index) is not int for index in payload['selected'])):
+    raise ValueError('Invalid settings recovery selection')
+  return settings_recovery().preview(payload['view'], payload['selected'], *identity)
