@@ -6,7 +6,7 @@ from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, Bi
 from openpilot.system.ui.lib.application import FontWeight, MousePos, gui_app
 from openpilot.system.ui.lib.bluetooth_manager import BluetoothManager
 from openpilot.system.ui.widgets.scroller import NavScroller
-from openpilot.tools.galaxy_bluetooth.comma_pairing import PairPhoneButton
+from openpilot.tools.galaxy_bluetooth.comma_pairing import PairPhoneButton, PhoneDiagnosticsToggle
 
 
 class BluetoothDeviceButton(BigButton):
@@ -151,9 +151,10 @@ class BluetoothLayoutMici(NavScroller):
     self._scan_btn.set_click_callback(lambda: self._manager.set_scanning(True))
     self._scanning_btn = BluetoothScanningButton()
     self._pair_phone_btn = PairPhoneButton()
+    self._phone_diagnostics = PhoneDiagnosticsToggle()
     self._device_buttons = {}
     self._scan_on_ready = False
-    self._scroller.add_widgets([self._power_btn, self._pair_phone_btn, self._scan_btn, self._scanning_btn])
+    self._scroller.add_widgets([self._power_btn, self._pair_phone_btn, self._phone_diagnostics, self._scan_btn, self._scanning_btn])
     self._rebuild()
 
   def show_event(self):
@@ -179,7 +180,7 @@ class BluetoothLayoutMici(NavScroller):
     self._power_btn.set_value("on" if status.enabled else "off")
     self._power_btn.set_enabled(status.available and status.offroad)
     self._scan_btn.set_enabled(status.enabled and status.offroad)
-    items = [self._power_btn, self._pair_phone_btn]
+    items = [self._power_btn, self._pair_phone_btn, self._phone_diagnostics]
     for device in status.devices:
       button = self._device_buttons.get(device.address)
       if button is None:

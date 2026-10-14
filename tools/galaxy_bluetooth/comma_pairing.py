@@ -6,11 +6,12 @@ import pyray as rl
 import qrcode
 
 from openpilot.selfdrive.ui.mici.layouts.settings.galaxy import GalaxyQRDialog
-from openpilot.selfdrive.ui.mici.widgets.button import BigButton
+from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigToggle
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigConfirmationDialog, BigMultiOptionDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.widgets.label import UnifiedLabel
+from openpilot.tools.galaxy_bluetooth.diagnostics_settings import diagnostics_enabled, set_diagnostics_enabled
 from openpilot.tools.galaxy_bluetooth.bootstrap import setup_status, retry_setup
 from openpilot.tools.galaxy_bluetooth.bridge.pairing import ensure_key, load_key, rotate_key, qr_payload
 
@@ -113,3 +114,28 @@ class PairPhoneButton(BigButton):
                                  default="pair phone", right_btn_callback=apply)
     holder["dialog"] = dialog
     gui_app.push_widget(dialog)
+
+
+class PhoneDiagnosticsToggle(BigToggle):
+  def __init__(self):
+    super().__init__("allow phone\ndiagnostics", "temps, rates & CarPlay", initial_state=diagnostics_enabled(),
+                     toggle_callback=self._change)
+    self._next_sync = 0.0
+
+  def _get_label_font_size(self):
+    return 48
+
+  def _update_state(self):
+    super()._update_state()
+    self.set_enabled(not ui_state.started)
+    now = time.monotonic()
+    if now >= self._next_sync:
+      self.set_checked(diagnostics_enabled())
+      self._next_sync = now + 1
+
+  def _change(self, enabled):
+    try:
+      set_diagnostics_enabled(enabled, offroad=not ui_state.started)
+    except OSError:
+      gui_app.push_widget(BigDialog("phone diagnostics", "Could not save the setting. Try again."))
+    self.set_checked(diagnostics_enabled())

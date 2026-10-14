@@ -10,8 +10,9 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog, alert_dialog
-from openpilot.system.ui.widgets.list_view import button_item
+from openpilot.system.ui.widgets.list_view import button_item, ListItem, ToggleAction
 from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
+from openpilot.tools.galaxy_bluetooth.diagnostics_settings import diagnostics_enabled, set_diagnostics_enabled
 from openpilot.tools.galaxy_bluetooth.bootstrap import setup_status, retry_setup
 from openpilot.tools.galaxy_bluetooth.bridge.pairing import ensure_key, load_key, rotate_key, qr_payload
 
@@ -112,3 +113,27 @@ def pair_phone_item():
 
   return button_item("Pair phone", "MANAGE", lambda: setup_status(),
                      callback=show_options, enabled=ui_state.is_offroad)
+
+
+class PhoneDiagnosticsItem(ListItem):
+  def __init__(self):
+    action = ToggleAction(initial_state=diagnostics_enabled(), enabled=ui_state.is_offroad, callback=self._change)
+    super().__init__(title="Allow phone diagnostics",
+                     description="Allow paired phones to read temperatures, frame rates and CarPlay status. "
+                                 "Live screen capture runs only when requested over Wi-Fi.",
+                     action_item=action)
+    self._next_sync = 0.0
+
+  def _update_state(self):
+    super()._update_state()
+    now = time.monotonic()
+    if now >= self._next_sync:
+      self.action_item.set_state(diagnostics_enabled())
+      self._next_sync = now + 1
+
+  def _change(self, enabled):
+    try:
+      set_diagnostics_enabled(enabled, offroad=ui_state.is_offroad())
+    except OSError:
+      gui_app.push_widget(alert_dialog("Could not save phone diagnostics. Try again."))
+    self.action_item.set_state(diagnostics_enabled())

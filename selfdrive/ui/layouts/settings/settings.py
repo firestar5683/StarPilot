@@ -16,7 +16,7 @@ from openpilot.system.ui.lib.wifi_manager import WifiManager
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.bluetooth import BluetoothManagerUI
 from openpilot.system.ui.widgets.network import NetworkUI
-from openpilot.tools.galaxy_bluetooth.comma_pairing_tici import pair_phone_item
+from openpilot.tools.galaxy_bluetooth.comma_pairing_tici import pair_phone_item, PhoneDiagnosticsItem
 
 # Constants
 COLLAPSED_WIDTH = 0
@@ -81,7 +81,8 @@ class SettingsLayout(Widget):
       PanelType.STARPILOT: PanelInfo(tr_noop("StarPilot"), StarPilotLayout()),
       PanelType.DEVICE: PanelInfo(tr_noop("Device"), DeviceLayout()),
       PanelType.NETWORK: PanelInfo(tr_noop("Network"), NetworkUI(wifi_manager)),
-      PanelType.BLUETOOTH: PanelInfo(tr_noop("Bluetooth"), BluetoothManagerUI(bluetooth_manager, phone_pairing=pair_phone_item())),
+      PanelType.BLUETOOTH: PanelInfo(tr_noop("Bluetooth"), BluetoothManagerUI(bluetooth_manager, phone_pairing=pair_phone_item(),
+                                                                         phone_diagnostics=PhoneDiagnosticsItem())),
       PanelType.TOGGLES: PanelInfo(tr_noop("Toggles"), TogglesLayout()),
       PanelType.SOFTWARE: PanelInfo(tr_noop("Software"), SoftwareLayout()),
       PanelType.DEVELOPER: PanelInfo(tr_noop("Developer"), DeveloperLayout()),
