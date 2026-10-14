@@ -163,13 +163,65 @@ def test_ui_poll_precedes_every_frame_including_wake(frame, monkeypatch, awake):
   monkeypatch.setattr(ui, "ui_state", SimpleNamespace(update=lambda: events.append("messages")))
   controllers = SimpleNamespace(poll=lambda: events.append("controls"))
   preview = SimpleNamespace(poll=lambda: events.append("preview"))
+  star = SimpleNamespace(_poll_projection_bookmark=lambda now: events.append("bookmark"))
   app._nav_stack_ticks = [lambda: events.append("transition")]
   app._nav_stack[0].render.side_effect = lambda _: events.append("draw")
-  loop = app.render(before_frame=lambda: ui.update_frame(preview, controllers))
+  loop = app.render(before_frame=lambda: ui.update_frame(preview, controllers, star))
   assert next(loop)[0] is awake
-  assert events == ["messages", "controls", "preview"] + (["transition", "draw"] if awake else [])
+  assert events == ["messages", "bookmark", "controls", "preview"] + (["transition", "draw"] if awake else [])
   with pytest.raises(StopIteration):
     next(loop)
+
+
+@pytest.mark.parametrize("awake", [True, False])
+def test_projection_bookmark_is_saved_once_without_rendering_starpilot(frame, monkeypatch, awake):
+  import ast
+  import tempfile
+  import time
+  from pathlib import Path
+  from openpilot.selfdrive.ui import ui
+  from openpilot.starpilot.system.android_auto.projection_bookmark import BookmarkReceiver, BookmarkSender
+
+  app, _, _, _ = frame
+  app._should_render = awake
+  monkeypatch.setattr(application.time, "sleep", lambda _: None)
+  monkeypatch.setattr(application.rl, "window_should_close", Mock(side_effect=[False, False, True]))
+  monkeypatch.setattr(ui, "gui_app", app)
+
+  sm = SimpleNamespace(logMonoTime={'carState': 1})
+  def update():
+    sm.logMonoTime['carState'] = time.monotonic_ns()
+  state = SimpleNamespace(started=True, started_frame=1, sm=sm, update=update)
+  monkeypatch.setattr(ui, "ui_state", state)
+  # Load the production dispatch without importing unrelated device-only UI libraries.
+  source = Path(__file__).parents[3] / 'starpilot/ui/runtime_app.py'
+  method = next(node for node in ast.walk(ast.parse(source.read_text()))
+                if isinstance(node, ast.FunctionDef) and node.name == '_poll_projection_bookmark')
+  namespace = {'ui_state': state, 'display_message': Mock(return_value=object())}
+  exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)
+  # Short Unix socket path for macOS. The real transport and native dispatch run
+  # while the top widget is unrelated to StarPilot, or no widget is drawn at all.
+  with tempfile.TemporaryDirectory(prefix='aa-bm-', dir='/tmp') as directory:
+    path = Path(directory) / 'bookmark.sock'
+    receiver, sender = BookmarkReceiver(path), BookmarkSender(path)
+    publish = Mock()
+    star = SimpleNamespace(_projection_bookmarks=receiver, _publish_bookmark=publish)
+    star._poll_projection_bookmark = lambda now: namespace['_poll_projection_bookmark'](star, now)
+    loop = app.render(before_frame=lambda: ui.update_frame(star=star))
+    try:
+      assert sender.send(time.monotonic_ns())
+      assert next(loop)[0] is awake
+      publish.assert_called_once_with()
+      assert app._nav_stack[0].render.call_count == int(awake)
+      app._should_render = True
+      assert next(loop)[0]
+      publish.assert_called_once_with()  # Waking must not replay the request.
+      with pytest.raises(StopIteration):
+        next(loop)
+    finally:
+      loop.close()
+      sender.close()
+      receiver.close()
 
 
 @pytest.mark.parametrize("initial", [False, True])
