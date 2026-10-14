@@ -1,5 +1,6 @@
 """Host source expiry preserves intent without expired commands."""
 from contextlib import ExitStack
+import time
 from unittest import mock
 
 import pytest
@@ -73,9 +74,10 @@ def test_first_real_lag_fresh_decision_expiring_during_publication_keeps_normal_
     original_publish = sd.publish_axis_proof
     entered = []
     def publish(cs, **kwargs):
-      entered.append((sd._loop_decision_ns, sd.aol_car_state_log_ns, tuple(sd.events.names),
+      publication_ns = time.monotonic_ns()
+      entered.append((publication_ns, sd.aol_car_state_log_ns, tuple(sd.events.names),
                       sd.state_machine.state, sd.state_machine.soft_disable_timer))
-      assert sd._loop_decision_ns == fresh + 29_999_000 and sd.aol_car_state_log_ns == fresh
+      assert publication_ns == fresh + 29_999_000 and sd.aol_car_state_log_ns == fresh
       assert log.OnroadEvent.EventName.selfdrivedLagging in sd.events.names
       assert log.OnroadEvent.EventName.commIssue not in sd.events.names
       assert not sd.aol_authority_lost and sd.aol_published_fault_reason == 'none'

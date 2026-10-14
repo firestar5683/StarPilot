@@ -1768,7 +1768,8 @@ class SelfdriveD:
       aol_hard_soft_fault = any(event.softDisable and not (
         event.name == EventName.steerTempUnavailable and CS.steerFaultTemporary and not CS.steerFaultPermanent or
         seatbelt_lateral_soft_event_allowed(self.CP, CS, intent, native, event,
-          source_ns=self.aol_car_state_log_ns, now_ns=now_ns, axis_session_id=self.aol_session_id))
+          source_ns=self.aol_car_state_log_ns, now_ns=now_ns, axis_session_id=self.aol_session_id,
+          pending_lateral_request=not previous.lateral_active and not self.aol_authority_lost))
         for event in self.events.to_msg())
       self.aol_fault_reason = ('availabilityPause' if ordinary_availability else
                                'critical' if self.aol_authority_lost or self.events.contains(ET.IMMEDIATE_DISABLE) or
