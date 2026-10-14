@@ -1,5 +1,6 @@
 """Vehicle-owned default torque controller for the five manual Bolt identities."""
 
+from openpilot.starpilot.flm import torque_stages as auto_stages
 from collections import deque
 import math
 
@@ -154,6 +155,8 @@ class BoltTorquePolicy:
       ff, threshold = flm.stages(parent.flm_surface, cs, setpoint, jerk, ff, threshold)
     jerk_deadzone = center_chatter_friction_jerk_deadzone(cs.vEgo, setpoint, 0.0)
     friction_jerk = math.copysign(max(abs(jerk) - jerk_deadzone, 0.0), jerk)
+    ff, threshold = auto_stages.apply_stages(parent, cs, setpoint, jerk, ff, threshold,
+      active=active, limited=safety_limited or curvature_limited)
     ff += friction_scale * get_friction(error + JERK_GAIN * friction_jerk, deadzone, threshold, parent.torque_params)
     if abs(gravity_adjusted) < 0.15:
       ff += np.sign(gravity_adjusted) * self.center_boost * np.interp(abs(gravity_adjusted), [0.0, 0.15], [1.0, 0.0])

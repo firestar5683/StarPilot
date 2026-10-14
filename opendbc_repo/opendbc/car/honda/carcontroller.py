@@ -120,6 +120,9 @@ class CarController(CarControllerBase):
     self.last_torque = 0.0
 
   def update(self, CC, CS, now_nanos):
+    _projection = self.learning_projection_observer
+    if _projection is not None:
+      _projection.begin(CC.actuators.torque, self.frame)
     actuators = CC.actuators
     hud_control = CC.hudControl
     hud_v_cruise = hud_control.setSpeed / CS.v_cruise_factor if hud_control.speedVisible else 255
@@ -135,9 +138,12 @@ class CarController(CarControllerBase):
       gas, brake = 0.0, 0.0
 
     # *** rate limit steer ***
+    if _projection is not None:
+      _projection.capture_honda(self.modified_civic_steering, CS)
     torque_cmd = self.modified_civic_steering.update(CC, CS) if self.modified_civic_steering is not None else actuators.torque
     limited_torque = rate_limit(torque_cmd, self.last_torque, -self.params.STEER_DELTA_DOWN * DT_CTRL,
                                 self.params.STEER_DELTA_UP * DT_CTRL)
+    _projection_previous = self.last_torque if _projection is not None else 0.
     self.last_torque = limited_torque
 
     # *** apply brake hysteresis ***
@@ -155,6 +161,10 @@ class CarController(CarControllerBase):
     # Preserve integer CAN rounding while steering limits are owned by the platform.
     apply_torque = int(np.interp(-limited_torque * self.params.STEER_MAX,
                                  self.params.STEER_LOOKUP, self.params.STEER_LOOKUP_V))
+    if _projection is not None:
+      _projection.input(apply_torque, self.params.STEER_MAX, _projection_previous, CS.out.steeringTorque, self.params,
+                        limiter='normalized_rate', mapping='honda_lookup', codec_input=torque_cmd,
+                        lookup_x=self.params.STEER_LOOKUP, lookup_y=self.params.STEER_LOOKUP_V, limited_input=limited_torque)
 
     # Send CAN commands
     can_sends = []
@@ -166,6 +176,8 @@ class CarController(CarControllerBase):
 
     # Send steering command.
     can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
+    if _projection is not None:
+      _projection.emit('honda.STEERING_CONTROL', apply_torque, CC.latActive, can_sends[-1])
 
     # wind brake from air resistance decel at high speed
     wind_brake = np.interp(CS.out.vEgo, [0.0, 2.3, 35.0], [0.001, 0.002, 0.15])
@@ -275,4 +287,6 @@ class CarController(CarControllerBase):
     new_actuators.torqueOutputCan = apply_torque
 
     self.frame += 1
+    if _projection is not None:
+      _projection.finish(new_actuators.torque)
     return new_actuators, can_sends

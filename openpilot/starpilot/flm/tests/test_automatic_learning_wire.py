@@ -4,7 +4,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest import mock
 
 import capnp
 
@@ -119,10 +118,16 @@ class TestAutomaticLearningWire(unittest.TestCase):
         self.assertEqual(prior.to_dict(), values)
 
   def test_real_controls_treats_valid_historical_payload_as_absent_learning(self):
-    with historical_car_params() as historical, integration.joined(self) as run:
-      controls = run.controls
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.toyota.values import CAR
+    from openpilot.starpilot.flm.tests.test_registered_controls_global import controls_for, frame
+
+    cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
+    with historical_car_params() as historical, controls_for(cp, 'standard', True) as controls:
+      self.assertIsNotNone(controls.global_learning.descriptor)
       cp_before = controls.CP.as_builder().to_bytes()
       native_factor = controls.LaC.torque_params.latAccelFactor
+      native_tune = controls.LaC.torque_params.to_dict()
       old = historical.StarPilotCarParams.new_message(
         alternativeExperience=123, flags=0xffffffff, canUsePedal=True,
         safetyConfigs=[{'safetyParam': 65535}], redneckCruiseAvailable=True)
@@ -130,7 +135,6 @@ class TestAutomaticLearningWire(unittest.TestCase):
       readers = []
       for tick in range(100):
         now = integration.NOW + tick * 10_000_000
-        integration.feed(controls, now, tick)
         if tick % 25 == 0:
           event = messaging.new_message(SERVICE, valid=True)
           with custom.StarPilotCarParams.from_bytes(old_bytes) as envelope:
@@ -138,24 +142,39 @@ class TestAutomaticLearningWire(unittest.TestCase):
           reader = messaging.log_from_bytes(event.to_bytes())
           readers.append(reader)
           controls.sm.update_msgs(now / 1e9, [reader])
-        with mock.patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=now):
-          command, _ = controls.state_control()
+        command, _ = frame(controls, now, tick, collecting=False)
         self.assertTrue(command.latActive)
         self.assertIsNone(controls.torque_host)
-        self.assertIsNone(controls.automatic_learning.result)
+        self.assertIsNotNone(controls.global_learning)
+        self.assertIsNone(controls.global_learning.profile)
+        self.assertIsNone(controls.global_learning.validation)
+        self.assertIsNone(controls.global_learning.outcome)
+        self.assertEqual(controls.global_learning.applied_coordinates, (0.0, 0.0))
         self.assertEqual(controls.LaC.torque_params.latAccelFactor, native_factor)
+        self.assertEqual(controls.LaC.torque_params.to_dict(), native_tune)
       self.assertTrue(controls.sm.all_checks([SERVICE]))
       self.assertFalse(controls.sm.simulation)
       self.assertEqual(len(readers), 4)
-      self.assertEqual(controls.automatic_learning.session, '')
+      self.assertEqual(controls.global_learning.session, '')
       self.assertEqual(controls.CP.as_builder().to_bytes(), cp_before)
 
   def test_transient_flat_learner_bytes_cannot_be_admitted_as_nested_fit(self):
-    with historical_car_params(TRANSIENT_FLAT_LEARNER) as historical, integration.joined(self) as run:
-      controls = run.controls
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.toyota.values import CAR
+    from openpilot.starpilot.flm.learning_source import AutomaticLearningConsumer, identity_for
+    from openpilot.starpilot.flm.tests.test_registered_controls_global import controls_for, frame
+
+    cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
+    with historical_car_params(TRANSIENT_FLAT_LEARNER) as historical, controls_for(cp, 'standard', True) as controls:
+      self.assertIsNotNone(controls.global_learning.descriptor)
       cp_before = controls.CP.as_builder().to_bytes()
       native_factor = controls.LaC.torque_params.latAccelFactor
-      identity = run.producer.identity
+      native_tune = controls.LaC.torque_params.to_dict()
+      legacy = AutomaticLearningConsumer(controls.CP, interfaces[cp.carFingerprint](controls.CP), 'standard', controls.params)
+      self.assertTrue(legacy.supported)
+      identity, enabled, manual = identity_for(controls.CP, 'standard', controls.params, legacy.conversion)
+      self.assertTrue(enabled)
+      self.assertFalse(manual)
       self.assertIsNotNone(identity)
       old = historical.AutoSteeringLearning.new_message(
         version=1, status='qualifiedFit', identity=identity, session='transient-c204', sequence=1,
@@ -163,7 +182,7 @@ class TestAutomaticLearningWire(unittest.TestCase):
         sourceWindowStartMonoTime=integration.NOW - 10_000_000_000,
         sourceWindowEndMonoTime=integration.NOW - 1_000_000_000,
         family='linearFactor', latAccelFactor=native_factor * 1.05,
-        acceptancePolicyId=next(iter(controls.automatic_learning.policies)),
+        acceptancePolicyId=next(iter(legacy.policies)),
         trainWindows=10, heldoutWindows=8, trainBaselineLoss=.1, trainCandidateLoss=.09,
         heldoutBaselineLoss=.1, heldoutCandidateLoss=.09)
       # Use the genuinely admitted policy, so only the changed wire layout denies the fit.
@@ -173,7 +192,6 @@ class TestAutomaticLearningWire(unittest.TestCase):
       readers = []
       for tick in range(50):
         now = integration.NOW + tick * 10_000_000
-        integration.feed(controls, now, tick)
         if tick % 25 == 0:
           event = messaging.new_message(SERVICE, valid=True)
           with custom.StarPilotCarParams.from_bytes(old_bytes) as envelope:
@@ -182,13 +200,17 @@ class TestAutomaticLearningWire(unittest.TestCase):
           reader = messaging.log_from_bytes(event.to_bytes())
           readers.append(reader)
           controls.sm.update_msgs(now / 1e9, [reader])
-        with mock.patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=now):
-          command, _ = controls.state_control()
+        command, _ = frame(controls, now, tick, collecting=False)
         self.assertTrue(command.latActive)
         self.assertIsNone(controls.torque_host)
-        self.assertIsNone(controls.automatic_learning.result)
+        self.assertIsNotNone(controls.global_learning)
+        self.assertIsNone(controls.global_learning.profile)
+        self.assertIsNone(controls.global_learning.validation)
+        self.assertIsNone(controls.global_learning.outcome)
+        self.assertEqual(controls.global_learning.applied_coordinates, (0.0, 0.0))
         self.assertEqual(controls.LaC.torque_params.latAccelFactor, native_factor)
+        self.assertEqual(controls.LaC.torque_params.to_dict(), native_tune)
       self.assertTrue(controls.sm.all_checks([SERVICE]))
       self.assertEqual(len(readers), 2)
-      self.assertEqual(controls.automatic_learning.session, '')
+      self.assertEqual(controls.global_learning.session, '')
       self.assertEqual(controls.CP.as_builder().to_bytes(), cp_before)

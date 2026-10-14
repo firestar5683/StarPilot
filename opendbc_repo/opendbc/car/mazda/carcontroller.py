@@ -16,6 +16,9 @@ class CarController(CarControllerBase):
     self.brake_counter = 0
 
   def update(self, CC, CS, now_nanos):
+    _projection = self.learning_projection_observer
+    if _projection is not None:
+      _projection.begin(CC.actuators.torque, self.frame)
     can_sends = []
 
     apply_torque = 0
@@ -23,6 +26,8 @@ class CarController(CarControllerBase):
     if CC.latActive:
       # calculate steer and also set limits due to driver torque
       new_torque = int(round(CC.actuators.torque * CarControllerParams.STEER_MAX))
+      if _projection is not None:
+        _projection.input(new_torque, CarControllerParams.STEER_MAX, self.apply_torque_last, CS.out.steeringTorque, CarControllerParams, limiter='driver')
       apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last,
                                                       CS.out.steeringTorque, CarControllerParams)
 
@@ -56,10 +61,14 @@ class CarController(CarControllerBase):
     # send steering command
     can_sends.append(mazdacan.create_steering_control(self.packer, self.CP,
                                                       self.frame, apply_torque, CS.cam_lkas))
+    if _projection is not None:
+      _projection.emit('mazda.CAM_LKAS', apply_torque, CC.latActive, can_sends[-1])
 
     new_actuators = CC.actuators.as_builder()
     new_actuators.torque = apply_torque / CarControllerParams.STEER_MAX
     new_actuators.torqueOutputCan = apply_torque
 
     self.frame += 1
+    if _projection is not None:
+      _projection.finish(new_actuators.torque)
     return new_actuators, can_sends

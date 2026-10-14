@@ -1,3 +1,4 @@
+from openpilot.starpilot.flm import torque_stages as auto_stages
 from collections import deque
 import math
 
@@ -110,6 +111,8 @@ class HKGShapedTorquePolicy:
     threshold, friction_scale = self.friction_context(setpoint, jerk, measurement, cs.vEgo)
     jerk_deadzone = center_chatter_friction_jerk_deadzone(cs.vEgo, setpoint, self.jerk_deadzone(setpoint, jerk, measurement, cs.vEgo))
     friction_jerk = math.copysign(max(abs(jerk) - jerk_deadzone, 0.0), jerk)
+    ff, threshold = auto_stages.apply_stages(parent, cs, setpoint, jerk, ff, threshold,
+      active=active, limited=safety_limited or curvature_limited)
     ff += friction_scale * parent.friction(error + JERK_GAIN * friction_jerk, deadzone, threshold, cs, setpoint)
     if cs.vEgo < self.low_speed_reset_threshold:
       parent.pid.reset()

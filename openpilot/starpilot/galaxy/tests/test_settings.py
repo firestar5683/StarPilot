@@ -908,8 +908,8 @@ class SettingsGatewayTest(unittest.TestCase):
     page = self.page("torque")
     learning = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Use StarPilot Auto Learn")
     self.assertTrue(page["rows"][learning]["action"])
-    self.assertIn("StarPilot Controller uses its vehicle tune", page["rows"][learning]["reason"])
-    self.assertIn("automatic learning is currently unavailable", page["rows"][learning]["reason"])
+    self.assertIn("automatically correct torque profiles", page["rows"][learning]["reason"])
+    self.assertTrue(page["rows"][learning]["reason"].startswith("StarPilot’s FLM tuning will attempt to automatically correct torque profiles as you drive."))
     self.assertFalse(learning_allowed(self.params, ioniq))
     before_cp = ioniq.as_reader().as_builder().to_bytes()
     before_tune = read_saved(self.params, "TorqueOverrideDocument", 65536)[0]

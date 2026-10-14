@@ -1,5 +1,6 @@
 """Default Corolla TSS2 torque shaping from StarPilot ba901b5f (no FLM overrides)."""
 
+from openpilot.starpilot.flm import torque_stages as auto_stages
 import math
 from collections import deque
 
@@ -174,6 +175,8 @@ class CorollaTSS2TorquePolicy:
     friction_threshold = get_toyota_corolla_tss2_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
     friction_jerk_deadzone = center_chatter_friction_jerk_deadzone(CS.vEgo, setpoint, 0.0)
     friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0), desired_lateral_jerk)
+    ff, friction_threshold = auto_stages.apply_stages(parent, CS, setpoint, desired_lateral_jerk, ff, friction_threshold,
+      active=active, limited=steer_limited_by_safety or curvature_limited)
     ff += get_friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone, friction_threshold, parent.torque_params)
     if CS.vEgo < self.low_speed_reset_threshold:
       parent.pid.reset()

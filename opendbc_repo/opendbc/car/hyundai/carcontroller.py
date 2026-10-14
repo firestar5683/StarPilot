@@ -149,6 +149,9 @@ class CarController(CarControllerBase):
     self._ray_disengage_frame = None
 
   def update(self, CC, CS, now_nanos):
+    _projection = self.learning_projection_observer
+    if _projection is not None:
+      _projection.begin(CC.actuators.torque, self.frame)
     actuators = CC.actuators
     if self.CP.carFingerprint == CAR.KIA_EV6_2025 and self.CP.dashcamOnly:
       return actuators.as_builder(), []
@@ -166,6 +169,8 @@ class CarController(CarControllerBase):
     if self.CP.flags & HyundaiFlags.CANFD and self.angle_vm is None:
       self.params = CarControllerParams(self.CP, CS.out.vEgoRaw)
     new_torque = int(round(actuators.torque * self.params.STEER_MAX))
+    if _projection is not None:
+      _projection.input(new_torque, self.params.STEER_MAX, self.apply_torque_last, CS.out.steeringTorque, self.params, limiter='driver')
     apply_torque = (0 if self.angle_vm is not None else
                     apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.params))
 
@@ -245,10 +250,13 @@ class CarController(CarControllerBase):
     new_actuators.accel = accel
 
     self.frame += 1
+    if _projection is not None:
+      _projection.finish(new_actuators.torque)
     return new_actuators, can_sends
 
   def create_can_msgs(self, apply_steer_req, apply_torque, torque_fault, set_speed_in_units, accel, stopping,
                       hud_control, actuators, CS, CC, *, lead_data=None):
+    _projection = self.learning_projection_observer
     can_sends = []
 
     # HUD messages
@@ -267,6 +275,8 @@ class CarController(CarControllerBase):
       icon = 2 if CC.enabled or CC.latActive else 3 if disengaging else 1
       if self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG:
         can_sends.append(hyundaican.create_blended_steering(self.packer, self.CAN, apply_torque, apply_steer_req, icon))
+        if _projection is not None:
+          _projection.emit('hyundai.BLENDED_TORQUE', apply_torque, apply_steer_req, can_sends[-1])
         if self.blended_longitudinal is not None and self.blended_longitudinal.owner.active():
           can_sends.extend(hyundaican.create_lkas11_can_canfd_blended(
             self.packer, self.frame, self.CP, apply_torque, apply_steer_req, torque_fault, CS.lkas11,
@@ -277,16 +287,22 @@ class CarController(CarControllerBase):
             CS.blended_camera_current):
           can_sends.append(hyundaicanfd.create_suppress_lfa(self.packer, self.CAN, CS.lfa_block_msg, False))
       else:
+        _projection_packet_index = len(can_sends) if _projection is not None else 0
         can_sends.extend(hyundaican.create_lkas11_can_canfd_blended(
           self.packer, self.frame, self.CP, apply_torque, apply_steer_req, torque_fault, CS.lkas11,
           sys_warning, sys_state, CC.enabled, hud_control.leftLaneVisible, hud_control.rightLaneVisible,
           left_lane_warning, right_lane_warning, CS.msg_364))
+        if _projection is not None:
+          _projection.emit('hyundai.BLENDED_LKAS11', apply_torque, apply_steer_req, can_sends[_projection_packet_index])
     elif self.CP.carFingerprint != CAR.KIA_RAY_EV or self._ray_lkas11_active:
       can_sends.append(hyundaican.create_lkas11(self.packer, self.frame, self.CP, apply_torque, apply_steer_req,
                                               torque_fault, CS.lkas11, sys_warning, sys_state, hud_enabled,
                                               hud_control.leftLaneVisible, hud_control.rightLaneVisible,
                                               left_lane_warning, right_lane_warning,
                                               ray_lka_icon=(self._ray_lfa_icon or 1) if self.CP.carFingerprint == CAR.KIA_RAY_EV else None))
+    if _projection is not None and can_sends:
+      if not is_blended(self.CP) and (self.CP.carFingerprint != CAR.KIA_RAY_EV or self._ray_lkas11_active):
+        _projection.emit('hyundai.LKAS11', apply_torque, apply_steer_req, can_sends[-1])
     if self.CP.carFingerprint == CAR.KIA_RAY_EV:
       self._ray_lkas11_active = True
 
@@ -345,6 +361,7 @@ class CarController(CarControllerBase):
     return can_sends
 
   def create_canfd_msgs(self, apply_steer_req, apply_torque, set_speed_in_units, accel, stopping, hud_control, CS, CC, now_nanos):
+    _projection = self.learning_projection_observer
     can_sends = []
     canfd_lfa_icon = (self.canfd_dash_icons.update(self.frame, CC.enabled, CC.latActive)
                        if self.canfd_dash_icons is not None else None)
@@ -444,6 +461,8 @@ class CarController(CarControllerBase):
         steering_status_active |= CC.latActive
       can_sends.extend(hyundaicanfd.create_steering_messages(self.packer, self.CP, self.CAN,
                                                             steering_status_active, apply_steer_req, apply_torque))
+      if _projection is not None:
+        _projection.emit('hyundai.CANFD_TORQUE', apply_torque, apply_steer_req, can_sends[-1])
 
     # prevent LFA from activating on LKA steering cars by sending "no lane lines detected" to ADAS ECU
     if (

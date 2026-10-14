@@ -8,7 +8,6 @@ import json
 
 from openpilot.starpilot.lateral.controller_selection import (
   DOCUMENT_KEY, LEARNING_OFF_KEY, MAX_DOCUMENT_BYTES, ControllerMode, policy_for, replace_mode, selection_from_bytes,
-  controller_uses_native_learning,
 )
 from openpilot.starpilot.lateral.learning_preferences import (
   KEY as LEARNING_PREFERENCES_KEY, MAX_BYTES as LEARNING_PREFERENCES_LIMIT, read_preference, replace_preference,
@@ -187,12 +186,8 @@ class ControllerFeature:
     legacy, legacy_readable = read_saved(self.params, LEARNING_OFF_KEY, 1)
     preference = read_preference(self.params, CP, legacy_snapshot=(legacy, legacy_readable))
     valid = preference.valid and legacy_readable and controller_readable and selection.source != 'invalid'
-    compatible = controller_uses_native_learning(selection)
-    label = CHOICES[0] if selection.mode == ControllerMode.STANDARD else CHOICES[1]
     value = ('On' if preference.enabled else 'Off') if valid else 'Invalid saved preference'
-    reason = ('StarPilot’s FLM tuning will attempt to automatically correct torque profiles as you drive.'
-              if compatible else f'Saved for this vehicle. {label} uses its vehicle tune; ' +
-              'automatic learning is currently unavailable. ' + TUNING_GUIDANCE)
+    reason = 'StarPilot’s FLM tuning will attempt to automatically correct torque profiles as you drive.'
     return FeatureRow(LEARNING_OFF_KEY, 'Use StarPilot Auto Learn', value, preference.raw, ('Off', 'On') if valid else (),
                       available=valid and self.authority('preferences'),
                       reason=reason if valid else 'Saved controller or learning preference is unreadable or invalid.',

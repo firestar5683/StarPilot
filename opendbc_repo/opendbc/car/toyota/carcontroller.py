@@ -132,6 +132,9 @@ class CarController(CarControllerBase):
     self.brake_hold_active = False
 
   def update(self, CC, CS, now_nanos):
+    _projection = self.learning_projection_observer
+    if _projection is not None:
+      _projection.begin(CC.actuators.torque, self.frame)
     filter_allowed = (not self.prius_longitudinal or self.prius_filter_input is not None and
                       self.prius_filter_input.update(now_nanos))
     long_active = CC.longActive and filter_allowed
@@ -162,6 +165,8 @@ class CarController(CarControllerBase):
 
     # *** steer torque ***
     new_torque = int(round(actuators.torque * self.params.STEER_MAX))
+    if _projection is not None:
+      _projection.input(new_torque, self.params.STEER_MAX, self.last_torque, CS.out.steeringTorqueEps, self.params, limiter='measured')
     apply_torque = apply_meas_steer_torque_limits(new_torque, self.last_torque, CS.out.steeringTorqueEps, self.params)
 
     # Steering-rate fault prevention
@@ -201,6 +206,8 @@ class CarController(CarControllerBase):
                               steer_command)
       self.secoc_lka_message_counter += 1
     can_sends.append(steer_command)
+    if _projection is not None:
+      _projection.emit('toyota.STEERING_LKA', apply_torque, apply_steer_req, can_sends[-1])
 
     # STEERING_LTA does not seem to allow more rate by sending faster, and may wind up easier
     if self.frame % 2 == 0 and self.CP.flags & ToyotaFlags.TSS2:
@@ -400,4 +407,6 @@ class CarController(CarControllerBase):
     new_actuators.accel = self.accel
 
     self.frame += 1
+    if _projection is not None:
+      _projection.finish(new_actuators.torque)
     return new_actuators, can_sends

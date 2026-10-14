@@ -21,6 +21,9 @@ class CarController(CarControllerBase):
     self.params = CarControllerParams(CP)
 
   def update(self, CC, CS, now_nanos):
+    _projection = self.learning_projection_observer
+    if _projection is not None:
+      _projection.begin(CC.actuators.torque, self.frame)
     can_sends = []
 
     lkas_active = CC.latActive and self.lkas_control_bit_prev
@@ -80,12 +83,16 @@ class CarController(CarControllerBase):
 
       # steer torque
       new_torque = int(round(CC.actuators.torque * self.params.STEER_MAX))
+      if _projection is not None:
+        _projection.input(new_torque, self.params.STEER_MAX, self.apply_torque_last, CS.out.steeringTorqueEps, self.params, limiter='measured')
       apply_torque = apply_meas_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorqueEps, self.params)
       if not lkas_active or not lkas_control_bit:
         apply_torque = 0
       self.apply_torque_last = apply_torque
 
       can_sends.append(chryslercan.create_lkas_command(self.packer, self.CP, int(apply_torque), lkas_control_bit))
+      if _projection is not None:
+        _projection.emit('chrysler.LKAS_COMMAND', apply_torque, lkas_control_bit, can_sends[-1])
 
     self.frame += 1
 
@@ -93,4 +100,6 @@ class CarController(CarControllerBase):
     new_actuators.torque = self.apply_torque_last / self.params.STEER_MAX
     new_actuators.torqueOutputCan = self.apply_torque_last
 
+    if _projection is not None:
+      _projection.finish(new_actuators.torque)
     return new_actuators, can_sends
