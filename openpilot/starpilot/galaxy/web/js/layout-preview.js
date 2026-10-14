@@ -1,4 +1,6 @@
 import { widgetArtMetadata } from "./widget-art.js"
+// hiddenOn: screens where the scene looks exactly like another one. The Small screen has no text for these
+// speed-limit states, so they match Longitudinal only or Cruise off there.
 export const PREVIEW_SCENES = [
   { id: "engaged", label: "Engaged" },
   { id: "aol", label: "Lateral only" },
@@ -12,11 +14,11 @@ export const PREVIEW_SCENES = [
   { id: "slc_pending", label: "Pending speed limit" },
   { id: "slc_max", label: "Using set speed" },
   { id: "slc_equal", label: "Equal speed limits" },
-  { id: "slc_pedal", label: "Using accelerator" },
-  { id: "slc_retained", label: "Set-speed override" },
+  { id: "slc_pedal", label: "Using accelerator", hiddenOn: ["compact"] },
+  { id: "slc_retained", label: "Set-speed override", hiddenOn: ["compact"] },
   { id: "slc_disengaged", label: "Cruise off" },
   { id: "slc_unavailable", label: "Unavailable speed limit" },
-  { id: "slc_display", label: "Display-only speed limit" },
+  { id: "slc_display", label: "Display-only speed limit", hiddenOn: ["compact"] },
 ]
 const SCENES = PREVIEW_SCENES.map(({ id }) => id)
 

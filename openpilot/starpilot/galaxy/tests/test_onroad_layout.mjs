@@ -489,6 +489,15 @@ assert.match(OnroadLayoutPage.template, /state\.profile === 'compact'" class="gx
 // One scene dropdown, grouped, with every scene exactly once.
 assert.deepEqual(vm.sceneGroups.map(group => group.label), ["Driving", "Conditional experimental", "Speed limit"])
 assert.deepEqual(vm.sceneGroups.flatMap(group => group.scenes.map(scene => scene.id)).sort(), vm.scenes.map(scene => scene.id).sort())
+// The Small screen only offers scenes that look different there; a hidden pick falls back to Engaged.
+vm.state.scene = "slc_display"
+vm.selectProfile("compact")
+assert.equal(vm.state.scene, "engaged")
+const smallScenes = vm.sceneGroups.flatMap(group => group.scenes.map(scene => scene.id))
+for (const id of ["slc_pedal", "slc_retained", "slc_display"]) assert.ok(!smallScenes.includes(id), id)
+assert.ok(smallScenes.includes("slc_unavailable") && smallScenes.includes("slc_disengaged"))
+vm.selectProfile("large")
+assert.equal(vm.sceneGroups.flatMap(group => group.scenes).length, vm.scenes.length)
 assert.match(OnroadLayoutPage.template, /<GalaxySelect class="gx-field gx-field--full" aria-label="Preview scene"/)
 // The widget open in Edit glows; the sources panel is a layout setting, not an on-screen toggle.
 assert.match(OnroadLayoutPage.template, /'is-editing': state\.showEditingAids && state\.inspectorPanel === 'edit' && state\.selected === widget\.id/)

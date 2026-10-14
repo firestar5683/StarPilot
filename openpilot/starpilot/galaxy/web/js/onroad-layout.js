@@ -375,9 +375,14 @@ export const OnroadLayoutPage = {
       const grow = this.state.draft.speedSourcesCard === true ? cruise.sourcesExtent.card : cruise.sourcesExtent.inline
       return { ...profile, widgets: { ...profile.widgets, cruise_limits: { ...cruise, height: cruise.height + grow } } }
     },
+    // Only the scenes that look different on this screen.
+    availableScenes() {
+      const screen = this.projection ? "projection" : this.state.profile
+      return this.scenes.filter(scene => !scene.hiddenOn?.includes(screen))
+    },
     sceneGroups() {
       return [["Driving", scene => !/^(cem|slc)_/.test(scene.id)], ["Conditional experimental", scene => scene.id.startsWith("cem_")],
-        ["Speed limit", scene => scene.id.startsWith("slc_")]].map(([label, test]) => ({ label, scenes: this.scenes.filter(test) }))
+        ["Speed limit", scene => scene.id.startsWith("slc_")]].map(([label, test]) => ({ label, scenes: this.availableScenes.filter(test) }))
     },
     layout() { return this.state.draft?.layouts[this.state.profile] },
     projectionHasPipWidget() {
@@ -723,6 +728,7 @@ export const OnroadLayoutPage = {
       this.state.profile = profile
       this.state.selected = Object.keys(this.profile.widgets)[0] || null
       this.state.placementError = ""
+      if (!this.availableScenes.some(scene => scene.id === this.state.scene)) this.state.scene = "engaged"
     },
     changePosition(id, x, y) {
       if (!this.editable) return
