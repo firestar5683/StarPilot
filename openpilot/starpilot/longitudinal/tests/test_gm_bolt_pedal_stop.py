@@ -111,6 +111,9 @@ class TestBoltPedalMovingStop(unittest.TestCase):
           cancel_seen |= any(m[0] == 0x1e1 and m[2] == 2 for m in sent[-1][0])
           self.assertEqual(cc.actuators.longControlState, controls.LoC.long_control_state if controls.longitudinal_inputs.gm_start_enabled else prior)
           prior = controls.LoC.long_control_state
+          # Stock ACC releases at tick 6; the stopped hold releases with the plan at tick 12.
+          stop_hold = candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and speed == 0. and 6 <= tick < 12
+          self.assertEqual(ci.CC.bolt_acc_pedal_stop_hold, stop_hold)
           if tick < 12:
             expected = stopping_step(expected, -2., out.vEgo)
             self.assertAlmostEqual(cc.actuators.accel, expected, places=6)
@@ -141,7 +144,13 @@ class TestBoltPedalMovingStop(unittest.TestCase):
               self.assertEqual(tuple(getattr(ci.CC, name) for name in calc_fields), calc_before)
               self.assertFalse(any(m[0] == 0x315 for m in sent[-1][0]))
               continue
-            steady = target if steady is None else pedal_step(target, steady, accel, out.vEgo)
+            if stop_hold:
+              steady = 0.
+              self.assertEqual(ci.CC.pedal_steady, 0.)
+            else:
+              steady = target if steady is None else pedal_step(target, steady, accel, out.vEgo)
+            if candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and speed == 0. and tick == 12:
+              self.assertGreater(steady, 0.)
             self.assertFalse(ci.CC.regen_paddle_pressed)
             self.assertEqual(next(m[1] for m in sent[-1][0] if m[0] == 0x200), pedal_wire(steady, tick // 4))
           if tick == 20:
