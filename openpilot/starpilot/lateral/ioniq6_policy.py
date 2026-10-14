@@ -39,7 +39,8 @@ def is_ioniq_6_2025_model(CP) -> bool:
   if getattr(CP, "carFingerprint", None) not in IONIQ_6_CARS:
     return False
   try:
-    versions = [fw.fwVersion.decode("ascii", errors="ignore") if isinstance(fw.fwVersion, bytes) else str(fw.fwVersion)
+    versions = [bytes(fw.fwVersion).decode("ascii", errors="ignore")
+                if isinstance(fw.fwVersion, (bytes, bytearray, memoryview)) else str(fw.fwVersion)
                 for fw in CP.carFw]
   except (AttributeError, TypeError, ValueError):
     return False
@@ -843,6 +844,9 @@ class Ioniq6TorquePolicy:
       friction_threshold = get_ioniq_6_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk) / max(center_taper, 1e-3)
     else:
       friction_threshold = self.surface_math.friction_threshold(self.surface, CS.vEgo, setpoint, desired_lateral_jerk) / max(center_taper, 1e-3)
+    if self.surface is None and not self.is_2025 and not CS.steeringPressed and not self.prev_steering_pressed:
+      friction_threshold += get_ioniq_6_2023_center_friction_increment(
+        CS.vEgo, setpoint, measurement, desired_lateral_jerk, future_desired_lateral_accel) / max(center_taper, 1e-3)
     friction_scale = get_ioniq_6_friction_scale(CS.vEgo, setpoint, desired_lateral_jerk)
     friction_scale = 1.0 + ((friction_scale - 1.0) * center_taper)
     friction_scale *= get_ioniq_6_friction_center_fade_scale(setpoint, CS.vEgo)
@@ -889,3 +893,24 @@ class Ioniq6TorquePolicy:
                                                        CS, steer_limited_by_safety, curvature_limited))
     self.prev_steering_pressed = CS.steeringPressed
     return -output_torque, 0.0, pid_log
+
+
+IONIQ_6_2023_CENTER_FRICTION_INCREMENT = 0.24
+
+IONIQ_6_2023_CENTER_FRICTION_SPEED_BP = [3.5, 8.0]
+
+IONIQ_6_2023_CENTER_FRICTION_LAT_BP = [0.12, 0.35]
+
+IONIQ_6_2023_CENTER_FRICTION_ERROR_BP = [0.08, 0.18]
+
+IONIQ_6_2023_CENTER_FRICTION_JERK_BP = [0.20, 0.60]
+
+def get_ioniq_6_2023_center_friction_increment(v_ego: float, desired_lateral_accel: float, measured_lateral_accel: float,
+                                             desired_lateral_jerk: float, future_lateral_accel: float) -> float:
+  speed_weight = np.interp(v_ego, IONIQ_6_2023_CENTER_FRICTION_SPEED_BP, [0.0, 1.0])
+  center_weight = np.interp(max(abs(desired_lateral_accel), abs(measured_lateral_accel), abs(future_lateral_accel)),
+                            IONIQ_6_2023_CENTER_FRICTION_LAT_BP, [1.0, 0.0])
+  tracking_weight = np.interp(abs(desired_lateral_accel - measured_lateral_accel),
+                              IONIQ_6_2023_CENTER_FRICTION_ERROR_BP, [1.0, 0.0])
+  jerk_weight = np.interp(abs(desired_lateral_jerk), IONIQ_6_2023_CENTER_FRICTION_JERK_BP, [1.0, 0.0])
+  return float(IONIQ_6_2023_CENTER_FRICTION_INCREMENT * speed_weight * center_weight * tracking_weight * jerk_weight)

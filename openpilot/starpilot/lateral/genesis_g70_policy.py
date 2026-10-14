@@ -369,6 +369,9 @@ class GenesisG70TorquePolicy:
     ff = gravity_adjusted_future_lateral_accel - parent.torque_params.latAccelOffset * roll_offset_fade
     ff *= get_genesis_g70_unwind_ff_scale(setpoint, measurement, desired_lateral_jerk, CS.vEgo)
     friction_threshold = get_genesis_g70_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
+    if not CS.steeringPressed and not self.prev_steering_pressed:
+      friction_threshold += get_genesis_g70_traffic_friction_increment(
+        CS.vEgo, setpoint, desired_lateral_jerk, desired_curvature, measured_curvature)
     vehicle_deadzone = get_genesis_g70_friction_jerk_deadzone(CS.vEgo, setpoint, desired_lateral_jerk, measurement)
     friction_jerk_deadzone = center_chatter_friction_jerk_deadzone(CS.vEgo, setpoint, vehicle_deadzone)
     friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0), desired_lateral_jerk)
@@ -408,3 +411,26 @@ class GenesisG70TorquePolicy:
     self.prev_steering_pressed = CS.steeringPressed
     self.prev_output_torque = float(output_torque)
     return -output_torque, 0.0, pid_log
+
+
+GENESIS_G70_TRAFFIC_FRICTION_CURVATURE_BP = [0.0035, 0.0080]
+
+GENESIS_G70_TRAFFIC_FRICTION_INCREMENT = 0.90
+
+GENESIS_G70_TRAFFIC_FRICTION_JERK_BP = [0.15, 0.50]
+
+GENESIS_G70_TRAFFIC_FRICTION_LAT_BP = [0.12, 0.30]
+
+GENESIS_G70_TRAFFIC_FRICTION_SPEED_BP = [6.0, 8.0]
+
+def get_genesis_g70_traffic_friction_increment(v_ego: float, desired_lateral_accel: float,
+                                              desired_lateral_jerk: float, future_curvature: float,
+                                              measured_curvature: float) -> float:
+  speed = max(v_ego, 0.0)
+  speed_weight = np.interp(speed, GENESIS_G70_TRAFFIC_FRICTION_SPEED_BP, [1.0, 0.0])
+  request_accel = max(abs(desired_lateral_accel), abs(future_curvature) * speed ** 2)
+  accel_weight = np.interp(request_accel, GENESIS_G70_TRAFFIC_FRICTION_LAT_BP, [1.0, 0.0])
+  curvature = max(abs(future_curvature), abs(measured_curvature), abs(desired_lateral_accel) / max(speed ** 2, 1.0))
+  curve_weight = np.interp(curvature, GENESIS_G70_TRAFFIC_FRICTION_CURVATURE_BP, [1.0, 0.0])
+  calm_weight = np.interp(abs(desired_lateral_jerk), GENESIS_G70_TRAFFIC_FRICTION_JERK_BP, [1.0, 0.0])
+  return float(GENESIS_G70_TRAFFIC_FRICTION_INCREMENT * speed_weight * accel_weight * curve_weight * calm_weight)

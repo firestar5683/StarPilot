@@ -75,9 +75,9 @@ def test_invalid_torque_contract_cannot_select_vehicle_policy(vehicle, profile, 
 
 
 @pytest.mark.parametrize('kph,desired,increment', (
-  (60., 0., 0.), (100., .65, 0.), (110., .65, .15), (120., .65, .30),
-  (120., -.65, .30), (120., 1.15, .15), (120., -1.15, .15),
-  (120., 1.5, 0.), (140., 0., .30), (140., -2., 0.),
+  (60., 0., 0.), (100., .65, 0.), (110., .65, .30), (120., .65, .30),
+  (120., -.65, .30), (120., 1.6, .15), (120., -1.6, .15),
+  (120., 2.0, 0.), (140., 0., .30), (140., -2., 0.),
 ))
 def test_kona_2022_high_speed_friction_boundaries(monkeypatch, kph, desired, increment):
   from openpilot.starpilot.lateral import hkg_vehicle_shaping as shaping

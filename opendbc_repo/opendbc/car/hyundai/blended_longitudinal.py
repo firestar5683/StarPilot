@@ -62,7 +62,8 @@ def candidate_from_stock(cp, *, alpha_requested, native_qualified=False):
   candidate.alphaLongitudinalAvailable = True
   candidate.openpilotLongitudinalControl = True
   candidate.pcmCruise = False
-  candidate.radarUnavailable = True
+  from opendbc.car.hyundai.radar_interface import blended_track_radar
+  candidate.radarUnavailable = cp.radarUnavailable if blended_track_radar(cp) else True
   candidate.safetyConfigs[0].safetyParam |= HyundaiSafetyFlags.LONG.value
   # Modern mixed alpha namespace2004/2014; cancel/LDA semantics are local.
   candidate.stopAccel = -.85

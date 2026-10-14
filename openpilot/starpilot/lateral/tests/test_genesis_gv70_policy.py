@@ -38,7 +38,14 @@ def test_original_derived_default_formula_vectors():
   assert data['source_commit'] == '385428f6ea1c183de4ddcd8604f294abec02a9e8'
   for row in data['vectors']:
     value = getattr(gv70_shaping, row['function'])(*row['input'])
-    assert value == pytest.approx(row['expected'], abs=1e-14, rel=0), row
+    expected = row['expected']
+    # Green Garden88c739 adds an exact curve gate. These original vectors
+    # remain frozen; undertracking/opposite-side curves now have zero damping.
+    if row['function'] in ('get_genesis_gv70_high_speed_error_scale', 'get_genesis_gv70_reversal_output_scale'):
+      request, measured, _, _ = row['input']
+      if abs(request) >= .55 and (request * measured <= 0. or abs(measured) <= abs(request)):
+        expected = 1.0
+    assert value == pytest.approx(expected, abs=1e-14, rel=0), row
 
 
 def test_exact_admission_and_saved_standard_keeps_upstream_controller():

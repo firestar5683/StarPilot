@@ -3,7 +3,8 @@ import math
 from opendbc.can import CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.interfaces import RadarInterfaceBase
-from opendbc.car.hyundai.values import CAR, DBC, HyundaiFlags, HYUNDAI_MRR35_RADAR_DBC, HYUNDAI_MRR30_RADAR_DBC, HYUNDAI_GV70_RADAR_DBC, HYUNDAI_G90_RADAR_DBC
+from opendbc.car.hyundai.values import (CAR, DBC, HyundaiFlags, HYUNDAI_MRR35_RADAR_DBC, HYUNDAI_MRR30_RADAR_DBC,
+                                        HYUNDAI_GV70_RADAR_DBC, HYUNDAI_G90_RADAR_DBC, is_blended)
 
 RADAR_START_ADDR = 0x500
 RADAR_MSG_COUNT = 32
@@ -21,6 +22,16 @@ MRR35_RADAR_MSG_COUNT = 32
 MRR35_RADAR_CYCLE_NS = 50_000_000  # 20 Hz
 
 
+def blended_track_radar(CP) -> bool:
+  # Exact mixed classic PT / HDA-II steering identity, independently observed
+  # by the existing factory. Never relabel another classic or CANFD car.
+  return bool(CP.brand == 'hyundai' and is_blended(CP) and CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG)
+
+
+def radar_dbc(CP):
+  return HYUNDAI_GV70_RADAR_DBC if blended_track_radar(CP) else DBC[CP.carFingerprint].get(Bus.radar)
+
+
 def radar_bus(CP) -> int:
   # Frozen Ioniq 6 camera-SCC wiring exposes the MRR35 object bank on bus 1;
   # its LKA/HDA-II wiring and the other MRR35 cars expose it on bus 0.
@@ -32,28 +43,28 @@ def radar_bus(CP) -> int:
 
 
 def get_radar_can_parser(CP):
-  if Bus.radar not in DBC[CP.carFingerprint]:
+  if radar_dbc(CP) is None:
     return None
 
   start, count = radar_message_range(CP)
-  mrr35 = DBC[CP.carFingerprint].get(Bus.radar) == HYUNDAI_MRR35_RADAR_DBC
-  g90 = DBC[CP.carFingerprint].get(Bus.radar) == HYUNDAI_G90_RADAR_DBC
-  gv70 = DBC[CP.carFingerprint].get(Bus.radar) == HYUNDAI_GV70_RADAR_DBC
+  mrr35 = radar_dbc(CP) == HYUNDAI_MRR35_RADAR_DBC
+  g90 = radar_dbc(CP) == HYUNDAI_G90_RADAR_DBC
+  gv70 = radar_dbc(CP) == HYUNDAI_GV70_RADAR_DBC
   messages = [(f"RADAR_TRACK_{addr:x}",
                20 if mrr35 and addr == start + count - 1 else
                float("nan") if mrr35 or g90 and addr >= start + RADAR_MSG_COUNT else 20 if gv70 else 50) for addr in range(start, start + count)]
-  mrr30 = DBC[CP.carFingerprint].get(Bus.radar) == HYUNDAI_MRR30_RADAR_DBC
-  return CANParser(DBC[CP.carFingerprint][Bus.radar], messages, radar_bus(CP) if mrr35 or mrr30 or gv70 else 1)
+  mrr30 = radar_dbc(CP) == HYUNDAI_MRR30_RADAR_DBC
+  return CANParser(radar_dbc(CP), messages, radar_bus(CP) if mrr35 or mrr30 or gv70 else 1)
 
 
 def radar_message_range(CP) -> tuple[int, int]:
-  if DBC[CP.carFingerprint].get(Bus.radar) == HYUNDAI_G90_RADAR_DBC:
+  if radar_dbc(CP) == HYUNDAI_G90_RADAR_DBC:
     return RADAR_START_ADDR, G90_RADAR_MSG_COUNT
-  if DBC[CP.carFingerprint].get(Bus.radar) in (HYUNDAI_MRR30_RADAR_DBC, HYUNDAI_GV70_RADAR_DBC):
+  if radar_dbc(CP) in (HYUNDAI_MRR30_RADAR_DBC, HYUNDAI_GV70_RADAR_DBC):
     return MRR30_RADAR_START_ADDR, MRR30_RADAR_MSG_COUNT
-  if DBC[CP.carFingerprint].get(Bus.radar) == HYUNDAI_MRR35_RADAR_DBC:
+  if radar_dbc(CP) == HYUNDAI_MRR35_RADAR_DBC:
     return MRR35_RADAR_START_ADDR, MRR35_RADAR_MSG_COUNT
-  if DBC[CP.carFingerprint].get(Bus.radar) == "hyundai_mrrevo14f_radar_generated":
+  if radar_dbc(CP) == "hyundai_mrrevo14f_radar_generated":
     return MRREVO14F_RADAR_START_ADDR, MRREVO14F_RADAR_MSG_COUNT
   return RADAR_START_ADDR, RADAR_MSG_COUNT
 
@@ -63,10 +74,10 @@ class RadarInterface(RadarInterfaceBase):
     super().__init__(CP)
     self.updated_messages = set()
     self.start_addr, self.msg_count = radar_message_range(CP)
-    self.g90 = DBC[CP.carFingerprint].get(Bus.radar) == HYUNDAI_G90_RADAR_DBC
+    self.g90 = radar_dbc(CP) == HYUNDAI_G90_RADAR_DBC
     self.mrrevo14f = self.start_addr == MRREVO14F_RADAR_START_ADDR
     self.mrr35 = self.start_addr == MRR35_RADAR_START_ADDR
-    self.gv70 = DBC[CP.carFingerprint].get(Bus.radar) == HYUNDAI_GV70_RADAR_DBC
+    self.gv70 = radar_dbc(CP) == HYUNDAI_GV70_RADAR_DBC
     self.mrr30 = self.start_addr == MRR30_RADAR_START_ADDR and not self.gv70
     self.last_mrr35_trigger_ns = 0
     self.trigger_msg = self.start_addr + (RADAR_MSG_COUNT if self.g90 else self.msg_count) - 1

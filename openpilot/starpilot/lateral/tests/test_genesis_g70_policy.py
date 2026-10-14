@@ -29,7 +29,11 @@ def controller_for(car=CAR.GENESIS_G70_2020):
 
 @pytest.mark.parametrize('case_index', range(5))
 @patch.object(genesis_g70_policy, 'get_genesis_g70_center_measurement_damping_gain', return_value=0.0)
-def test_frozen_base_tuning_numeric_traces(_damping, case_index):
+@patch.object(genesis_g70_policy, 'get_genesis_g70_traffic_friction_increment', return_value=0.0)
+def test_frozen_base_tuning_numeric_traces(_traffic, _damping, case_index):
+  # This ba901b5f fixture intentionally tests historical base math, as the
+  # existing damping isolation does. The new traffic stage is exercised by
+  # test_genesis_dom_leaves.py against actual friction/current driver state.
   fixture = json.loads(FIXTURE.read_text())
   cp, controller, vm = controller_for()
   assert selected_policy(controller) is not None

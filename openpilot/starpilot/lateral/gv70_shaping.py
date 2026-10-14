@@ -3,6 +3,8 @@
 Only default source formulas; learned torque calibration remains caller-owned.
 See the repository's retained StarPilot attribution and licenses.
 """
+import numpy as np
+
 from openpilot.common.constants import CV
 from openpilot.starpilot.lateral.torque_shaping import sigmoid as _sigmoid
 
@@ -179,7 +181,8 @@ def get_genesis_gv70_unwind_ff_scale(setpoint: float, measured_lateral_accel: fl
                          GENESIS_GV70_UNWIND_FF_JERK_WIDTH)
   speed_weight = _sigmoid((v_ego - GENESIS_GV70_UNWIND_FF_SPEED) /
                           GENESIS_GV70_UNWIND_FF_SPEED_WIDTH)
-  return 1.0 - GENESIS_GV70_UNWIND_FF_REDUCTION_MAX * overshoot_weight * jerk_weight * speed_weight
+  tracking_weight = _genesis_gv70_curve_damping_weight(setpoint, measured_lateral_accel)
+  return 1.0 - GENESIS_GV70_UNWIND_FF_REDUCTION_MAX * overshoot_weight * jerk_weight * speed_weight * tracking_weight
 
 def get_genesis_gv70_high_speed_error_scale(setpoint: float, measured_lateral_accel: float,
                                              desired_lateral_jerk: float, v_ego: float) -> float:
@@ -195,7 +198,7 @@ def get_genesis_gv70_high_speed_error_scale(setpoint: float, measured_lateral_ac
   phase_weight = 1.0 if setpoint * desired_lateral_jerk < 0.0 else 0.45
   reduction = (GENESIS_GV70_HIGH_SPEED_ERROR_DAMPING_MAX * speed_weight * error_weight *
                (0.35 + (0.65 * jerk_weight)) * phase_weight)
-  return 1.0 - reduction
+  return 1.0 - reduction * _genesis_gv70_curve_damping_weight(setpoint, measured_lateral_accel)
 
 def get_genesis_gv70_reversal_output_scale(setpoint: float, measured_lateral_accel: float,
                                            desired_lateral_jerk: float, v_ego: float) -> float:
@@ -212,7 +215,7 @@ def get_genesis_gv70_reversal_output_scale(setpoint: float, measured_lateral_acc
   jerk_weight = _sigmoid((abs(desired_lateral_jerk) - GENESIS_GV70_REVERSAL_OUTPUT_DAMPING_JERK) /
                          GENESIS_GV70_REVERSAL_OUTPUT_DAMPING_JERK_WIDTH)
   reduction = (GENESIS_GV70_REVERSAL_OUTPUT_DAMPING_MAX * speed_weight * error_weight * jerk_weight)
-  return 1.0 - reduction
+  return 1.0 - reduction * _genesis_gv70_curve_damping_weight(setpoint, measured_lateral_accel)
 
 def get_genesis_gv70_low_speed_center_overshoot_scale(setpoint: float, measured_lateral_accel: float,
                                                       v_ego: float) -> float:
@@ -256,3 +259,14 @@ def get_genesis_gv70_stabilized_output(output_torque: float, prev_output_torque:
   output_alpha = dt / (max(response_time, 0.0) + dt)
   smoothed_output = prev_output_torque + output_alpha * (output_torque - prev_output_torque)
   return float(output_torque + speed_weight * (smoothed_output - output_torque))
+
+
+GENESIS_GV70_CURVE_DAMPING_LAT_BP = [0.25, 0.55]
+
+GENESIS_GV70_CURVE_DAMPING_OVERSHOOT_BP = [0.0, 0.20]
+
+def _genesis_gv70_curve_damping_weight(setpoint: float, measured_lateral_accel: float) -> float:
+  curve_weight = float(np.interp(abs(setpoint), GENESIS_GV70_CURVE_DAMPING_LAT_BP, [0.0, 1.0]))
+  overshoot = max(abs(measured_lateral_accel) - abs(setpoint), 0.0) if setpoint * measured_lateral_accel > 0.0 else 0.0
+  overshoot_weight = float(np.interp(overshoot, GENESIS_GV70_CURVE_DAMPING_OVERSHOOT_BP, [0.0, 1.0]))
+  return 1.0 - curve_weight * (1.0 - overshoot_weight)

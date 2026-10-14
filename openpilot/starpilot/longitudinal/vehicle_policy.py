@@ -15,7 +15,9 @@ from opendbc.car.hyundai.g90_longitudinal import (stopping_decel_rate as hyundai
 
 
 def installed_policy_for(cp):
-  return (hybrid_policy_for(cp) or suburban_policy_for(cp) or conventional_pedal_policy_for(cp) or camera_policy_for(cp) or ordinary_cc_policy_for(cp) or
+  from opendbc.car.hyundai.ray_pedal import longitudinal_policy_for as ray_policy_for
+  return (ray_policy_for(cp) or hybrid_policy_for(cp) or suburban_policy_for(cp) or conventional_pedal_policy_for(cp) or
+          camera_policy_for(cp) or ordinary_cc_policy_for(cp) or
           sdgm_policy_for(cp) or ascm_policy_for(cp) or gm_pedal_policy_for(cp) or volt_policy_for(cp) or
           euv_policy_for(cp) or volt_cc_policy_for(cp) or bolt_cc_policy_for(cp))
 
