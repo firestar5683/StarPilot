@@ -180,3 +180,10 @@ def download_status(now: float | None = None) -> dict | None:
   if release is None or release["expires"] - LINK_MARGIN <= (_now() if now is None else now):
     return None
   return {"version": release["version"], "url": release["url"], "size": release["size"]}
+
+
+def version_for_size(size: int) -> str | None:
+  """The cached release's version when a package has exactly its size; a display label only."""
+  with _lock:
+    release = _cache
+  return release["version"] if release is not None and release["size"] == size else None

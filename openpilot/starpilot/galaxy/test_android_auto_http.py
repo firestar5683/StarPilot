@@ -38,7 +38,7 @@ class FakeImport:
     self.running = False
   def busy(self): return self.running
   def status(self): return {'state': 'running' if self.running else 'idle'}
-  def start(self, *, path, enabled):
+  def start(self, *, path, enabled, app_version=None):
     self.calls.append((path.read_bytes(), enabled))
     self.running = True
 

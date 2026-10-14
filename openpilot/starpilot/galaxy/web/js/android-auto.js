@@ -318,8 +318,8 @@ const WRONG_DOWNLOAD = "That’s not the Android Auto download. Download it agai
 
 export function downloadLink(release) {
   if (typeof release?.url === "string" && DOWNLOAD_LINK.test(release.url) && typeof release.version === "string" &&
-      release.version.length <= 128 && /^[0-9]+(?:\.[0-9]+)+-release$/.test(release.version) &&
-      Number.isSafeInteger(release.size) && release.size > 0) {
+    release.version.length <= 128 && /^[0-9]+(?:\.[0-9]+)+-release$/.test(release.version) &&
+    Number.isSafeInteger(release.size) && release.size > 0) {
     return { direct: true, url: release.url, version: release.version.replace(/-release$/, ""), megabytes: Math.ceil(release.size / 1048576) }
   }
   return { direct: false, url: APKMIRROR_URL }
@@ -447,6 +447,10 @@ export const AndroidAutoPage = {
     canRespond() { return validPromptInput(this.pairing?.prompt, this.pairValue) },
     expiry() { return expiryInfo(this.setup?.identity) },
     projecting() { return this.runtime?.state === "streaming" },
+    installedVersion() {
+      const version = this.setup?.identity.installed && this.setup.identity.app_version
+      return typeof version === "string" ? version.replace(/-release.*$/, "") : ""
+    },
     supportReady() { return !!(this.setup?.enabled && this.setup.identity.installed) },
     // Returning drivers see a status card; the setup steps fold away below it.
     setupDone() { return !!(this.supportReady && this.selected && !this.pairing?.active) },
@@ -796,7 +800,7 @@ export const AndroidAutoPage = {
             <div><h3>Customize Your Dashboard</h3><p>Once connected, customize your dashboard setup.</p></div>
           </div>
           <div class="gx-aa-step__body">
-            <a class="gx-btn gx-btn--tonal gx-aa-cta" href="#/theme_maker/android_auto">Customize Dashboard</a>
+            <a class="gx-btn gx-btn--tonal gx-aa-cta" href="#/theme_maker/android_auto">Customize Layout</a>
             <a class="gx-btn gx-btn--tonal gx-aa-cta" href="#/navigation/maps"><i class="bi bi-map" aria-hidden="true"></i> Offline Road Maps</a>
             <p class="gx-note">Save road lines for the map overlay so it keeps drawing roads with no signal.</p>
           </div>
@@ -960,7 +964,7 @@ export const AndroidAutoPage = {
                   <span class="gx-aa-step__num gx-aa-step-card__num">1</span>
                   <div class="gx-aa-step-card__title">
                     <strong>Download Android Auto</strong>
-                    <small>{{ download.direct ? 'Saves the app to this ' + (onPhone ? 'phone' : 'computer') : 'Get the newest release from APKMirror' }}</small>
+                    <small>{{ download.direct ? 'Saves the app to this ' + (onPhone ? 'phone' : 'computer') : 'Get the newest release from APKMirror' }}<template v-if="installedVersion"> · You have {{ installedVersion }}</template></small>
                   </div>
                 </div>
                 <div class="gx-aa-step-card__body">

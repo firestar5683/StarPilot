@@ -165,3 +165,10 @@ def test_refresh_is_single_flight(monkeypatch, cache):
     if thread.name == "aa-apkpure":
       thread.join(2)
   assert calls == [1]
+
+
+def test_version_for_size_names_only_an_exact_size_match(monkeypatch, cache):
+  assert apkpure.version_for_size(5) is None
+  monkeypatch.setattr(apkpure, "_cache", {"version": "17.7.663654-release", "code": 1, "url": LINK, "size": 5, "expires": NOW})
+  assert apkpure.version_for_size(5) == "17.7.663654-release"  # an expired link still names the file it pointed to
+  assert apkpure.version_for_size(6) is None

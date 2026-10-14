@@ -66,7 +66,7 @@ class AndroidAutoSetup:
     return {
       'enabled': self.enabled(), 'bluetoothEnabled': self.bluetooth_enabled(), 'parked': self.parked(),
       'installReady': self.install_ready(), 'serviceReady': self.service_ready(),
-      'identity': {key: ident[key] for key in ('installed', 'expires', 'days_left', 'warning', 'message', 'expired', 'error') if key in ident},
+      'identity': {key: ident[key] for key in ('installed', 'expires', 'days_left', 'warning', 'message', 'expired', 'error', 'app_version') if key in ident},
       'import': self.job.status(),
       'download': apkpure.download_status(),
       'maxUploadBytes': apk_identity.MAX_FILE_BYTES,
@@ -133,7 +133,8 @@ class AndroidAutoSetup:
         out.flush()
         os.fsync(out.fileno())
       self._require_session(session)
-      self.job.start(path=path, enabled=lambda: self.session_valid(session))
+      # APKPure's XAPK carries no version, so name it after the release we offered when the size matches.
+      self.job.start(path=path, enabled=lambda: self.session_valid(session), app_version=apkpure.version_for_size(length))
       started = True
       return self.status(session)
     finally:
