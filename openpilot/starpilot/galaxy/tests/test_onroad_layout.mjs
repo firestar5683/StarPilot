@@ -135,6 +135,7 @@ function editor() {
   vm.artFeed.start = () => { vm.artFeed.active = true }
   vm.artFeed.update = () => {}
   vm.artFeed.stop = () => { vm.artFeed.active = false }
+  vm.artFeed.pause = () => { vm.artFeed.active = false }
   vm.state.data = snapshot(); vm.state.data.supportedProfiles = ['large', 'compact']; vm.state.draft = copy(vm.state.data.document); vm.state.status = "ready"; vm.state.selected = "current_speed"
   const publish = vm.feed.publish
   vm.feed = { load: () => calls.push("load"), save: (document) => calls.push(copy(document)) }

@@ -31,9 +31,13 @@ export class LayoutPreviewFeed {
     this.request = null
     this.currentUrl = null
     this.pending = null
+    // Keep one native sheet per profile while switching views or refreshing it.
+    this.artCache = new Map()
+    this.failureKey = null
+    this.failures = 0
   }
 
-  stop() {
+  pause() {
     this.active = false
     this.version++
     if (this.timer !== null) this.cancelTimer(this.timer)
@@ -42,16 +46,26 @@ export class LayoutPreviewFeed {
     this.inputKey = null
     this.request?.abort()
     this.request = null
+    this.last = null
+  }
+
+  stop() {
+    this.pause()
     this.clearImage()
+    this.failureKey = null
+    this.failures = 0
   }
 
   clearImage() {
-    if (this.currentUrl) this.urls.revokeObjectURL(this.currentUrl)
+    const urls = new Set([...this.artCache.values()].map(item => item.url))
+    if (this.currentUrl) urls.add(this.currentUrl)
+    for (const url of urls) this.urls.revokeObjectURL(url)
+    this.artCache.clear()
     this.currentUrl = null
     this.publish({ url: null, ...(this.art ? {sprites: null} : {}) })
   }
 
-  start() { this.stop(); this.active = true }
+  start() { if (this.art) this.pause(); else this.stop(); this.active = true }
 
   update(document, profile, scene, dragging = false) {
     if (!this.active || !document || !["large", "compact", "projection"].includes(profile) || !SCENES.includes(scene)) return
@@ -64,9 +78,20 @@ export class LayoutPreviewFeed {
     this.pending = null
     this.request?.abort()
     if (dragging) { this.publish({ status: "editing", error: "" }); return }
-    if (this.art) this.clearImage()
-    this.pending = { document: JSON.parse(JSON.stringify(document)), profile, scene, version: this.version }
-    this.publish({ status: "updating" })
+    const renderKey = JSON.stringify({ document, profile, scene })
+    if (renderKey !== this.failureKey) { this.failureKey = renderKey; this.failures = 0 }
+    if (this.art) {
+      const cached = this.artCache.get(profile)
+      this.currentUrl = cached?.url || null
+      this.publish({ url: this.currentUrl, sprites: cached?.sprites || null })
+      if (cached?.key === renderKey) {
+        this.publish({ status: "ready", error: "" })
+        return
+      }
+    }
+    this.pending = { document: JSON.parse(JSON.stringify(document)), profile, scene, version: this.version, renderKey }
+    // Once a real outage is reported, keep the message stable through retries.
+    if (!this.art || this.failures < 2) this.publish({ status: "updating", error: "" })
     this.timer = this.later(() => { this.timer = null; this.dispatch() }, 200)
   }
 
@@ -88,6 +113,7 @@ export class LayoutPreviewFeed {
     const aborted = new Promise((_, reject) => { rejectAborted = () => reject(new Error("Preview request cancelled")) })
     request.signal.addEventListener("abort", rejectAborted, { once: true })
     let failure = "Preview is unavailable. Reconnecting automatically…"
+    let denied = false
     try {
       await Promise.race([aborted, (async () => {
         const response = await this.fetcher("./api/ui/layout/preview", { method: "POST", credentials: "same-origin",
@@ -95,7 +121,7 @@ export class LayoutPreviewFeed {
           body: JSON.stringify({ document: item.document, profile: item.profile, scene: item.scene, ...(this.art ? {art: true} : {}) }), signal: request.signal })
         if (!this.active || item.version !== this.version || request.signal.aborted) return
         if (response.status === 401) { this.stop(); this.unauthorized(); return }
-        if (response.status === 403) { failure = "Turn off the vehicle to preview this layout."; throw new Error() }
+        if (response.status === 403) { denied = true; failure = "Turn off the vehicle to preview this layout."; throw new Error() }
         if (response.status === 429) { failure = "Preview is busy. Retrying automatically…"; throw new Error() }
         if (!response.ok) { const detail = await response.json().catch(() => null); failure = detail?.error || failure; throw new Error() }
         if (!response.headers.get("Content-Type")?.toLowerCase().startsWith("image/png")) throw new Error("Preview is unavailable. Reconnecting automatically…")
@@ -104,17 +130,21 @@ export class LayoutPreviewFeed {
         if (!blob.size || blob.size > 4 * 1024 * 1024) throw new Error("Preview is unavailable. Reconnecting automatically…")
         const sprites = this.art ? await widgetArtMetadata(blob) : null
         if (!this.active || item.version !== this.version || request.signal.aborted) return
-        const previousUrl = this.currentUrl
+        const previousUrl = this.art ? this.artCache.get(item.profile)?.url : this.currentUrl
         this.currentUrl = this.urls.createObjectURL(blob)
+        if (this.art) this.artCache.set(item.profile, { key: item.renderKey, url: this.currentUrl, sprites })
+        this.failures = 0
         this.publish({ status: "ready", error: "", url: this.currentUrl, ...(this.art ? {sprites} : {}) })
         if (previousUrl) this.urls.revokeObjectURL(previousUrl)
       })()])
     } catch {
       if (this.active && item.version === this.version) {
         this.inputKey = null
-        if (this.art) this.clearImage()
-        this.publish({ status: "unavailable", error: failure })
-        this.timer = this.later(() => { this.timer = null; this.retry() }, 5000)
+        this.failures = denied ? 2 : this.failures + 1
+        if (this.art && denied) this.clearImage()
+        const recovering = this.art && this.failures < 2
+        this.publish({ status: recovering ? "updating" : "unavailable", error: recovering ? "" : failure })
+        this.timer = this.later(() => { this.timer = null; this.retry() }, recovering ? 600 : 5000)
       }
     } finally {
       this.cancelTimer(timeout)

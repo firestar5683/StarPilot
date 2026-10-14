@@ -3,6 +3,23 @@ const clone = (value) => JSON.parse(JSON.stringify(value))
 // Text above the Android Auto lead marker, matching projection_layout.LEAD_INFO_CHOICES.
 export const LEAD_INFO = ["Off", "Distance", "Speed"]
 
+// projection_onroad draws the fixed brand at (width - 210, height - 90),
+// using Sora-800.fnt at 30 * Profile.LARGE.font_scale. Reuse that atlas and
+// its glyph metrics so the browser needs no substitute font or native request.
+const brandGlyphs = {
+  S: [331, 6, 131, 155, 43], t: [6, 175, 87, 142, 54], a: [474, 6, 120, 117, 80],
+  r: [913, 6, 85, 112, 82], P: [184, 6, 135, 148, 46], i: [606, 6, 69, 157, 38],
+  l: [687, 6, 65, 147, 47], o: [764, 6, 137, 119, 79],
+}
+export const PROJECTION_WORDMARK = {
+  right: 210, bottom: 90, scale: 30 * 1.242 / 200,
+  glyphs: [..."StarPilot"].map((letter, index, letters) => {
+    const [x, y, width, height, offsetY] = brandGlyphs[letter]
+    const offsetX = letters.slice(0, index).reduce((sum, char) => sum + brandGlyphs[char][2], 0)
+    return { x, y, width, height, offsetX, offsetY }
+  }),
+}
+
 export function editorSnapshot(raw) {
   if (!raw || raw.version !== 1 || !raw.screen || !raw.metadata || !raw.document || !raw.defaults)
     throw new Error(raw?.reason || "Connect Android Auto once to obtain the actual screen.")

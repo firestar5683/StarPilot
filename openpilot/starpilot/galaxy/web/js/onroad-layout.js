@@ -3,7 +3,7 @@ import { guardUnload } from "./unload-guard.js"
 import { PollTimer, connectionError } from "./polling.js"
 import { reactive, watch } from "../vendor/vue/vue.esm-browser.js"
 import { LayoutPreviewFeed, PREVIEW_SCENES } from "./layout-preview.js"
-import { LEAD_INFO, editorSnapshot, projectionPayload } from "./projection-layout.js"
+import { LEAD_INFO, PROJECTION_WORDMARK, editorSnapshot, projectionPayload } from "./projection-layout.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { GxNotice } from "./notice.js"
 import { GxDialog } from "./dialog.js"
@@ -326,8 +326,12 @@ export const OnroadLayoutPage = {
       publish: update => Object.assign(state.art, update) })
     watch(() => [state.draft && JSON.stringify(state.draft), state.profile, state.scene, !!state.drag,
                  !!state.layerDrag, state.data?.revision, state.previewMode, state.data?.editable], () => {
-      if (props.mode !== "local" || state.previewMode !== "layout" || !state.data?.editable || !state.draft) {
-        if (artFeed.active) artFeed.stop()
+      if (props.mode !== "local" || !state.data?.editable || !state.draft) {
+        artFeed.stop()
+        return
+      }
+      if (state.previewMode !== "layout") {
+        if (artFeed.active) artFeed.pause()
         return
       }
       if (!artFeed.active) artFeed.start()
@@ -348,7 +352,7 @@ export const OnroadLayoutPage = {
     watch(() => props.mode, (mode) => {
       if (mode !== "local") { state.devicePreviewOpen = false; previewFeed.stop(); artFeed.stop() }
     })
-    return { state, feed, previewFeed, artFeed, scenes: PREVIEW_SCENES }
+    return { state, feed, previewFeed, artFeed, scenes: PREVIEW_SCENES, projectionWordmark: PROJECTION_WORDMARK }
   },
   computed: {
     busy() { return ["loading", "saving"].includes(this.state.status) },
@@ -707,7 +711,7 @@ export const OnroadLayoutPage = {
       if (this.mode !== "local" || !this.state.data || !this.state.draft || this.state.drag || this.state.devicePreviewOpen) return
       this.state.devicePreviewOpen = true
       this.state.previewMode = "device"
-      if (this.artFeed.active) this.artFeed.stop()
+      if (this.artFeed.active) this.artFeed.pause()
       // The synchronous mode watcher starts the selected feed; avoid starting it twice.
       if (!this.previewFeed.active) {
         this.previewFeed.start()
@@ -1216,7 +1220,7 @@ export const OnroadLayoutPage = {
           <p v-if="!state.data.valid" class="gx-note" role="status">{{ projection ? 'Default Android Auto positions are shown. Save to keep your separate layout.' : 'The saved customization is invalid. Default colors and positions are shown; save your edits to replace it.' }}</p>
           <div class="gx-layout__workspace" :inert="busy">
             <section ref="pinned" class="gx-card gx-layout__preview-card" :class="{'is-stuck': state.stuck.pinned}" aria-label="Driving screen preview" :style="{'--layout-ratio': profile.width / profile.height}">
-              <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ state.layerDrag ? "Adjusting " + selectedWidget.label : profile.width + " × " + profile.height }}</span></div>
+              <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ state.layerDrag ? "Adjusting " + selectedWidget.label : state.previewMode === 'layout' && state.art.status === 'updating' ? 'Updating widget preview…' : profile.width + " × " + profile.height }}</span></div>
               <div class="gx-layout__preview-bar">
                 <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Preview type">
                   <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'layout'" :disabled="!!state.drag" @click="selectPreview('layout')"><span>Arrange<span class="gx-layout__long"> widgets</span></span></button>
@@ -1230,7 +1234,7 @@ export const OnroadLayoutPage = {
                 <button v-for="scene in scenes" :key="scene.id" class="gx-btn gx-btn--tonal" type="button" :aria-pressed="state.scene === scene.id"
                   :disabled="!!state.drag || !!state.layerDrag" @click="state.scene = scene.id">{{ scene.label }}</button>
               </div>
-              <p v-if="state.previewMode === 'layout' && state.art.status === 'unavailable'" class="gx-note" role="status">Widget preview unavailable. Placement controls remain available.</p>
+              <p v-if="state.previewMode === 'layout' && state.art.status === 'unavailable'" class="gx-note" role="status">{{ state.art.url ? 'Widget preview could not refresh. Showing the last preview.' : 'Widget preview unavailable. Placement controls remain available.' }}</p>
               <div class="gx-layout__stage">
               <span v-if="state.snapGuides.length && !snapInBar" class="gx-layout__stage-chip gx-layout__stage-chip--start" :class="{'gx-layout__stage-chip--with-tap-areas': !projection && state.showFavoriteZones}" aria-hidden="true">{{ snapSummary }}</span>
               <span v-if="!projection && state.showFavoriteZones && state.previewMode === 'layout'" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i>Tap areas</span>
@@ -1286,6 +1290,13 @@ export const OnroadLayoutPage = {
                     <circle r="34" fill="transparent" /><circle r="16" fill="#b799ff" stroke="#16121f" stroke-width="4" />
                     <path d="M-6 6 L6 -6 M0 6 L6 0" stroke="#16121f" stroke-width="3" stroke-linecap="round" />
                   </g>
+                </g>
+                <g v-if="projection" data-preview-source="fixed-wordmark" role="img" aria-label="StarPilot, fixed logo" pointer-events="none"
+                  :transform="'translate(' + (profile.width - projectionWordmark.right) + ' ' + (profile.height - projectionWordmark.bottom) + ') scale(' + projectionWordmark.scale + ')'">
+                  <svg v-for="(glyph, index) in projectionWordmark.glyphs" :key="index" :x="glyph.offsetX" :y="glyph.offsetY"
+                    :width="glyph.width" :height="glyph.height" :viewBox="[glyph.x, glyph.y, glyph.width, glyph.height].join(' ')" aria-hidden="true">
+                    <image href="./assets/starpilot-wordmark.png" width="1024" height="512" />
+                  </svg>
                 </g>
                 <g v-if="state.snapGuides.length" class="gx-layout__guides" aria-hidden="true" pointer-events="none">
                   <line v-for="guide in state.snapGuides" :key="guide.axis + guide.value" :class="'gx-layout__guide gx-layout__guide--' + guide.kind"

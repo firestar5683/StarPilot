@@ -294,6 +294,9 @@ class _Canvas:
     try:
       rl.clear_background(rl.BLACK)
       self.view.render(state)
+      if self.viewport is not None:
+        # ProjectionOnroad adds this permanent brand after the shared onroad view.
+        self.fonts.draw('StarPilot', FontRole.BRAND, 30, width - 210, height - 90)
       if self.profile == Profile.LARGE and self.viewport is None:
         render_sidebar(self.fonts, rl.Rectangle(width - SIDEBAR_WIDTH, 0, SIDEBAR_WIDTH, height))
       self._label(scene)
