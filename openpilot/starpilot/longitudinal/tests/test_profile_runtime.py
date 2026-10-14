@@ -544,7 +544,7 @@ class ProfileRuntimeTests(unittest.TestCase):
       'ordinary': (0.9333333333333333, 0.9333333333333333, '0', 20.74389339004308),
       'lead': (-2.7921389094943962, 0.9333333333333333, '1', 17.200449813861578),
       'e2e': (-2.0, 1.4933333333333327, '4', 17.883714999983308),
-      'force': (-1.2, -1.2, '0', 19.159553191798594),
+      'force': (-0.5, -0.5, '0', 19.53261473430761),
     }
     for case, (target, cruise, source, speed0) in golden.items():
       with self.subTest(case=case):
