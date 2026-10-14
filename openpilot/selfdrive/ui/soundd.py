@@ -1,11 +1,6 @@
 import math
-import json
-import os
 import numpy as np
 import time
-from time import monotonic_ns
-from threading import get_native_id
-from collections import deque
 from pathlib import Path
 
 
@@ -16,7 +11,7 @@ from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.system import micd
-from openpilot.common.hardware import HARDWARE
+from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.params import Params
 from openpilot.starpilot.aol.wire import INTENT_SERVICE
 from openpilot.starpilot.audio.alert_volume import AUTO, VOLUMES, effective_volume, read_volume
@@ -85,93 +80,6 @@ def check_selfdrive_timeout_alert(sm):
   return False
 
 
-def _native_audio_time(info, key):
-  try:
-    value = float(getattr(info, key))
-    return value if math.isfinite(value) else None
-  except (AttributeError, TypeError, ValueError):
-    return None
-
-
-def _callback_thread_snapshot(tid):
-  snapshot = {"tid": tid}
-  try:
-    directory = Path(f"/proc/self/task/{tid}")
-    with (directory / "stat").open() as source:
-      fields = source.read(4096).rsplit(")", 1)[1].split()
-    with (directory / "schedstat").open() as source:
-      runtime_ns, runqueue_ns, timeslices = map(int, source.read(4096).split())
-    snapshot.update(state=fields[0], priority=int(fields[15]), nice=int(fields[16]), processor=int(fields[36]),
-                    runtime_ns=runtime_ns, runqueue_ns=runqueue_ns, timeslices=timeslices,
-                    policy=os.sched_getscheduler(tid), affinity=sorted(os.sched_getaffinity(tid)))
-  except (OSError, ValueError, IndexError, AttributeError):
-    snapshot["unavailable"] = True
-  return snapshot
-
-
-def _read_callback_schedstat(tid):
-  with Path(f"/proc/self/task/{tid}/schedstat").open() as source:
-    values = tuple(map(int, source.read(128).split()))
-  if len(values) != 3 or any(value < 0 for value in values):
-    raise ValueError("invalid callback schedstat")
-  return values
-
-
-class _CallbackSchedulerHistory:
-  MAX_GAP_NS = 100_000_000
-
-  def __init__(self):
-    self.tid = None
-    self.samples = deque(maxlen=128)
-
-  def sample(self, tid):
-    if tid != self.tid:
-      self.samples.clear()
-      self.tid = tid
-    if tid is None:
-      return
-    try:
-      begin = monotonic_ns()
-      counters = _read_callback_schedstat(tid)
-      end = monotonic_ns()
-    except (OSError, ValueError, IndexError, AttributeError):
-      self.samples.clear()
-      return
-    if end < begin or end - begin > self.MAX_GAP_NS:
-      self.samples.clear()
-      return
-    if self.samples and (begin < self.samples[-1][1] or
-                         any(new < old for new, old in zip(counters, self.samples[-1][2], strict=True))):
-      self.samples.clear()
-    self.samples.append((begin, end, counters))
-
-  def bracket(self, tid, event_end, event_gap):
-    unknown = {"available": False}
-    if tid != self.tid or event_gap is None or event_gap <= 0:
-      return unknown
-    event_start = event_end - event_gap
-    before = [i for i, sample in enumerate(self.samples) if sample[1] <= event_start]
-    after = [i for i, sample in enumerate(self.samples) if sample[0] >= event_end]
-    if not before or not after:
-      return unknown
-    window = list(self.samples)[before[-1]:after[0] + 1]
-    if len(window) < 2:
-      return unknown
-    first, last = window[0], window[-1]
-    max_gap = max(right[1] - left[0] for left, right in zip(window, window[1:], strict=False))
-    if (max_gap > self.MAX_GAP_NS or event_start - first[1] > self.MAX_GAP_NS or
-        last[0] - event_end > self.MAX_GAP_NS):
-      return unknown
-    return {"available": True, "tid": tid,
-            "event_gap_start_ns": event_start, "event_gap_end_ns": event_end,
-            "sample_before_begin_ns": first[0], "sample_before_end_ns": first[1],
-            "sample_after_begin_ns": last[0], "sample_after_end_ns": last[1],
-            "runtime_delta_ns": last[2][0] - first[2][0],
-            "runqueue_delta_ns": last[2][1] - first[2][1],
-            "timeslices_delta": last[2][2] - first[2][2],
-            "max_sample_gap_ns": max_gap, "sample_count": len(window)}
-
-
 class Soundd:
   def __init__(self, params=None, pack_root=PACK_ROOT):
     self.volume_params = params if params is not None else Params()
@@ -196,12 +104,7 @@ class Soundd:
     self.output_underflow_count = 0
     self.reported_output_underflows = 0
     self.stream_report_at = None
-    self.last_callback_start_ns = None
-    self.last_callback_work_ns = None
-    self.last_native_audio_time = None
-    self.callback_tid = None
-    self.callback_scheduler_history = _CallbackSchedulerHistory()
-    self.underflow_timing = None
+    self.native_audio = None
     self.axis_alerts = AxisAlerts()
 
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
@@ -256,33 +159,11 @@ class Soundd:
     self.saved_volumes = {key: read_volume(self.volume_params, key).value for key, _, _ in VOLUMES}
 
   def callback(self, data_out: np.ndarray, frames: int, time, status) -> None:
-    started_ns = monotonic_ns()
-    previous_ns = getattr(self, "last_callback_start_ns", None)
-    previous_work_ns = getattr(self, "last_callback_work_ns", None)
-    previous_native_time = getattr(self, "last_native_audio_time", None)
-    native_time = _native_audio_time(time, "currentTime")
-    dac_time = _native_audio_time(time, "outputBufferDacTime")
-    native_gap = (native_time - previous_native_time if native_time is not None and
-                  previous_native_time is not None and native_time >= previous_native_time else None)
-    if getattr(self, "callback_tid", None) is None:
-      self.callback_tid = get_native_id()
-    self.last_callback_start_ns = started_ns
-    self.last_native_audio_time = native_time
-    try:
-      data_out[:frames, 0] = self.get_sound_data(frames)
-    finally:
-      finished_ns = monotonic_ns()
-      self.last_callback_work_ns = finished_ns - started_ns
-      if status:
-        underflow = bool(getattr(status, "output_underflow", False))
-        if underflow:
-          self.underflow_timing = (self.output_underflow_count + 1, started_ns,
-                                   None if previous_ns is None else started_ns - previous_ns,
-                                   finished_ns - started_ns, frames, previous_work_ns,
-                                   native_time, dac_time, native_gap, self.callback_tid)
-        self.pending_stream_status = status
-        self.stream_status_count += 1
-        self.output_underflow_count += int(underflow)
+    data_out[:frames, 0] = self.get_sound_data(frames)
+    if status:
+      self.pending_stream_status = status
+      self.stream_status_count += 1
+      self.output_underflow_count += int(bool(getattr(status, "output_underflow", False)))
 
   def log_pending_stream_status(self, stream=None) -> None:
     status = self.pending_stream_status
@@ -296,27 +177,6 @@ class Soundd:
     underflows = self.output_underflow_count
     message = (f"soundd stream diagnostics: status={status} status_callbacks={self.stream_status_count} "
                + f"output_underflows={underflows}")
-    timing = getattr(self, "underflow_timing", None)
-    if timing is not None and timing[0] == underflows:
-      _, started_ns, gap_ns, work_ns, frames, previous_work_ns, native_time, dac_time, native_gap, tid = timing
-      gap_ms = "unknown" if gap_ns is None else f"{gap_ns / 1e6:.3f}"
-      message += (f" underflow_callback_mono={started_ns / 1e9:.9f} callback_gap_ms={gap_ms}"
-                  + f" callback_work_ms={work_ns / 1e6:.3f}"
-                  + f" callback_period_ms={frames / SAMPLE_RATE * 1e3:.3f}")
-      previous_work_ms = "unknown" if previous_work_ns is None else f"{previous_work_ns / 1e6:.3f}"
-      native_text = "unknown" if native_time is None else f"{native_time:.9f}"
-      dac_text = "unknown" if dac_time is None else f"{dac_time:.9f}"
-      native_gap_ms = "unknown" if native_gap is None else f"{native_gap * 1e3:.3f}"
-      message += (f" previous_callback_work_ms={previous_work_ms} native_current_time={native_text}"
-                  + f" native_output_dac_time={dac_text} native_callback_gap_ms={native_gap_ms} callback_tid={tid}")
-      if underflows > self.reported_output_underflows:
-        snapshot = json.dumps(_callback_thread_snapshot(tid), separators=(",", ":"), sort_keys=True)
-        message += f" callback_thread_snapshot_current={snapshot} snapshot_mono={now:.9f}"
-        history = getattr(self, "callback_scheduler_history", None)
-        bracket = history.bracket(tid, started_ns, gap_ns) if history is not None else {"available": False}
-        message += " callback_scheduler_bracket=" + json.dumps(bracket, separators=(",", ":"), sort_keys=True)
-    if stream is not None:
-      message += f" latency={stream.latency} cpu_load={stream.cpu_load}"
     # Output dropouts must reach errorLogMessage, which is retained in qlog.
     if underflows > self.reported_output_underflows:
       cloudlog.error(message)
@@ -381,6 +241,23 @@ class Soundd:
     # reload sounddevice to reinitialize portaudio
     sd._terminate()
     sd._initialize()
+    if not PC:
+      from openpilot.starpilot.audio.native_playback import NativePlayback
+      try:
+        playback = NativePlayback(self, sd)
+      except (OSError, AttributeError, ValueError, MemoryError):
+        pass
+      else:
+        try:
+          stream = playback.stream()
+        except (AttributeError, TypeError, ValueError):
+          playback.close()
+        except BaseException:
+          playback.close()
+          raise
+        else:
+          self.native_audio = playback
+          return stream
     return sd.OutputStream(channels=1, samplerate=SAMPLE_RATE, callback=self.callback, blocksize=SAMPLE_BUFFER)
 
   def soundd_thread(self):
@@ -396,7 +273,8 @@ class Soundd:
       cloudlog.info(f"soundd stream started: {stream.samplerate=} {stream.channels=} {stream.dtype=} {stream.device=}, {stream.blocksize=}, {stream.latency=}")
       while True:
         sm.update(0)
-        self.callback_scheduler_history.sample(self.callback_tid)
+        if self.native_audio is not None:
+          self.native_audio.sync_owner()
         self.log_pending_stream_status(stream)
         self.refresh_saved_volumes(time.monotonic())
         self.load_sounds()
@@ -410,6 +288,8 @@ class Soundd:
         self.get_audible_alert(sm)
 
         self.update_critical_sound(time.monotonic())
+        if self.native_audio is not None:
+          self.native_audio.publish()
 
         rk.keep_time()
 

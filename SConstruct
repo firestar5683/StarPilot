@@ -328,6 +328,7 @@ SConscript([
   'openpilot/selfdrive/locationd/SConscript',
   'openpilot/selfdrive/modeld/SConscript',
   'openpilot/selfdrive/ui/SConscript',
+  'openpilot/starpilot/audio/native/SConscript',
 ])
 
 # Replay is also the isolated on-device viewer engine.
