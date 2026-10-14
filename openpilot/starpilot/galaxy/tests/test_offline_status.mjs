@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict'
-import { pathToFileURL } from 'node:url'
-import path from 'node:path'
-const root = process.env.OFFLINE_MAPS_ROOT || '/work'
-const { validOperation, formatBytes, MapOperationsPanel } = await import(pathToFileURL(path.join(root, 'openpilot/starpilot/galaxy/web/js/map-operations.js')))
+import { validOperation, formatBytes, MapOperationsPanel } from '../web/js/map-operations.js'
 const generation = 'a'.repeat(64)
 const status = { schemaVersion: 1, ownerSession: 'owner', operationId: 'owner:1', state: 'completed', regionToken: 'us_state.Oklahoma',
   bounds: [35, -98, 35.25, -97.75], completedGroups: 1, totalGroups: 1, transferredBytes: 256, transferBudgetBytes: 1024,
