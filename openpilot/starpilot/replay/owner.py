@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import cast
 import uuid
 
 from openpilot.starpilot.replay.client import MAX_REQUEST, MAX_RESPONSE, encode, parse, receive, replay_root
@@ -346,7 +347,10 @@ class ReplayOwner:
     if self.status.get('target') != 'web' or request['epoch'] != self.status['epoch'] or not self.status.get('mediaReady'):
       raise Rejected('epoch_changed')
     from openpilot.starpilot.replay.media import media_descriptor
-    return media_descriptor(self.session_dir, request['epoch'], request['sequence'], count)
+    directory = self.session_dir
+    if directory is None:
+      raise Rejected('session_changed')
+    return media_descriptor(directory, request['epoch'], request['sequence'], count)
 
   def _stop(self, reason):
     if self.worker is not None:
@@ -396,8 +400,10 @@ class ReplayOwner:
       ranges = value.get('seekRanges', [])
       if (type(ranges) is not list or len(ranges) > 512 or
           any(type(item) is not list or len(item) != 2 or not all(_finite(number) for number in item) or
-              not value['start'] <= item[0] <= item[1] <= value['end'] for item in ranges) or
-          any(before[1] > after[0] for before, after in zip(ranges, ranges[1:], strict=False))):
+              not value['start'] <= item[0] <= item[1] <= value['end'] for item in ranges)):
+        raise Rejected('worker_failed')
+      ranges = cast(list[list[float]], ranges)
+      if any(before[1] > after[0] for before, after in zip(ranges, ranges[1:], strict=False)):
         raise Rejected('worker_failed')
       self.status['seekRanges'] = ranges
       warnings = value.get('sourceWarnings', [])
@@ -532,6 +538,7 @@ class ReplayOwner:
       with self.lock:
         self.child, self.child_birth = child, _process_birth(child.pid)
       self._record_session(directory, child)
+      assert child.stdout is not None and child.stderr is not None and child.stdin is not None
       for file in (child.stdout, child.stderr, child.stdin):
         os.set_blocking(file.fileno(), False)
       stdout = bytearray()

@@ -229,6 +229,7 @@ class ReplayCatalogTest(unittest.TestCase):
     uploader.listdir_by_creation = lambda root: sorted(os.listdir(root))
     path = Path(__file__).resolve().parents[3] / 'system/loggerd/deleter.py'
     spec = importlib.util.spec_from_file_location('replay_fixture_deleter', path)
+    assert spec is not None and spec.loader is not None
     deleter = importlib.util.module_from_spec(spec)
     with patch.dict(sys.modules, {'openpilot.system.loggerd.uploader': uploader}):
       spec.loader.exec_module(deleter)

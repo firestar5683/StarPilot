@@ -105,34 +105,35 @@ class ReplayFrameReader:
     self.fd = fd
 
   def latest(self) -> ReplayFrame | None:
-    if self.mm is None:
+    mm, fd = self.mm, self.fd
+    if mm is None or fd is None:
       return None
     try:
-      fcntl.flock(self.fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+      fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
     except BlockingIOError:
       return None
     try:
-      return self._latest()
+      return self._latest(mm)
     finally:
-      fcntl.flock(self.fd, fcntl.LOCK_UN)
+      fcntl.flock(fd, fcntl.LOCK_UN)
 
-  def _latest(self):
+  def _latest(self, mm: mmap.mmap):
     for _ in range(3):
-      seq = SEQ.unpack_from(self.mm, 8)[0]
+      seq = SEQ.unpack_from(mm, 8)[0]
       if not seq or seq & 1:
         continue
-      magic, stamp, version, width, height, profile, epoch, frame_id, captured_ns, position, session = HEADER.unpack_from(self.mm)
+      magic, stamp, version, width, height, profile, epoch, frame_id, captured_ns, position, session = HEADER.unpack_from(mm)
       if (magic != MAGIC or stamp != seq or version != VERSION or profile not in PROFILES.values() or
           self.profile is not None and profile != PROFILES[self.profile] or
           not 0 < width <= MAX_WIDTH or not 0 < height <= MAX_HEIGHT or
-          len(self.mm) != HEADER_SIZE + width * height * 4 or session.rstrip(b'\0') != self.session_id.encode() or
+          len(mm) != HEADER_SIZE + width * height * 4 or session.rstrip(b'\0') != self.session_id.encode() or
           epoch <= 0 or frame_id <= 0 or captured_ns <= 0 or not math.isfinite(position) or position < 0):
         return None
       key = epoch, frame_id
       if key == self.last_key:
         return None
-      data = self.mm[HEADER_SIZE:]
-      if SEQ.unpack_from(self.mm, 8)[0] != seq:
+      data = mm[HEADER_SIZE:]
+      if SEQ.unpack_from(mm, 8)[0] != seq:
         continue
       self.last_key = key
       return ReplayFrame(data, width, height, self.session_id, epoch, position, frame_id, captured_ns)

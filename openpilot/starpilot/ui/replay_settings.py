@@ -152,7 +152,7 @@ class ReplayController:
     if type(position) not in (int, float) or not math.isfinite(position):
       return False
     start, end = self.status.get('start'), self.status.get('end')
-    if type(start) not in (int, float) or type(end) not in (int, float) or end <= start:
+    if start is None or end is None or type(start) not in (int, float) or type(end) not in (int, float) or end <= start:
       return False
     position = max(start, min(end, position))
     ranges = self.status.get('seekRanges')
@@ -305,7 +305,7 @@ class ReplayPage(Widget):
     self.last_touch = time.monotonic()
     self.stopping = False
     self._epoch = None
-    self.stack_widget = self
+    self.stack_widget: Widget = self
 
   def show_event(self):
     super().show_event()
@@ -676,12 +676,12 @@ class ReplayPage(Widget):
       start, end = self.controller.status.get('start') or 0, self.controller.status.get('end') or 0
       self.seek_preview = start + max(0, min(1, (x - left) / width)) * (end - start)
 
-  def _handle_mouse_event(self, event):
-    if event.left_released and not rl.check_collision_point_rec(event.pos, self._hit_rect):
+  def _handle_mouse_event(self, mouse_event):
+    if mouse_event.left_released and not rl.check_collision_point_rec(mouse_event.pos, self._hit_rect):
       self.press = self.seek_preview = None
       self.input.cancel()
-    if event.left_down:
-      x, y = event.pos.x - self.rect.x, event.pos.y - self.rect.y
+    if mouse_event.left_down:
+      x, y = mouse_event.pos.x - self.rect.x, mouse_event.pos.y - self.rect.y
       if self.press:
         px, py, target, epoch, _ = self.press
         tolerance = 36 if self.profile == Profile.LARGE else 5
@@ -690,7 +690,7 @@ class ReplayPage(Widget):
         else:
           self._move_seek(x)
       elif self.view:
-        self.input.move(x, y, self._state(), event.t)
+        self.input.move(x, y, self._state(), mouse_event.t)
 
   def _handle_mouse_release(self, pos):
     x, y = pos.x - self.rect.x, pos.y - self.rect.y
@@ -738,10 +738,10 @@ class ReplayCompactPage(NavWidget):
   def _back_enabled(self):
     return self.content.page != 'viewer'
 
-  def _handle_mouse_event(self, event):
+  def _handle_mouse_event(self, mouse_event):
     was_dismissing = self._playing_dismiss_animation
-    super()._handle_mouse_event(event)
-    if event.left_released and not was_dismissing and self._playing_dismiss_animation and self.content.page == 'detail':
+    super()._handle_mouse_event(mouse_event)
+    if mouse_event.left_released and not was_dismissing and self._playing_dismiss_animation and self.content.page == 'detail':
       self._playing_dismiss_animation = False
       self.content._back()
 

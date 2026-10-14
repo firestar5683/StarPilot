@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 from openpilot.cereal.messaging import SubMaster
 from types import SimpleNamespace as NS
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -119,7 +120,7 @@ def test_started_presentation_does_not_replace_existing_message_freshness():
 
 def replay_owner(sample):
   from openpilot.starpilot.ui.tests.test_runtime_snapshot import SubMasterFake
-  ui = object.__new__(UIState)
+  ui: Any = object.__new__(UIState)
   ui.sm = SubMasterFake()
   ui.sm.sock = {name: object() for name in ('carControl', 'carState', 'selfdriveState')}
   ui.sm.static_freq_services = set(ui.sm.sock)
@@ -240,6 +241,7 @@ def test_replay_boot_time_camera_primer_retention_and_freshness():
   from openpilot.starpilot.ui.tests.test_runtime_snapshot import NOW
   from openpilot.starpilot.ui.runtime_snapshot import display_message
   sample = ClockSample(NOW, NOW + 2_000_000_000, NOW, epoch=2, paused=True, valid=True)
+  assert sample.boot_ns is not None
   ui = replay_owner(sample)
   ui.sm.sock['cabinCameraState'] = object()
   ui.sm.static_freq_services.add('cabinCameraState')

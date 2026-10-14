@@ -6,6 +6,7 @@ import os
 import socket
 import threading
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
@@ -22,8 +23,8 @@ def server(tmp_path):
   directory.mkdir(parents=True)
   media = directory / 'init.mp4'
   media.write_bytes(b'x' * (65536 + 5))
-  state = {'requests': [], 'chunks': 0, 'revoke_after': None, 'expire_session': False, 'expired': False,
-           'recording_checks': 0, 'change_recording': False}
+  state: dict[str, Any] = {'requests': [], 'chunks': 0, 'revoke_after': None, 'expire_session': False, 'expired': False,
+                           'recording_checks': 0, 'change_recording': False}
 
   def owner(payload):
     if payload['op'] == 'media':

@@ -18,6 +18,7 @@ def test_coherent_epoch_and_viewer_close_preserves_owned_file(tmp_path):
     publisher.publish(b'\x22' * 32, epoch=2, position=2, captured_ns=456)
     assert reader.latest().epoch == 2
     reader.close()
+    assert reader.latest() is None
     assert path.exists()
   finally:
     reader.close()
@@ -75,6 +76,7 @@ def test_kernel_lock_prevents_copying_pixels_while_writer_is_active(tmp_path):
     assert reader.latest() is None
     fcntl.flock(publisher.fd, fcntl.LOCK_UN)
     assert reader.latest().data == b'a' * 32
+    assert reader.fd is not None
     fcntl.flock(reader.fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
     with pytest.raises(RuntimeError, match='consumer stalled'):
       publisher.publish(b'b' * 32, epoch=2, position=1, captured_ns=2)

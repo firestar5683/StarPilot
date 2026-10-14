@@ -97,7 +97,9 @@ class Machine:
     self.process = subprocess.Popen(self.command, env=self.env, stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE, stderr=self.stderr, text=True)
     def reader():
-      for line in self.process.stdout:
+      stdout = self.process.stdout
+      assert stdout is not None
+      for line in stdout:
         try:
           self.statuses.put(json.loads(line))
         except ValueError as error:
@@ -275,6 +277,7 @@ class TestMachine(unittest.TestCase):
 
   @unittest.skipUnless(FFMPEG, "installed system ffmpeg fixture encoder required")
   def test_shared_decoder_returns_correct_pixels(self):
+    assert FFMPEG is not None
     native_test = BINARY.parent / "tests/test_route"
     self.assertTrue(native_test.is_file())
     with tempfile.TemporaryDirectory(prefix="replay-decode-") as temporary:

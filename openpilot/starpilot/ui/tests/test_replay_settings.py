@@ -3,6 +3,7 @@
 from types import SimpleNamespace as NS
 import threading
 import time
+from typing import Any
 from unittest.mock import Mock
 
 import pyray as rl
@@ -99,10 +100,10 @@ def test_details_show_source_timezone_and_full_id_without_reformatting_each_fram
 class Backend:
   def __init__(self):
     self.calls = []
-    self.status = {'schemaVersion': 1, 'ownerId': 'a' * 32, 'sessionId': None, 'state': 'idle',
-                   'routeId': None, 'profile': 'large', 'revision': 0, 'epoch': 0,
-                   'position': 0.0, 'start': 0.0, 'end': 120.0, 'rate': 1.0, 'paused': True,
-                   'frameReady': False, 'errorCode': None, 'owned': False, 'offroad': True}
+    self.status: dict[str, Any] = {'schemaVersion': 1, 'ownerId': 'a' * 32, 'sessionId': None, 'state': 'idle',
+                                 'routeId': None, 'profile': 'large', 'revision': 0, 'epoch': 0,
+                                 'position': 0.0, 'start': 0.0, 'end': 120.0, 'rate': 1.0, 'paused': True,
+                                 'frameReady': False, 'errorCode': None, 'owned': False, 'offroad': True}
     self.start_gate = None
 
   def __call__(self, payload):
@@ -142,7 +143,8 @@ def pump(owner, predicate):
     if predicate():
       return
     time.sleep(0.001)
-  pytest.fail('fake replay operation did not finish')
+  # shortcut: ty drops pytest's reason argument; remove the ignore when its callable binding is fixed.
+  pytest.fail('fake replay operation did not finish')  # ty: ignore[invalid-argument-type]
 
 
 @pytest.fixture
@@ -173,6 +175,15 @@ def test_owned_start_and_controls_bind_revision_and_client(playback):
   assert command['expectedRevision'] == 1
   assert command['sessionId'] == owner.own_session
   assert not owner.seek(float('nan'))
+
+
+@pytest.mark.parametrize('bounds', [(None, 120), (0, None), (False, 120), (0, True), ('0', 120), (120, 0)])
+def test_seek_rejects_missing_or_invalid_bounds_without_sending_controls(playback, bounds):
+  owner, backend, _, _ = playback
+  owner.status['start'], owner.status['end'] = bounds
+  count = len(backend.calls)
+  assert not owner.seek(30)
+  assert len(backend.calls) == count
 
 
 @pytest.fixture(params=[Profile.LARGE, Profile.COMPACT])
@@ -335,7 +346,7 @@ def page_for_input():
 def test_timeline_commits_only_on_release_and_epoch_change_cancels():
   page, controller = page_for_input()
   page._handle_mouse_press(NS(x=100, y=940))
-  page._handle_mouse_event(NS(left_down=True, left_released=False, pos=NS(x=1570, y=940), t=1))
+  page._handle_mouse_event(mouse_event=NS(left_down=True, left_released=False, pos=NS(x=1570, y=940), t=1))
   controller.seek.assert_not_called()
   page._handle_mouse_release(NS(x=1570, y=940))
   controller.seek.assert_called_once_with(90)
@@ -753,7 +764,7 @@ def test_compact_swipe_down_goes_back_one_level_and_is_blocked_during_playback(m
   page.content.page = page_name
   page.content.press = (200, 40, 'held button', 1, True)
   for y, pressed, down, released in [(40, True, True, False), (160, False, True, False), (160, False, False, True)]:
-    page._handle_mouse_event(NS(pos=NS(x=200, y=y), left_pressed=pressed, left_down=down, left_released=released))
+    page._handle_mouse_event(mouse_event=NS(pos=NS(x=200, y=y), left_pressed=pressed, left_down=down, left_released=released))
   assert page._playing_dismiss_animation is dismisses
   assert page.content.page == ('routes' if returns_to_routes else page_name)
   if returns_to_routes:

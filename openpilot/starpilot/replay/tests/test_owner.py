@@ -371,6 +371,15 @@ def test_strict_revision_numbers_and_request_identity(owner):
     value.dispatch(dict(control(value, 'pause', 'paused', False, '7' * 32), expectedRevision=accepted['revision'] - 1))
 
 
+@pytest.mark.parametrize('ranges', [None, [[0]], [[0, True]], [[0, float('nan')]], [[20, 10]],
+                                   [[0, 101]], [[0, 20], [10, 30]]])
+def test_worker_seek_ranges_reject_malformed_or_overlapping_bounds(owner, tmp_path, ranges):
+  value, _, _, _ = owner
+  status = {**value._idle(), 'event': 'status', 'state': 'paused', 'end': 100., 'seekRanges': ranges}
+  with pytest.raises(Rejected, match='worker failed'):
+    value._observe(status, tmp_path)
+
+
 def test_gap_seek_is_rejected_without_losing_owned_viewer(owner):
   value, _, _, children = owner
   start(value)
@@ -393,7 +402,8 @@ def test_real_machine_uses_owner_created_clock_and_cleans_it(tmp_path, monkeypat
 
   binary = Path(BASEDIR) / 'openpilot/tools/replay/replay'
   if not binary.is_file():
-    pytest.skip('Build the isolated replay engine first')
+    # shortcut: ty drops pytest's reason argument; remove the ignore when its callable binding is fixed.
+    pytest.skip('Build the isolated replay engine first')  # ty: ignore[too-many-positional-arguments]
   routes = tmp_path / 'routes'
   routes.mkdir()
   segment(routes, 0, [.1, .2, 10], compressed=True)
