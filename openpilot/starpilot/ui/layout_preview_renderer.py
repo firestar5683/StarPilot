@@ -15,6 +15,8 @@ from openpilot.starpilot.ui.layout_preview_transport import SCENES
 from openpilot.starpilot.ui.developer_preview import OnroadVisualPreview
 from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, PROFILES, placement, validate_document
 from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
+from openpilot.starpilot.curve_speed.status import CurveObservation
+from openpilot.starpilot.ui.onroad_state import ConditionalLead
 from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind, OnroadAlert, OnroadState, SourceReading, SpeedLimitObservation
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, OnroadAppearance
 from openpilot.starpilot.ui.onroad_dm import monitor_visible
@@ -91,6 +93,11 @@ def sample_state(scene: str, document: dict) -> OnroadState:
                      customization=document,
                      visual_preview=OnroadVisualPreview(cem_reason=CEM_SCENE_REASONS[scene]) if scene in CEM_SCENE_REASONS else None)
 
+  if scene == 'cem_lead':
+    state = replace(state, conditional_lead=ConditionalLead(12.0, 0.0))
+  elif scene == 'cem_curve':
+    state = replace(state, curve=CurveObservation(False, None, None, False, False, False, 0.0, 2.0, 0.0,
+                                                 'preview', 'idle', 'none', False, False, 0.005))
   observation = state.speed_limit
   if scene == 'slc_max':
     state = replace(state, cruise_kph=65)

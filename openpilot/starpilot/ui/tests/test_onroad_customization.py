@@ -411,7 +411,8 @@ def test_compact_drag_keeps_animation_state_and_separate_origins():
   document = default_document()
   document["layouts"]["compact"]["max_speed"].update(x=100, y=10)
   document["layouts"]["compact"]["steering_wheel"].update(x=90, y=150)
-  fonts = NS(draw=Mock())
+  fonts = NS(draw=Mock(), measure=lambda text, _role, size: NS(
+    width=len(text) * size * .5, height=size * Profile.COMPACT.font_scale))
   hud = CompactHudRenderer(Mock(spec=BitmapFonts, **vars(fonts)), Mock())
   hud._wheel = Mock()
   state = road(document, lateral_active=True, longitudinal_active=True)

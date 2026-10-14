@@ -823,6 +823,9 @@ class Car:
       from openpilot.starpilot.aol.transport_pause import AVAILABILITY_EVENTS
       events = [event for event in events if not
                 (event.name in AVAILABILITY_EVENTS and event.softDisable and not event.immediateDisable)]
+    if getattr(self.aol_transport_feedback, 'temporary_host_qualified', False):
+      events = [event for event in events if not (event.name == log.OnroadEvent.EventName.locationdTemporaryError and
+                event.softDisable and not event.immediateDisable)]
     return intent_disarming_fault(self.CP, events, CS,
       temporary_ui_process_failure=self.aol_process_fault_context.temporary_ui_failure(event_ns, now_ns),
       temporary_selfdrive_lagging=(qualified_gm(self.CP) or aol_policy_for(self.CP).intent_supported),

@@ -76,16 +76,28 @@ std::string ensure_params_path(const std::string &prefix, const std::string &pat
 
 class FileLock {
 public:
-  FileLock(const std::string &fn) {
-    fd_ = HANDLE_EINTR(open(fn.c_str(), O_CREAT, 0775));
-    if (fd_ < 0 || HANDLE_EINTR(flock(fd_, LOCK_EX)) < 0) {
+  FileLock(const std::string &fn) : owner_pid_(getpid()) {
+    fd_ = HANDLE_EINTR(open(fn.c_str(), O_CREAT | O_CLOEXEC, 0775));
+    locked_ = fd_ >= 0 && HANDLE_EINTR(flock(fd_, LOCK_EX)) == 0;
+    if (!locked_) {
       LOGE("Failed to lock file %s, errno=%d", fn.c_str(), errno);
     }
   }
-  ~FileLock() { close(fd_); }
+  ~FileLock() {
+    if (fd_ >= 0) {
+      // flock follows the open file description across fork. Release explicitly
+      // in the acquiring process even while children retain their copies.
+      if (locked_ && owner_pid_ == getpid()) {
+        HANDLE_EINTR(flock(fd_, LOCK_UN));
+      }
+      close(fd_);
+    }
+  }
 
 private:
+  const pid_t owner_pid_;
   int fd_ = -1;
+  bool locked_ = false;
 };
 
 } // namespace

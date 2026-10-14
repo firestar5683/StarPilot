@@ -98,13 +98,13 @@ class TestPairedClock(unittest.TestCase):
     self.assertTrue(self.sample(event, expiry, message_ns=now, receipt_ns=now,
                                 model_ns=expiry, car_state_ns=expiry).accepted)
     self.assertEqual(self.fixture.consumer.last, original)
-    self.assertEqual(event.to_bytes(), original_envelope)
+    self.assertEqual(event.as_reader().as_builder().to_bytes(), original_envelope)
     self.assertFalse(self.sample(event, expiry + 1, message_ns=now, receipt_ns=now,
                                  model_ns=expiry + 1, car_state_ns=expiry + 1).accepted)
     self.assertEqual(self.fixture.consumer.rejection, 'proposal_invalid')
     self.assertEqual(self.fixture.consumer.last, original)
     self.assertEqual(self.fixture.consumer.last.expires_ns, expiry)
-    self.assertEqual(event.to_bytes(), original_envelope)
+    self.assertEqual(event.as_reader().as_builder().to_bytes(), original_envelope)
 
   def test_monotonic_rollback_and_drive_change_still_require_new_sources(self):
     now = MONO + 50_000_000

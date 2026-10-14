@@ -139,8 +139,12 @@ _timer_widget = _widget("Stopped timer", STOPPED_TIMER_WIDGET, 440, 112, 18, 48)
 _timer_widget["default"]["enabled"] = False
 _timer_widget["note"] = "Counts how long you have been stopped"
 PROFILES["compact"]["widgets"][STOPPED_TIMER_WIDGET] = _timer_widget
-# Widgets an older saved layout may lack; they start off and never block placement.
-OPTIONAL_WIDGETS = frozenset({MODE_WIDGET, CLOCK_WIDGET, STOPPED_TIMER_WIDGET})
+# Restore the Dom road graphic in the gap between the speed card and main speed.
+# It has no background and appears only with a current selected source.
+CEM_GAUGE_WIDGET = 'cem_gauge'
+PROFILES['large']['widgets'][CEM_GAUGE_WIDGET] = _widget('CEM road gauge', CEM_GAUGE_WIDGET, 344, 300, 436, 75)
+# Older documents retain every saved placement and gain this independent widget.
+OPTIONAL_WIDGETS = frozenset({MODE_WIDGET, CLOCK_WIDGET, STOPPED_TIMER_WIDGET, CEM_GAUGE_WIDGET})
 
 _FRAME_COLORS = {"cardFill": "#00000000", "cardBorder": "#00000000"}
 _ACTION_COLORS = {"cardFill": "#0C1820EB", "cardBorder": "#A6DFBEFF", "text": "#FFFFFFFF"}
@@ -148,6 +152,7 @@ WIDGET_COLORS = {
   "large": {
     MODE_WIDGET: {"text": "#FFFFFFFF"},
     CLOCK_WIDGET: {"text": "#FFFFFFFF"},
+    CEM_GAUGE_WIDGET: {},
     "current_speed": {"text": None},
     "cruise_limits": {"cardFill": "#10191FFF", "cardBorder": "#35434DFF", "text": None},
     "speed_limit_actions": {"cardFill": "#10191FFF", "cardBorder": "#35434DFF", "text": "#FFFFFFFF"},
@@ -169,7 +174,7 @@ WIDGET_COLORS = {
 
 # Back-to-front order used when a layout first opts into custom layers.
 DEFAULT_WIDGET_ORDER = {
-  "large": ("pip_left", "pip_right", "cruise_limits", "speed_limit_actions", "current_speed",
+  "large": ("pip_left", "pip_right", "cruise_limits", "speed_limit_actions", CEM_GAUGE_WIDGET, "current_speed",
             "steering_wheel", "torque_bar", "driver_monitor", MODE_WIDGET, CLOCK_WIDGET),
   "compact": ("pip_left", "pip_right", "speed_limit", "max_speed", "steering_wheel", "torque_bar",
               "speed_limit_actions", "driver_monitor", *RAIL_WIDGETS, MODE_WIDGET, CLOCK_WIDGET, STOPPED_TIMER_WIDGET),

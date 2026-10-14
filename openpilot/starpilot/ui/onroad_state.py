@@ -144,6 +144,28 @@ class BorderSignals:
 
 
 @dataclass(frozen=True)
+class ConditionalLead:
+  distance_m: float
+  speed_mps: float
+
+  def __post_init__(self) -> None:
+    if (not math.isfinite(self.distance_m) or not 0 < self.distance_m <= 500 or
+        not math.isfinite(self.speed_mps) or not 0 <= self.speed_mps <= 100):
+      raise ValueError('Conditional lead metrics must be finite and physically bounded')
+
+
+def conditional_lead_from_message(radar) -> ConditionalLead | None:
+  """The caller supplies only a current display radar observation."""
+  try:
+    lead = radar.leadOne
+    if lead.status is not True:
+      return None
+    return ConditionalLead(float(lead.dRel), float(lead.vLead))
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    return None
+
+
+@dataclass(frozen=True)
 class OnroadState:
   engaged: bool
   camera_available: bool
@@ -172,6 +194,7 @@ class OnroadState:
   navigation: NavigationDisplay | None = None
   conditional_perception: ConditionalDisplay | None = None
   conditional_effective: ConditionalDisplay | None = None
+  conditional_lead: ConditionalLead | None = None
   visual_preview: OnroadVisualPreview | None = None
   border_signals: BorderSignals | None = None
   stopped_duration_s: int | None = None

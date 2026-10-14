@@ -267,6 +267,67 @@ class TransportPauseFeedback:
     self.healthy_native_ns = 0
     self.healthy_inventory = None
 
+  def _temporary_host_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer):
+    """A fresh inactive proof may retain intent, never native/output authority."""
+    from openpilot.starpilot.nostalgia import physical_cancel
+    if physical_cancel(cs) or cs.steeringDisengage:
+      return False
+    events = sm['onroadEvents']
+    faults = [event for event in events if event.immediateDisable or event.softDisable]
+    names = (log.OnroadEvent.EventName.selfdrivedLagging, log.OnroadEvent.EventName.locationdTemporaryError)
+    temporary = bool(len(faults) == 1 and faults[0].name in names and faults[0].softDisable and not faults[0].immediateDisable)
+    eps_recovery = bool(not cs.steerFaultTemporary and getattr(self, 'temporary_eps_event_ns', 0) and
+      axis.faultEventMonoTime == self.temporary_eps_event_ns and
+      all(not event.immediateDisable and
+          (not event.softDisable or event.name == log.OnroadEvent.EventName.steerTempUnavailable) for event in events))
+    users = [event for event in events if event.userDisable]
+    pedal = bool(cs.brakePressed and users and all(event.name == log.OnroadEvent.EventName.pedalPressed and
+      not event.softDisable and not event.immediateDisable for event in users) and not faults)
+    location_only = bool(temporary and faults[0].name == log.OnroadEvent.EventName.locationdTemporaryError)
+    if axis.longitudinalActive and not location_only or not (temporary or eps_recovery or pedal):
+      return False
+    if (not latched or self.failed or self.paused or self.pending_event or self.retention_started_ns or
+        not self.session or str(axis.sessionId) != self.session or
+        not producer or producer != self.availability_producer or
+        str(getattr(axis, 'intentProducerSessionId', '')) != producer or
+        int(getattr(axis, 'intentIntegrityEpoch', 0)) != self.availability_epoch or
+        not self.lateral_inventory or not self.lateral_baseline_ns or
+        not cs.canValid or cs.canTimeout or cs.steerFaultPermanent or cs.accFaulted or cs.steerFaultTemporary or
+        users and not pedal or str(axis.faultReason) not in ('none', 'critical') or
+        not 0 < self.lateral_source_ns <= axis.sourceCarStateMonoTime <= stamp <= now_ns or
+        now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS or
+        not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents']):
+      return False
+    event_ns = int(sm.logMonoTime['onroadEvents'])
+    if not 0 < event_ns <= now_ns or now_ns - event_ns > 1_500_000_000:
+      return False
+    withdrawn = not axis.desiredLateral and not axis.lateralActive and not axis.desiredLongitudinal and not axis.longitudinalActive
+    event_first = bool(temporary and str(axis.faultReason) == 'none' and
+      self.signature is not None and self.signature[9] and self.signature[11] and self.signature[13] and
+      axis.sequence >= self.sequence and stamp >= self.signature[2] and
+      temporary and axis.desiredLateral and axis.lateralActive and axis.nativeAcknowledged and
+      0 < axis.faultEventMonoTime < event_ns and now_ns - event_ns <= AXIS_MAX_AGE_NS)
+    if not (event_first or temporary and axis.faultEventMonoTime == event_ns and
+            (withdrawn or str(axis.faultReason) == 'none' and axis.desiredLateral and
+             axis.lateralActive and axis.nativeAcknowledged) or eps_recovery and withdrawn or
+            pedal and str(axis.faultReason) == 'none' and axis.desiredLateral and axis.lateralActive and
+            not axis.desiredLongitudinal and not axis.longitudinalActive and
+            axis.nativeAcknowledged and axis.faultEventMonoTime == event_ns):
+      return False
+    native = _configured_transport_native(sm, cp, self.session, now_ns, require_longitudinal=not pedal)
+    if (native is None or not native.pandaInventory or native.observedMonoTime < self.lateral_native_ns or
+        (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.lateral_inventory or
+        native.requestedLateral and not native.lateralAllowed or
+        pedal and not (native.requestedLateral and native.lateralAllowed) or
+        axis.lateralActive and not (native.requestedLateral and native.lateralAllowed) or
+        axis.longitudinalActive and not (native.requestedLongitudinal and native.longitudinalAllowed)):
+      return False
+    from openpilot.starpilot.aol.vehicle import policy_for
+    if not policy_for(cp).intent_supported:
+      return False
+    self.temporary_host_qualified = True
+    return True
+
   def _temporary_lag_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer, signature):
     """Retain intent only through isolated lag or its bounded critical/event join."""
     reason = str(axis.faultReason)
@@ -413,6 +474,8 @@ class TransportPauseFeedback:
         native.observedMonoTime < self.lateral_native_ns or
         (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.lateral_inventory):
       return False
+    if cs.steerFaultTemporary and matched_withdrawal:
+      self.temporary_eps_event_ns = int(axis.faultEventMonoTime)
     if pending_withdrawal:
       # Keep only intent while this exact physical-EPS occurrence awaits its
       # event socket. Duplicate/newer proofs cannot move the original anchor.
@@ -782,12 +845,15 @@ class TransportPauseFeedback:
     return True
 
   def observe(self, sm, cp, cs, now_ns, *, latched=True, cancel_source_ns=0, brake_source_ns=0, gm_withdrawal_source_ns=0, intent_producer_session=''):
+    self.temporary_host_qualified = False
     self.qualified = False
     self.awaiting = False
     self.retention_qualified = False
     self.retention_pending = False
     try:
       axis = sm['aolAxisState']
+      if not latched or cp_identity(cp) != self.cp or self.session and str(axis.sessionId) != self.session:
+        self.temporary_eps_event_ns = 0
       stamp = int(sm.logMonoTime['aolAxisState'])
       reason = str(axis.faultReason)
       signature = (str(axis.sessionId), int(axis.sequence), stamp, int(axis.observedMonoTime),
@@ -807,6 +873,10 @@ class TransportPauseFeedback:
           latched=latched, producer=intent_producer_session, signature=signature):
         # Received identity only; every original permission/output deadline and
         # healthy baseline timestamp remains unchanged.
+        self.sequence, self.signature = int(axis.sequence), signature
+        return False
+      if current and continuity and self._temporary_host_intent_current(sm, cp, cs, axis, stamp, now_ns,
+          latched=latched, producer=intent_producer_session):
         self.sequence, self.signature = int(axis.sequence), signature
         return False
       if current and continuity and self._temporary_steering_intent_current(sm, cp, cs, axis, stamp, now_ns,
@@ -873,6 +943,7 @@ class TransportPauseFeedback:
         return False
       current = bool(current and (transport_healthy or cancel_native is not None))
       if current and baseline and not latched:
+        self.temporary_eps_event_ns = 0
         self.session = ''
         self.pending_event = 0
         self.failed = False
@@ -966,6 +1037,7 @@ class TransportPauseFeedback:
         self.lateral_only_baseline = bool(lateral_baseline and self.availability_producer and
           not axis.desiredLongitudinal and not axis.longitudinalActive and not native.requestedLongitudinal)
         if lateral_baseline and native is not None:
+          self.temporary_eps_event_ns = 0
           self.lateral_native_ns = int(native.observedMonoTime)
           self.lateral_inventory = (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory))
         else:

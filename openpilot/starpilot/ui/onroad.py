@@ -28,6 +28,7 @@ from openpilot.starpilot.ui.onroad_curve import controlling as curve_controlling
 from openpilot.starpilot.ui.onroad_conditional import status as conditional_status, stop_active, reason as conditional_reason
 from openpilot.starpilot.ui.onroad_corner import CornerHintCache, render_corner_hint
 from openpilot.starpilot.ui.onroad_large_widgets import CurrentSpeedHud, UnifiedSpeedWidget, SteeringWheelWidget
+from openpilot.starpilot.ui.onroad_cem_gauge import AetherGauge
 from openpilot.starpilot.ui.live_developer_sidebar import render_sidebar as render_live_sidebar
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, slc_controls
 from openpilot.starpilot.ui.onroad_stopped_timer import duration_color, duration_text, timer_size
@@ -120,6 +121,7 @@ class OnroadView:
     if fonts.profile == Profile.LARGE:
       self.unified_speed = UnifiedSpeedWidget(fonts)
       self.current_speed = CurrentSpeedHud(fonts)
+      self.cem_gauge = AetherGauge(fonts)
       self.steering_wheel = SteeringWheelWidget(asset_directory)
     else:
       self.compact_hud = CompactHudRenderer(fonts, asset_directory)
@@ -295,6 +297,8 @@ class OnroadView:
         if placement(state.customization, profile, "cruise_limits")["enabled"]:
           submit("cruise_limits", lambda: self.unified_speed.render(content, state))
         submit("speed_limit_actions", lambda: self._slc_actions(state))
+        if gauge := getattr(self, "cem_gauge", None):
+          submit("cem_gauge", lambda: gauge.render(state))
       if placement(state.customization, profile, "current_speed")["enabled"]:
         speed_content = rl.Rectangle(content.x + (width - 1860) / 2, content.y, content.width, content.height)
         submit("current_speed", lambda: self.current_speed.render(speed_content, state))
@@ -363,6 +367,8 @@ class OnroadView:
           if placement(state.customization, "large", "cruise_limits")["enabled"]:
             self.unified_speed.render(content, state)
           self._slc_actions(state)
+          if gauge := getattr(self, "cem_gauge", None):
+            gauge.render(state)
         if placement(state.customization, "large", "current_speed")["enabled"]:
           speed_content = rl.Rectangle(content.x + right_shift / 2, content.y, content.width, content.height)
           self.current_speed.render(speed_content, state)

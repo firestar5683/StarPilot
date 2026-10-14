@@ -174,7 +174,7 @@ def test_model_paint_flag_cannot_leak_after_render_exception(monkeypatch):
   assert renderer._render_lateral_active is False
 
 
-def make_session(monkeypatch, profile, camera):
+def make_session(monkeypatch, request, profile, camera):
   for name in ('BitmapFonts', 'PiPRenderer', 'PiPWarningSource', 'BluetoothStatusSource', 'RuntimeSnapshotAdapter',
                'GalaxyAccessFlow', 'FeatureSettingsOwner', 'SoundsOwner', 'AppearanceOwner', 'PiPOwner',
                'DisplayOwner', 'PowerOwner', 'ShellInput', 'FavoritesOwner', 'OnroadFavorites', 'DriveStateOwner', 'PhysicalSource'):
@@ -186,10 +186,13 @@ def make_session(monkeypatch, profile, camera):
   def view(*_, camera_layer, **__):
     return NS(camera_layer=camera_layer, onroad=NS(unified_speed=NS(source_bounds=Mock()), compact_sidebar=NS()))
   monkeypatch.setattr(runtime_app, 'ShellView', view)
-  return runtime_app.StarShellSession(profile, camera)
+  session = runtime_app.StarShellSession(profile, camera)
+  if receiver := session._projection_bookmarks:
+    request.addfinalizer(receiver.close)
+  return session
 
 
-def test_compact_layout_propagates_paint_and_resets_after_first_touch_and_exception(lifecycle, monkeypatch):
+def test_compact_layout_propagates_paint_and_resets_after_first_touch_and_exception(lifecycle, monkeypatch, request):
   settings, _, _, _ = lifecycle
   monkeypatch.setattr(runtime_app.gui_app, '_nav_stack', [settings])
   monkeypatch.setattr(runtime_app.gui_app, '_width', 536)
@@ -210,7 +213,7 @@ def test_compact_layout_propagates_paint_and_resets_after_first_touch_and_except
   monkeypatch.setattr(native, 'ui_state', NS(started=True, sm={}))
   camera_paint = Mock()
   monkeypatch.setattr(native.CameraView, '_render', camera_paint)
-  session = make_session(monkeypatch, runtime_app.Profile.COMPACT, camera)
+  session = make_session(monkeypatch, request, runtime_app.Profile.COMPACT, camera)
   layout = runtime_app.StarMiciMainLayout.__new__(runtime_app.StarMiciMainLayout)
   Widget.__init__(layout)
   layout._rect = rl.Rectangle(0, 0, 536, 240)
@@ -241,9 +244,9 @@ def test_compact_layout_propagates_paint_and_resets_after_first_touch_and_except
   assert layout._native_onroad._bookmark_icon.process_gesture.call_count == 3
 
 
-def test_large_camera_paint_is_unchanged(monkeypatch):
+def test_large_camera_paint_is_unchanged(monkeypatch, request):
   camera = Mock()
-  session = make_session(monkeypatch, runtime_app.Profile.LARGE, camera)
+  session = make_session(monkeypatch, request, runtime_app.Profile.LARGE, camera)
   session.camera_paint = False
   state = OnroadState(True, True, 20, 80, SpeedLimitObservation())
   session.view.camera_layer(rl.Rectangle(0, 0, 2160, 1080), state)

@@ -14,7 +14,7 @@ _CCM_HOLD_REASONS = {4: "ccm_lead", 6: "ccm_speed"}
 
 _REASONS = {reason.value: (reason.name[4:] if reason.name.startswith(('CEM_', 'CCM_')) else reason.name).replace('_', ' ')
             for reason in Reason}
-_REASONS[Reason.SCENE_UNAVAILABLE.value] = 'WAITING FOR ROAD DATA'
+_HIDDEN_REASONS = frozenset((Reason.SCENE_UNAVAILABLE.value, Reason.UNAVAILABLE.value))
 
 
 def reason(state: OnroadState) -> str | None:
@@ -23,7 +23,7 @@ def reason(state: OnroadState) -> str | None:
   if preview is not None and preview.cem_reason in ('CURVE', 'LEAD', 'STOP LIGHT', 'SPEED'):
     return {'CURVE': 'cem_curve', 'LEAD': 'cem_lead', 'STOP LIGHT': 'cem_stop', 'SPEED': 'cem_speed'}[preview.cem_reason]
   value = (state.conditional_effective if state.longitudinal_active else None) or getattr(state, 'conditional_perception', None)
-  if value is None or value.choice not in (ModeChoice.CEM, ModeChoice.CCM):
+  if value is None or value.choice not in (ModeChoice.CEM, ModeChoice.CCM) or value.reason in _HIDDEN_REASONS:
     return None
   if value.reason == 'cem_hold' and value.choice is ModeChoice.CEM:
     return _CEM_HOLD_REASONS.get(getattr(value, 'status_code', 0))
@@ -52,7 +52,7 @@ def status(state: OnroadState) -> tuple[str, str, rl.Color] | None:
   value = (state.conditional_effective if state.longitudinal_active else None) or getattr(state, 'conditional_perception', None)
   if value is None or value.choice not in (ModeChoice.CEM, ModeChoice.CCM):
     return None
-  if value.reason in ('no_trigger', 'manual_chill', 'manual_experimental', 'ccm_veto'):
+  if value.reason in _HIDDEN_REASONS or value.reason in ('no_trigger', 'manual_chill', 'manual_experimental', 'ccm_veto'):
     return None
   # The text is selected from known policy reasons, never rendered from wire text.
   detail = _REASONS.get(reason(state))

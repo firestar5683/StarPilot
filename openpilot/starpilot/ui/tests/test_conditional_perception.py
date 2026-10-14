@@ -86,7 +86,7 @@ def test_independently_stamped_scene_survives_transport_without_control_authorit
   # A fresh envelope must not revive a stale or malformed nested scene.
   for altered in ({'observedMonoTime': envelope_ns - 200_000_001},
                   {'modelMonoTime': scene_ns + 1}, {'carStateMonoTime': drive_id - 1},
-                  {'validUntilMonoTime': scene_ns + 100_000_001}):
+                  {'validUntilMonoTime': scene_ns + 150_000_001}):
     changed = event.as_reader().as_builder()
     for key, value in altered.items():
       setattr(changed.slcState.conditionalMode, key, value)

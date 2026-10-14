@@ -218,10 +218,10 @@ class TestModeTransport(unittest.TestCase):
     changed = messaging.log_from_bytes(event.as_reader().as_builder().to_bytes()).as_builder()
     changed.slcState.conditionalMode.experimental = False
     self.assertFalse(self.consume(changed, now + 20_000_000, message_ns=now, receipt_ns=now).accepted)
-    self.assertFalse(self.consume(event, now + 101_000_000, message_ns=now, receipt_ns=now).accepted)
-    later, _, _ = self.produce(now + 150_000_000)
-    self.assertTrue(self.consume(later, now + 150_000_000).accepted)
-    self.assertFalse(self.consume(event, now + 150_000_000).accepted)
+    self.assertFalse(self.consume(event, now + 151_000_000, message_ns=now, receipt_ns=now).accepted)
+    later, _, _ = self.produce(now + 200_000_000)
+    self.assertTrue(self.consume(later, now + 200_000_000).accepted)
+    self.assertFalse(self.consume(event, now + 200_000_000).accepted)
 
   def test_new_session_resume_and_drive_wait_for_new_sources(self):
     now = MONO + 50_000_000

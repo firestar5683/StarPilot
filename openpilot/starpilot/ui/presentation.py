@@ -31,6 +31,7 @@ class FontRole(StrEnum):
   ROMAN = "roman"
   DISPLAY = "display"
   SPEED = "speed"
+  SET_SPEED = "set_speed"
   FALLBACK = "fallback"
 
 
@@ -50,6 +51,7 @@ def font_filename(profile: Profile, role: FontRole) -> str:
     FontRole.BRAND: "Sora-800.fnt",
     FontRole.ROMAN: "Inter-Regular.fnt",
     FontRole.DISPLAY: "Inter-Bold.fnt",
+    FontRole.SET_SPEED: "DINish-Speed.fnt",
     FontRole.SPEED: "DINish-Speed.fnt" if profile == Profile.LARGE else "Inter-Bold.fnt",
     FontRole.FALLBACK: "unifont.fnt",
   }[role]
@@ -132,15 +134,25 @@ class BitmapFonts:
       role = FontRole.FALLBACK
     return self._fonts[font_filename(self.profile, role)]
 
+  def _optical_style(self, role: FontRole, fallback: bool = False) -> tuple[float, float]:
+    if fallback:
+      return 1., 0.
+    if self.profile == Profile.LARGE and role == FontRole.SPEED:
+      return 1.04, .6
+    if self.profile == Profile.COMPACT and role == FontRole.SET_SPEED:
+      return 1., .45
+    return 1., 0.
+
   def measure(self, text: str, role: FontRole, size: float, *, spacing: float = 0, fallback: bool = False) -> TextSize:
     font = self.font(role, fallback=fallback)
     spacing = round(spacing, 4)
-    key = font.texture.id, text, size, spacing
+    width_scale, weight = self._optical_style(role, fallback)
+    key = font.texture.id, text, size, spacing, width_scale, weight
     if key not in self._measurements:
       measured = rl.measure_text_ex(font, text, size * self.profile.font_scale, spacing)  # noqa: TID251
       if len(self._measurements) >= 1024:
         self._measurements.clear()
-      self._measurements[key] = TextSize(measured.x, measured.y)
+      self._measurements[key] = TextSize(measured.x * width_scale + (weight if text else 0), measured.y)
     return self._measurements[key]
 
   def vertical_ink(self, text: str, role: FontRole, size: float) -> tuple[float, float]:
@@ -160,7 +172,20 @@ class BitmapFonts:
   def draw(self, text: str, role: FontRole, size: float, x: float, y: float, color: rl.Color = rl.WHITE,
            *, spacing: float = 0, fallback: bool = False) -> None:
     draw = getattr(rl, "_orig_draw_text_ex", rl.draw_text_ex)
-    draw(self.font(role, fallback=fallback), text, rl.Vector2(x, y), size * self.profile.font_scale, spacing, color)
+    width_scale, weight = self._optical_style(role, fallback)
+    if width_scale == 1. and weight == 0.:
+      draw(self.font(role, fallback=fallback), text, rl.Vector2(x, y), size * self.profile.font_scale, spacing, color)
+      return
+    rl.rl_push_matrix()
+    try:
+      rl.rl_translatef(x, y, 0)
+      rl.rl_scalef(width_scale, 1., 1.)
+      draw(self.font(role, fallback=fallback), text, rl.Vector2(0, 0), size * self.profile.font_scale, spacing, color)
+      if weight:
+        draw(self.font(role, fallback=fallback), text, rl.Vector2(weight / width_scale, 0),
+             size * self.profile.font_scale, spacing, color)
+    finally:
+      rl.rl_pop_matrix()
 
   def close(self) -> None:
     if rl.is_window_ready() or self._headless_context:

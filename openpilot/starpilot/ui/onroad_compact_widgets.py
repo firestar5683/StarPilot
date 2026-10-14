@@ -143,7 +143,10 @@ class CompactHudRenderer:
         rl.draw_circle_gradient(int(81 + mx), int(81 + my), 81, shadow, rl.BLANK)
       red, green, blue, alpha = rgba(state.customization, "text", "compact", "max_speed")
       color = rl.Color(red, green, blue, int(alpha * 0.9 * set_speed_alpha))
-      self.fonts.draw(cruise, FontRole.DISPLAY, 112, 17 + mx, -4 + my, color)
+      speed_size = 112
+      while speed_size > 72 and self.fonts.measure(cruise, FontRole.SET_SPEED, speed_size).width > 128:
+        speed_size -= 1
+      self.fonts.draw(cruise, FontRole.SET_SPEED, speed_size, 17 + mx, -4 + my, color)
       self.fonts.draw("MAX", FontRole.SEMI_BOLD, 36, 25 + mx, 109 + my, color)
   def render_steering_wheel(self, state: OnroadState) -> None:
     if state.lateral_active:

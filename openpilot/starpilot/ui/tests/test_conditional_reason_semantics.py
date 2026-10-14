@@ -1,4 +1,4 @@
-"""Wire receipt regression: scene readiness must not become generic unavailability."""
+"""Keep readiness receipts intact while missing road data stays visually neutral."""
 from typing import Any
 from unittest.mock import Mock
 from dataclasses import replace
@@ -20,7 +20,7 @@ def changed_arguments(arguments: dict[str, Any], changes: dict[str, Any]) -> dic
   return arguments | changes
 
 
-def check_fresh_validated_receipt_preserves_unavailable_reason(choice, policy_reason, detail):
+def check_fresh_validated_receipt_preserves_unavailable_reason(choice, policy_reason):
   now = 100_000_000_000
   drive_id = now - 1_000_000_000
   authority = Authority(True, True, False, False, False, True)
@@ -43,8 +43,7 @@ def check_fresh_validated_receipt_preserves_unavailable_reason(choice, policy_re
     assert not received.slcState.conditionalMode.hasOverride
     ui = OnroadState(False, True, 0.0, 0.0, SpeedLimitObservation(), conditional_perception=value)
     display = status(ui)
-    assert display is not None
-    assert display[:2] == (choice.name, detail)
+    assert display is None
     assert not stop_active(ui)
     for changed in ({'now_ns': now + 200_000_001}, {'drive_id': drive_id + 1}, {'car_valid': False},
                     {'system_long': False}, {'lateral_active': False}, {'choice': ModeChoice.STOCK}):
@@ -55,17 +54,17 @@ def check_fresh_validated_receipt_preserves_unavailable_reason(choice, policy_re
 
 
 class TestConditionalReasonSemantics(unittest.TestCase):
-  def test_cem_scene_waits_for_road_data(self):
-    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CEM, Reason.SCENE_UNAVAILABLE, 'WAITING FOR ROAD DATA')
+  def test_cem_missing_scene_is_neutral(self):
+    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CEM, Reason.SCENE_UNAVAILABLE)
 
-  def test_cem_unavailable_remains_visible(self):
-    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CEM, Reason.UNAVAILABLE, 'UNAVAILABLE')
+  def test_cem_unavailable_is_neutral(self):
+    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CEM, Reason.UNAVAILABLE)
 
-  def test_ccm_scene_waits_for_road_data(self):
-    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CCM, Reason.SCENE_UNAVAILABLE, 'WAITING FOR ROAD DATA')
+  def test_ccm_missing_scene_is_neutral(self):
+    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CCM, Reason.SCENE_UNAVAILABLE)
 
-  def test_ccm_unavailable_remains_visible(self):
-    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CCM, Reason.UNAVAILABLE, 'UNAVAILABLE')
+  def test_ccm_unavailable_is_neutral(self):
+    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CCM, Reason.UNAVAILABLE)
 
 
 if __name__ == '__main__':

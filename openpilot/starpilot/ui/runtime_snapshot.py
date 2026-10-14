@@ -37,6 +37,7 @@ from openpilot.cereal.services import SERVICE_LIST
 from opendbc.car.structs import car as car_schema
 from openpilot.starpilot.ui.device_state import DeviceRequest, DeviceState
 from openpilot.starpilot.ui.home_state import HomeMode, HomeState
+from openpilot.starpilot.ui.onroad_state import conditional_lead_from_message
 from openpilot.starpilot.ui.onroad_state import (AlertSize, BorderSignals, ObservationKind, OnroadAlert,
                                                 OnroadState, SpeedLimitObservation, is_personality_notice, speed_limit_from_message)
 from openpilot.starpilot.ui.onroad_stopped_timer import StoppedTimer
@@ -620,6 +621,7 @@ class RuntimeSnapshotAdapter:
                          curve=curve, show_curve_status=_flag(params, "ShowCSCStatus"),
                          conditional_configured=self._conditional_choice, conditional_effective=conditional,
                          conditional_perception=perception,
+                         conditional_lead=conditional_lead_from_message(display_radar) if display_car_valid else None,
                          navigation=navigation_display(navigation, now_ns=now_ns, drive_id=drive_id),
                          border_signals=border_signals, stopped_duration_s=stopped_duration,
                          reverse_driver_camera=reverse_driver_camera,

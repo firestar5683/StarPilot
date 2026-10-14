@@ -6,7 +6,7 @@ from pathlib import Path
 
 from openpilot.starpilot.system.android_auto.identity import DATA_DIR
 from openpilot.starpilot.system.android_auto.display_profile import screen_geometry
-from openpilot.starpilot.ui.onroad_customization import (CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET, WHEEL_SIZES,
+from openpilot.starpilot.ui.onroad_customization import (CEM_GAUGE_WIDGET, CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET, WHEEL_SIZES,
                                                          customization_metadata, validate_widget_order)
 from openpilot.starpilot.ui.onroad_stopped_timer import timer_size
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
@@ -182,7 +182,7 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
       type(value['version']) is not int or value['version'] not in (1, 2) or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
       type(value['widgets']) is not dict or not set(value['widgets']) <= set(metadata['widgets']) or
-      not set(metadata['widgets']) - set(value['widgets']) <= {MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS}):
+      not set(metadata['widgets']) - set(value['widgets']) <= {CEM_GAUGE_WIDGET, MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS}):
     raise ValueError('Projection layout does not match saved screen')
   result = copy.deepcopy(value)
   if 'clock24Hour' in value and type(value['clock24Hour']) is not bool:
@@ -200,7 +200,7 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
   if 'widgetOrder' in value:
     order = value['widgetOrder']
     if type(order) is list:
-      order = [*order, *(key for key in (MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS) if key not in order)]
+      order = [*order, *(key for key in (CEM_GAUGE_WIDGET, MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS) if key not in order)]
     order = validate_widget_order(order, metadata['widgets'])
     # Older or hand-edited documents may put the escape control underneath
     # another widget. Preserve their order while restoring this safety layer.
