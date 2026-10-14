@@ -109,6 +109,9 @@ def change_drive_state(self, payload, effect_lock, drive_owner):
       len(payload['revision']) != 32):
     self.json(400, {'error': 'Invalid drive state request'})
     return
+  if payload['mode'] == 'offroad':
+    self.json(403, {'error': 'Use the in-car Force Off-road control'})
+    return
   from openpilot.starpilot.drive_state.owner import Rejected
   try:
     with effect_lock:

@@ -127,11 +127,13 @@ def test_authenticated_remote_force_drive_modes_use_shared_owner():
     result = case.drive_action('onroad', remote=True)
     assert result[0] == 200 and result[1]['mode'] == 'onroad'
     assert result[1]['effective'] == 'offroad'
-    assert case.drive_action('offroad', remote=True)[0] == 409
+    assert case.drive_action('offroad', remote=True)[0] == 403
     assert case.drive.snapshot().mode == Mode.ONROAD
     case.allowed = True
     result = case.drive_action('offroad', remote=True)
-    assert result[0] == 200 and result[1]['mode'] == 'offroad'
+    assert result[0] == 403
+    case.control.change('offroad', case.drive.snapshot().revision, lambda: True)
+    assert case.drive.snapshot().mode == Mode.OFFROAD
 
 
 def test_update_snapshot_keeps_one_admission_and_matching_reason():

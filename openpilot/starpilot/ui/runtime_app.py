@@ -812,7 +812,7 @@ class StarShellSession:
       drive_row = FeatureRow("drive_state", "Force Drive State", LABELS[drive["mode"]],
                              source=drive["revision"].encode() if drive["revision"] is not None else None,
                              available=drive["available"], reason=f"Device: {drive['effective'] or 'unavailable'}",
-                             actions=tuple((label, drive["mode"] != mode and (mode != "onroad" or drive["overrideAllowed"]))
+                             actions=tuple((label, drive["mode"] != mode and (mode != "offroad" or drive["overrideAllowed"]))
                                            for mode, label in LABELS.items()))
       power_available = getattr(self, "system_power_action", None) is not None and not ui_state.engaged
       device_power = FeatureRow("device_power", "Device Power", "", available=power_available,
@@ -1239,10 +1239,12 @@ class StarShellSession:
                                    (item.destination == Destination.FORCE_DRIVE and drive["available"]) or
                                    snapshot.device.offroad and item.destination == Destination.PAIR)
                            for item in snapshot.settings.availability)
-      next_mode = DriveStateControl.next_mode(drive)
+      from openpilot.starpilot.drive_state.control import CYCLE
+      next_mode = CYCLE[(CYCLE.index(next(mode for mode in CYCLE if mode.value == drive["mode"])) + 1) % len(CYCLE)]
       label = ("unavailable" if not drive["available"] else
                {"offroad": "Force Off-road", "onroad": "Force On-road", "auto": "Return to Auto"}[next_mode.value])
-      availability = tuple(replace(item, request_value=next_mode.value, request_revision=drive["revision"])
+      availability = tuple(replace(item, request_value=next_mode.value, request_revision=drive["revision"],
+                                   reason=drive.get("reason") if next_mode.value == "offroad" and not drive["overrideAllowed"] else None)
                            if item.destination == Destination.FORCE_DRIVE else item for item in availability)
       snapshot = replace(snapshot, settings=replace(snapshot.settings, availability=availability, nav_bar_alpha=0,
                                                    force_drive_label=label))

@@ -101,6 +101,7 @@ def test_hidden_settings_still_updates_navigation_but_does_not_project(lifecycle
 
 @pytest.mark.parametrize("mode,allowed,label,target", [
   ("auto", True, "Force Off-road", "offroad"),
+  ("auto", False, "Force Off-road", "offroad"),
   ("offroad", True, "Force On-road", "onroad"),
   ("onroad", True, "Return to Auto", "auto"),
   ("offroad", False, "Force On-road", "onroad"),
@@ -121,3 +122,30 @@ def test_force_menu_names_requested_action_with_supported_glyphs(lifecycle, mode
   glyphs = {int(value) for value in re.findall(r"char id=(\d+)", font.read_text())}
   assert all(ord(char) in glyphs for char in label)
   assert ord("→") not in glyphs
+
+
+@pytest.mark.parametrize('allowed,target', [(True, 'offroad'), (False, 'offroad')])
+def test_actual_compact_force_card_hitbox_dispatches_captured_owner_request(lifecycle, allowed, target):
+  from dataclasses import replace
+  from openpilot.starpilot.ui.settings_state import SettingsInput
+  from openpilot.starpilot.ui.shell import ShellRequest
+  _, session, _, _ = lifecycle
+  session._mode = runtime_app.ShellMode.SETTINGS
+  session._drive_change = Mock()
+  revision = 'current-owner-revision'
+  session.drive_state.snapshot = lambda: {'mode': 'auto', 'revision': revision, 'available': True,
+                                        'effective': 'onroad', 'overrideAllowed': allowed, 'reason': None if allowed else 'Current Panda status is stale'}
+  snapshot = session.snapshot(runtime_app.ShellMode.SETTINGS)
+  assert snapshot.settings.destination(runtime_app.Destination.FORCE_DRIVE).reason == (None if allowed else "Current Panda status is stale")
+  index = next(i for i, item in enumerate(compact_menu(snapshot.settings)) if item[0] == runtime_app.Destination.FORCE_DRIVE)
+  state = replace(snapshot.settings, compact_scroll_x=-422 * index, compact_y=0)
+  inputs = SettingsInput(session.profile, lambda action: session._emit(ShellRequest('settings', action)))
+  inputs.press(221, 120, state)
+  session._drive_change.assert_not_called()
+  inputs.release(221, 120, state)
+  session._drive_change.assert_called_once_with(target, revision)
+  session._drive_change.reset_mock()
+  inputs.press(221, 120, state)
+  inputs.move(230, 120, state)
+  inputs.release(230, 120, state)
+  session._drive_change.assert_not_called()

@@ -36,10 +36,6 @@ await onroad.change('offroad');assert.equal(requests.length,before)
 window.confirm=()=>true
 await onroad.change('offroad');assert.equal(requests.length,before)
 onroad.state.overrideAllowed=true
-const stop=onroad.change('offroad')
-assert.equal(requests.length,before+1)
-assert.deepEqual(JSON.parse(requests.at(-1).options.body),{mode:'offroad',revision:'a'.repeat(32)})
-requests.at(-1).resolve(response({...snapshot('offroad','d'.repeat(32)),effective:'onroad'}));await flush()
-assert.equal(DriveStatePanel.computed.pending.call(onroad),true)
-requests.at(-1).resolve(response({...snapshot('offroad','d'.repeat(32)),effective:'offroad'}));await stop;await flush()
-assert.equal(DriveStatePanel.computed.pending.call(onroad),false)
+await onroad.change('offroad');assert.equal(requests.length,before)
+assert.match(DriveStatePanel.template, /\['onroad', 'auto'\]/)
+assert.doesNotMatch(DriveStatePanel.template, /v-for="mode in \['offroad'/)

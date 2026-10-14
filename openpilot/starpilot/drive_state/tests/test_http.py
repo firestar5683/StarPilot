@@ -4,7 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace as NS
 import tempfile
 from openpilot.starpilot.galaxy.tests import test_navigation_http as helpers
-from openpilot.starpilot.drive_state.owner import DriveStateOwner, Mode
+from openpilot.starpilot.drive_state.owner import DriveStateOwner, Mode, Rejected
+import pytest
 from openpilot.starpilot.drive_state.control import DriveStateControl
 from openpilot.starpilot.drive_state.tests.test_owner import Params, BOOT
 
@@ -41,15 +42,17 @@ class ForceHttpTest(helpers.NavigationHttpTest):
     self.assertEqual((result[1]['mode'], result[1]['effective']), ('onroad', 'offroad'))
     status = self.request('/api/drive-state/status', remote=True, cookie=self.remote_cookie)
     self.assertEqual(status[1]['revision'], result[1]['revision'])
-    self.assertEqual(self.drive_action('offroad', remote=True)[0], 200)
+    self.assertEqual(self.drive_action('offroad', remote=True)[0], 403)
+    self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
     self.assertEqual(self.drive_action('auto', revision=result[1]['revision'])[0], 409)
 
   def test_physical_loss_blocks_offroad_but_onroad_and_auto_remain_recoverable(self):
-    self.assertEqual(self.drive_action('offroad')[0], 200)
+    self.assertEqual(self.drive_action('offroad')[0], 403)
+    self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
     self.allowed = False
     self.assertEqual(self.drive_action('onroad')[0], 200)
     self.assertEqual(self.drive.snapshot().mode, Mode.ONROAD)
-    self.assertEqual(self.drive_action('offroad')[0], 409)
+    self.assertEqual(self.drive_action('offroad')[0], 403)
     self.assertEqual(self.drive.snapshot().mode, Mode.ONROAD)
     self.assertEqual(self.drive_action('auto', remote=True)[0], 200)
     self.assertEqual(self.drive.snapshot().mode, Mode.AUTO)
@@ -60,17 +63,27 @@ class ForceHttpTest(helpers.NavigationHttpTest):
     self.assertEqual(self.drive_action('onroad', origin='https://unrelated.invalid')[0], 403)
     self.assertEqual(self.drive_action('badmode')[0], 409)
     self.assertEqual(self.params.writes, before)
-    calls = []
+    original_change = self.control.change
 
-    def revoke():
-      calls.append(1)
-      if len(calls) == 2:
-        self.pairing.unpair()
-      return True
+    def revoke_remote(mode, revision, authorized):
+      self.assertEqual(mode, 'onroad')
+      self.assertTrue(authorized())
+      self.pairing.unpair()  # Real HTTP credential changes inside the route's effect lock.
+      self.assertFalse(authorized())
+      return original_change(mode, revision, authorized)
 
-    self.physical.allowed = revoke
-    self.assertEqual(self.drive_action('offroad', remote=True)[0], 409)
+    with patch.object(self.control, 'change', side_effect=revoke_remote):
+      self.assertEqual(self.drive_action('onroad', remote=True)[0], 409)
     self.assertEqual(self.params.writes, before)
+
+  def test_native_park_permission_revoked_during_commit_writes_nothing(self):
+    before = list(self.params.writes)
+    permission = iter((True, False))
+    self.physical.allowed = lambda: next(permission)
+    with pytest.raises(Rejected):
+      self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
+    self.assertEqual(self.params.writes, before)
+    self.assertEqual(self.drive.snapshot().mode, Mode.AUTO)
 
   def test_authenticated_force_offroad_from_live_onroad_state(self):
     self._force_offroad_from_live_onroad_state(True)
@@ -98,12 +111,14 @@ class ForceHttpTest(helpers.NavigationHttpTest):
     self.assertEqual(status[1]['effective'], 'onroad')
     self.assertEqual(status[1]['overrideAllowed'], can_valid)
     result = self.drive_action('offroad', remote=True)
-    self.assertEqual(result[0], 200 if can_valid else 409)
+    self.assertEqual(result[0], 403)
     if can_valid:
-      self.assertEqual(result[1]['mode'], 'offroad')
+      self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
+      self.assertEqual(self.drive.snapshot().mode, Mode.OFFROAD)
     else:
+      with pytest.raises(Rejected, match='Park'):
+        self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
       self.assertEqual(self.drive.snapshot().mode, Mode.AUTO)
-      self.assertIn('Park', result[1]['error'])
     # hardwared consumes this same owner request through the actual resolver.
     messages.values['deviceState'].started = should_start(self.drive.snapshot().mode,
       {'ignition': True}, {'ready': True}, already_started=True)

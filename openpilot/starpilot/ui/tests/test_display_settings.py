@@ -133,10 +133,14 @@ class DisplaySettingsTests(unittest.TestCase):
     session._drive_change.assert_not_called()
     status["overrideAllowed"] = False
     fresh = session.system_snapshot()
-    self.assertIsNone(inputs.target(*point, fresh))
-    session._display_ui(FeatureUiAction("action", row, 2))
+    self.assertIsNotNone(inputs.target(*point, fresh))
+    session._drive_change.reset_mock()
+    session._display_ui(FeatureUiAction("action", fresh.rows[0], 2))
+    session._drive_change.assert_called_once_with("onroad", "shown-revision")
+    self.assertFalse(fresh.rows[0].actions[1][1])  # Only Offroad requires parked admission.
+    session._drive_change.reset_mock()
+    session._display_ui(FeatureUiAction("action", fresh.rows[0], 1))
     session._drive_change.assert_not_called()
-    self.assertTrue(fresh.rows[0].actions[1][1])  # Offroad remains available when Onroad admission fails.
 
   def test_display_submenu_opens_while_off_enabling_enters_and_back_keeps_the_hierarchy(self):
     with patch("openpilot.starpilot.ui.runtime_app.native_device.invalidate_display_preferences"):
