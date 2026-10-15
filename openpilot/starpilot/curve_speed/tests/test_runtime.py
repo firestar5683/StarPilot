@@ -90,6 +90,7 @@ class TestCurveRuntime(unittest.TestCase):
     rt = Runtime(enabled=True)
     arm_selected(rt)
     held = rt.filter.target
+    assert held is not None
     stale = frame(27, inputs_fresh=False)
     self.assertIsNone(rt.step(stale).ceiling_mps)
     rt.confirm_applied(stale.now_ns, applied=False)
