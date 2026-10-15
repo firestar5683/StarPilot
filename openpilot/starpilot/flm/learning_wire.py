@@ -1,6 +1,7 @@
 """Typed custom child snapshots; legacy Event fields and linear fit unchanged."""
 
-from openpilot.cereal import messaging
+from capnp.lib.capnp import _DynamicStructReader
+from openpilot.cereal import custom, messaging
 from openpilot.starpilot.flm.adaptive_profile import Parameter, Profile, ReplayValidation, replay_accepts
 from openpilot.starpilot.flm.fullrate_collector import ControlEvidence, AppliedEvidence, identity, finite
 
@@ -345,12 +346,54 @@ def write_source_receipt(event, source):
   }
 
 
+def _read_native_source_receipt(row, now_ns, cp_sha256, source_type):
+  if row.version != VERSION:
+    return None
+  cp = str(row.cpSha256)
+  if cp != cp_sha256 or not identity(cp):
+    return None
+  observed = row.observedMonoTime
+  if not 0 < observed <= now_ns:
+    return None
+  expires = row.validUntilMonoTime
+  if not now_ns <= expires <= observed + 500_000_000:
+    return None
+  enabled = bool(row.enabled)
+  if enabled:
+    epoch = str(row.sourceEpoch)
+    if not identity(epoch):
+      return None
+    reset = str(row.resetGeneration)
+    if not reset:
+      return None
+  else:
+    reset = str(row.resetGeneration)
+  if len(reset) > 64:
+    return None
+  basis = row.calibrationBasis
+  if len(basis) != 3:
+    return None
+  calibration = []
+  for item in basis:
+    value = float(item)
+    if not finite(value):
+      return None
+    calibration.append(value)
+  manual = bool(row.manual)
+  if not enabled:
+    epoch = str(row.sourceEpoch)
+  return source_type(enabled, manual, reset, epoch, observed, expires, cp, tuple(calibration))
+
+
 def read_source_receipt(event, *, now_ns, cp_sha256):
   from openpilot.starpilot.flm.runtime_adapter_registry import SourceState
 
   if not event.valid:
     return None
   row = event.autoSteeringLearning.learning.sourceReceipt
+  if (type(row) is _DynamicStructReader and row.schema == custom.AutomaticLearningSourceReceipt.schema
+      and type(now_ns) is int and type(cp_sha256) is str):
+    return _read_native_source_receipt(row, now_ns, cp_sha256, SourceState)
   if (
     row.version != VERSION
     or str(row.cpSha256) != cp_sha256
