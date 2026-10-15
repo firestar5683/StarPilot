@@ -192,10 +192,9 @@ func (s *MsgqSubscriber) Read() []byte {
 		if err != nil {
 			panic("Msgq Flush Error")
 		}
+		start := int64(readPointer.Position) + 8
 		result := make([]byte, size)
-		for i := range size {
-			result[i] = s.Msgq.Data[int64(readPointer.Position)+8+i]
-		}
+		copy(result, s.Msgq.Data[start:start+size])
 		err = s.Msgq.Mem.Flush()
 		if err != nil {
 			panic("Msgq Flush Error")

@@ -348,14 +348,19 @@ func (w *Way) OnWay(location log.GpsLocationData, distanceMultiplier float32) (O
 		res.OnWay = false
 		return res, nil
 	}
+	max_dist := MatchDistance(location, w.Width(), distanceMultiplier)
+	if !MayBeWithin(box, pos, max_dist) {
+		// No point of the way can be close enough; skip the per-segment
+		// distance. The result is the same OnWay=false the scan would give.
+		res.OnWay = false
+		return res, nil
+	}
 	d, err := w.DistanceFrom(pos)
 	res.Distance = d
 	if err != nil {
 		res.OnWay = false
 		return res, errors.Wrap(err, "could not get distance to way")
 	}
-	max_dist := max(location.HorizontalAccuracy(), 5) + w.Width()
-	max_dist *= distanceMultiplier
 
 	if d.Distance < max_dist {
 		res.OnWay = true
@@ -367,6 +372,33 @@ func (w *Way) OnWay(location log.GpsLocationData, distanceMultiplier float32) (O
 	}
 	res.OnWay = false
 	return res, nil
+}
+
+// MatchDistance is the distance from a way, in metres, within which OnWay
+// accepts a fix: the fix's accuracy (at least 5 m) plus the road width,
+// scaled by the caller's multiplier.
+func MatchDistance(location log.GpsLocationData, width float32, distanceMultiplier float32) float32 {
+	return (max(location.HorizontalAccuracy(), 5) + width) * distanceMultiplier
+}
+
+// MayBeWithin is false only when every point of box is at least maxDist
+// metres from pos by DistanceTo's haversine. Validated way nodes, and so
+// every segment point DistanceFrom measures to, lie inside the way's box.
+// The pads are twice the bound: the haversine distance is at least R*dLat
+// and at least (2/pi)*R*cos(maxLat)*dLon.
+func MayBeWithin(box m.Box, pos m.Position, maxDist float32) bool {
+	dist := float64(maxDist)
+	latPad := 2 * dist / ms.R * ms.TO_DEGREES
+	maxLat := max(math.Abs(box.MinPos.Lat()), math.Abs(box.MaxPos.Lat()), math.Abs(pos.Lat()))
+	if !(maxLat < 89) {
+		return true // too close to a pole for the longitude bound; measure instead
+	}
+	lonPad := 2 * dist / (ms.R * math.Cos(maxLat*ms.TO_RADIANS)) * ms.TO_DEGREES
+	padded := m.Box{
+		MinPos: m.NewPosition(box.MinPos.Lat()-latPad, box.MinPos.Lon()-lonPad),
+		MaxPos: m.NewPosition(box.MaxPos.Lat()+latPad, box.MaxPos.Lon()+lonPad),
+	}
+	return padded.PosInside(pos)
 }
 
 func (w *Way) BearingAlignment(location log.GpsLocationData) (float32, error) {
