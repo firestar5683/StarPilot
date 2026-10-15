@@ -532,7 +532,7 @@ class Compositor:
     from openpilot.starpilot.system.android_auto import gpu_nv12
     from openpilot.starpilot.ui.shell import ShellMode
     rl = self.rl
-    self.context.begin_frame(sample.now_ns / 1e9)
+    self.context.begin_frame(cast(int, sample.now_ns) / 1e9)
     self.placement.maintain(now_ns / 1e9)
     snapshot = self.adapter.build(ShellMode.ONROAD)
     self.primary_ready = False
