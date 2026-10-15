@@ -5,6 +5,7 @@
 #include <tuple>
 #include <utility>
 #include <chrono>
+#include <stdexcept>
 
 #include "common/util.h"
 #include "common/yuv.h"
@@ -137,7 +138,13 @@ bool FrameReader::get(int idx, VisionBuf *buf) {
     return false;
   }
   std::lock_guard lock(decoder_->lock_);
-  return decoder_->decode(this, idx, buf);
+  try {
+    return decoder_->decode(this, idx, buf);
+  } catch (const std::runtime_error &error) {
+    decoder_->active_reader_ = nullptr;
+    rError("Decoder failed at frame %d: %s", idx, error.what());
+    return false;
+  }
 }
 
 // class VideoDecoder
@@ -300,6 +307,7 @@ bool V4LVideoDecoder::open(AVCodecParameters *codecpar, bool hw_decoder) {
 }
 
 bool V4LVideoDecoder::decode(FrameReader *reader, int idx, VisionBuf *buf) {
+  if (!v4l_decoder) return false;
   int from_idx = idx;
   const bool reset = active_reader_ != reader || idx != reader->prev_idx + 1;
   const bool next_segment = active_reader_ && active_reader_ != reader && idx == 0 &&
@@ -309,7 +317,12 @@ bool V4LVideoDecoder::decode(FrameReader *reader, int idx, VisionBuf *buf) {
     // A drained decoder accepts the new file's keyframe without reallocating its capture buffers.
     if (decoded_ && !next_segment) {
       v4l_decoder = std::make_unique<V4LDecoder>();
-      if (!v4l_decoder->init(V4LDecoder::DEVICE, width, height, V4L2_PIX_FMT_HEVC)) return false;
+      if (!v4l_decoder->init(V4LDecoder::DEVICE, width, height, V4L2_PIX_FMT_HEVC)) {
+        v4l_decoder.reset();
+        active_reader_ = nullptr;
+        decoded_ = false;
+        return false;
+      }
     }
     // seeking to the nearest key frame
     for (int i = idx; i >= 0; --i) {
@@ -330,7 +343,8 @@ bool V4LVideoDecoder::decode(FrameReader *reader, int idx, VisionBuf *buf) {
   active_reader_ = reader;
   decoded_ = true;
   bool result = false;
-  AVPacket pkt;
+  AVPacket pkt = {};
+  std::unique_ptr<AVPacket, decltype(&av_packet_unref)> packet_scope(&pkt, av_packet_unref);
   v4l_decoder->avctx = reader->input_ctx;
   for (int i = from_idx; i <= idx; ++i) {
     if (reader->abort_ && *reader->abort_) return false;

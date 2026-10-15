@@ -1,4 +1,5 @@
 #include "common/tests/native_test.h"
+#include "common/hardware/hw.h"
 #include "tools/replay/replay.h"
 #include "tools/replay/route.h"
 #include <filesystem>
@@ -101,11 +102,36 @@ void test_machine_camera_time() {
   CHECK(raw.getRoot<cereal::Event>().getNarrowRoadEncodeIdx().getTimestampSof() == 10000000000ULL);
 }
 
+class ThrowingVideoDecoder : public VideoDecoder {
+public:
+  bool open(AVCodecParameters *, bool) override { return true; }
+  bool decode(FrameReader *reader, int, VisionBuf *) override {
+    active_reader_ = reader;
+    throw std::runtime_error("injected decoder failure");
+  }
+};
+
+void test_decoder_exception_is_a_failed_frame() {
+  FrameReader reader;
+  reader.width = reader.height = 2;
+  reader.packets_info.push_back({0, 0});
+  reader.decoder_ = std::make_shared<ThrowingVideoDecoder>();
+  VisionBuf buffer;
+  buffer.width = buffer.height = buffer.stride = 2;
+  CHECK(!reader.get(0, &buffer));
+  CHECK(reader.decoder_->active_reader_ == nullptr);
+}
+
 void test_decoder_reader_switch(const char *first, const char *second, bool no_hw_decoder) {
   FrameReader a, b;
   REQUIRE(a.loadFromFile(NarrowRoadCam, first, no_hw_decoder));
   REQUIRE(b.loadFromFile(NarrowRoadCam, second, no_hw_decoder));
   REQUIRE(a.decoder_ == b.decoder_);
+#ifndef __APPLE__
+  if (!no_hw_decoder && !Hardware::PC()) {
+    REQUIRE(dynamic_cast<V4LVideoDecoder *>(a.decoder_.get()) != nullptr);
+  }
+#endif
   REQUIRE(a.width == b.width && a.height == b.height);
   std::vector<uint8_t> pixels(a.width * a.height * 3 / 2);
   VisionBuf buffer;
@@ -118,16 +144,26 @@ void test_decoder_reader_switch(const char *first, const char *second, bool no_h
     REQUIRE(reader.get(index, &buffer));
     CHECK(std::all_of(pixels.begin(), pixels.begin() + a.width * a.height, [expected](auto value) { return value == expected; }));
   };
-  check(a, 0, 30);
-  check(b, 0, 200);
-  check(a, 1, 90);
-  check(a, 2, 120);
-  check(b, 0, 200);
-  check(b, 1, 220);
-  check(b, 2, 240);
-  check(a, 0, 30);
-  check(a, 2, 120);
-  check(a, 0, 30);
+  for (int iteration = 0; iteration < (no_hw_decoder ? 1 : 12); ++iteration) {
+    check(a, 0, 30);
+    check(b, 0, 200);
+    check(a, 1, 90);
+    check(a, 2, 120);
+    check(b, 0, 200);
+    check(b, 1, 220);
+    check(b, 2, 240);
+    check(a, 0, 30);
+    check(a, 2, 120);
+    check(a, 0, 30);
+#ifndef __APPLE__
+    if (!no_hw_decoder) {
+      size_t descriptors = std::distance(std::filesystem::directory_iterator("/proc/self/fd"), std::filesystem::directory_iterator());
+      static size_t warmed_descriptors = 0;
+      if (iteration == 0) warmed_descriptors = descriptors;
+      CHECK(descriptors == warmed_descriptors);
+    }
+#endif
+  }
   std::weak_ptr<VideoDecoder> inactive;
   {
     FrameReader transient;
@@ -143,6 +179,7 @@ int main(int argc, char **argv) {
     test_replay_recorder_only_service();
     test_local_sources();
     test_machine_camera_time();
+    test_decoder_exception_is_a_failed_frame();
     if (argc == 3 || argc == 4) {
       REQUIRE(argc == 3 || std::string(argv[3]) == "--hardware");
       test_decoder_reader_switch(argv[1], argv[2], argc == 3);

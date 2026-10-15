@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <cerrno>
 #include <climits>
+#include <stdexcept>
 #include <linux/v4l2-controls.h>
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
@@ -33,44 +34,66 @@ static void request_buffers(int fd, v4l2_buf_type buf_type, unsigned int count) 
 }
 
 V4LDecoder::~V4LDecoder() {
-  if (fd > 0) {
+  releaseResources();
+}
+
+void V4LDecoder::releaseResources() {
+  if (fd >= 0) {
     close(fd);
+    fd = -1;
   }
+  for (auto &buffer : out_bufs) {
+    if (buffer.addr != nullptr) buffer.free();
+    buffer = VisionBuf();
+  }
+  for (auto &buffer : cap_bufs) {
+    if (buffer.addr != nullptr) buffer.free();
+    buffer = VisionBuf();
+  }
+  initialized = false;
+  reconfigure_pending = false;
 }
 
 bool V4LDecoder::init(const char* dev, size_t width, size_t height, uint64_t codec,
                    bool direct_mode, uint32_t capture_fourcc) {
-  LOG("Initializing msm_vidc device %s", dev);
-  this->w = width;
-  this->h = height;
-  this->direct = direct_mode;
-  this->capture_format = capture_fourcc;
-  this->fd = open(dev, O_RDWR | O_NONBLOCK, 0);
-  if (fd < 0) {
-    LOGE("failed to open video device %s", dev);
+  releaseResources();
+  try {
+    LOG("Initializing msm_vidc device %s", dev);
+    this->w = width;
+    this->h = height;
+    this->direct = direct_mode;
+    this->capture_format = capture_fourcc;
+    this->fd = open(dev, O_RDWR | O_NONBLOCK, 0);
+    if (fd < 0) {
+      LOGE("failed to open video device %s", dev);
+      return false;
+    }
+    subscribeEvents();
+    v4l2_buf_type out_type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+    setPlaneFormat(out_type, codec); // Also allocates the output buffers
+    setFPS(FPS);
+    if (direct) {
+      struct v4l2_control ctrls[] = {
+        // A finite real-time load lets the driver place decode and encode on separate cores.
+        { .id = V4L2_CID_MPEG_VIDC_VIDEO_OPERATING_RATE, .value = OFFLINE_CORE_PLACEMENT_RATE },
+        { .id = V4L2_CID_MPEG_VIDC_VIDEO_PRIORITY, .value = V4L2_MPEG_VIDC_VIDEO_PRIORITY_REALTIME_ENABLE },
+      };
+      for (auto ctrl : ctrls) {
+        util::safe_ioctl(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL offline decode failed");
+      }
+    }
+    request_buffers(fd, out_type, OUTPUT_BUFFER_COUNT);
+    util::safe_ioctl(fd, VIDIOC_STREAMON, &out_type, "VIDIOC_STREAMON OUTPUT failed");
+    restartCapture();
+    pfd = {fd, POLLIN | POLLOUT | POLLWRNORM | POLLRDNORM | POLLPRI, 0};
+
+    this->initialized = true;
+    return true;
+  } catch (const std::runtime_error &error) {
+    LOGE("Decoder init failed (%zux%zu): %s", width, height, error.what());
+    releaseResources();
     return false;
   }
-  subscribeEvents();
-  v4l2_buf_type out_type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
-  setPlaneFormat(out_type, codec); // Also allocates the output buffers
-  setFPS(FPS);
-  if (direct) {
-    struct v4l2_control ctrls[] = {
-      // A finite real-time load lets the driver place decode and encode on separate cores.
-      { .id = V4L2_CID_MPEG_VIDC_VIDEO_OPERATING_RATE, .value = OFFLINE_CORE_PLACEMENT_RATE },
-      { .id = V4L2_CID_MPEG_VIDC_VIDEO_PRIORITY, .value = V4L2_MPEG_VIDC_VIDEO_PRIORITY_REALTIME_ENABLE },
-    };
-    for (auto ctrl : ctrls) {
-      util::safe_ioctl(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL offline decode failed");
-    }
-  }
-  request_buffers(fd, out_type, OUTPUT_BUFFER_COUNT);
-  util::safe_ioctl(fd, VIDIOC_STREAMON, &out_type, "VIDIOC_STREAMON OUTPUT failed");
-  restartCapture();
-  pfd = {fd, POLLIN | POLLOUT | POLLWRNORM | POLLRDNORM | POLLPRI, 0};
-
-  this->initialized = true;
-  return true;
 }
 
 VisionBuf* V4LDecoder::decodeFrame(AVPacket *pkt, VisionBuf *buf) {
@@ -172,7 +195,8 @@ bool V4LDecoder::setPlaneFormat(enum v4l2_buf_type type, uint32_t fourcc) {
     .height = (__u32)this->h,
     .pixelformat = fourcc
   };
-  util::safe_ioctl(fd, VIDIOC_S_FMT, &fmt, "VIDIOC_S_FMT failed");
+  util::safe_ioctl(fd, VIDIOC_S_FMT, &fmt, type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE ?
+                   "VIDIOC_S_FMT OUTPUT failed" : "VIDIOC_S_FMT CAPTURE failed");
   if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
     this->out_buf_size = pix->plane_fmt[0].sizeimage;
     for (int i = 0; i < OUTPUT_BUFFER_COUNT; i++) {

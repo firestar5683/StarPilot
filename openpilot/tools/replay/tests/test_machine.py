@@ -8,6 +8,7 @@ import queue
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -266,6 +267,13 @@ class TestMachine(unittest.TestCase):
       clock.close()
       del socket
       engine.close()
+
+  @unittest.skipUnless(sys.platform == "linux", "Linux V4L decoder lifecycle")
+  def test_decoder_releases_resources_after_initialization_failure(self):
+    native_test = BINARY.parent / "tests/test_v4l_decoder_lifecycle"
+    self.assertTrue(native_test.is_file())
+    result = subprocess.run([str(native_test)], timeout=10, capture_output=True, text=True)
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
   def test_bounded_decompression(self):
     from openpilot.tools.lib.file_downloader import decompress_file

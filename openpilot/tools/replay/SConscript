@@ -17,3 +17,12 @@ replay_env.Program("replay", ["main.cc"], LIBS=replay_libs, FRAMEWORKS=base_fram
 replay_env.SharedLibrary("media_mux", ["media_mux.cc"], LIBS=ffmpeg_libs)
 if GetOption('extras') or 'openpilot/tools/replay/tests/test_route' in COMMAND_LINE_TARGETS:
   replay_env.Program("tests/test_route", ["tests/test_route.cc"], LIBS=replay_libs, FRAMEWORKS=base_frameworks)
+if arch != "Darwin" and (GetOption('extras') or 'openpilot/tools/replay/tests/test_v4l_decoder_lifecycle' in COMMAND_LINE_TARGETS):
+  lifecycle_env = replay_env.Clone()
+  lifecycle_env.Append(LINKFLAGS=[
+    '-Wl,--wrap=' + symbol for symbol in (
+      'open', 'close', 'ioctl', 'av_packet_unref', '_ZN9VisionBuf8allocateEm', '_ZN9VisionBuf4freeEv'
+    )
+  ])
+  lifecycle_env.Program("tests/test_v4l_decoder_lifecycle", ["tests/test_v4l_decoder_lifecycle.cc"],
+                        LIBS=replay_libs, FRAMEWORKS=base_frameworks)

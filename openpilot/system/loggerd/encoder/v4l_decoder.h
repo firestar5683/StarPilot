@@ -67,7 +67,7 @@ public:
   size_t maxPacketSize() const { return out_buf_size; }
 
   AVFormatContext* avctx = nullptr;
-  int fd = 0;
+  int fd = -1;
 
 private:
   bool initialized = false;
@@ -90,6 +90,7 @@ private:
 
   struct pollfd pfd = {};
 
+  void releaseResources();
   bool subscribeEvents();
   bool setPlaneFormat(v4l2_buf_type type, uint32_t fourcc);
   bool setFPS(uint32_t fps);
