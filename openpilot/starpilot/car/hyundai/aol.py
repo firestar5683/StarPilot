@@ -272,6 +272,10 @@ def create_intent(CP, settings):
     from openpilot.starpilot.car.hyundai.forte_intent import ForteCardIntent
 
     return ForteCardIntent(CP, settings)
+  if qualified_ioniq6(CP):
+    from openpilot.starpilot.car.hyundai.ioniq6_intent import Ioniq6CardIntent
+
+    return Ioniq6CardIntent(settings)
   from openpilot.starpilot.aol.intent import AolCardIntent
 
   return AolCardIntent(settings, explicit_latch=policy_for(CP).explicit_latch)

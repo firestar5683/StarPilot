@@ -487,12 +487,17 @@ class TransportPauseFeedback:
     return True
 
   def _honda_brake_lateral_current(self, sm, cp, cs, axis, now_ns, *, latched, brake_source_ns):
-    """Preserve existing LAT intent through brake's LONG withdrawal, never output."""
+    """Preserve existing LAT intent through brake's LONG withdrawal, never output.
+
+    Honda stock AOL and the Ioniq 6 both see Panda revoke LONG on brake before
+    the host withdraws its LONG request."""
     from opendbc.car.honda.stock_aol import qualified
     from opendbc.car.structs import car
+    from openpilot.starpilot.car.hyundai.aol import qualified_ioniq6
 
     source_ns = self.honda_brake_ns or (brake_source_ns if cs.brakePressed else 0)
-    if (not qualified(cp, marked_only=True) or not latched or self.failed or self.paused or self.pending_event or
+    if (not (qualified(cp, marked_only=True) or qualified_ioniq6(cp)) or
+        not latched or self.failed or self.paused or self.pending_event or
         not self.session or str(axis.sessionId) != self.session or
         not self.healthy_feedback_ns or not 0 <= now_ns - self.healthy_feedback_ns <= AXIS_MAX_AGE_NS or
         not 0 < source_ns <= now_ns or now_ns - source_ns > SAFETY_MAX_AGE_NS or

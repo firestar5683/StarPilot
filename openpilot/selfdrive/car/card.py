@@ -53,7 +53,7 @@ from opendbc.car.ford.aol import (
 from opendbc.car.hyundai.canfd_angle_aol import native_observation, temporary_restriction, qualified as qualified_angle_aol
 from opendbc.car.hyundai.canfd_owner import config_index as hyundai_canfd_config_index
 from opendbc.car.hyundai.captured_adrv_startup import CapturedADRVStartup
-from openpilot.starpilot.car.hyundai.aol import aol_safety_config as hyundai_aol_safety_config
+from openpilot.starpilot.car.hyundai.aol import aol_safety_config as hyundai_aol_safety_config, qualified_ioniq6
 from openpilot.starpilot.aol.runtime import AXIS_MAX_AGE_NS, current_axis, current_native
 from openpilot.starpilot.aol.vehicle import create_intent as create_aol_intent, native_latch_rejected, policy_for as aol_policy_for
 from openpilot.starpilot.aol.wire import IntentState, encode_intent
@@ -773,18 +773,25 @@ class Car:
 
   def aol_honda_brake_source(self, CS, now_ns: int) -> int:
     observation = getattr(self, '_aol_can_observation', None)
-    if (not CS.brakePressed or not qualified_honda_stock_aol(self.CP, marked_only=True) or
-        observation is None or observation[0] is not CS):
+    if not CS.brakePressed or observation is None or observation[0] is not CS:
       return 0
     from opendbc.car import Bus
-    from opendbc.car.honda.values import HondaFlags
     parser = self.CI.can_parsers[Bus.pt]
-    message = 'BRAKE_MODULE' if self.CP.flags & HondaFlags.BOSCH_ALT_BRAKE else 'POWERTRAIN_DATA'
-    signals = parser.vl.get(message, {})
-    # Match the real parser's applied-brake or two-sample switch decision.
-    brake = bool(signals.get('BRAKE_PRESSED', 0) or message == 'POWERTRAIN_DATA' and
-                 signals.get('BRAKE_SWITCH', 0) and self.CI.CS.brake_switch_active)
-    stamp = int(parser.ts_nanos.get(message, {}).get('BRAKE_PRESSED', 0))
+    if qualified_honda_stock_aol(self.CP, marked_only=True):
+      from opendbc.car.honda.values import HondaFlags
+      message = 'BRAKE_MODULE' if self.CP.flags & HondaFlags.BOSCH_ALT_BRAKE else 'POWERTRAIN_DATA'
+      signals = parser.vl.get(message, {})
+      # Match the real parser's applied-brake or two-sample switch decision.
+      brake = bool(signals.get('BRAKE_PRESSED', 0) or message == 'POWERTRAIN_DATA' and
+                   signals.get('BRAKE_SWITCH', 0) and self.CI.CS.brake_switch_active)
+      stamp = int(parser.ts_nanos.get(message, {}).get('BRAKE_PRESSED', 0))
+    elif qualified_ioniq6(self.CP):
+      # Panda revokes LONG on this brake one frame before the host withdraws its
+      # request; the source lets that window retain LAT intent like Honda's.
+      brake = parser.vl.get('TCS', {}).get('DriverBraking', 0) == 1
+      stamp = int(parser.ts_nanos.get('TCS', {}).get('DriverBraking', 0))
+    else:
+      return 0
     _, received_ns, can_source_ns, boot_ns = observation
     # CANParser/CAN batch use BOOTTIME; retain the original MONOTONIC receipt.
     if (not brake or not 0 < received_ns <= now_ns or now_ns - received_ns > 30_000_000 or
