@@ -275,7 +275,11 @@ class TransportPauseFeedback:
     events = sm['onroadEvents']
     faults = [event for event in events if event.immediateDisable or event.softDisable]
     names = (log.OnroadEvent.EventName.selfdrivedLagging, log.OnroadEvent.EventName.locationdTemporaryError)
-    temporary = bool(len(faults) == 1 and faults[0].name in names and faults[0].softDisable and not faults[0].immediateDisable)
+    location_fault = bool(any(event.name == log.OnroadEvent.EventName.locationdTemporaryError for event in faults) and
+      all(event.softDisable and not event.immediateDisable and event.name in
+          (log.OnroadEvent.EventName.locationdTemporaryError, log.OnroadEvent.EventName.commIssue) for event in faults))
+    temporary = location_fault or bool(len(faults) == 1 and faults[0].name in names and
+                                       faults[0].softDisable and not faults[0].immediateDisable)
     eps_recovery = bool(not cs.steerFaultTemporary and getattr(self, 'temporary_eps_event_ns', 0) and
       axis.faultEventMonoTime == self.temporary_eps_event_ns and
       all(not event.immediateDisable and
@@ -283,8 +287,7 @@ class TransportPauseFeedback:
     users = [event for event in events if event.userDisable]
     pedal = bool(cs.brakePressed and users and all(event.name == log.OnroadEvent.EventName.pedalPressed and
       not event.softDisable and not event.immediateDisable for event in users) and not faults)
-    location_only = bool(temporary and faults[0].name == log.OnroadEvent.EventName.locationdTemporaryError)
-    if axis.longitudinalActive and not location_only or not (temporary or eps_recovery or pedal):
+    if axis.longitudinalActive and not location_fault or not (temporary or eps_recovery or pedal):
       return False
     if (not latched or self.failed or self.paused or self.pending_event or self.retention_started_ns or
         not self.session or str(axis.sessionId) != self.session or

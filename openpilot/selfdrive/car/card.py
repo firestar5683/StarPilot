@@ -826,7 +826,8 @@ class Car:
       events = [event for event in events if not
                 (event.name in AVAILABILITY_EVENTS and event.softDisable and not event.immediateDisable)]
     if getattr(self.aol_transport_feedback, 'temporary_host_qualified', False):
-      events = [event for event in events if not (event.name == log.OnroadEvent.EventName.locationdTemporaryError and
+      events = [event for event in events if not (event.name in
+                (log.OnroadEvent.EventName.locationdTemporaryError, log.OnroadEvent.EventName.commIssue) and
                 event.softDisable and not event.immediateDisable)]
     return intent_disarming_fault(self.CP, events, CS,
       startup_calibration_pending=bool(getattr(self.aol_card_intent, 'startup_calibration_pending', False) and

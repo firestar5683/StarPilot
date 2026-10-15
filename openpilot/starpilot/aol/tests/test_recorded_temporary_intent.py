@@ -50,8 +50,9 @@ def test_actual_temporary_host_event_keeps_only_armed_intent(event_name):
     assert leases(card.aol_transport_feedback) == original
 
 
-@pytest.mark.parametrize('fault', ['native_denial', 'panda_fault', 'permanent_eps', 'invalid_can', 'hard_event'])
-def test_recorded_temporary_host_path_never_masks_native_or_hard_fault(fault):
+@pytest.mark.parametrize('coincident_communication', [False, True])
+@pytest.mark.parametrize('fault', ['native_denial', 'panda_fault', 'permanent_eps', 'invalid_can', 'hard_event', 'overheat'])
+def test_recorded_temporary_host_path_never_masks_native_or_hard_fault(fault, coincident_communication):
   case = fixture.IoniqAvailabilityTests(methodName='runTest')
   with ExitStack() as cleanup:
     cleanup.callback(case.doCleanups)
@@ -62,11 +63,17 @@ def test_recorded_temporary_host_path_never_masks_native_or_hard_fault(fault):
     state = fixture.car_state()
     state.steerFaultPermanent = fault == 'permanent_eps'
     state.canValid = fault != 'invalid_can'
-    proof, event = sd.pm.messages['aolAxisState'], sd.pm.messages['onroadEvents']
+    proof, event = sd.pm.messages['aolAxisState'], sd.pm.messages['onroadEvents'].as_builder()
+    extra = []
+    if coincident_communication:
+      extra.append({'name': 'commIssue', 'softDisable': True})
+    if fault == 'overheat':
+      extra.append({'name': 'overheat', 'softDisable': True})
+    if extra:
+      event.onroadEvents = [entry.to_dict() for entry in event.onroadEvents] + extra
     if fault == 'hard_event':
-      event = event.as_builder()
       event.onroadEvents[0].immediateDisable = True
-    assert not receive(10_020_000_000, axis=proof, event=event, state=state)
+    assert not receive(10_020_000_000, axis=proof, event=event.as_reader(), state=state)
     assert not command.longActive
 
 
@@ -206,7 +213,9 @@ def test_verified_eps_marker_cannot_cross_owner_reset(reset):
     assert not command.latActive and not command.longActive
 
 
-def test_full_long_location_error_event_first_withdraw_recover_brake_and_lkas_off():
+@pytest.mark.parametrize('coincident_communication', [False, True])
+@pytest.mark.parametrize('recovery_tick', [40, 303])
+def test_full_long_location_error_event_first_withdraw_recover_brake_and_lkas_off(coincident_communication, recovery_tick):
   case = fixture.IoniqAvailabilityTests(methodName='runTest')
   with ExitStack() as cleanup:
     cleanup.callback(case.doCleanups)
@@ -218,6 +227,8 @@ def test_full_long_location_error_event_first_withdraw_recover_brake_and_lkas_of
     def events(cs):
       result = actual_events(cs)
       if location_error[0]:
+        if coincident_communication:
+          sd.events.add(log.OnroadEvent.EventName.commIssue)
         sd.events.add(log.OnroadEvent.EventName.locationdTemporaryError)
       return result
 
@@ -272,7 +283,8 @@ def test_full_long_location_error_event_first_withdraw_recover_brake_and_lkas_of
       axis, state, command = drive_with_sources(2)
       assert state.enabled and state.active
       assert state.state == log.SelfdriveState.OpenpilotState.softDisabling
-      assert state.alertType == 'locationdTemporaryError/softDisable'
+      expected_alert = 'commIssue' if coincident_communication else 'locationdTemporaryError'
+      assert state.alertType == expected_alert + '/softDisable'
       assert not axis.lateralActive and not axis.longitudinalActive
       assert not command.latActive and not command.longActive
       assert sd.state_machine.soft_disable_timer == 300
@@ -283,32 +295,36 @@ def test_full_long_location_error_event_first_withdraw_recover_brake_and_lkas_of
       assert receive(10_020_100_000, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
       assert card.aol_card_intent.allowed_latch
       # Follow the unchanged ordinary SOFT countdown, not a forced fixture disable.
-      for tick in range(3, 303):
+      for tick in range(3, recovery_tick):
         axis, state, command = drive_with_sources(tick)
         assert publish_to_card(tick, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
-      assert not state.enabled and not state.active
+      ordinary_still_enabled = recovery_tick < 303
+      assert state.enabled == state.active == ordinary_still_enabled
       assert not axis.lateralActive and not axis.longitudinalActive
       assert not command.latActive and not command.longActive
       assert card.aol_card_intent.allowed_latch
       location_error[0] = False
-      axis, state, command = drive_with_sources(303, native_request_long=False)
-      assert not state.enabled and not state.active
-      assert axis.lateralActive and not axis.longitudinalActive
-      assert command.latActive and not command.longActive
-      assert publish_to_card(303, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
-      axis, state, command = drive_with_sources(304, brake=True, native_request_long=False)
+      axis, state, command = drive_with_sources(recovery_tick, native_request_long=ordinary_still_enabled)
+      assert state.enabled == state.active == ordinary_still_enabled
+      assert axis.lateralActive and axis.longitudinalActive == ordinary_still_enabled
+      assert command.latActive and command.longActive == ordinary_still_enabled
+      assert publish_to_card(recovery_tick, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      brake_tick = recovery_tick + 1
+      axis, state, command = drive_with_sources(brake_tick, brake=True, native_request_long=False)
       assert not state.enabled and not axis.longitudinalActive and not command.longActive
-      assert publish_to_card(304, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'],
+      assert axis.lateralActive and command.latActive
+      assert publish_to_card(brake_tick, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'],
                              state=fixture.car_state(brake=True))
       from opendbc.car.structs import car
       release = fixture.car_state()
       release.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.lkas, pressed=False)]
-      assert receive(13_040_050_000, state=release)
+      brake_ns = 10_000_000_000 + brake_tick * 10_000_000
+      assert receive(brake_ns + 50_000, state=release)
       assert not card.aol_card_intent._lkas_held
       off = fixture.car_state()
       off.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.lkas, pressed=True)]
-      assert not receive(13_040_100_000, state=off)
+      assert not receive(brake_ns + 100_000, state=off)
       assert not card.aol_card_intent.allowed_latch
-      axis, state, command = drive_with_sources(305, native_request_long=False)
+      axis, state, command = drive_with_sources(brake_tick + 1, native_request_long=False)
       assert not axis.lateralActive and not axis.longitudinalActive
       assert not command.latActive and not command.longActive and not state.enabled
