@@ -1,19 +1,25 @@
 # Galaxy Android companion
 
-Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.7 (versionCode 9).
+Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.9 (versionCode 11).
 
-Allow notifications on Android to receive an **App updates** pop-up when your comma
-has a newer APK. The app checks when opened and after connecting, plus about every
+Update notifications work on Android 12 and newer. Android 12 does not require a
+runtime notification permission; its **App updates** channel works by default unless
+disabled in system settings. On Android 13+, notifications are optional and are not
+requested at first launch. Choose **Connections → Notification settings** to opt in
+and receive an **App updates** pop-up when your comma has a newer APK. The app checks
+when opened and after connecting, plus about every
 15 minutes in the background (Android may delay background work). Checks use Galaxy
 Wi-Fi or the last connected comma address on the same LAN, independently of phone
 internet sharing. Bluetooth-only connections cannot download or check for APKs.
 Each available version alerts once; tapping opens Galaxy's update page, where
 **Update app** downloads the APK for Android's normal installation confirmation.
-Use **Connections → App notification settings** to enable notifications if previously
-denied, or change the App updates channel's sound and pop-up behavior.
+The same option opens Android settings if permission was previously denied, or lets
+you change the App updates channel's sound and pop-up behavior.
 Wi-Fi/LAN loads live Galaxy screens from comma. Bluetooth uses screens bundled
 in the APK, so Bluetooth screen changes require rebuilding/updating the APK. This directory and the Galaxy changes are source implementation plus a
 signed release artifact; physical phone/comma/in-car acceptance is still required.
+Screen rotation is handled in the existing activity so it resizes the UI without
+destroying the authenticated Bluetooth session or reloading the current page.
 
 ## Use
 
@@ -43,14 +49,17 @@ never available to remote pages or cross-origin frames/resources.
 
 Use the **Connections** button at the top of the Android app:
 
-- **Automatic** tries Galaxy Wi-Fi or the saved LAN address first. On home Wi-Fi,
-  a fresh install or failed saved address starts a 12-second LAN search. It
+- **Automatic** tries Galaxy Wi-Fi or the saved LAN address first. A resolved LAN
+  service opens after a brief 500 ms window for other commas instead of waiting for
+  the 12-second search timeout. With a saved Bluetooth pairing, a missing or failed
+  LAN address falls back directly to Bluetooth. Without a pairing, the app
+  continues searching for up to 12 seconds. It
   connects automatically when one comma is found and offers a picker when
   several are found. If no Wi-Fi or LAN device is available, or you cancel the
   picker while disconnected, it tries a saved Bluetooth pairing.
-- **Galaxy Wi-Fi / LAN only** loads live pages from comma over HTTP port 8082.
-- **Bluetooth only** loads bundled pages and sends bounded API requests over BLE.
-- **Find Galaxy on LAN** discovers `_sp-galaxy._tcp.` for 12 seconds and
+- **Wi-Fi & LAN** loads live pages from comma over HTTP port 8082.
+- **Bluetooth** loads bundled pages and sends bounded API requests over BLE.
+- **Find comma on this network** discovers `_sp-galaxy._tcp.` for 12 seconds and
   lets you choose an address. The disconnected screen also has a **Find comma
   on LAN** button. Manual RFC1918 IPv4 entry remains available when
   multicast is blocked. Use a trusted LAN; HTTP/mDNS is not TLS.
@@ -98,7 +107,8 @@ at `/data/galaxy-ble/stardust-setup.log`.
 Failed environment verification also backs off for 60 seconds while driving,
 so a partial installation does not repeatedly launch Python onroad.
 
-Once paired, the supervisor also starts the BLE adapter and retries if Bluetooth
+Once paired, Android remembers the last authenticated BLE address and tries it for
+four seconds before falling back to a normal low-latency scan. The supervisor also starts the BLE adapter and retries if Bluetooth
 is off or BlueZ is not ready. It does not change Bluetooth power/bonds, pairing
 keys, or the other fork's venv or systemd units. Do not run two Galaxy GATT bridge
 services at once. `install_bluetooth.sh` remains an internal setup helper; users
@@ -122,17 +132,17 @@ discovery errors. Android 13+ searches the selected Wi-Fi network explicitly.
 
 1. Enable Bluetooth in comma settings. Park and join Galaxy Wi-Fi, or connect to
    comma over a trusted LAN.
-2. Choose **Connections → Pair Bluetooth using Wi-Fi / LAN**. This obtains the
+2. Choose **Connections → Pair over Wi-Fi**. This obtains the
    existing key without rotating it. The endpoint requires a local session,
    same-origin POST and the existing parked check.
-3. Choose **Bluetooth only**, grant Nearby Devices permission, and connect.
+3. Choose **Connections → Bluetooth**, grant Nearby Devices permission, and connect.
    Android 8–11 requires location permission for foreground BLE discovery;
    Android 12+ uses Scan/Connect with `neverForLocation`.
 4. An existing `galaxy-bluetooth` version-1 JSON code or its 64-character hex key
    can also be pasted. Treat it as a credential. Android encrypts it using an
    Android Keystore key; the key is not exposed to the WebView.
-5. **Forget Bluetooth on this phone** deletes only this phone's copy.
-   **Revoke all paired phones on comma** explicitly rotates the shared key over
+5. **Forget pairing on this phone** deletes only this phone's copy.
+   **Revoke all paired phones** explicitly rotates the shared key over
    Wi-Fi/LAN while parked, disconnecting all clients, including existing iPhones.
 
 The pairing file remains `/data/galaxy-ble/pairing.json`, compatible with upstream.

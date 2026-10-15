@@ -72,8 +72,9 @@ object AppUpdates {
         val available = status.optString("shippedVersion")
         val manager = context.getSystemService(NotificationManager::class.java)
         synchronized(notificationLock) {
-            val allowed = manager.areNotificationsEnabled() && manager.getNotificationChannel(CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE &&
-                (Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+            val allowed = AppUpdatePolicy.notificationsAllowed(Build.VERSION.SDK_INT, manager.areNotificationsEnabled(),
+                manager.getNotificationChannel(CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE,
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
             if (!AppUpdatePolicy.shouldNotify(available, BuildConfig.VERSION_NAME, status.optBoolean("appAvailable"), allowed,
                     prefs.getString("notifiedAppVersion", "") ?: "")) return
             val open = PendingIntent.getActivity(context, NOTIFICATION,

@@ -42,7 +42,7 @@ async function mount() {
   const host = node('host')
   const app = renderer.createApp({ ...GalaxyPage,
     // The real companion child still polls and emits metadata to the real page.
-    components: { ...GalaxyPage.components, GalaxyHotspot: { template: '<div />' }, InstallApp: { template: '<div />' } },
+    components: { ...GalaxyPage.components, GalaxyHotspot: { template: '<div />' }, InstallApp: { props: ['updateAvailable'], template: '<div class="install-state">{{ updateAvailable }}</div>' } },
   }, { mode: 'local', unauthorized() { assert.fail('Unexpected authentication failure') } })
   app.config.compilerOptions.decodeEntities = raw => raw.replaceAll('&amp;', '&')
   const vm = app.mount(host)
@@ -58,6 +58,8 @@ try {
   assert.ok(notice, 'A native app without an internet-sharing lease still gets an update notice')
   assert.match(text(notice), /Version 1.1.5 is available.*Installed: 1.1.4/s)
   assert.ok(all(notice).some(item => item.type === 'a' && item.props.href === './app.apk' && text(item).includes('Update app')))
+  assert.ok(all(host).some(item => item.type === 'div' && item.props.class === 'install-state' && text(item).includes('true')),
+    'The main install action is told to render as an update')
   const root = host.children.find(item => item.type === 'div')
   assert.ok(root.children.indexOf(notice) < root.children.findIndex(item => item.type === 'section'), 'Notice precedes all page sections')
   const install = all(host).find(item => item.type === 'section' && text(item).includes('Install Galaxy'))

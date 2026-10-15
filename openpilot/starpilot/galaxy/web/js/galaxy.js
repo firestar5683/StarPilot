@@ -19,9 +19,11 @@ export const GalaxyPage = {
   computed: {
     availableAppVersion() { return this.companionStatus?.appAvailable ? this.companionStatus.shippedVersion : '' },
     installedAppVersion() { return this.nativeVersion || this.companionStatus?.version || '' },
+    appUpdateAvailable() {
+      return this.mode === 'local' && newerCompanionVersion(this.availableAppVersion, this.installedAppVersion)
+    },
     showAppUpdate() {
-      return this.mode === 'local' && this.availableAppVersion !== this.dismissedUpdateVersion &&
-        newerCompanionVersion(this.availableAppVersion, this.installedAppVersion)
+      return this.appUpdateAvailable && this.availableAppVersion !== this.dismissedUpdateVersion
     },
   },
   mounted() { this.load() },
@@ -110,7 +112,7 @@ export const GalaxyPage = {
         <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
       </section>
       <section class="gx-card gx-info-card">
-        <h3>Install Galaxy</h3><InstallApp />
+        <h3>Install Galaxy</h3><InstallApp :update-available="appUpdateAvailable" />
         <p v-if="availableAppVersion">Android app version: <strong>{{ availableAppVersion }}</strong><span v-if="installedAppVersion"> · {{ nativeVersion ? 'Installed' : 'Connected phone' }}: {{ installedAppVersion }}</span></p>
         <p>Install Galaxy to launch it from your home screen or desktop. Use your remote Galaxy link for app installation; the button shows installation instructions when your browser needs them.</p>
         <ul class="gx-install-benefits"><li><i class="bi bi-window" aria-hidden="true"></i> Your own full-screen window</li><li><i class="bi bi-lightning-charge" aria-hidden="true"></i> Launch from your home screen</li><li><i class="bi bi-arrow-repeat" aria-hidden="true"></i> Automatic updates, no app store</li></ul>

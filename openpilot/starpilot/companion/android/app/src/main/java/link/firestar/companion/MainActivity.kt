@@ -49,7 +49,7 @@ class MainActivity : Activity() {
             if (network in knownWifi || properties.linkAddresses.none { it.address is Inet4Address && it.address.isSiteLocalAddress }) return
             knownWifi.add(network)
             // Open Galaxy as soon as the phone joins a Wi-Fi network, without waiting for "Try again".
-            handler.postDelayed({ if (idle()) connect() }, 600)
+            handler.post { if (idle()) connect() }
         }
         override fun onLost(network: Network) { knownWifi.remove(network) }
     }
@@ -61,11 +61,6 @@ class MainActivity : Activity() {
         super.onCreate(state)
         share = intent.getStringExtra("share")?.take(8192)
         AppUpdates.initialize(this)
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-            !prefs.getBoolean("notificationPermissionRequested", false)) {
-            prefs.edit().putBoolean("notificationPermissionRequested", true).apply()
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        }
         val cm = Networks.manager(this)
         knownWifi.addAll(cm.allNetworks.filter { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true })
         // Galaxy Wi-Fi may have no internet, so do not require that capability.
@@ -94,7 +89,10 @@ class MainActivity : Activity() {
         }
         val saved = Networks.localOrigin(prefs.getString("host", "") ?: "")
         if (host == null && Networks.wifi(this) == null && (saved == null || saved == Networks.ORIGIN)) {
-            disconnected(); discoverLan(automatic = true); return
+            disconnected()
+            // A saved pairing is immediately useful; a new LAN can still be selected by tapping Home network.
+            if (!bluetoothFallback()) discoverLan(automatic = true)
+            return
         }
         origin = host?.let { Networks.localOrigin(it) } ?: if (Networks.wifi(this) != null) Networks.ORIGIN else
             Networks.localOrigin(prefs.getString("host", Networks.ORIGIN)!!) ?: Networks.ORIGIN
@@ -144,7 +142,8 @@ class MainActivity : Activity() {
         }
         showWeb(view, route, if (route == Route.GALAXY_WIFI) "Galaxy Wi-Fi" else "Home network, ${address(origin)}", waitForPage = true)
         // A comma that vanished mid-load can leave the page pending for a long time.
-        pageWatchdog = Runnable { if (web === view && screen != null) pageFailed(view, host) }.also { handler.postDelayed(it, 15000) }
+        val watchdogMs = if (route == Route.HOME_NETWORK && mode == "auto" && pairing.load() != null) 4000L else 10000L
+        pageWatchdog = Runnable { if (web === view && screen != null) pageFailed(view, host) }.also { handler.postDelayed(it, watchdogMs) }
         view.loadUrl(if (share != null) "$origin/?share=${Uri.encode(share)}#/navigation" else "$origin/#/galaxy")
         if (prefs.getBoolean("enabled", false)) startForegroundService(Intent(this, UplinkService::class.java))
     }
@@ -162,8 +161,10 @@ class MainActivity : Activity() {
                 detail("comma didn't answer at ${address(failed)}. Its address may have changed, or comma is off this network.")
             }
         }
-        if (host == null && Networks.wifi(this) == null && Networks.wifi(this, false) != null) discoverLan(automatic = true)
-        else bluetoothFallback()
+        if (host == null && Networks.wifi(this) == null && Networks.wifi(this, false) != null) {
+            // An existing pairing is a faster fallback than waiting for another full LAN search.
+            if (!bluetoothFallback()) discoverLan(automatic = true)
+        } else bluetoothFallback()
     }
     private fun disconnected(): ConnectScreen {
         stopDiscovery(); clearWatchdog()
@@ -242,37 +243,47 @@ class MainActivity : Activity() {
     }
     private fun message(text: String) { if (isFinishing || isDestroyed) return; AlertDialog.Builder(this).setMessage(text).setPositiveButton("OK", null).show() }
     private fun connections() {
-        val options = arrayOf("Automatic (Wi-Fi first)", "Galaxy Wi-Fi / LAN only", "Bluetooth only", "Enter LAN address", "Pair Bluetooth using Wi-Fi / LAN", "Paste Bluetooth pairing code", "Forget Bluetooth on this phone", "Revoke all paired phones on comma", "Find Galaxy on LAN", "App notification settings")
-        AlertDialog.Builder(this).setTitle("Galaxy connection").setItems(options) { _, which ->
-            when (which) {
-                0, 1, 2 -> { prefs.edit().putString("transport", arrayOf("auto", "wifi", "bluetooth")[which]).apply(); connect() }
-                3 -> {
-                    val field = EditText(this).apply { setText(prefs.getString("host", Networks.ORIGIN)); setSingleLine() }
-                    AlertDialog.Builder(this).setTitle("Local Galaxy address").setView(field).setPositiveButton("Connect") { _, _ ->
+        ConnectionSheet(this, Transport.of(prefs.getString("transport", "auto")))
+            .onTransport { prefs.edit().putString("transport", it.key).apply(); connect() }
+            .group("Home network") {
+                action("Find comma on this network", "Search this Wi-Fi for Galaxy") { discoverLan(fromMenu = true) }
+                action("Type comma's address", "For routers that block discovery") {
+                    val field = EditText(this@MainActivity).apply { setText(prefs.getString("host", Networks.ORIGIN)); setSingleLine() }
+                    AlertDialog.Builder(this@MainActivity).setTitle("Local Galaxy address").setView(field).setPositiveButton("Connect") { _, _ ->
                         val host = Networks.localOrigin(Networks.typedAddress(field.text.toString()))
                         if (host == null) message("Use a private IPv4 address on port 8082") else {
                             prefs.edit().putString("host", host).putString("transport", "wifi").apply(); connect(host)
                         }
                     }.setNegativeButton("Cancel", null).show()
                 }
-                4 -> pairOverWifi(false)
-                5 -> {
-                    val field = EditText(this).apply { hint = "galaxy-bluetooth JSON or 64-character key" }
-                    AlertDialog.Builder(this).setTitle("Pair with comma").setView(field).setPositiveButton("Save") { _, _ ->
+            }
+            .group("Bluetooth pairing") {
+                action("Pair over Wi-Fi", "Get a pairing key from comma over Wi-Fi") { pairOverWifi(false) }
+                action("Paste a pairing code", "From Galaxy on another device") {
+                    val field = EditText(this@MainActivity).apply { hint = "galaxy-bluetooth JSON or 64-character key" }
+                    AlertDialog.Builder(this@MainActivity).setTitle("Pair with comma").setView(field).setPositiveButton("Save") { _, _ ->
                         try {
                             val raw = field.text.toString().trim()
                             savePairing(if (raw.startsWith("{")) JSONObject(raw) else JSONObject().put("type", "galaxy-bluetooth").put("version", 1).put("key", raw))
-                            message("Bluetooth pairing saved. Choose Bluetooth only to connect.")
+                            message("Bluetooth pairing saved. Choose Bluetooth in Connections to connect.")
                         } catch (_: Exception) { message("Invalid Galaxy Bluetooth pairing code") }
                     }.setNegativeButton("Cancel", null).show()
                 }
-                6 -> { pairing.forget(); ble?.close(); disconnected() }
-                8 -> discoverLan(fromMenu = true)
-                9 -> startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
-                7 -> AlertDialog.Builder(this).setMessage("Revoke every phone using this comma's Galaxy Bluetooth key, including iPhones? Pair again afterward.")
-                    .setPositiveButton("Revoke") { _, _ -> pairOverWifi(true) }.setNegativeButton("Cancel", null).show()
+                action("Forget pairing on this phone") { pairing.forget(); ble?.close(); disconnected() }
+                action("Revoke all paired phones", "Unpairs every phone from this comma, including iPhones", danger = true) {
+                    AlertDialog.Builder(this@MainActivity).setMessage("Revoke every phone using this comma's Galaxy Bluetooth key, including iPhones? Pair again afterward.")
+                        .setPositiveButton("Revoke") { _, _ -> pairOverWifi(true) }.setNegativeButton("Cancel", null).show()
+                }
             }
-        }.show()
+            .group("This app") { action("Notification settings") { appNotificationSettings() } }
+            .show()
+    }
+    private fun appNotificationSettings() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !prefs.getBoolean("notificationPermissionRequested", false)) {
+            prefs.edit().putBoolean("notificationPermissionRequested", true).apply()
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        } else startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
     }
     private var discovery: LanDiscovery? = null
     private var discoveryAutomatic = false
@@ -388,7 +399,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (rotate) pairingNotice("All Bluetooth phones revoked. Pair again to reconnect.", false)
                     else if (screen != null) pairingNotice("Bluetooth is paired. When Wi-Fi isn't available, Automatic uses Bluetooth for Galaxy controls.", true)
-                    else message("Pairing saved. Enable Bluetooth on comma and choose Bluetooth only to connect.")
+                    else message("Pairing saved. Enable Bluetooth on comma and choose Bluetooth in Connections to connect.")
                 }
             } catch (e: Exception) { runOnUiThread { pairingNotice("Couldn't pair Bluetooth: ${e.message ?: "comma didn't answer"}. Open Galaxy over Wi-Fi, then try again.", pairing.load() != null) } }
         }.start()
@@ -424,11 +435,19 @@ class MainActivity : Activity() {
             detail("Keep Bluetooth on for comma and this phone. Bluetooth opens Galaxy controls; maps and video need Wi-Fi.")
         }
         Thread {
-            val transport = BleTransport(this, key)
+            var transport = BleTransport(this, key)
             if (generation != connectionGeneration.get()) { transport.close(); return@Thread }
             ble = transport
             try {
-                transport.connect()
+                val remembered = pairing.deviceAddress()
+                val device = try { transport.connect(remembered) } catch (first: Exception) {
+                    if (remembered == null || generation != connectionGeneration.get()) throw first
+                    transport.close()
+                    transport = BleTransport(this, key)
+                    ble = transport
+                    transport.connect()
+                }
+                pairing.rememberDevice(device)
                 runOnUiThread { if (!isFinishing && generation == connectionGeneration.get()) showBluetooth(transport) else transport.close() }
             } catch (e: Exception) {
                 transport.close()

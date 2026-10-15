@@ -25,7 +25,7 @@ class PairingStore(context: Context) {
         require(value.size == 32)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
-        prefs.edit().putString("key", Base64.getEncoder().encodeToString(cipher.iv + cipher.doFinal(value))).commit()
+        prefs.edit().remove("deviceAddress").putString("key", Base64.getEncoder().encodeToString(cipher.iv + cipher.doFinal(value))).commit()
     }
     fun load(): ByteArray? = try {
         prefs.getString("key", null)?.let {
@@ -35,5 +35,12 @@ class PairingStore(context: Context) {
             cipher.doFinal(value.copyOfRange(12, value.size)).also { decoded -> require(decoded.size == 32) }
         }
     } catch (_: Exception) { null }
+    fun rememberDevice(address: String) {
+        require(address.matches(Regex("(?i)[0-9a-f]{2}(?::[0-9a-f]{2}){5}")))
+        prefs.edit().putString("deviceAddress", address.uppercase()).apply()
+    }
+    fun deviceAddress(): String? = prefs.getString("deviceAddress", null)?.takeIf {
+        it.matches(Regex("(?i)[0-9a-f]{2}(?::[0-9a-f]{2}){5}"))
+    }
     fun forget() { prefs.edit().clear().commit() }
 }

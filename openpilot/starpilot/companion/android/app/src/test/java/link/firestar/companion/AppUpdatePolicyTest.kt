@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AppUpdatePolicyTest {
+    @Test fun android12DoesNotRequireRuntimeNotificationPermission() {
+        assertTrue(AppUpdatePolicy.notificationsAllowed(31, true, true, false))
+        assertTrue(AppUpdatePolicy.notificationsAllowed(32, true, true, false))
+        assertFalse(AppUpdatePolicy.notificationsAllowed(33, true, true, false))
+        assertTrue(AppUpdatePolicy.notificationsAllowed(33, true, true, true))
+        assertFalse(AppUpdatePolicy.notificationsAllowed(31, false, true, true))
+        assertFalse(AppUpdatePolicy.notificationsAllowed(31, true, false, true))
+    }
+
     @Test fun comparesNumericVersionsAndRejectsDowngrades() {
         assertTrue(AppUpdatePolicy.newerVersion("1.1.10", "1.1.9"))
         assertTrue(AppUpdatePolicy.newerVersion("1.2", "1.1.99"))

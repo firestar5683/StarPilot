@@ -15,7 +15,10 @@ import java.util.concurrent.Executor
 /** One bounded foreground search. All callbacks and state changes run on the main thread. */
 class LanDiscovery(context: Context, private val network: Network,
                    private val complete: (List<String>, String?) -> Unit) {
-    companion object { const val SERVICE = "_sp-galaxy._tcp." }
+    companion object {
+        const val SERVICE = "_sp-galaxy._tcp."
+        private const val SUCCESS_SETTLE_MS = 500L
+    }
     private val nsd = context.getSystemService(NsdManager::class.java)
     private val wifi = context.applicationContext.getSystemService(WifiManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
@@ -29,6 +32,7 @@ class LanDiscovery(context: Context, private val network: Network,
     private var lock: WifiManager.MulticastLock? = null
     private var lastError: String? = null
     private val timeout = Runnable { finish(lastError) }
+    private val settle = Runnable { if (hosts.isNotEmpty() && resolving == null && pending.isEmpty()) finish(null) }
 
     private val listener = object : NsdManager.DiscoveryListener {
         override fun onDiscoveryStarted(type: String) {}
@@ -39,7 +43,11 @@ class LanDiscovery(context: Context, private val network: Network,
         override fun onStopDiscoveryFailed(type: String, code: Int) { Log.w("GalaxyLAN", "Stop discovery failed: $code") }
         override fun onServiceLost(info: NsdServiceInfo) {}
         override fun onServiceFound(info: NsdServiceInfo) { handler.post {
-            if (active && seen.add(info.serviceName)) { pending.addLast(info); resolveNext() }
+            if (active && seen.add(info.serviceName)) {
+                handler.removeCallbacks(settle)
+                pending.addLast(info)
+                resolveNext()
+            }
         } }
     }
 
@@ -76,7 +84,7 @@ class LanDiscovery(context: Context, private val network: Network,
                     addresses.filterIsInstance<Inet4Address>().forEach { address ->
                         Networks.localOrigin("http://${address.hostAddress}:${service.port}")?.let { hosts.add(it) }
                     }
-                    resolving = null; resolveNext()
+                    resolving = null; resolveNext(); settleIfReady()
                 }
             } }
         }
@@ -85,8 +93,15 @@ class LanDiscovery(context: Context, private val network: Network,
         catch (error: RuntimeException) {
             Log.w("GalaxyLAN", "Resolve failed", error)
             lastError = "Comma was advertised, but Android could not resolve its LAN address."
-            resolving = null; resolveNext()
+            resolving = null; resolveNext(); settleIfReady()
         }
+    }
+
+    /** Allow a brief window for another advertised comma, without imposing the full discovery timeout. */
+    private fun settleIfReady() {
+        if (hosts.isEmpty() || resolving != null || pending.isNotEmpty()) return
+        handler.removeCallbacks(settle)
+        handler.postDelayed(settle, SUCCESS_SETTLE_MS)
     }
 
     private fun finish(error: String?) {
@@ -99,6 +114,7 @@ class LanDiscovery(context: Context, private val network: Network,
     fun close() {
         active = false
         handler.removeCallbacks(timeout)
+        handler.removeCallbacks(settle)
         if (discoveryRequested) runCatching { nsd.stopServiceDiscovery(listener) }
         discoveryRequested = false
         if (Build.VERSION.SDK_INT >= 34) resolving?.let { runCatching { nsd.stopServiceResolution(it) } }

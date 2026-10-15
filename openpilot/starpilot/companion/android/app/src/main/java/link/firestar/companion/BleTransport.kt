@@ -59,25 +59,29 @@ class BleTransport(private val context: Context, private val key: ByteArray) : C
         if (!sent) throw IOException("Bluetooth write unavailable")
         await("write")
     }
-    @Synchronized fun connect() {
+    /** Returns the authenticated device address so the next connection can skip scanning. */
+    @Synchronized fun connect(preferredAddress: String? = null): String {
         check(!closed)
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: throw IOException("Bluetooth is unavailable")
         if (!adapter.isEnabled) throw IOException("Enable Bluetooth on your phone and comma")
-        val scanner = adapter.bluetoothLeScanner ?: throw IOException("Bluetooth scanner unavailable")
-        val found = LinkedBlockingQueue<BluetoothDevice>()
-        val scan = object : ScanCallback() {
-            override fun onScanResult(type: Int, result: ScanResult) { found.offer(result.device) }
-            override fun onScanFailed(code: Int) { events.offer(Event("scan-failed", code)) }
+        val remembered = preferredAddress?.let { runCatching { adapter.getRemoteDevice(it) }.getOrNull() }
+        val device = remembered ?: run {
+            val scanner = adapter.bluetoothLeScanner ?: throw IOException("Bluetooth scanner unavailable")
+            val found = LinkedBlockingQueue<BluetoothDevice>()
+            val scan = object : ScanCallback() {
+                override fun onScanResult(type: Int, result: ScanResult) { found.offer(result.device) }
+                override fun onScanFailed(code: Int) { events.offer(Event("scan-failed", code)) }
+            }
+            scanner.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(uuid("1"))).build()),
+                ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scan)
+            try { found.poll(12, TimeUnit.SECONDS) } finally { scanner.stopScan(scan) }
+                ?: throw IOException("No Galaxy Bluetooth bridge found. Enable Bluetooth and install the bridge on comma.")
         }
-        scanner.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(uuid("1"))).build()),
-            ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scan)
-        val device = try { found.poll(12, TimeUnit.SECONDS) } finally { scanner.stopScan(scan) }
-            ?: throw IOException("No Galaxy Bluetooth bridge found. Enable Bluetooth and install the bridge on comma.")
         if (closed) throw IOException("Connection canceled")
         events.clear()
         gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
         try {
-            await("connect")
+            await("connect", if (remembered != null) 4 else 12)
             if (gatt?.discoverServices() != true) throw IOException("Bluetooth discovery failed")
             await("services")
             if (gatt?.requestMtu(517) == true) packetSize = (ByteBuffer.wrap(await("mtu")).int - 3).coerceIn(20, 512)
@@ -87,6 +91,7 @@ class BleTransport(private val context: Context, private val key: ByteArray) : C
             // Authenticate before exposing cached controls. Do not trust the advertised device name.
             val response = request(JSONObject().put("method", "GET").put("path", "/_bridge/health"))
             if (response.getInt("status") != 200) throw IOException("Galaxy Bluetooth authentication failed")
+            return device.address
         } catch (e: Exception) { close(); throw e }
     }
     @Synchronized fun request(value: JSONObject): JSONObject {

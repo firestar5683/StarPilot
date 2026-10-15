@@ -1,6 +1,10 @@
 package link.firestar.companion
 
 object AppUpdatePolicy {
+    /** Android 12 has no runtime notification permission; Android 13 introduced it. */
+    fun notificationsAllowed(sdk: Int, appEnabled: Boolean, channelEnabled: Boolean, permissionGranted: Boolean): Boolean =
+        appEnabled && channelEnabled && (sdk < 33 || permissionGranted)
+
     fun newerVersion(available: String, installed: String): Boolean {
         fun parts(version: String): List<Long>? {
             if (!Regex("[0-9]+(?:\\.[0-9]+){1,3}").matches(version)) return null

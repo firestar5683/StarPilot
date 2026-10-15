@@ -46,6 +46,7 @@ globalThis.location = { protocol: 'http:', assign: value => { apk = value } }
 const android = { ...InstallApp.data() }
 await InstallApp.methods.install.call(android)
 assert.equal(apk, './app.apk')
+assert.match(InstallApp.template, /updateAvailable \? 'Update app' : 'Install app'/)
 location.protocol = 'https:'
 await InstallApp.methods.install.call(android)
 assert.equal(android.help, true)

@@ -13,6 +13,7 @@ export function installHelp({ secure = window.isSecureContext, agent = navigator
 
 export const InstallApp = {
   name: 'InstallApp',
+  props: { updateAvailable: { type: Boolean, default: false } },
   data: () => ({ prompt: null, installed: false, help: false, message: '', android: /Android/.test(navigator.userAgent) }),
   mounted() {
     this.prompt = deferredPrompt
@@ -47,8 +48,8 @@ export const InstallApp = {
       } catch { this.message = installHelp(); this.help = true }
     },
   },
-  template: `<div v-if="!installed" class="gx-install-app">
-    <button type="button" class="gx-btn gx-btn--tonal" @click="install"><i class="bi bi-download" aria-hidden="true"></i><span>{{ android ? 'Download Android app' : 'Install Galaxy' }}</span></button>
+  template: `<div v-if="!installed || updateAvailable" class="gx-install-app">
+    <button type="button" class="gx-btn gx-btn--tonal" @click="install"><i class="bi bi-download" aria-hidden="true"></i><span>{{ android ? (updateAvailable ? 'Update app' : 'Install app') : 'Install Galaxy' }}</span></button>
     <p v-if="help" class="gx-note gx-install-help">{{ message }}</p>
   </div>`,
 }
