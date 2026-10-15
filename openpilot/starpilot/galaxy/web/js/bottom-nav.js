@@ -13,13 +13,14 @@ export function primaryTab(path) {
 }
 
 export const BottomNav = {
-  props: { path: { type: String, required: true } },
+  props: { path: { type: String, required: true }, localAccess: { type: Boolean, required: true } },
   emits: ["navigate"],
   computed: { activeTab() { return primaryTab(this.path) } },
   data: () => ({ tabs: NAV }),
   template: `<nav class="blur-nav" aria-label="Primary navigation" :style="{'--active-tab': activeTab}">
     <span class="gx-nav-indicator" aria-hidden="true"></span>
     <button v-for="(item, index) in tabs" :key="item.path" type="button" class="nav-item"
+      :disabled="item.path === '/recordings' && !localAccess" :title="item.path === '/recordings' && !localAccess ? 'Routes require a local Galaxy connection' : null"
       :class="{active: index === activeTab}" :aria-current="index === activeTab ? 'page' : null" @click="$emit('navigate', item.path)">
       <i class="bi" :class="item.icon" aria-hidden="true"></i><span>{{ item.name }}</span>
     </button>

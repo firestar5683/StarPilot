@@ -67,8 +67,8 @@ class ReplayHTTPTest(unittest.TestCase):
     self.server.server_close()
     self.temp.cleanup()
 
-  def request(self, path, payload=None, cookie=None, origin=True):
-    headers = {'Forwarded': 'for=203.0.113.8'}
+  def request(self, path, payload=None, cookie=None, origin=True, local=True):
+    headers = {} if local else {'Forwarded': 'for=203.0.113.8'}
     if cookie:
       headers['Cookie'] = cookie
     if payload is not None:
@@ -85,6 +85,30 @@ class ReplayHTTPTest(unittest.TestCase):
 
   def login(self):
     return self.request('/api/auth/login', {'password': 'password123'})[2]['Set-Cookie'].split(';', 1)[0]
+
+  def test_forwarded_session_cannot_access_routes(self):
+    cookie = self.login()
+    _, body, _ = self.request('/api/auth/session', cookie=cookie, local=False)
+    self.assertTrue(json.loads(body)['authenticated'])
+    self.assertFalse(json.loads(body)['localAccess'])
+    for path in ('/api/replay/catalog', f'/api/replay/status?clientId={CLIENT}',
+                 '/api/replay/detail?routeId=00000042--abcdef1234',
+                 f'/api/replay/media?sessionId={SESSION}&clientId={CLIENT}&epoch=1&sequence=0',
+                 '/api/recordings/local', '/api/recordings/segment-summary?segmentName=00000042--abcdef1234--0',
+                 '/api/recordings/logs/00000042--abcdef1234', '/api/recordings/files/00000042--abcdef1234--0/rlog.zst',
+                 '/api/recordings/media/00000042--abcdef1234--0',
+                 '/api/recordings/route/00000042--abcdef1234/fcamera'):
+      with self.subTest(path=path):
+        status, body, _ = self.request(path, cookie=cookie, local=False)
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(body)['code'], 'local_only')
+    for path in ('/api/replay/start', '/api/replay/control', '/api/replay/stop', '/api/recordings/action', '/api/recordings/delete-videos'):
+      with self.subTest(path=path):
+        status, body, _ = self.request(path, {'clientId': CLIENT}, cookie, local=False)
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(body)['code'], 'local_only')
+    self.assertEqual(self.calls, [], 'forwarded playback never reaches the replay owner')
+    self.assertIsNone(getattr(self.server, 'recording_media_source', None), 'forwarded video cannot prepare a media source')
 
   def test_auth_origin_and_actor_binding(self):
     self.assertEqual(self.request('/api/replay/catalog')[0], 401)

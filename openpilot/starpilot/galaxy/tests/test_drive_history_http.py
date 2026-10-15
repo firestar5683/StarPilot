@@ -39,8 +39,7 @@ class DriveHistoryHTTPTest(unittest.TestCase):
       worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
       worker.start()
       def request(path, *, cookie=None, payload=None):
-        # Exercise the password-backed forwarded path.
-        headers = {'Forwarded': 'for=203.0.113.8', **({'Cookie': cookie} if cookie else {})}
+        headers = {'Cookie': cookie} if cookie else {}
         if payload is not None:
           headers.update({'Content-Type': 'application/json', 'Origin': f'http://127.0.0.1:{server.server_port}'})
         connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
@@ -53,7 +52,7 @@ class DriveHistoryHTTPTest(unittest.TestCase):
           connection.close()
       try:
         route = '/api/recordings/local'
-        self.assertEqual(request(route)[0], 503)
+        self.assertEqual(request(route)[0], 401)
         access.configure('password123', lambda: True)
         self.assertEqual(request(route)[0], 401)
         self.assertEqual(calls, [])
@@ -97,7 +96,7 @@ class DriveHistoryHTTPTest(unittest.TestCase):
       worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
       worker.start()
       def request(path, payload, cookie=None):
-        headers = {'Forwarded': 'for=203.0.113.8', 'Content-Type': 'application/json',
+        headers = {'Content-Type': 'application/json',
                    'Origin': f'http://127.0.0.1:{server.server_port}', **({'Cookie': cookie} if cookie else {})}
         connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
         try:

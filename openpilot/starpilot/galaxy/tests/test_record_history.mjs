@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { BottomNav } from '../web/js/bottom-nav.js'
 import { LocalHistoryFeed, LocalRecordingsPage, availableFiles, hasVideo, validLocalHistory, quickRoadUrl,
   segmentSummaryUrl, validSegmentSummary, routeFiles, firstQuickVideo, routeDate, connectRouteUrl, routeMatchesSearch } from '../web/js/record-history.js'
 
@@ -55,7 +56,11 @@ assert.equal(cards[0].connect, connected.connectUrl)
 assert.equal(cards[0].firstQuick.number, 0)
 assert.equal(cards[0].fileLabels.length, 5)
 const app = readFileSync(new URL('../web/js/app.js', import.meta.url), 'utf8')
-assert.match(app, /route\.path === '\/recordings'.*LocalRecordingsPage|LocalRecordingsPage v-else-if="route.path === '\/recordings'"/)
+assert.match(app, /<LocalRecordingsPage v-else-if="route.path === '\/recordings' && authState.localAccess"/)
+assert.match(app, /<div v-if="authState.localAccess" class="gx-nav-section"><div class="gx-nav-section__title">Routes<\/div>/)
+assert.match(app, /<GxState v-else-if="route.path === '\/recordings'">Routes require a local Galaxy connection/)
+assert.match(app, /<BottomNav[^>]*:local-access="authState.localAccess"/)
+assert.match(BottomNav.template, /:disabled="item.path === '\/recordings' && !localAccess"/)
 
 function fixture() {
   const requests = [], states = [], timers = new Map()

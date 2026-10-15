@@ -663,7 +663,9 @@ ul { list-style: none; margin: 0; padding: 0; }
   transition: transform var(--motion-fast);
 }
 
-.blur-nav .nav-item:hover {
+.blur-nav .nav-item:disabled { opacity: .4; cursor: not-allowed; }
+
+.blur-nav .nav-item:hover:not(:disabled) {
   color: var(--on-surface);
   background: rgba(255, 255, 255, 0.08);
 }

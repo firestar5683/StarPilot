@@ -193,7 +193,7 @@ createApp({
         <div class="gx-nav-section"><div class="gx-nav-section__title">Main</div>
           <button v-for="item in NAV.slice(0,3)" :key="item.path" type="button" class="gx-nav-item" :class="{active:isActive(item.path)}" @click="goFromMenu(item.path)"><i class="bi" :class="item.icon"></i><span>{{ item.name }}</span></button>
         </div>
-        <div class="gx-nav-section"><div class="gx-nav-section__title">Routes</div><button type="button" class="gx-nav-item" :class="{active:isActive('/recordings')}" @click="goFromMenu('/recordings')"><i class="bi bi-camera-reels"></i><span>Routes</span></button></div>
+        <div v-if="authState.localAccess" class="gx-nav-section"><div class="gx-nav-section__title">Routes</div><button type="button" class="gx-nav-item" :class="{active:isActive('/recordings')}" @click="goFromMenu('/recordings')"><i class="bi bi-camera-reels"></i><span>Routes</span></button></div>
         <div class="gx-nav-section"><div class="gx-nav-section__title">Tools</div>
           <button v-for="tool in visibleTools.filter(tool => tool.path !== '/galaxy')" :key="tool.path" type="button" class="gx-nav-item" :class="{active:isActive(tool.path)}" @click="goFromMenu(tool.path)"><i class="bi" :class="tool.icon"></i><span>{{ tool.name }}</span></button>
 
@@ -218,7 +218,8 @@ createApp({
         </section>
         <GxNotice v-else-if="state.pageError" tone="danger">{{ state.pageError }} <button class="gx-btn" @click="reloadPage">Reload page</button></GxNotice>
         <Home v-else-if="route.path === '/'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
-        <LocalRecordingsPage v-else-if="route.path === '/recordings'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
+        <LocalRecordingsPage v-else-if="route.path === '/recordings' && authState.localAccess" :mode="state.monitorMode" :unauthorized="sessionExpired" />
+        <GxState v-else-if="route.path === '/recordings'">Routes require a local Galaxy connection. Open a local address from Home while connected to the comma's hotspot or local network.</GxState>
         <CamerasPage v-else-if="route.path === '/cameras'" :mode="state.monitorMode" :go="go" :unauthorized="sessionExpired" />
         <SentryEventsPage v-else-if="['/cameras/events', '/cameras/sentry-settings'].includes(route.path)" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <PipPage v-else-if="route.path === '/cameras/pip'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
@@ -256,7 +257,7 @@ createApp({
         <FlmPage v-else-if="route.path === '/tuning/flm'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <GxState v-else :title="pageName">This capability is unavailable in this build. No operation was attempted.</GxState>
       </div></Transition></div></main>
-      <BottomNav :path="route.path" @navigate="go" />
+      <BottomNav :path="route.path" :local-access="authState.localAccess" @navigate="go" />
       </template>
     </div>
   `,

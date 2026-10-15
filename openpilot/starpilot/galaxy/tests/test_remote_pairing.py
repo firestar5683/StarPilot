@@ -55,6 +55,40 @@ class RemotePairingTest(unittest.TestCase):
     connection.close()
     return result
 
+  def test_gateway_session_cannot_access_routes(self):
+    self.assertTrue(self.owner.configure('password123', lambda: True))
+    slug = self.pairing.pair(hashlib.sha256(b'password123').hexdigest())
+    record = self.pairing.read()
+    assert record is not None
+    cookie = f"galaxy_session={slug}%3A{record['session']}"
+    host = f'{slug}.devices.local'
+    _, body, _ = self.request(self.remote, '/api/auth/session', host=host, cookie=cookie)
+    self.assertTrue(json.loads(body)['authenticated'])
+    self.assertFalse(json.loads(body)['localAccess'])
+    route = '00000042--abcdef1234'
+    paths = ['/api/replay/catalog', '/api/replay/status?clientId=' + '1' * 32,
+             f'/api/replay/detail?routeId={route}',
+             '/api/replay/media?sessionId=' + '1' * 32 + '&clientId=' + '2' * 32 + '&epoch=1&sequence=0',
+             '/api/recordings/local', f'/api/recordings/segment-summary?segmentName={route}--0',
+             f'/api/recordings/logs/{route}', f'/api/recordings/files/{route}--0/rlog.zst',
+             f'/api/recordings/media/{route}--0']
+    for camera in ('qcamera', 'fcamera', 'dcamera', 'ecamera'):
+      paths.extend((f'/api/recordings/media/{route}--0/{camera}', f'/api/recordings/route/{route}/{camera}'))
+    for prefix in ('', f'/{slug}'):
+      for path in paths:
+        for method in ('GET', 'HEAD'):
+          with self.subTest(prefix=prefix, path=path, method=method):
+            status, body, _ = self.request(self.remote, prefix + path, method=method, host=host, cookie=cookie)
+            self.assertEqual(status, 403)
+            if method == 'GET':
+              self.assertEqual(json.loads(body)['code'], 'local_only')
+      for path in ('/api/replay/start', '/api/replay/control', '/api/replay/stop', '/api/recordings/action', '/api/recordings/delete-videos'):
+        status, body, _ = self.request(self.remote, prefix + path, method='POST',
+                                       payload={'clientId': '1' * 32}, host=host, cookie=cookie, origin='https://galaxy.firestar.link')
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(body)['code'], 'local_only')
+    self.assertIsNone(getattr(self.local, 'recording_media_source', None), 'tunnel video cannot prepare a media source')
+
   def test_local_pair_and_remote_uses_gateway_auth_even_over_loopback(self):
     local_origin = f'http://127.0.0.1:{self.local.server_port}'
     local_cookie = self.request(self.local, '/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]

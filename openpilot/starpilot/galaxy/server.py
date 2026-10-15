@@ -577,6 +577,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if not self.local_request():
         return
       path = urlsplit(self.path).path
+      if path.startswith(('/api/replay/', '/api/recordings/')) and not self.direct_local():
+        self.json(403, {'error': 'Routes require a local Galaxy connection', 'code': 'local_only'})
+        return
       if path.startswith('/api/replay/'):
         replay_api.get(self, path)
         return
@@ -1316,6 +1319,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if not self.local_request(mutation=True):
         return
       path = urlsplit(self.path).path
+      if path.startswith(('/api/replay/', '/api/recordings/')) and not self.direct_local():
+        self.json(403, {'error': 'Routes require a local Galaxy connection', 'code': 'local_only'})
+        return
       if path == '/api/android-auto/upload':
         if not self.require_session():
           return
