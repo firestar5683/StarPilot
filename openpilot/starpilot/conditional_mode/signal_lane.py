@@ -124,6 +124,23 @@ def model_widths(model: object) -> tuple[float, float] | None:
   return (left, right) if left is not None and right is not None else None
 
 
+def _model_widths_valid(model: object) -> bool:
+  from capnp.lib.capnp import _DynamicStructReader
+  from openpilot.cereal import log
+
+  if type(model) is not _DynamicStructReader or model.schema != log.ModelDataV2.schema:
+    return model_widths(model) is not None
+  try:
+    lines, edges = model.laneLines, model.roadEdges
+    if len(lines) != 4 or len(edges) != 2:
+      return False
+    geometry = (_line(lines[0]), _line(lines[1]), _line(edges[0]),
+                _line(lines[3]), _line(lines[2]), _line(edges[1]))
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    return False
+  return all(line is not None for line in geometry)
+
+
 class SignalLaneTracker:
   """One drive-session owner; call once per newly received model update."""
 
@@ -150,13 +167,13 @@ class SignalLaneTracker:
       self._count = 0
       self._widths = (0.0, 0.0)
     elif repeated:
-      if model_widths(frame.model) is None:
+      if not _model_widths_valid(frame.model):
         self._widths = None
     elif not repeated:
       self._count += 1
       if self._count % 4 == 0:
         self._widths = model_widths(frame.model)
-      elif model_widths(frame.model) is None:
+      elif not _model_widths_valid(frame.model):
         # A malformed intervening model frame cannot extend prior evidence.
         self._widths = None
     if not frame.left_blinker and not frame.right_blinker:
