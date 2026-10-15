@@ -155,3 +155,25 @@ class TestBigModelStatus(unittest.TestCase):
     drive.sm['deviceState'].chestnutPresent = False
     self.assertTrue(drive.update_big_model_status())
     self.assertIn(EventName.bigModelFailed, drive.events.names)
+
+
+class TestStatusParamThrottle(unittest.TestCase):
+  def test_status_params_are_read_once_per_ten_frames(self):
+    from openpilot.selfdrive.selfdrived.helpers import STATUS_PARAM_FRAMES, throttled_param
+    reads = []
+    owner = SimpleNamespace(sm=SimpleNamespace(frame=0))
+    read = lambda key: reads.append(key) or len(reads)
+    for frame in range(3 * STATUS_PARAM_FRAMES):
+      owner.sm.frame = frame
+      throttled_param(owner, "ChestnutLoading", read)
+    self.assertEqual(len(reads), 3)
+    owner.sm.frame = 3 * STATUS_PARAM_FRAMES
+    self.assertEqual(throttled_param(owner, "ChestnutLoading", read), 4)   # a fresh read past the window
+
+  def test_without_a_frame_counter_every_call_reads(self):
+    from openpilot.selfdrive.selfdrived.helpers import throttled_param
+    reads = []
+    owner = SimpleNamespace(sm=SimpleNamespace())
+    for _ in range(3):
+      throttled_param(owner, "ChestnutActive", lambda key: reads.append(key))
+    self.assertEqual(len(reads), 3)
