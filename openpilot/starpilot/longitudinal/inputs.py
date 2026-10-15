@@ -1,5 +1,7 @@
 """Qualified longitudinal evidence and transport outside the upstream control loop."""
+from dataclasses import replace
 import os
+import time
 
 from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from opendbc.car.hyundai.blended_stopping import eligible as blended_longitudinal_eligible
@@ -10,6 +12,8 @@ from openpilot.starpilot.longitudinal.toyota_output_policy import (CLOCK_PAIR_MA
                                                                  development_enabled as toyota_development_enabled,
                                                                  production_enabled as toyota_production_enabled, leads_from_radar)
 from openpilot.starpilot.longitudinal.ioniq6_start import StartEvidence, eligible as ioniq6_start_eligible
+from openpilot.starpilot.longitudinal.lead_takeoff_preferences import TakeoffPreferences
+from openpilot.starpilot.longitudinal.takeoffs import eligible as takeoff_eligible
 from opendbc.car.gm.conventional_pedal import policy_for as conventional_pedal_policy_for
 from opendbc.car.gm.ordinary_cc import policy_for as ordinary_cc_policy_for
 from opendbc.car.gm.hybrid_cc import policy_for as hybrid_policy_for
@@ -60,6 +64,11 @@ class ResumeFreshness:
 class LongitudinalInputs:
   def __init__(self, cp, params, messages):
     self.CP = cp
+    self.takeoff_enabled = takeoff_eligible(cp)
+    self.takeoff_preferences = TakeoffPreferences(params) if self.takeoff_enabled else None
+    self.takeoff_boot_offset_ns = None
+    self.takeoff_source_floor_ns = 0
+    self.faster_takeoffs = False
     self.ev9_long_enabled = ev9_long_qualified(cp)
     if self.ev9_long_enabled:
       self.ev9_boot_offset_ns = None
@@ -126,12 +135,12 @@ class LongitudinalInputs:
         self.gm_cc_enabled or self.gm_cc_stop_enabled or self.gm_ascm_enabled or self.gm_suburban_enabled):
       return ['radarState', 'deviceState'] + (['slcState'] if self.gm_start_enabled or self.ev9_long_enabled else [])
     if self.ev9_long_enabled:
-      return ['deviceState', 'slcState']
-    return []
+      return ['radarState', 'deviceState', 'slcState']
+    return ['radarState', 'deviceState'] if self.takeoff_enabled else []
 
   @property
   def publish_state(self):
-    return self.ioniq6_start_enabled or self.gm_start_enabled
+    return self.ioniq6_start_enabled or self.gm_start_enabled or self.faster_takeoffs
 
   def qualify_active(self, active):
     if not self.gm_cc_enabled:
@@ -140,6 +149,15 @@ class LongitudinalInputs:
     return bool(active and isinstance(self.gm_cc_evidence, VoltCcEvidence))
 
   def context(self, active):
+    context = self._vehicle_context(active)
+    self.faster_takeoffs = bool(self.takeoff_preferences is not None and
+                               self.takeoff_preferences.sample(time.monotonic_ns()))
+    if not self.faster_takeoffs:
+      return context
+    evidence = self._start_evidence('takeoff_boot_offset_ns', 'takeoff_source_floor_ns') if active else None
+    return replace(context, faster_takeoffs=True, start_evidence=evidence)
+
+  def _vehicle_context(self, active):
     if self.ev9_long_enabled:
       return self._ev9_context(active)
     if self.toyota_sienna_replay or self.toyota_sienna_production or self.toyota_corolla_stop:
@@ -276,7 +294,11 @@ class LongitudinalInputs:
     unavailable = StartEvidence(False, False, None, None, None)
     if not self.ioniq6_start_enabled:
       return unavailable
-    result = self._qualified_radar_leads('ioniq6_boot_offset_ns', 'ioniq6_source_floor_ns')
+    return self._start_evidence('ioniq6_boot_offset_ns', 'ioniq6_source_floor_ns')
+
+  def _start_evidence(self, offset_name, floor_name):
+    unavailable = StartEvidence(False, False, None, None, None)
+    result = self._qualified_radar_leads(offset_name, floor_name)
     if result is None:
       return unavailable
     leads, now_ns, drive_id = result
@@ -285,7 +307,7 @@ class LongitudinalInputs:
       return unavailable
     if not sm.all_checks(['carState', 'longitudinalPlan']):
       return unavailable
-    floor_ns = self.ioniq6_source_floor_ns
+    floor_ns = getattr(self, floor_name)
     for name in ('carState', 'longitudinalPlan'):
       source_ns = int(sm.logMonoTime[name])
       receipt_ns = int(sm.recv_time[name] * 1e9)

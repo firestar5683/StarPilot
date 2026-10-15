@@ -23,6 +23,7 @@ class LongitudinalContext:
   traffic_mode: bool | None = None
   custom_acceleration: bool | None = None
   profile_max_accel: float | None = None
+  faster_takeoffs: bool = False
 
 
 class LongitudinalExtension:
@@ -68,7 +69,7 @@ class LongitudinalExtension:
     start_evidence = context.start_evidence
     gm_start_evidence = context.gm_start_evidence
     vehicle_stop_evidence = context.vehicle_stop_evidence
-    if self.ioniq6_start is None:
+    if self.ioniq6_start is None or context.faster_takeoffs:
       state = native_state
     else:
       evidence = start_evidence or StartEvidence(False, False, None, None, None)
@@ -106,6 +107,8 @@ class LongitudinalExtension:
     if hasattr(self.stopping_policy, "starting_output"):
       return self.stopping_policy.starting_output(a_target, accel_limits, context)
     if self.ioniq6_start is not None:
+      if context.faster_takeoffs:
+        return max(0.0, min(a_target, accel_limits[1]))
       return self.ioniq6_start.starting_output(a_target, accel_limits)
     if hasattr(self.vehicle_stop, "starting_output"):
       return self.vehicle_stop.starting_output(a_target, accel_limits, context)

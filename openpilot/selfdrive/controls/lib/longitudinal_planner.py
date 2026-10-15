@@ -48,6 +48,8 @@ NATIVE_PLAN_INPUTS = ('carControl', 'carState', 'controlsState', 'vehicleParamet
 # Lookup table for turns
 _A_TOTAL_MAX_V = [1.7, 3.2]
 _A_TOTAL_MAX_BP = [20., 40.]
+_TAKEOFF_TOTAL_BP = [0., 2., 5., 20., 40.]
+_TAKEOFF_TOTAL_MAX = [3.5, 3.5, 1.7, 1.7, 3.2]
 
 def get_max_accel(v_ego):
   return np.interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
@@ -57,7 +59,7 @@ def get_coast_accel(pitch):
 
 def get_cruise_accel(e2e, v_cruise, v_ego, a_cruise_prev, angle_steers, CP, dt, accel_coast, allow_throttle,
                      profile: AppliedProfile | None = None, cruise_brake_floor: float | None = None,
-                     base_brake_floor: float = A_CRUISE_MIN, selected_acceleration_max: float | None = None):
+                     base_brake_floor: float = A_CRUISE_MIN, selected_acceleration_max: float | None = None, faster_takeoffs: bool = False):
   max_accel = ACCEL_MAX if e2e else get_max_accel(v_ego)
   if selected_acceleration_max is not None and not e2e:
     max_accel = selected_acceleration_max
@@ -68,7 +70,7 @@ def get_cruise_accel(e2e, v_cruise, v_ego, a_cruise_prev, angle_steers, CP, dt, 
     max_accel = min(max_accel, selected_acceleration_max, ACCEL_MAX)
 
   if not e2e:
-    a_total_max = np.interp(v_ego, _A_TOTAL_MAX_BP, _A_TOTAL_MAX_V)
+    a_total_max = np.interp(v_ego, _TAKEOFF_TOTAL_BP, _TAKEOFF_TOTAL_MAX) if faster_takeoffs else np.interp(v_ego, _A_TOTAL_MAX_BP, _A_TOTAL_MAX_V)
     a_y = v_ego ** 2 * angle_steers * CV.DEG_TO_RAD / (CP.steerRatio * CP.wheelbase)
     a_x_allowed = math.sqrt(max(a_total_max ** 2 - a_y ** 2, 0.))
     max_accel = min(max_accel, a_x_allowed)
@@ -135,6 +137,7 @@ class LongitudinalPlanner:
     if curve_ceiling is not None and curve_provider is not None:
       raise ValueError('choose explicit Curve ceiling or same-cycle provider')
     self.plan_drive_id = drive_id
+    faster_takeoffs = bool(faster_lead_takeoff)
     sample_now_ns = self.clock_ns() if now_ns is None else now_ns
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
@@ -367,7 +370,7 @@ class LongitudinalPlanner:
     self.a_cruise = get_cruise_accel(sm['selfdriveState'].experimentalMode, v_cruise, v_ego,
                                      self.a_cruise, steer_angle_without_offset, self.CP, self.dt,
                                      accel_coast, self.allow_throttle, cruise_profile, slc_floor,
-                                     base_brake_floor=global_floor, selected_acceleration_max=selected_acceleration)
+                                     base_brake_floor=global_floor, selected_acceleration_max=selected_acceleration, faster_takeoffs=faster_takeoffs)
     cruise_should_stop = should_stop(v_ego, self.a_cruise)
 
     output_a_target_e2e = self.accel_boost.update(sm, output_a_target_e2e, output_a_target_mpc, self.a_cruise)
@@ -409,7 +412,7 @@ class LongitudinalPlanner:
         takeoff_max = min(takeoff_max, cruise_profile.acceleration_max)
       if selected_acceleration is not None:
         takeoff_max = min(takeoff_max, selected_acceleration)
-      a_total_max = np.interp(v_ego, _A_TOTAL_MAX_BP, _A_TOTAL_MAX_V)
+      a_total_max = np.interp(v_ego, _TAKEOFF_TOTAL_BP, _TAKEOFF_TOTAL_MAX) if faster_takeoffs else np.interp(v_ego, _A_TOTAL_MAX_BP, _A_TOTAL_MAX_V)
       a_y = v_ego ** 2 * steer_angle_without_offset * CV.DEG_TO_RAD / (self.CP.steerRatio * self.CP.wheelbase)
       takeoff_max = min(takeoff_max, math.sqrt(max(a_total_max ** 2 - a_y ** 2, 0.)), max(0., v_cruise - v_ego))
       takeoff_frame = project_takeoff(

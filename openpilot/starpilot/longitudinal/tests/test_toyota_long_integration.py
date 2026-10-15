@@ -1,4 +1,6 @@
 """Real Toyota CP and LongControl composition, with optional radar transport."""
+from openpilot.starpilot.longitudinal.tests.extension_helpers import empty_params
+
 
 from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from openpilot.starpilot.longitudinal.tests.extension_helpers import extension_state
@@ -100,7 +102,7 @@ class ToyotaLongIntegrationTests(TestCase):
       self.assertTrue(production_enabled(selected.CP))
       owner = LongControl(selected.CP)
       self.assertFalse(extension_state(owner, 'toyota_stopped_lead'))
-      inputs = LongitudinalInputs(selected.CP, NS(), lambda: None)
+      inputs = LongitudinalInputs(selected.CP, empty_params(self), lambda: None)
       self.assertIn('radarState', inputs.optional_services)
       self.assertFalse(inputs.toyota_corolla_stop)
       self.assertFalse(inputs.toyota_sienna_replay)
@@ -204,7 +206,7 @@ class ToyotaLongIntegrationTests(TestCase):
     advance_sources()
     with patch.dict(os.environ, {'TOYOTA_LONG_OUTPUT_REPLAY_RUNTIME': '0', 'REPLAY': '0'}), \
          patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', side_effect=lambda: (now[0], now[0] + now[1])):
-      inputs = LongitudinalInputs(cp, NS(), lambda: sm)
+      inputs = LongitudinalInputs(cp, empty_params(self), lambda: sm)
       self.assertIn('radarState', inputs.optional_services)
       self.assertIsNone(inputs.context(True).leads)
       now[0] += 20_000_000

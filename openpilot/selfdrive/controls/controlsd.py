@@ -264,11 +264,12 @@ class Controls:
       self.LoC.reset()
 
     # accel PID loop
+    publish_takeoff_state = getattr(self.LoC, 'takeoff_starting', False)
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
     longitudinal_output = self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits,
                                           context=self.longitudinal_inputs.context(CC.longActive))
     actuators.accel = final_output(longitudinal_output)
-    if self.longitudinal_inputs.publish_state:
+    if self.longitudinal_inputs.publish_state or publish_takeoff_state:
       # Publish the selected launch state to the vehicle controller in this same frame.
       actuators.longControlState = self.LoC.long_control_state
 

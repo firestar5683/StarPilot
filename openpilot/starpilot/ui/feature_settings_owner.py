@@ -1002,9 +1002,9 @@ class FeatureSettingsOwner:
                                     self.authority("preferences"),
                                     reason="Gradually adds following distance when approaching a slower or braking lead")
       rows.append(approach_row)
-      rows.append(self._bool_row(LEAD_TAKEOFF_KEY, "Faster Lead Takeoff", self.authority("preferences"),
-                                reason="Respond sooner when a stopped or slow lead starts moving. Off by default; " +
-                                       "normal braking, stop-light detection and acceleration limits still apply."))
+      rows.append(self._bool_row(LEAD_TAKEOFF_KEY, "Faster Takeoffs", self.authority("preferences"),
+                                reason="Improves launches from a stop and responds sooner when a lead starts moving. " +
+                                       "Selected acceleration profiles, stop detection and vehicle limits still apply."))
       document, raw, valid = self._document()
       for category, field, label, choices in (
         ('acceleration', 'selectedAccelerationProfile', 'Selected Acceleration Profile',

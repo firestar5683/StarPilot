@@ -40,7 +40,8 @@ DESCRIPTIONS = {
   'ForceStops': 'Commits to stops detected by the driving model. Press the accelerator to continue.',
   'ForceStopDistanceOffset': 'Moves the planned stopping point. Positive values stop farther forward; negative values stop earlier.',
   'LeadApproachBuffer': 'Gradually adds following distance when approaching a slower or braking lead vehicle.',
-  'FasterLeadTakeoff': 'Responds sooner when a stopped or slow lead vehicle starts moving.',
+  'FasterLeadTakeoff': ('Improves launches from a stop and responds sooner when a lead starts moving. ' +
+                        'Selected acceleration profiles, stop detection and vehicle limits still apply.'),
   'CustomPersonalities': 'Uses your following-time and jerk settings for the selected driving personality.',
   'profile:global_acceleration': 'Chooses the acceleration curve used by personalities set to Selected Profile.',
   'profile:global_braking': 'Chooses the braking response used by personalities set to Selected Profile.',

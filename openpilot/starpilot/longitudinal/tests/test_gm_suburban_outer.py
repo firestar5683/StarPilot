@@ -1,4 +1,6 @@
 """Ordinary Suburban control selection and transition boundaries."""
+from openpilot.starpilot.longitudinal.tests.extension_helpers import empty_params
+
 import json
 import struct
 from types import SimpleNamespace as NS
@@ -113,7 +115,7 @@ class TestSuburbanOuter(unittest.TestCase):
   def test_actual_transport_owner_and_stale_source_withdrawal(self):
     now, offset = 5_000_000_000, 500_000_000
     sm = SubMasterFixture(now)
-    owner = LongitudinalInputs(params(), NS(), lambda: sm)
+    owner = LongitudinalInputs(params(), empty_params(self), lambda: sm)
     self.assertTrue(owner.gm_suburban_enabled)
     self.assertFalse(owner.gm_ascm_enabled)
     self.assertEqual(owner.optional_services, ['radarState', 'deviceState'])

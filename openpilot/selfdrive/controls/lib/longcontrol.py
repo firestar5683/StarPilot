@@ -5,6 +5,7 @@ from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
 from openpilot.common.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.starpilot.longitudinal.extension import LongitudinalContext, create_extension
+from openpilot.starpilot.longitudinal.takeoffs import TakeoffStart, eligible as takeoff_eligible
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
@@ -47,6 +48,8 @@ class LongControl:
                               else (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV)),
                              rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
+    self.takeoff_start = TakeoffStart() if takeoff_eligible(CP) else None
+    self.takeoff_starting = False
 
   def reset(self, *, reset_start: bool = True):
     self.pid.reset()
@@ -59,15 +62,28 @@ class LongControl:
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
+    planner_target = a_target
     previous_state = self.long_control_state
-    native_state = long_control_state_trans(active, previous_state, should_stop,
+    enabled_takeoff = bool(context.faster_takeoffs and self.takeoff_start is not None)
+    ioniq_start = self.extension is not None and self.extension.ioniq6_start is not None
+    native_previous = (LongCtrlState.pid if previous_state == LongCtrlState.starting and
+                       (self.takeoff_starting or enabled_takeoff and ioniq_start) else previous_state)
+    native_state = long_control_state_trans(active, native_previous, should_stop,
                                            CS.brakePressed, CS.cruiseState.standstill and
                                            not (self.extension is not None and self.extension.ignore_cruise_standstill))
+    owned_start = self.extension is not None and any((self.extension.gm_start, self.extension.vehicle_stop,
+                                                     self.extension.stopping_policy))
+    selected = bool(enabled_takeoff and not owned_start and self.takeoff_start.select(
+      active=active, CS=CS, target=a_target, should_stop=should_stop, limits=accel_limits,
+      evidence=context.start_evidence, stock_hold_allowed=ioniq_start))
+    if selected:
+      native_state = LongCtrlState.starting
     self.long_control_state = native_state
     if self.extension is not None:
       self.long_control_state = self.extension.transition(
         native_state, previous_state, active, CS, a_target, should_stop, accel_limits,
         context=context)
+    self.takeoff_starting = selected and self.long_control_state == LongCtrlState.starting
     if self.long_control_state == LongCtrlState.off:
       self.reset()
       output_accel = 0.
@@ -99,5 +115,7 @@ class LongControl:
         output_accel = self.extension.shape_output(output_accel, a_target, error, CS, self.last_output_accel,
                                                   previous_state, should_stop, context)
 
+    if self.takeoff_starting:
+      output_accel = min(output_accel, planner_target)
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel

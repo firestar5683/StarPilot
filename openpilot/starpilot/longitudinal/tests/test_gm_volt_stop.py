@@ -1,4 +1,6 @@
 """Default Volt STOP ownership, qualified release, and parsed Controls-to-CAN recurrence."""
+from openpilot.starpilot.longitudinal.tests.extension_helpers import empty_params
+
 from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from types import SimpleNamespace as NS
 import unittest
@@ -70,7 +72,7 @@ class TestVoltStop(unittest.TestCase):
           self.assertTrue(cp.openpilotLongitudinalControl)
           now = [5_000_000_000]
           sm = SubMasterFixture(now[0])
-          inputs = LongitudinalInputs(cp, NS(), lambda sm=sm: sm)
+          inputs = LongitudinalInputs(cp, empty_params(self), lambda sm=sm: sm)
           long = LongControl(cp, startup_preferences=NS(gm_longitudinal_tune=2))
           long.extension.vehicle_stop.clock = lambda now=now: now[0]
           sm.data['carState'] = state(0.)
