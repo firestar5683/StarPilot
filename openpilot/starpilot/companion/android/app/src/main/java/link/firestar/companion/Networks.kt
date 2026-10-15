@@ -17,6 +17,15 @@ object Networks {
                 ?.let { network to it }
         }
     }
+    /** Accept what people type: "192.168.1.10", "192.168.1.10:8082" or a full URL. localOrigin still validates it. */
+    fun typedAddress(value: String): String {
+        val trimmed = value.trim().trimEnd('/')
+        val scheme = if ("://" in trimmed) trimmed.substringBefore("://") else "http"
+        val rest = trimmed.substringAfter("://")
+        val authority = rest.substringBefore('/')
+        val path = rest.removePrefix(authority)
+        return "$scheme://$authority${if (':' in authority) "" else ":8082"}$path"
+    }
     fun localOrigin(value: String): String? {
         val uri = Uri.parse(value)
         if (uri.scheme != "http" || uri.port != 8082 || uri.userInfo != null) return null

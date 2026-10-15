@@ -108,3 +108,14 @@ error type and continues cleanup when a publisher's close operation fails.
 - Lint has 0 errors and 27 warnings. Physical Android discovery remains unverified;
   no phone was connected over ADB. Updated comma source, internet while parked
   for automatic first setup, and installation of APK 1.1.4 are required for the fix.
+
+## Android release — 1.1.5
+
+- Built from the current working tree, including its connection-screen and
+  typed-address changes; versionName 1.1.5, versionCode 7.
+- Signed release build and lint passed (0 errors, 16 warnings); Android JVM tests passed.
+- APK manifest version and `starpilot-companion.apk.version` both verified as 1.1.5.
+- APK SHA-256: `3cb6ea50a9e5b1796d285f0ad3317d07869cc6fff295d4baeb029ded15be1d07`.
+- `apksigner verify --print-certs` passed. Signing certificate SHA-256 is unchanged:
+  `d9e72cbb842e9530b4b686dec424cdeb8f2982109be6875fa73594c33332fc3a`.
+- No commit, push, device installation or hardware verification was performed for this build.

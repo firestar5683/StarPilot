@@ -1,6 +1,6 @@
 # Galaxy Android companion
 
-Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.4 (versionCode 6).
+Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.5 (versionCode 7).
 Wi-Fi/LAN loads live Galaxy screens from comma. Bluetooth uses screens bundled
 in the APK, so Bluetooth screen changes require rebuilding/updating the APK. This directory and the Galaxy changes are source implementation plus a
 signed release artifact; physical phone/comma/in-car acceptance is still required.

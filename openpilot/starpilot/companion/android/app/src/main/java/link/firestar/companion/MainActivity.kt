@@ -11,14 +11,23 @@ import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 import android.content.Intent
 import android.graphics.Color
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
+import android.view.ViewGroup
 import android.webkit.*
 import android.widget.*
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
+import java.net.Inet4Address
 
 class MainActivity : Activity() {
     @Volatile private var web: WebView? = null
@@ -29,8 +38,21 @@ class MainActivity : Activity() {
     private val jobs = ConcurrentHashMap<String, FutureTask<Unit>>()
     private val worker = ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, ArrayBlockingQueue(16))
     private val cachedOrigin = "https://galaxy-app.invalid"
-    private var connectionStatus: TextView? = null
+    private var screen: ConnectScreen? = null
     private val recovery = ConnectionRecovery({ discoverLan(it) }, { connect() }, { stopDiscovery() })
+    private val handler = Handler(Looper.getMainLooper())
+    private var pageWatchdog: Runnable? = null
+    private var resumed = false
+    private val knownWifi = mutableSetOf<Network>()
+    private val wifiWatcher = object : ConnectivityManager.NetworkCallback() {
+        override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
+            if (network in knownWifi || properties.linkAddresses.none { it.address is Inet4Address && it.address.isSiteLocalAddress }) return
+            knownWifi.add(network)
+            // Open Galaxy as soon as the phone joins a Wi-Fi network, without waiting for "Try again".
+            handler.postDelayed({ if (idle()) connect() }, 600)
+        }
+        override fun onLost(network: Network) { knownWifi.remove(network) }
+    }
 
     private var origin = Networks.ORIGIN
     private var share: String? = null
@@ -39,8 +61,14 @@ class MainActivity : Activity() {
         super.onCreate(state)
         share = intent.getStringExtra("share")?.take(8192)
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        val cm = Networks.manager(this)
+        knownWifi.addAll(cm.allNetworks.filter { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true })
+        // Galaxy Wi-Fi may have no internet, so do not require that capability.
+        runCatching { cm.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), wifiWatcher, handler) }
         connect()
     }
+    private fun idle() = resumed && !isFinishing && web == null && ble == null && discovery == null && lanPicker == null && screen?.busy() == false
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); share = intent.getStringExtra("share")?.take(8192); connect() }
     private fun connect(host: String? = null) {
         stopDiscovery()
@@ -52,7 +80,7 @@ class MainActivity : Activity() {
         if (host == null && mode == "bluetooth") { connectBluetooth(); return }
         val wifi = Networks.wifi(this) ?: Networks.wifi(this, false)
         if (wifi == null) {
-            if (mode == "auto" && pairing.load() != null) connectBluetooth() else disconnected()
+            if (!bluetoothFallback()) disconnected()
             return
         }
         val saved = Networks.localOrigin(prefs.getString("host", "") ?: "")
@@ -62,7 +90,15 @@ class MainActivity : Activity() {
         origin = host?.let { Networks.localOrigin(it) } ?: if (Networks.wifi(this) != null) Networks.ORIGIN else
             Networks.localOrigin(prefs.getString("host", Networks.ORIGIN)!!) ?: Networks.ORIGIN
         Networks.manager(this).bindProcessToNetwork(wifi.first)
-        web?.destroy()
+        web?.destroy(); web = null
+        clearWatchdog()
+        val route = if (origin == Networks.ORIGIN) Route.GALAXY_WIFI else Route.HOME_NETWORK
+        connectScreen().apply {
+            refreshRoutes(this)
+            headline("Opening Galaxy")
+            if (route == Route.GALAXY_WIFI) { route(route, RouteState.TRYING, "Opening…"); detail("Joined the comma's Wi-Fi.") }
+            else { route(route, RouteState.TRYING, "Opening ${address(origin)}…"); detail("Reaching comma on this Wi-Fi network.") }
+        }
         val view = WebView(this)
         web = view
         view.setBackgroundColor(Color.rgb(7, 7, 18))
@@ -83,55 +119,114 @@ class MainActivity : Activity() {
                 return WebResourceResponse("text/plain", "UTF-8", 403, "Local Galaxy only", emptyMap(), ByteArrayInputStream(byteArrayOf()))
             }
             override fun onReceivedError(v: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (web === v && request.isForMainFrame) runOnUiThread {
-                    if (web !== v) return@runOnUiThread
-                    disconnected()
-                    if (host == null && Networks.wifi(this@MainActivity) == null && Networks.wifi(this@MainActivity, false) != null)
-                        discoverLan(automatic = true)
-                    else if (prefs.getString("transport", "auto") == "auto" && pairing.load() != null) connectBluetooth()
-                }
+                if (web === v && request.isForMainFrame) runOnUiThread { pageFailed(v, host) }
             }
+            // Reveal as soon as Galaxy starts drawing, so a slow asset never trips the watchdog.
+            override fun onPageCommitVisible(v: WebView, url: String) { if (web === v && Networks.localOrigin(url) == origin) revealWeb() }
             override fun onPageFinished(v: WebView, url: String) {
-                if (web === v && Networks.localOrigin(url) == origin) { prefs.edit().putString("host", origin).apply(); share = null }
+                if (web === v && Networks.localOrigin(url) == origin) { prefs.edit().putString("host", origin).apply(); share = null; revealWeb() }
             }
         }
         view.setDownloadListener { url, _, _, _, _ ->
             if (Networks.localOrigin(url) == origin) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         }
-        view.setOnApplyWindowInsetsListener { v, insets ->
-            v.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insets.systemWindowInsetBottom); insets
-        }
-        showWeb(view, if (origin == Networks.ORIGIN) "Galaxy Wi-Fi" else "Local LAN")
+        showWeb(view, route, if (route == Route.GALAXY_WIFI) "Galaxy Wi-Fi" else "Home network, ${address(origin)}", waitForPage = true)
+        // A comma that vanished mid-load can leave the page pending for a long time.
+        pageWatchdog = Runnable { if (web === view && screen != null) pageFailed(view, host) }.also { handler.postDelayed(it, 15000) }
         view.loadUrl(if (share != null) "$origin/?share=${Uri.encode(share)}#/navigation" else "$origin/#/galaxy")
         if (prefs.getBoolean("enabled", false)) startForegroundService(Intent(this, UplinkService::class.java))
     }
-    private fun disconnected() {
-        stopDiscovery()
+    private fun address(origin: String) = origin.removePrefix("http://").removeSuffix(":8082")
+    private fun clearWatchdog() { pageWatchdog?.let { handler.removeCallbacks(it) }; pageWatchdog = null }
+    private fun pageFailed(v: WebView, host: String?) {
+        if (web !== v) return
+        val failed = origin
+        disconnected().apply {
+            if (failed == Networks.ORIGIN) {
+                route(Route.GALAXY_WIFI, RouteState.FAILED, "Galaxy didn't open")
+                detail("This phone is on the comma's Wi-Fi, but Galaxy didn't answer. Check that Galaxy is turned on in comma settings.")
+            } else {
+                route(Route.HOME_NETWORK, RouteState.FAILED, "No answer at ${address(failed)}")
+                detail("comma didn't answer at ${address(failed)}. Its address may have changed, or comma is off this network.")
+            }
+        }
+        if (host == null && Networks.wifi(this) == null && Networks.wifi(this, false) != null) discoverLan(automatic = true)
+        else bluetoothFallback()
+    }
+    private fun disconnected(): ConnectScreen {
+        stopDiscovery(); clearWatchdog()
         Networks.manager(this).bindProcessToNetwork(null)
         connectionGeneration.incrementAndGet(); ble?.close(); ble = null
         val previous = web; web = null
         previous?.removeJavascriptInterface("StarPilotApp"); previous?.stopLoading(); previous?.destroy()
-        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 100, 40, 40); setBackgroundColor(Color.rgb(7, 7, 18)) }
-        connectionStatus = TextView(this).apply { text = "Connect to Galaxy\n\nUse comma Wi-Fi, a local LAN address, or pair Bluetooth while parked."; textSize = 22f; setTextColor(Color.WHITE) }
-        panel.addView(connectionStatus)
-        panel.addView(Button(this).apply { text = "Wi-Fi settings"; setOnClickListener { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } })
-        panel.addView(Button(this).apply { text = "Try again"; setOnClickListener { connect() } })
-        panel.addView(Button(this).apply { text = "Find comma on LAN"; setOnClickListener { discoverLan() } })
-        panel.addView(Button(this).apply { text = "Bluetooth and connection options"; setOnClickListener { connections() } })
-        val address = EditText(this).apply { hint = "Direct LAN: http://192.168.1.10:8082"; setSingleLine() }
-        panel.addView(address)
-        panel.addView(Button(this).apply { text = "Open local address"; setOnClickListener {
-            if (Networks.localOrigin(address.text.toString()) != null) connect(address.text.toString())
-            else address.error = "Use a private IPv4 address on port 8082"
-        } })
-        setContentView(ScrollView(this).apply { addView(panel) })
+        screen = null
+        return connectScreen().apply {
+            headline("Connect to comma")
+            detail("Join the comma's Galaxy Wi-Fi, or put this phone on the same Wi-Fi as comma. Galaxy opens as soon as you join.")
+        }
     }
-    private fun showWeb(view: WebView, transport: String) {
-        connectionStatus = null
-        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 32, 0, 0) }
-        panel.addView(Button(this).apply { text = "$transport · Connections"; setOnClickListener { connections() } })
+    /** The current connect screen, shown on its own; a new one if a page is showing. */
+    private fun connectScreen(): ConnectScreen {
+        val existing = screen
+        if (existing != null) {
+            val parent = existing.view.parent as? ViewGroup
+            if (parent == null || parent.id != android.R.id.content) { parent?.removeView(existing.view); setContentView(existing.view) }
+            return existing
+        }
+        val created = ConnectScreen(this, ::tryRoute, { connect() }, { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }, ::openTypedAddress, ::connections)
+        screen = created
+        refreshRoutes(created)
+        setContentView(created.view)
+        return created
+    }
+    private fun refreshRoutes(s: ConnectScreen) {
+        val hotspot = Networks.wifi(this) != null
+        val lan = !hotspot && Networks.wifi(this, false) != null
+        val saved = Networks.localOrigin(prefs.getString("host", "") ?: "")?.takeIf { it != Networks.ORIGIN }
+        val paired = pairing.load() != null
+        s.mode(prefs.getString("transport", "auto"))
+        s.route(Route.GALAXY_WIFI, if (hotspot) RouteState.IDLE else RouteState.UNAVAILABLE, if (hotspot) "Joined" else "Not joined")
+        s.route(Route.HOME_NETWORK, if (lan) RouteState.IDLE else RouteState.UNAVAILABLE, when {
+            hotspot -> "Not needed on Galaxy Wi-Fi"
+            !lan -> "Not on Wi-Fi"
+            saved != null -> "Last found at ${address(saved)}"
+            else -> "Tap to search"
+        })
+        s.route(Route.BLUETOOTH, if (paired) RouteState.IDLE else RouteState.UNAVAILABLE, if (paired) "Paired, controls only" else "Not paired")
+    }
+    private fun tryRoute(route: Route) {
+        when (route) {
+            Route.GALAXY_WIFI -> if (Networks.wifi(this) != null) connect(Networks.ORIGIN) else joinWifi("Join the comma's Galaxy Wi-Fi, then come back")
+            Route.HOME_NETWORK -> if (Networks.wifi(this, false) != null) discoverLan() else joinWifi("Join the same Wi-Fi as comma, then come back")
+            Route.BLUETOOTH -> if (pairing.load() != null) connectBluetooth() else pairOverWifi(false)
+        }
+    }
+    private fun joinWifi(hint: String) {
+        Toast.makeText(this, hint, Toast.LENGTH_LONG).show()
+        startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+    }
+    private fun openTypedAddress(value: String): String? {
+        val host = Networks.localOrigin(Networks.typedAddress(value)) ?: return "Use comma's private IPv4 address, like 192.168.1.10"
+        connect(host); return null
+    }
+    private fun showWeb(view: WebView, route: Route, label: String, waitForPage: Boolean) {
+        view.setOnApplyWindowInsetsListener { v, insets ->
+            v.setPadding(insets.systemWindowInsetLeft, 0, insets.systemWindowInsetRight, insets.systemWindowInsetBottom); insets
+        }
+        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Palette.SPACE) }
+        panel.addView(ConnectScreen.webBar(this, route, label) { connections() })
         panel.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
-        setContentView(panel)
+        val overlay = screen
+        if (!waitForPage || overlay == null) { screen = null; setContentView(panel); return }
+        // Keep the connect screen over the page until it has loaded, instead of a blank WebView.
+        (overlay.view.parent as? ViewGroup)?.removeView(overlay.view)
+        setContentView(FrameLayout(this).apply { addView(panel, -1, -1); addView(overlay.view, -1, -1) })
+    }
+    private fun revealWeb() {
+        clearWatchdog()
+        val overlay = screen ?: return
+        screen = null
+        overlay.dismiss()
     }
     private fun message(text: String) { if (isFinishing || isDestroyed) return; AlertDialog.Builder(this).setMessage(text).setPositiveButton("OK", null).show() }
     private fun connections() {
@@ -142,7 +237,7 @@ class MainActivity : Activity() {
                 3 -> {
                     val field = EditText(this).apply { setText(prefs.getString("host", Networks.ORIGIN)); setSingleLine() }
                     AlertDialog.Builder(this).setTitle("Local Galaxy address").setView(field).setPositiveButton("Connect") { _, _ ->
-                        val host = Networks.localOrigin(field.text.toString())
+                        val host = Networks.localOrigin(Networks.typedAddress(field.text.toString()))
                         if (host == null) message("Use a private IPv4 address on port 8082") else {
                             prefs.edit().putString("host", host).putString("transport", "wifi").apply(); connect(host)
                         }
@@ -160,7 +255,7 @@ class MainActivity : Activity() {
                     }.setNegativeButton("Cancel", null).show()
                 }
                 6 -> { pairing.forget(); ble?.close(); disconnected() }
-                8 -> discoverLan()
+                8 -> discoverLan(fromMenu = true)
                 7 -> AlertDialog.Builder(this).setMessage("Revoke every phone using this comma's Galaxy Bluetooth key, including iPhones? Pair again afterward.")
                     .setPositiveButton("Revoke") { _, _ -> pairOverWifi(true) }.setNegativeButton("Cancel", null).show()
             }
@@ -173,16 +268,18 @@ class MainActivity : Activity() {
         discovery?.close(); discovery = null
         lanPicker?.dismiss(); lanPicker = null
     }
-    private fun connectionStatus(text: String) { connectionStatus?.text = "Connect to Galaxy\n\n$text" }
     private fun bluetoothFallback(): Boolean {
         if (prefs.getString("transport", "auto") != "auto" || pairing.load() == null) return false
         connectBluetooth(); return true
     }
-    private fun discoverLan(automatic: Boolean = false) {
+    /** [fromMenu] keeps the old menu behaviour: always confirm the address, then stay on Wi-Fi/LAN. */
+    private fun discoverLan(automatic: Boolean = false, fromMenu: Boolean = false) {
         val wifi = Networks.wifi(this, false)
         if (wifi == null) {
-            if (automatic) { if (!bluetoothFallback()) connectionStatus("Join the same Wi-Fi network as comma first.") }
-            else message("Join the same Wi-Fi network as comma first")
+            val text = "Join the same Wi-Fi network as comma first."
+            screen?.route(Route.HOME_NETWORK, RouteState.UNAVAILABLE, "Not on Wi-Fi")
+            if (automatic && bluetoothFallback()) return
+            screen?.detail(text) ?: message(text)
             return
         }
         stopDiscovery()
@@ -193,19 +290,29 @@ class MainActivity : Activity() {
             if (!isFinishing && !isDestroyed && generation == connectionGeneration.get()) {
                 fun select(host: String) {
                     val edit = prefs.edit().putString("host", host)
-                    if (!automatic) edit.putString("transport", "wifi")
+                    if (fromMenu) edit.putString("transport", "wifi")
                     edit.apply(); connect(host)
                 }
                 fun cancel() {
-                    if (generation == connectionGeneration.get() && web == null && ble == null) bluetoothFallback()
+                    if (generation != connectionGeneration.get() || web != null || ble != null) return
+                    screen?.route(Route.HOME_NETWORK, RouteState.IDLE, "Tap to search again")
+                    if (automatic) bluetoothFallback()
                 }
+                val s = screen
                 if (hosts.isEmpty()) {
-                    val text = error ?: "No comma found. Keep Galaxy enabled on comma and connect both devices to the same Wi-Fi. Comma prepares discovery automatically while parked with internet; the first setup may take a few minutes. Try again shortly, or enter its IP address if your router blocks multicast."
-                    if (automatic) { if (!bluetoothFallback()) connectionStatus(text) } else message(text)
-                } else if (automatic && hosts.size == 1) select(hosts.single())
+                    val text = error ?: "No comma answered on this Wi-Fi. Check that Galaxy is on and comma is on the same network. " +
+                        "A new install needs a few minutes parked with internet before comma can be found. " +
+                        "If your router blocks discovery, type comma's address instead."
+                    s?.route(Route.HOME_NETWORK, RouteState.FAILED, "No comma found")
+                    if (!(automatic && bluetoothFallback())) {
+                        if (s != null) { s.headline("Connect to comma"); s.detail(text) } else message(text)
+                    }
+                } else if (hosts.size == 1 && !fromMenu) select(hosts.single())
                 else {
+                    s?.route(Route.HOME_NETWORK, RouteState.LIVE, "${hosts.size} found")
+                    s?.headline("Choose your comma")
                     val picker = AlertDialog.Builder(this).setTitle("Choose your comma on this trusted LAN")
-                        .setItems(hosts.toTypedArray()) { _, which -> if (generation == connectionGeneration.get()) select(hosts[which]) }
+                        .setItems(hosts.map(::address).toTypedArray()) { _, which -> if (generation == connectionGeneration.get()) select(hosts[which]) }
                         .setNegativeButton("Cancel") { _, _ -> cancel() }.setOnCancelListener { cancel() }.create()
                     picker.setOnDismissListener { if (lanPicker === picker) lanPicker = null }
                     lanPicker = picker; picker.show()
@@ -213,8 +320,12 @@ class MainActivity : Activity() {
             }
         }
         discovery = search
-        if (automatic) connectionStatus("Looking for comma on LAN…")
-        else Toast.makeText(this, "Looking for comma on LAN…", Toast.LENGTH_LONG).show()
+        val s = screen
+        if (s != null) {
+            s.headline("Finding your comma")
+            s.route(Route.HOME_NETWORK, RouteState.TRYING, "Searching…")
+            s.detail("Looking for comma on this Wi-Fi network. This takes up to 12 seconds.")
+        } else Toast.makeText(this, "Looking for comma on LAN…", Toast.LENGTH_LONG).show()
         search.start()
     }
     private fun savePairing(value: JSONObject) {
@@ -225,9 +336,10 @@ class MainActivity : Activity() {
     }
     private fun pairOverWifi(rotate: Boolean) {
         val wifi = Networks.wifi(this) ?: Networks.wifi(this, false)
-        if (wifi == null) { message("Join Galaxy Wi-Fi or the comma's trusted LAN first"); return }
+        if (wifi == null) { pairingNotice("To pair Bluetooth, join the comma's Galaxy Wi-Fi or the same Wi-Fi as comma first.", false); return }
         val host = if (Networks.wifi(this) != null) Networks.ORIGIN else Networks.localOrigin(prefs.getString("host", "") ?: "")
-        if (host == null) { message("Enter the comma's LAN address first"); return }
+        if (host == null) { pairingNotice("To pair Bluetooth, open Galaxy over Wi-Fi first so this phone knows comma's address.", false); return }
+        if (!rotate) screen?.route(Route.BLUETOOTH, RouteState.TRYING, "Pairing…")
         Thread {
             try {
                 fun connection(path: String) = (wifi.first.openConnection(URL(host + path)) as HttpURLConnection).apply {
@@ -260,15 +372,30 @@ class MainActivity : Activity() {
                     check(status == 200) { value.optString("error", "Pairing failed") }; value
                 } finally { call.disconnect() }
                 if (rotate) { pairing.forget(); ble?.close() } else savePairing(result)
-                runOnUiThread { message(if (rotate) "All Bluetooth phones revoked. Pair again to reconnect." else "Pairing saved. Enable Bluetooth on comma and choose Bluetooth only to connect.") }
-            } catch (e: Exception) { runOnUiThread { message(e.message ?: "Pairing failed") } }
+                runOnUiThread {
+                    if (rotate) pairingNotice("All Bluetooth phones revoked. Pair again to reconnect.", false)
+                    else if (screen != null) pairingNotice("Bluetooth is paired. When Wi-Fi isn't available, Automatic uses Bluetooth for Galaxy controls.", true)
+                    else message("Pairing saved. Enable Bluetooth on comma and choose Bluetooth only to connect.")
+                }
+            } catch (e: Exception) { runOnUiThread { pairingNotice("Couldn't pair Bluetooth: ${e.message ?: "comma didn't answer"}. Open Galaxy over Wi-Fi, then try again.", pairing.load() != null) } }
         }.start()
+    }
+    /** Pairing results appear on the connect screen when it is showing, otherwise in a dialog over Galaxy. */
+    private fun pairingNotice(text: String, paired: Boolean) {
+        val s = screen ?: return message(text)
+        s.detail(text)
+        s.route(Route.BLUETOOTH, if (paired) RouteState.IDLE else RouteState.UNAVAILABLE, if (paired) "Paired, controls only" else "Not paired")
     }
     private fun connectBluetooth() {
         stopDiscovery()
-        connectionStatus = null
         val key = pairing.load()
-        if (key == null) { disconnected(); message("Pair Bluetooth using Galaxy Wi-Fi or LAN first, or paste an existing pairing code."); return }
+        if (key == null) {
+            disconnected().apply {
+                route(Route.BLUETOOTH, RouteState.UNAVAILABLE, "Not paired")
+                detail("Pair Bluetooth first: tap Bluetooth while Galaxy is reachable over Wi-Fi, or paste a pairing code in More options.")
+            }
+            return
+        }
         val permissions = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
             else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         if (permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) { requestPermissions(permissions, 2); return }
@@ -276,10 +403,13 @@ class MainActivity : Activity() {
         ble?.close()
         web?.destroy(); web = null
         Networks.manager(this).bindProcessToNetwork(null)
-        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 100, 40, 40) }
-        panel.addView(TextView(this).apply { text = "Connecting to Galaxy Bluetooth…"; textSize = 22f })
-        panel.addView(Button(this).apply { text = "Connections"; setOnClickListener { connections() } })
-        setContentView(panel)
+        clearWatchdog()
+        connectScreen().apply {
+            refreshRoutes(this)
+            headline("Connecting over Bluetooth")
+            route(Route.BLUETOOTH, RouteState.TRYING, "Connecting…")
+            detail("Keep Bluetooth on for comma and this phone. Bluetooth opens Galaxy controls; maps and video need Wi-Fi.")
+        }
         Thread {
             val transport = BleTransport(this, key)
             if (generation != connectionGeneration.get()) { transport.close(); return@Thread }
@@ -289,14 +419,22 @@ class MainActivity : Activity() {
                 runOnUiThread { if (!isFinishing && generation == connectionGeneration.get()) showBluetooth(transport) else transport.close() }
             } catch (e: Exception) {
                 transport.close()
-                runOnUiThread { if (!isFinishing && generation == connectionGeneration.get()) { disconnected(); message(e.message ?: "Bluetooth connection failed") } }
+                runOnUiThread {
+                    if (!isFinishing && generation == connectionGeneration.get()) disconnected().apply {
+                        route(Route.BLUETOOTH, RouteState.FAILED, "Didn't connect")
+                        detail("Bluetooth didn't connect: ${e.message ?: "comma didn't answer"}. Check that Bluetooth is on in comma settings and comma is nearby.")
+                    }
+                }
             }
         }.start()
     }
     override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, permissions, results)
         if (code == 2) { if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) connectBluetooth()
-            else { disconnected(); message("Bluetooth access is needed for Bluetooth connections. Wi-Fi and LAN remain available.") } }
+            else disconnected().apply {
+                route(Route.BLUETOOTH, RouteState.FAILED, "Needs permission")
+                detail("Allow Nearby devices to connect over Bluetooth. Wi-Fi and LAN still work without it.")
+            } }
     }
     private fun showBluetooth(transport: BleTransport) {
         bluetoothMode = true
@@ -356,7 +494,7 @@ class MainActivity : Activity() {
             }
             override fun onPageFinished(v: WebView, url: String) { if (web === v) share = null }
         }
-        showWeb(view, "Bluetooth · controls only")
+        showWeb(view, Route.BLUETOOTH, "Bluetooth, controls only", waitForPage = false)
         view.loadUrl(if (share != null) "$origin/?share=${Uri.encode(share)}#/navigation" else "$origin/#/galaxy")
     }
     inner class Bridge {
@@ -374,13 +512,15 @@ class MainActivity : Activity() {
         @JavascriptInterface fun openWifiSettings() { runOnUiThread { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } }
     }
     @Deprecated("Legacy back handling") override fun onBackPressed() { if (web?.canGoBack() == true) web?.goBack() else super.onBackPressed() }
-    override fun onResume() { super.onResume(); recovery.resumed() }
+    override fun onResume() { super.onResume(); resumed = true; recovery.resumed() }
+    override fun onPause() { resumed = false; super.onPause() }
     override fun onStop() {
         recovery.stopped(if (discovery != null || lanPicker != null) discoveryAutomatic else null, web == null && ble == null)
         super.onStop()
     }
     override fun onDestroy() {
-        stopDiscovery()
+        stopDiscovery(); clearWatchdog(); handler.removeCallbacksAndMessages(null)
+        runCatching { Networks.manager(this).unregisterNetworkCallback(wifiWatcher) }
         connectionGeneration.incrementAndGet(); ble?.close(); worker.shutdownNow()
         web?.destroy(); Networks.manager(this).bindProcessToNetwork(null); super.onDestroy()
     }
