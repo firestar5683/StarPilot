@@ -6,6 +6,11 @@ from functools import cache
 
 from opendbc import DBC_PATH, get_generated_dbcs
 
+try:
+  from opendbc.can._raw_value import get_raw_value as _native_raw_value
+except ImportError:
+  _native_raw_value = None
+
 # TODO: these should just be passed in along with the DBC file
 from opendbc.car.honda.hondacan import honda_checksum
 from opendbc.car.toyota.toyotacan import toyota_checksum
@@ -61,6 +66,10 @@ class Signal:
   checksum_fields: tuple['Signal', ...] = ()
 
   def get_raw_value(self, dat: bytes | bytearray) -> int:
+    if _native_raw_value is not None:
+      value = _native_raw_value(self, dat, Signal)
+      if value is not NotImplemented:
+        return value
     msb_byte = self.msb // 8
     lsb_byte = self.lsb // 8
     if self.is_little_endian:

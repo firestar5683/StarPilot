@@ -1,0 +1,6 @@
+Import('envCython')
+
+raw_value = envCython.Clone(SHLIBPREFIX='', SHLIBSUFFIX='.so')
+raw_value.Append(CFLAGS=['-std=c11'], CCFLAGS=['-O3', '-Werror'])
+raw_value.Replace(SHLINKFLAGS=['$LINKFLAGS'])
+raw_value.SharedLibrary('_raw_value', ['_raw_value.c'])

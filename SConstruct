@@ -287,6 +287,8 @@ def prune_cache_dir(target=None, source=None, env=None):
 
 # ********** start building stuff **********
 
+SConscript(['opendbc_repo/opendbc/can/SConscript'])
+
 # Build common module
 SConscript(['openpilot/common/SConscript'])
 Import('_common')
