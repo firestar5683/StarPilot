@@ -106,6 +106,16 @@ class TestLayoutPreviewHttp(unittest.TestCase):
     self.assertEqual(self.preview_with_pump(cookie)[0], 403)
     self.assertIsNone(self.params.get(PARAM_KEY))
 
+  def test_sidebar_draft_reaches_renderer_without_saving(self):
+    cookie = self.login()
+    self.payload['document']['developerSidebar'] = False
+    self.assertEqual(self.preview_with_pump(cookie)[0], 200)
+    self.assertEqual(self.rendered, [self.payload])
+    self.assertIsNone(self.params.get('DeveloperSidebar'))
+    self.assertIsNone(self.params.get(PARAM_KEY))
+    self.payload['document']['developerSidebar'] = 'Off'
+    self.assertEqual(self.request('/api/ui/layout/preview', self.payload, cookie)[0], 400)
+
 
 if __name__ == '__main__':
   unittest.main()

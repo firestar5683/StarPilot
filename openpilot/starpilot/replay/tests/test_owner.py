@@ -328,8 +328,11 @@ def test_display_snapshot_never_exceeds_renderer_bounds(owner, tmp_path):
   output = tmp_path / 'snapshot'
   output.mkdir()
   (saved / 'OnroadCustomizations').write_bytes(b'x' * (48 * 1024))
+  (saved / 'DeveloperSidebar').write_bytes(b'0')
   value._display_snapshot(output)
   path = output / 'display.json'
+  import base64
+  assert base64.b64decode(json.loads(path.read_bytes())['values']['DeveloperSidebar']) == b'0'
   assert len(path.read_bytes()) <= 128 * 1024
   assert all(len(raw) <= 64 * 1024 for raw in json.loads(path.read_bytes())['values'].values())
   path.unlink()

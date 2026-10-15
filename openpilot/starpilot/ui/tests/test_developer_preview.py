@@ -75,12 +75,12 @@ class DeveloperPreviewTests(unittest.TestCase):
       self.assertEqual(replace(observed, onroad=baseline.onroad), baseline)
       self.assertIsNone(baseline.onroad.visual_preview)
       self.assertIs(session.snapshot(ShellMode.ONROAD), observed)
-      session._onroad_width = 1560.0
+      session._onroad_page_width = 1860.0
       session._snapshot_cache = None
       resized = session.snapshot(ShellMode.ONROAD)
-      self.assertEqual(resized.onroad.viewport_width, 1560.0)
+      self.assertEqual(resized.onroad.viewport_width, 1860.0)
       self.assertEqual(replace(resized.onroad, viewport_width=baseline.onroad.viewport_width), observed.onroad)
-      self.assertEqual(baseline.onroad.viewport_width, 1860.0)
+      self.assertEqual(baseline.onroad.viewport_width, 2160.0)
 
 
 if __name__ == "__main__":

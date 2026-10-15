@@ -119,7 +119,7 @@ def test_background_tap_on_home_or_settings_does_not_toggle_onroad_sidebar(large
     assert not n.layout._sidebar.is_visible
 
 
-@pytest.mark.parametrize('width', [1560, 1860])
+@pytest.mark.parametrize('width', [1560, 1860, 2160])
 def test_wheel_and_navigation_hit_boxes_follow_resized_camera(width):
   observed = OnroadState(False, True, 10, 50, SpeedLimitObservation(), viewport_width=width,
                         experimental_available=True, experimental_action_token='test',

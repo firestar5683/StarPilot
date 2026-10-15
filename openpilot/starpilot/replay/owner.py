@@ -35,7 +35,7 @@ PREPARE_SECONDS = 45.0
 CONTROL_SECONDS = 15.0
 STOP_GRACE_SECONDS = 1.5
 DISPLAY_KEYS = (
-  'OnroadCustomizations', 'IsMetric', 'CameraView', 'DriverCamera', 'AlwaysOnDM', 'HidePersonalityAlerts',
+  'OnroadCustomizations', 'IsMetric', 'CameraView', 'DriverCamera', 'AlwaysOnDM', 'HidePersonalityAlerts', 'DeveloperSidebar',
   'ShowBrakeStatus', 'PedalsOnUI', 'StockConfidenceBallWidget', 'HideLeadMarker', 'LeadInfo', 'LeadInfoMode',
   'BlindSpotMetrics', 'SignalMetrics', 'ShowSpeedLimits', 'UseVienna', 'ShowCSCStatus', 'PIPPreviewEnabled',
   'PIPPreviewMask', 'PIPPreviewShowOnBlinker', 'PIPPreviewShowOnBSM', 'PIPPreviewInvert',

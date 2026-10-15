@@ -52,7 +52,7 @@ class AppearanceSettingsTests(unittest.TestCase):
   def test_absent_defaults_are_read_only_and_match_both_views(self):
     self.assertEqual(onroad_appearance(self.params), OnroadAppearance())
     self.assertEqual(tuple(row.key for row in self.owner.snapshot(Profile.LARGE).rows),
-                     ("HidePersonalityAlerts", "ShowBrakeStatus", "BlindSpotMetrics", "SignalMetrics"))
+                     ("DeveloperSidebar", "HidePersonalityAlerts", "ShowBrakeStatus", "BlindSpotMetrics", "SignalMetrics"))
     self.assertEqual(tuple(row.key for row in self.owner.snapshot(Profile.COMPACT).rows),
                      ("CameraView", "DriverCamera", "StockConfidenceBallWidget", "HidePersonalityAlerts", "ShowBrakeStatus",
                       "HideLeadMarker", "LeadInfo", "SignalMetrics", "BlindSpotMetrics"))
@@ -72,6 +72,29 @@ class AppearanceSettingsTests(unittest.TestCase):
     self.assertEqual(self.row("CameraView", Profile.COMPACT).value, "Standard")
     self.assertEqual(self.row("DriverCamera", Profile.COMPACT).value, "Off")
     self.assertIn("border highlights apply to C4 only", self.owner.snapshot(Profile.LARGE).subtitle)
+
+  def test_developer_sidebar_saved_choice_defaults_repair_and_source_guard(self):
+    self.assertFalse(onroad_appearance(self.params).show_developer_sidebar)
+    self.assertIsNone(read_visibility(self.params, "DeveloperSidebar").raw)
+    self.assertEqual(self.params.get_default_value("DeveloperSidebar"), False)
+    self.assertNotIn("DeveloperSidebar", {row.key for row in self.owner.snapshot(Profile.COMPACT).rows})
+    row = self.row("DeveloperSidebar")
+    self.assertEqual((row.label, row.value, row.default_value), ("Developer Sidebar", "Off", "Off"))
+    request = row_change(row)
+    self.parked = False
+    self.assertFalse(self.owner.apply(request))
+    self.parked = True
+    self.assertTrue(self.owner.apply(request))
+    self.assertTrue(onroad_appearance(self.params).show_developer_sidebar)
+    self.assertFalse(self.owner.apply(request), "a stale toggle must not overwrite another edit")
+    self.assertTrue(self.owner.apply(row_change(self.row("DeveloperSidebar"))))
+    self.assertFalse(onroad_appearance(self.params).show_developer_sidebar)
+    source = Path(self.params.get_param_path("DeveloperSidebar"))
+    source.write_bytes(b"bad")
+    self.assertFalse(onroad_appearance(self.params).show_developer_sidebar)
+    self.assertEqual(source.read_bytes(), b"bad")
+    self.assertTrue(self.owner.apply(row_change(self.row("DeveloperSidebar"))))
+    self.assertEqual(source.read_bytes(), b"0")
 
   def test_personality_alert_visibility_is_default_off_and_widget_independent(self):
     from openpilot.starpilot.ui.onroad_customization import read_customization
@@ -98,6 +121,17 @@ class AppearanceSettingsTests(unittest.TestCase):
     path.write_bytes(b"bad")
     self.assertFalse(onroad_appearance(self.params).hide_personality_alerts)
     self.assertEqual(path.read_bytes(), b"bad")
+
+  def test_developer_sidebar_external_changes_refresh_without_restart(self):
+    from openpilot.starpilot.ui.tests.test_runtime_snapshot import RuntimeSnapshotAdapter
+    ui = ui_fake()
+    ui.params = self.params
+    adapter = RuntimeSnapshotAdapter(ui)
+    self.assertFalse(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.appearance.show_developer_sidebar)
+    self.params.put_bool("DeveloperSidebar", True, block=True)
+    self.assertTrue(adapter.build(ShellMode.ONROAD, now_ns=NOW + 1_000_000_000).onroad.appearance.show_developer_sidebar)
+    self.params.put_bool("DeveloperSidebar", False, block=True)
+    self.assertFalse(adapter.build(ShellMode.ONROAD, now_ns=NOW + 2_000_000_000).onroad.appearance.show_developer_sidebar)
 
   def test_compact_border_saved_controls_repair_and_parked_source_guard(self):
     amber = row_change(self.row("SignalMetrics", Profile.COMPACT))
@@ -441,7 +475,7 @@ class AppearanceSettingsTests(unittest.TestCase):
     self.assertEqual(changed, [], "the remaining rows fit on one page")
     large.press(1980, 300, state)
     large.release(1980, 300, state)
-    self.assertEqual(changed[0].row.key, "HidePersonalityAlerts")
+    self.assertEqual(changed[0].row.key, "DeveloperSidebar")
 
     class Button:
       def __init__(self, label, value):

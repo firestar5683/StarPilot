@@ -144,6 +144,23 @@ class TestOnroadLayoutDisplay(unittest.TestCase):
     self.assertEqual({rows[key]['group'] for key in ('ShowBrakeStatus', 'StockConfidenceBallWidget')}, {'widget'})
     self.assertFalse({'HideSpeed', 'RainbowPath', 'StoppedTimer', 'EnableTorqueBarWidget'} & rows.keys())
     self.assertEqual(snapshot['display']['values']['HideLeadMarker'], 'Off')
+    self.assertEqual(rows['DeveloperSidebar']['group'], 'Big layout')
+    self.assertEqual(rows['DeveloperSidebar']['choices'], ['Off', 'On'])
+    self.assertEqual(snapshot['display']['values']['DeveloperSidebar'], 'Off')
+    self.assertEqual(snapshot['display']['defaults']['DeveloperSidebar'], 'Off')
+
+  def test_developer_sidebar_saves_to_its_own_param_and_rejects_stale_drafts(self):
+    self.params.put_bool('DeveloperSidebar', True, block=True)
+    saved = self.save(DeveloperSidebar='Off')
+    self.assertEqual(saved['failed'], [])
+    self.assertFalse(self.params.get_bool('DeveloperSidebar'))
+    self.assertNotIn('DeveloperSidebar', self.params.get(PARAM_KEY))
+    self.params.put_bool('DeveloperSidebar', True, block=True)
+    with self.assertRaises(LayoutChanged):
+      self.save(saved, DeveloperSidebar='Off')
+    saved = self.save(DeveloperSidebar='Off')
+    self.assertEqual(self.save(saved, DeveloperSidebar='On')['failed'], [])
+    self.assertTrue(self.params.get_bool('DeveloperSidebar'))
 
   def test_layout_and_dependent_display_choices_save_together(self):
     saved = self.save(HideLeadMarker='On', LeadInfo='Distance', SignalMetrics='On')

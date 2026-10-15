@@ -44,6 +44,7 @@ from openpilot.starpilot.ui.pip_preferences import read_pip
 from openpilot.starpilot.ui.pip_render import PiPRenderer
 from openpilot.starpilot.ui.pip_sidecam import Signals, Rect
 from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, placement, widget_size
+from openpilot.starpilot.ui.layout_preview_sidebar import SIDEBAR_WIDTH
 from openpilot.starpilot.ui.pip_warning import PiPWarningSource
 from openpilot.starpilot.spot_monitor.preferences import read_preferences as read_vasm_preferences
 from openpilot.starpilot.speed_limits.vision.observation import clock_pair_ns
@@ -234,7 +235,7 @@ class StarShellSession:
       self.view.onroad.pressed_action = lambda: self.input.onroad.pressed_action
     self.selected = Destination.STAR
     self.sidebar_expanded = True
-    self._onroad_width = 1860.0
+    self._onroad_page_width = 2160.0
     self.compact_y = 0.0
     self.compact_scroll_x = 0.0
     self.notice = ""
@@ -1212,7 +1213,7 @@ class StarShellSession:
                                   compact_scroll_x=self.compact_scroll_x, sidebar_expanded=self.sidebar_expanded,
                                   menu_only=self.profile == Profile.COMPACT and mode == ShellMode.SETTINGS)
     if mode == ShellMode.ONROAD and self.profile == Profile.LARGE:
-      width = getattr(self, '_onroad_width', 1860.0)
+      width = getattr(self, '_onroad_page_width', 2160.0) - (SIDEBAR_WIDTH if snapshot.onroad.appearance.show_developer_sidebar else 0)
       if snapshot.onroad.viewport_width != width:
         snapshot = replace(snapshot, onroad=replace(snapshot.onroad, viewport_width=width))
     if mode == ShellMode.HOME:
@@ -1283,9 +1284,8 @@ class StarShellSession:
   def render(self, mode: ShellMode, rect: rl.Rectangle, parent_clip: rl.Rectangle | None = None) -> None:
     self._poll_aol_save()
     if mode == ShellMode.ONROAD and self.profile == Profile.LARGE:
-      width = rect.width - 300
-      if width != self._onroad_width:
-        self._onroad_width = width
+      if rect.width != self._onroad_page_width:
+        self._onroad_page_width = rect.width
         self._snapshot_cache = None
     snapshot = self.snapshot(mode)
     self._mode = mode

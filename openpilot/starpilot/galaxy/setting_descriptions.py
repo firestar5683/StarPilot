@@ -84,6 +84,7 @@ DESCRIPTIONS = {
   'TeslaWakeOnCAN': 'Wakes comma when the Tesla wakes up, before you press the brake.',
   'RadarRecoveryAlert': 'Play a chime and show a brief message when a radar fault clears. You must re-engage manually.',
   'CameraView': 'Chooses the camera view shown on the driving screen.',
+  'DeveloperSidebar': 'Shows live developer metrics on the right of the Big driving screen. Off gives that space back to the road view.',
   'DriverCamera': 'Shows the driver camera while reversing.',
   'StockConfidenceBallWidget': 'Uses StarPilot driving widgets in place of the stock confidence ball.',
   'HidePersonalityAlerts': 'Hides the alert shown when the driving personality changes.',

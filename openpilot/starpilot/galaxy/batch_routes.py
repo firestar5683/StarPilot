@@ -5,8 +5,8 @@ from openpilot.starpilot.galaxy.settings import SettingsChanged, SettingsUnavail
 from openpilot.starpilot.galaxy.sentry_events import SentryEventsUnavailable
 from openpilot.starpilot.sentry_mode.notifications import NotificationUnavailable
 from openpilot.starpilot.ui.layout_preview_transport import (PreviewBusy, PreviewDenied, PreviewInvalid, PreviewUnavailable,
-                                                            PROFILES as PREVIEW_PROFILES, SCENES as PREVIEW_SCENES, request_preview)
-from openpilot.starpilot.ui.onroad_customization import validate_document
+                                                            PROFILES as PREVIEW_PROFILES, SCENES as PREVIEW_SCENES, request_preview,
+                                                            validate_preview_document)
 
 
 def delete_records(self, path, payload, sentry_events_lock, crash_reports_lock, notification_owner, motion_events, reports):
@@ -73,7 +73,7 @@ def preview_layout(self, payload, projection_layout_owner, layout_owner, layout_
       document = {'layout': validate_layout(payload['document'], snapshot['screen']),
                   'base': read_customization(layout_owner().params)}
     else:
-      document = validate_document(payload['document'])
+      document = validate_preview_document(payload['document'])
   except (ValueError, TypeError, OverflowError, RecursionError):
     self.json(400, {'error': 'Invalid layout document'})
     return

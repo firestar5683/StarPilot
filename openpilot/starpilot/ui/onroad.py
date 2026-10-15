@@ -30,6 +30,7 @@ from openpilot.starpilot.ui.onroad_corner import CornerHintCache, render_corner_
 from openpilot.starpilot.ui.onroad_large_widgets import CurrentSpeedHud, UnifiedSpeedWidget, SteeringWheelWidget
 from openpilot.starpilot.ui.onroad_cem_gauge import AetherGauge
 from openpilot.starpilot.ui.live_developer_sidebar import render_sidebar as render_live_sidebar
+from openpilot.starpilot.ui.layout_preview_sidebar import SIDEBAR_WIDTH
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, slc_controls
 from openpilot.starpilot.ui.onroad_stopped_timer import duration_color, duration_text, timer_size
 from openpilot.starpilot.ui.onroad_torque import TorqueBarWidget
@@ -407,8 +408,8 @@ class OnroadView:
       self.alert.render(content, state.alert)
     finally:
       clip.end_scissor_mode()
-    if not self.projection_viewport:
-      render_live_sidebar(self.fonts, rl.Rectangle(width, 0, 300, height), state.developer_metrics)
+    if not self.projection_viewport and state.appearance.show_developer_sidebar:
+      render_live_sidebar(self.fonts, rl.Rectangle(width, 0, SIDEBAR_WIDTH, height), state.developer_metrics)
     # Projection has its own permanent escape control in this corner; the native
     # favorite-menu hint would overlap it and does not control projected input.
     if not self.projection_viewport and state.alert.size != AlertSize.FULL:

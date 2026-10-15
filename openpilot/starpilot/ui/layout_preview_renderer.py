@@ -13,7 +13,7 @@ from dataclasses import replace
 
 import pyray as rl
 
-from openpilot.starpilot.ui.layout_preview_transport import SCENES
+from openpilot.starpilot.ui.layout_preview_transport import SCENES, validate_preview_document
 from openpilot.starpilot.ui.developer_preview import OnroadVisualPreview
 from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, PROFILES, RUNTIME_PREVIEW_WIDGETS, placement, validate_document, widget_size
 from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
@@ -292,7 +292,7 @@ class _Canvas:
       if self.viewport is not None:
         # ProjectionOnroad adds this permanent brand after the shared onroad view.
         self.fonts.draw('StarPilot', FontRole.BRAND, 30, width - 210, height - 90)
-      if self.profile == Profile.LARGE and self.viewport is None:
+      if self.profile == Profile.LARGE and self.viewport is None and state.appearance.show_developer_sidebar:
         render_sidebar(self.fonts, rl.Rectangle(width - SIDEBAR_WIDTH, 0, SIDEBAR_WIDTH, height))
     finally:
       rl.end_texture_mode()
@@ -312,10 +312,11 @@ class _Canvas:
     """Transparent arrangement art from the same widgets/fonts as the live view."""
     if self.view is None or self.fonts is None or self.target is None:
       raise RuntimeError("Layout preview resources are closed")
+    # Sprite crops use the saved 1860px road layout; the editor applies runtime anchor offsets.
+    if self.profile == Profile.LARGE and self.viewport is None:
+      state = replace(state, viewport_width=1860)
     self._settle(state)
     canvas_width, canvas_height = self.viewport or self.profile.size
-    # Native Large has a 300px sidebar outside the onroad viewport. Including it
-    # here shifts right-anchored artwork beyond its saved crop (notably the wheel).
     road_width = self.viewport[0] if self.viewport else state.viewport_width
     content = (rl.Rectangle(30, 30, road_width - 60, canvas_height - 60) if self.profile == Profile.LARGE
                else rl.Rectangle(0, 0, 476, 240))
@@ -451,12 +452,16 @@ class LayoutPreviewRenderer:
       viewport = (layout['canvas']['width'], layout['canvas']['height'])
       document = projection_customization(layout, validate_document(payload['document']['base']))
     else:
-      document = validate_document(payload['document'])
+      document = validate_preview_document(payload['document'])
     if type(payload["profile"]) is not str or payload["profile"] not in ("large", "compact", "projection"):
       raise ValueError("Invalid layout preview profile")
     profile = Profile.LARGE if viewport else Profile(payload["profile"])
     scene = payload["scene"]
+    sidebar = document.pop('developerSidebar', False)
     state = sample_state(scene, document)
+    if profile == Profile.LARGE and viewport is None:
+      width = profile.size[0] - (SIDEBAR_WIDTH if sidebar else 0)
+      state = replace(state, viewport_width=width, appearance=replace(state.appearance, show_developer_sidebar=sidebar))
     if viewport:
       from openpilot.starpilot.ui.navigation_state import NavigationDisplay
       state = replace(state, navigation=NavigationDisplay(("preview", 1), "Turn left onto Desert Inn Road", "turn", "left",

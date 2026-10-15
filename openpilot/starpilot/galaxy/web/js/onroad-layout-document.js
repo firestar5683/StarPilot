@@ -19,6 +19,7 @@ const frontmostOrder = (order, profile) => {
 
 // Display preferences ride along in the draft but are not part of the rendered layout.
 export const layoutDocument = ({ display, ...document }) => document
+export const previewDocument = document => ({ ...layoutDocument(document), developerSidebar: document.display?.DeveloperSidebar === "On" })
 // The device sends them beside the layout; the editor keeps them in its draft so Save, undo and reload cover them.
 export const withDisplay = (data) => !object(data?.display) || !Array.isArray(data.display.rows) ? data : {
   ...data, display: data.display.rows,

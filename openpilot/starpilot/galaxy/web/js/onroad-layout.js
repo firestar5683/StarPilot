@@ -10,8 +10,8 @@ import { GxDialog } from "./dialog.js"
 import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 import { snapTargets, snapMove, snapResize, snapThreshold } from "./layout-snap.js"
 
-import { PROFILES, ROAD_COLORS, PATH_MODES, HEX, PROJECTION_DISPLAY_SWITCHES, layoutDocument, withDisplay, orderedWidgetIds, widgetPalette, withAlpha, widgetSize, placementLimits, clampBox, clampPlacement, overlapsReserved, previewPoint, validDocument, validSnapshot } from "./onroad-layout-document.js"
-export { layoutDocument, withDisplay, orderedWidgetIds, widgetPalette, withAlpha, widgetSize, placementLimits, clampBox, clampPlacement, overlapsReserved, previewPoint, validDocument, validSnapshot } from "./onroad-layout-document.js"
+import { PROFILES, ROAD_COLORS, PATH_MODES, HEX, PROJECTION_DISPLAY_SWITCHES, layoutDocument, previewDocument, withDisplay, orderedWidgetIds, widgetPalette, withAlpha, widgetSize, placementLimits, clampBox, clampPlacement, overlapsReserved, previewPoint, validDocument, validSnapshot } from "./onroad-layout-document.js"
+export { layoutDocument, previewDocument, withDisplay, orderedWidgetIds, widgetPalette, withAlpha, widgetSize, placementLimits, clampBox, clampPlacement, overlapsReserved, previewPoint, validDocument, validSnapshot } from "./onroad-layout-document.js"
 
 const previewVisibilityKey = projection => "gx-layout-preview-visibility-v2:" + (projection ? "android-auto" : "comma")
 function loadPreviewVisibility(projection) {
@@ -354,7 +354,7 @@ export const OnroadLayoutPage = {
         return
       }
       if (!backdropFeed.active) backdropFeed.start()
-      const document = props.projection ? projectionPayload({document: state.draft}, state.data.metadata).document : layoutDocument(state.draft)
+      const document = props.projection ? projectionPayload({document: state.draft}, state.data.metadata).document : previewDocument(state.draft)
       backdropFeed.update(document, props.projection ? "projection" : state.profile, state.scene, false, backdropKey(state.draft))
     }, {flush: "sync"})
     watch(() => props.mode, (mode) => {
@@ -392,6 +392,8 @@ export const OnroadLayoutPage = {
         ["Speed limit", scene => scene.id.startsWith("slc_")]].map(([label, test]) => ({ label, scenes: this.availableScenes.filter(test) }))
     },
     sceneBorder() { return previewScene(this.state.scene).border },
+    expandedRoad() { return !this.projection && this.state.profile === "large" && this.displayValue("DeveloperSidebar") !== "On" },
+    roadBounds() { return this.expandedRoad ? { ...this.profile.bounds, width: this.profile.bounds.width + 300 } : this.profile.bounds },
     // The last screen for this profile stays up while the next scene renders, instead of flashing the sketch.
     nativeBackdropReady() { return !!this.state.backdrop.url && this.state.backdrop.profile === (this.projection ? "projection" : this.state.profile) },
     layout() { return this.state.draft?.layouts[this.state.profile] },
@@ -409,7 +411,7 @@ export const OnroadLayoutPage = {
       const widget = this.renderWidgets.find(widget => widget.id === this.state.selected)
       if (!widget) return null
       return {
-        x: this.selectedPosition.x, y: this.selectedPosition.y - widget.visualInsetTop,
+        x: this.previewX(this.state.selected), y: this.selectedPosition.y - widget.visualInsetTop,
         width: widget.width, height: widget.height + widget.visualInsetTop + widget.visualInsetBottom
       }
     },
@@ -491,6 +493,18 @@ export const OnroadLayoutPage = {
     if (this._onPinScroll) window.removeEventListener("scroll", this._onPinScroll, { capture: true })
   },
   methods: {
+    previewShift(id) {
+      return this.expandedRoad ? ({ steering_wheel: 300, current_speed: 150, torque_bar: 150, driving_mode_descriptions: 150, clock: 150 }[id] || 0) : 0
+    },
+    previewX(id) { return this.layout[id].x + this.previewShift(id) },
+    previewSnapTargets(id) {
+      if (!this.expandedRoad) return snapTargets(this.profile, this.layout, id, key => !this.previewHidden(key))
+      const widget = this.profile.widgets[id], bounds = widget.bounds || this.profile.bounds, shift = this.previewShift(id)
+      const profile = { ...this.profile, widgets: { ...this.profile.widgets, [id]: { ...widget, bounds: { ...bounds, x: bounds.x + shift } } } }
+      const layout = Object.fromEntries(Object.entries(this.layout).map(([key, at]) => [key, { ...at, x: this.previewX(key) }]))
+      return snapTargets(profile, layout, id, key => !this.previewHidden(key))
+        .map(target => ({ ...target, value: target.value - (target.axis === "x" ? shift : 0) }))
+    },
     switchRow,
     runtimeWidget(id) { return this.profile?.runtimePreviewWidgets?.includes(id) === true },
     toggleSnap() {
@@ -940,7 +954,7 @@ export const OnroadLayoutPage = {
       this.state.drag = {
         id, pointerId: event.pointerId, touch: event.pointerType === "touch", fromTray, before: { ...position }, historyBefore: clone(this.state.draft), inside: !fromTray,
         startX: event.clientX, startY: event.clientY, moved: false,
-        offsetX: fromTray ? width / 2 : point.x - position.x,
+        offsetX: fromTray ? width / 2 + this.previewShift(id) : point.x - position.x,
         offsetY: fromTray ? height / 2 : point.y - position.y
       }
       this._dragTarget = this.$refs.preview
@@ -1029,7 +1043,7 @@ export const OnroadLayoutPage = {
       if (drag.resize) {
         const raw = { width: point.x - drag.offsetX, height: point.y - drag.offsetY }, position = this.layout[drag.id]
         if (snapping) {
-          drag.targets ||= snapTargets(this.profile, this.layout, drag.id, id => !this.previewHidden(id))
+          drag.targets ||= this.previewSnapTargets(drag.id)
           const snapped = snapResize({ x: position.x, y: position.y, ...raw }, drag.targets, snapThreshold(this.profile, rect, event.pointerType))
           if (this.resizeBox(drag.id, snapped.width, snapped.height)) {
             if (position.width === snapped.width && position.height === snapped.height) this.state.snapGuides = snapped.guides
@@ -1048,7 +1062,7 @@ export const OnroadLayoutPage = {
         let next = raw
         if (snapping) {
           const [width, height] = widgetSize(this.profile.widgets[drag.id], this.layout[drag.id])
-          drag.targets ||= snapTargets(this.profile, this.layout, drag.id, id => !this.previewHidden(id))
+          drag.targets ||= this.previewSnapTargets(drag.id)
           // Pushing past an edge parks the widget on it, so snap from where the clamp will leave it.
           const { minX, maxX, minY, maxY } = placementLimits(this.profile, drag.id, this.layout)
           const inside = { x: Math.max(minX, Math.min(maxX, raw.x)), y: Math.max(minY, Math.min(maxY, raw.y)) }
@@ -1113,7 +1127,7 @@ export const OnroadLayoutPage = {
       this.state.notice = "This widget’s colors are reset in your draft. Save to apply them."
     },
     roadPoints(points) {
-      const r = this.profile.bounds
+      const r = this.roadBounds
       return points.map(([x, y]) => (r.x + x * r.width) + ',' + (r.y + y * r.height)).join(' ')
     },
     roadLabel(id) {
@@ -1306,8 +1320,8 @@ export const OnroadLayoutPage = {
                   :d="'M'+roadPoints(line).replace(' ', ' L')"
                   :stroke="state.profile === 'compact' && index < 2 ? (roadStyle.pathEdge || '#00ff40ff') : roadColors.laneLines"
                   opacity=".7" :stroke-width="state.profile === 'compact' ? 2 : 5" />
-                <rect v-if="!projection" :x="state.profile === 'large' ? 1860 : 476" y="0" :width="state.profile === 'large' ? 300 : 60" :height="profile.height" fill="#090c10" />
-                <g v-if="!projection && state.profile === 'large'" aria-hidden="true" pointer-events="none">
+                <rect v-if="!projection && !expandedRoad" :x="state.profile === 'large' ? 1860 : 476" y="0" :width="state.profile === 'large' ? 300 : 60" :height="profile.height" fill="#090c10" />
+                <g v-if="!projection && state.profile === 'large' && !expandedRoad" aria-hidden="true" pointer-events="none">
                   <g v-for="(sample, index) in [{label:'ACCEL',value:'1.08 ft/s²',accent:'#ffffff'}, {label:'STEER DELAY',value:'0.15000',accent:'#3b82f6'}, {label:'FRICTION',value:'0.12000',accent:'#22c55e'}, {label:'LAT ACCEL',value:'2.50000',accent:'#3b82f6'}, {label:'LATERAL %',value:'78.00%',accent:'#ffffff'}, {label:'TORQUE %',value:'42%',accent:'#ffffff'}, {label:'CHESTNUT',value:'',accent:'#ffffff'}]" :key="sample.label" :transform="'translate(1873 ' + (24 + index * 150) + ')'">
                     <rect width="275" height="126" rx="16" fill="#000000" stroke="#ffffff55" stroke-width="2" />
                     <rect x="253" y="4" width="18" height="118" rx="4" :fill="sample.accent" />
@@ -1318,9 +1332,9 @@ export const OnroadLayoutPage = {
                 </template>
                 <rect v-if="!nativeBackdropReady" data-preview-source="scene-border"
                   :x="state.profile === 'compact' ? 4 : profile.bounds.x" :y="state.profile === 'compact' ? 4 : profile.bounds.y"
-                  :width="state.profile === 'compact' ? 468 : profile.bounds.width" :height="state.profile === 'compact' ? 232 : profile.bounds.height"
+                  :width="state.profile === 'compact' ? 468 : roadBounds.width" :height="state.profile === 'compact' ? 232 : profile.bounds.height"
                   :rx="state.profile === 'compact' ? 14 : 61" fill="none" :stroke="sceneBorder" :stroke-width="state.profile === 'compact' ? 8 : 30" />
-                <rect v-if="state.showEditingAids" :x="profile.bounds.x" :y="profile.bounds.y" :width="profile.bounds.width" :height="profile.bounds.height" fill="none" stroke="#8495a855" stroke-width="2" stroke-dasharray="8 8" />
+                <rect v-if="state.showEditingAids" :x="roadBounds.x" :y="roadBounds.y" :width="roadBounds.width" :height="roadBounds.height" fill="none" stroke="#8495a855" stroke-width="2" stroke-dasharray="8 8" />
                 <g v-if="!projection && state.showFavoriteZones && state.showEditingAids" aria-hidden="true" pointer-events="none">
                   <g v-for="zone in profile.inputZones || []" :key="zone.id">
                     <rect :x="zone.x" :y="zone.y" :width="zone.width" :height="zone.height" fill="#b799ff16" stroke="#b799ff88" :stroke-width="state.profile === 'large' ? 3 : 1" stroke-dasharray="5 5" />
@@ -1328,8 +1342,8 @@ export const OnroadLayoutPage = {
                   </g>
                 </g>
                 <g v-for="widget in renderWidgets" :key="widget.id" class="gx-layout__widget" :class="{'is-selected': state.drag?.id === widget.id, 'is-editing': state.showEditingAids && state.inspectorPanel === 'edit' && state.selected === widget.id}"
-                  :transform="'translate(' + layout[widget.id].x + ' ' + layout[widget.id].y + ')'" tabindex="0" role="button"
-                  :aria-label="widget.label + ', x ' + layout[widget.id].x + ', y ' + layout[widget.id].y +
+                  :transform="'translate(' + previewX(widget.id) + ' ' + layout[widget.id].y + ')'" tabindex="0" role="button"
+                  :aria-label="widget.label + ', x ' + previewX(widget.id) + ', y ' + layout[widget.id].y +
                     (widget.frontmost ? '. Arrow keys move; Shift moves ten pixels; required and always frontmost widget.' :
                       widget.required ? '. Arrow keys move; Shift moves ten pixels; required widget.' : '. Arrow keys move; Shift moves ten pixels; Delete removes.')"
                   :aria-pressed="state.selected === widget.id" @focus="state.selected = widget.id" @keydown="onKey(widget.id, $event)"
@@ -1352,7 +1366,7 @@ export const OnroadLayoutPage = {
                 </g>
                 <g v-if="state.showEditingAids && state.snapGuides.length" class="gx-layout__guides" aria-hidden="true" pointer-events="none">
                   <line v-for="guide in state.snapGuides" :key="guide.axis + guide.value" :class="'gx-layout__guide gx-layout__guide--' + guide.kind"
-                    :x1="guide.axis === 'x' ? guide.value : 0" :x2="guide.axis === 'x' ? guide.value : profile.width"
+                    :x1="guide.axis === 'x' ? guide.value + previewShift(state.drag?.id) : 0" :x2="guide.axis === 'x' ? guide.value + previewShift(state.drag?.id) : profile.width"
                     :y1="guide.axis === 'y' ? guide.value : 0" :y2="guide.axis === 'y' ? guide.value : profile.height" vector-effect="non-scaling-stroke" />
                 </g>
                 <rect v-if="state.showEditingAids && selectionBox" class="gx-layout__outline" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height" rx="4" fill="none" stroke="#d4baff" stroke-width="2" vector-effect="non-scaling-stroke" />

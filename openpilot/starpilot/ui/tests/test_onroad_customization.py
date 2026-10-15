@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pyray as rl
 import pytest
 
+from openpilot.starpilot.ui.appearance_preferences import OnroadAppearance
 from openpilot.starpilot.ui.onroad_customization import (
   CLOCK_WIDGET, DEFAULT_WIDGET_ORDER, MAX_BYTES, STOPPED_TIMER_WIDGET, customization_metadata, default_document, offset, read_customization,
   validate_document, decode_document, widget_palette, rgba, widget_size)
@@ -20,7 +21,8 @@ from openpilot.starpilot.ui.presentation import Profile
 
 
 def road(document=None, **changes):
-  return replace(OnroadState(True, True, 15.0, 80.0, SpeedLimitObservation()),
+  return replace(OnroadState(True, True, 15.0, 80.0, SpeedLimitObservation(),
+                            appearance=OnroadAppearance(show_developer_sidebar=True), viewport_width=1860),
                  customization=document or default_document(), **changes)
 
 

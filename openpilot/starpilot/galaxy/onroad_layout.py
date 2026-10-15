@@ -16,6 +16,7 @@ from openpilot.starpilot.galaxy.setting_descriptions import description
 
 # Display preferences edited with the layout but saved in their own params. Groups order the editor.
 DISPLAY_GROUPS = {
+  "DeveloperSidebar": "Big layout",
   "ShowBrakeStatus": "widget", "StockConfidenceBallWidget": "widget",
   "HideLeadMarker": "Lead car (Small layout)", "LeadInfo": "Lead car (Small layout)",
   "CameraView": "Camera (Small layout)", "DriverCamera": "Camera (Small layout)",
@@ -40,7 +41,7 @@ class OnroadLayoutOwner:
     self.parked = parked
 
   def _display_rows(self):
-    rows = AppearanceOwner(self.params, self.parked).snapshot(Profile.COMPACT).rows
+    rows = AppearanceOwner(self.params, self.parked).snapshot(Profile.COMPACT, include_large=True).rows
     order = list(DISPLAY_GROUPS)
     return tuple(sorted((row for row in rows if row.key in DISPLAY_GROUPS), key=lambda row: order.index(row.key)))
 

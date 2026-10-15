@@ -290,6 +290,16 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertFalse(self.gateway.confirm(intent["intent"], self.session, self.generation))
     self.assertEqual(Path(self.params.get_param_path("BlindSpotMetrics")).read_bytes(), b"bad")
 
+  def test_developer_sidebar_uses_the_shared_saved_choice(self):
+    self.context.value = AuthorityContext(False, None, None)
+    for desired in ("Off", "On"):
+      page = self.page("appearance")
+      index, row = next((i, row) for i, row in enumerate(page["rows"]) if row["label"] == "Developer Sidebar")
+      self.assertEqual(row["defaultValue"], "Off")
+      intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=desired)
+      self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
+      self.assertEqual(self.params.get_bool("DeveloperSidebar"), desired == "On")
+
   def test_onroad_visual_choice_rechecks_session_and_vehicle_source(self):
     self.context.value = AuthorityContext(False, None, b"car-a")
     page = self.page("appearance")

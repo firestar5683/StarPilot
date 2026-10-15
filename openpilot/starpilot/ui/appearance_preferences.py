@@ -72,6 +72,7 @@ def read_camera_view(params: Any) -> SavedCameraView:
 
 
 DEFAULTS = {
+  "DeveloperSidebar": False,
   "HideSpeed": False,
   "HideMaxSpeed": False,
   "HideSteeringWheel": False,
@@ -156,6 +157,7 @@ def read_visibility(params: Any, key: str) -> SavedVisibility:
 
 @dataclass(frozen=True)
 class OnroadAppearance:
+  show_developer_sidebar: bool = False
   show_blindspot_border: bool = True
   show_signal_border: bool = False
   show_speed_limit_sign: bool = True
@@ -181,6 +183,7 @@ def onroad_appearance(params: Any) -> OnroadAppearance:
     metric_raw, metric_readable = None, False
   metric = False if metric_readable and metric_raw in (None, b"0") else True if metric_readable and metric_raw == b"1" else None
   return OnroadAppearance(
+    show_developer_sidebar=values["DeveloperSidebar"] is True,
     hide_personality_alerts=values["HidePersonalityAlerts"] is True,
     wheel_pedal_feedback=values["ShowBrakeStatus"] is True or values["PedalsOnUI"] is True,
     show_blindspot_border=values["BlindSpotMetrics"] is True,

@@ -212,7 +212,7 @@ class OnroadState:
   experimental_action_token: str = ""
   drive_frame: int | None = None
   observed_ns: int = 0
-  viewport_width: float = 1860.0
+  viewport_width: float = 2160.0
   developer_metrics: tuple[DeveloperMetric, ...] = ()
 
   @property

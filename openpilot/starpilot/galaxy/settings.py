@@ -553,7 +553,7 @@ class SettingsGateway:
     if page == "developer":
       return self._developer_owner(ctx).snapshot()
     if page == "appearance":
-      return self._appearance_owner(ctx).snapshot(Profile.COMPACT)
+      return self._appearance_owner(ctx).snapshot(Profile.COMPACT, include_large=True)
     if page == "sounds":
       return self._sounds_owner(ctx).snapshot()
     if page == "display":

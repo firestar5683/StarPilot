@@ -1,5 +1,6 @@
 
 from unittest.mock import patch
+from dataclasses import replace
 import io
 import struct
 from types import SimpleNamespace as NS
@@ -15,6 +16,47 @@ import pyray as rl
 
 
 class LayoutPreviewRendererTests(unittest.TestCase):
+  def test_sidebar_choice_expands_native_preview_and_keeps_sprite_crops_in_saved_coordinates(self):
+    document = default_document()
+    with patch('openpilot.starpilot.ui.layout_preview_renderer.rl.is_window_ready', return_value=True), \
+         patch('openpilot.starpilot.ui.layout_preview_renderer._Canvas') as canvas_type:
+      canvas = Mock(profile=Profile.LARGE, viewport=None)
+      canvas_type.return_value = canvas
+      renderer = LayoutPreviewRenderer()
+      for sidebar, width in ((True, 1860), (False, 2160)):
+        payload = {'document': {**document, 'developerSidebar': sidebar}, 'profile': 'large', 'scene': 'engaged'}
+        renderer(payload)
+        state = canvas.render.call_args.args[0]
+        self.assertEqual(state.viewport_width, width)
+        self.assertIs(state.appearance.show_developer_sidebar, sidebar)
+        self.assertEqual(state.customization, document)
+        renderer({**payload, 'art': 'backdrop'})
+        self.assertEqual(canvas.render.call_args.args[0].viewport_width, width)
+        renderer({**payload, 'art': True})
+        self.assertEqual(canvas.render_widget_art.call_args.args[0].viewport_width, width)
+        self.assertEqual(payload['document']['developerSidebar'], sidebar)
+
+  def test_canvas_omits_sample_sidebar_when_hidden(self):
+    from contextlib import ExitStack
+    canvas = _Canvas.__new__(_Canvas)
+    canvas.profile, canvas.viewport, canvas.map = Profile.LARGE, None, None
+    canvas.view = canvas.fonts = canvas.target = Mock()
+    canvas._settle = Mock()
+    state = sample_state('engaged', default_document())
+    state = replace(state, appearance=replace(state.appearance, show_developer_sidebar=True))
+    pixels = rl.ffi.new('unsigned char[]', 2160 * 1080 * 4)
+    with ExitStack() as stack:
+      for name in ('begin_texture_mode', 'clear_background', 'end_texture_mode', 'image_format', 'image_flip_vertical', 'unload_image'):
+        stack.enter_context(patch('openpilot.starpilot.ui.layout_preview_renderer.rl.' + name))
+      stack.enter_context(patch('openpilot.starpilot.ui.layout_preview_renderer.rl.load_image_from_texture', return_value=NS(data=pixels)))
+      stack.enter_context(patch('openpilot.starpilot.ui.layout_preview_renderer._png_rgba', return_value=b'png'))
+      sidebar = stack.enter_context(patch('openpilot.starpilot.ui.layout_preview_renderer.render_sidebar'))
+      canvas.render(state, 'engaged')
+      sidebar.assert_called_once()
+      sidebar.reset_mock()
+      canvas.render(replace(state, viewport_width=2160, appearance=replace(state.appearance, show_developer_sidebar=False)), 'engaged')
+      sidebar.assert_not_called()
+
   def test_native_and_projection_previews_supply_timer_sample(self):
     from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport
     from openpilot.starpilot.ui.layout_preview_transport import SCENES

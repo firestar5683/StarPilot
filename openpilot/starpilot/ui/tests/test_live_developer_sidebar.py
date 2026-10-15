@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace as NS
 from unittest.mock import Mock, patch
 
@@ -85,12 +86,14 @@ class TestLiveDeveloperSidebar(unittest.TestCase):
     from contextlib import ExitStack
     from pathlib import Path
     from openpilot.starpilot.ui.onroad import OnroadView
+    from openpilot.starpilot.ui.appearance_preferences import OnroadAppearance
     from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
     from openpilot.starpilot.ui.presentation import Profile
 
     fonts = Mock(profile=Profile.LARGE)
     fonts.measure.return_value = NS(width=100, height=30)
     state = OnroadState(False, False, None, None, SpeedLimitObservation(), viewport_width=1560,
+                        appearance=OnroadAppearance(show_developer_sidebar=True),
                         developer_metrics=self.observe(DeveloperMetrics()))
     with ExitStack() as stack:
       for name in ('draw_rectangle_rec', 'draw_rectangle_gradient_v', 'draw_rectangle_lines_ex',
@@ -108,7 +111,38 @@ class TestLiveDeveloperSidebar(unittest.TestCase):
       view._large(state)
       self.assertEqual(rail.call_args.args[1].x, 1560)
       self.assertEqual(rail.call_args.args[1].width, 300)
+      for width in (1860, 2160):
+        rail.reset_mock()
+        expanded = replace(state, viewport_width=width, appearance=replace(state.appearance, show_developer_sidebar=False))
+        view._large(expanded)
+        rail.assert_not_called()
+        self.assertEqual(view.current_speed.render.call_args.args[0].width, width - 60)
+        self.assertEqual(view.alert.render.call_args.args[0].width, width - 60)
       rail.reset_mock()
       view.projection_viewport = (1280, 720)
       view._large(state)
       rail.assert_not_called()
+
+  def test_runtime_viewport_follows_sidebar_choice_and_left_menu_without_lag(self):
+    from openpilot.starpilot.ui.tests.test_runtime_layouts import runtime_app
+    from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
+    from openpilot.starpilot.ui.presentation import Profile
+    from openpilot.starpilot.ui.settings_state import Destination, SettingsState
+    from openpilot.starpilot.ui.shell import ShellMode, ShellSnapshot
+
+    session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    session.profile = Profile.LARGE
+    session.selected = Destination.STAR
+    session.compact_y = session.compact_scroll_x = 0
+    session.sidebar_expanded = True
+    state = OnroadState(False, False, None, None, SpeedLimitObservation())
+    session.adapter = NS(ui_state=NS(sm=NS(frame=1)), build=Mock())
+    for page_width, shown, expected in ((2160, True, 1860), (2160, False, 2160),
+                                        (1860, False, 1860), (1860, True, 1560), (2160, True, 1860)):
+      session._onroad_page_width = page_width
+      session._snapshot_cache = None
+      session.adapter.build.return_value = ShellSnapshot(ShellMode.ONROAD, Mock(), SettingsState(),
+        replace(state, appearance=replace(state.appearance, show_developer_sidebar=shown)))
+      snapshot = session.snapshot(ShellMode.ONROAD)
+      self.assertEqual(snapshot.onroad.viewport_width, expected)
+      self.assertIs(session.snapshot(ShellMode.ONROAD), snapshot)

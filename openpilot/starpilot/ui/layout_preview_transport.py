@@ -57,6 +57,16 @@ class _Job:
     self.error: Exception | None = None
 
 
+def validate_preview_document(value: dict) -> dict:
+  if type(value) is not dict:
+    raise ValueError('Invalid preview document')
+  document = value.copy()
+  sidebar = document.pop('developerSidebar', False)
+  if type(sidebar) is not bool:
+    raise ValueError('Invalid preview sidebar choice')
+  return {**validate_document(document), **({'developerSidebar': sidebar} if 'developerSidebar' in value else {})}
+
+
 def _payload(value: object) -> dict:
   if not isinstance(value, dict) or type(value) is not dict or set(value) not in ({'document', 'profile', 'scene'}, {'document', 'profile', 'scene', 'art'}):
     raise PreviewInvalid('Invalid preview request')
@@ -75,7 +85,7 @@ def _payload(value: object) -> dict:
       document = {'layout': validate_layout_for_viewport(source['layout'], (canvas['width'], canvas['height'])),
                   'base': validate_document(source['base'])}
     else:
-      document = validate_document(value['document'])
+      document = validate_preview_document(value['document'])
   except (ValueError, TypeError, OverflowError, RecursionError) as error:
     raise PreviewInvalid('Invalid layout document') from error
   return {'document': document, 'profile': value['profile'], 'scene': value['scene'],

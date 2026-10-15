@@ -23,6 +23,19 @@ def test_widget_art_request_uses_same_validated_document_and_scene():
   assert _payload(without) == without
 
 
+@pytest.mark.parametrize('sidebar', (True, False))
+def test_native_preview_sidebar_choice_is_strict_and_does_not_change_saved_layout(sidebar):
+  document = default_document()
+  payload = {'document': {**document, 'developerSidebar': sidebar}, 'profile': 'large', 'scene': 'engaged'}
+  assert _payload(payload) == payload
+  assert 'developerSidebar' not in document
+  for invalid in (0, 1, 'Off', None, [], {}):
+    with pytest.raises(PreviewInvalid):
+      _payload({**payload, 'document': {**document, 'developerSidebar': invalid}})
+  with pytest.raises(PreviewInvalid):
+    _payload({**payload, 'document': list(document.items())})
+
+
 def test_widget_art_registry_is_shared_with_native_and_projection_metadata():
   from openpilot.starpilot.system.android_auto.projection_layout import layout_metadata_for_viewport
   metadata = customization_metadata()['profiles']
@@ -100,7 +113,9 @@ def test_scene_switches_settle_cem_geometry_independently_of_previous_scene():
 
 
 @pytest.mark.parametrize('viewport', (None, (2880, 1080)))
-def test_large_wheel_art_is_drawn_inside_its_crop_with_or_without_sidebar(monkeypatch, viewport):
+@pytest.mark.parametrize('sidebar', (True, False))
+def test_large_wheel_art_is_drawn_inside_its_crop_with_or_without_sidebar(monkeypatch, viewport, sidebar):
+  from dataclasses import replace
   from pathlib import Path
   from types import SimpleNamespace as NS
   from unittest.mock import Mock
@@ -136,7 +151,8 @@ def test_large_wheel_art_is_drawn_inside_its_crop_with_or_without_sidebar(monkey
   pixels = rl.ffi.new('unsigned char[]', 192 * 192 * 4)
   monkeypatch.setattr(rl, 'load_image_from_texture', Mock(return_value=NS(data=pixels)))
   monkeypatch.setattr(renderer, '_png_rgba', Mock(return_value=b'png'))
-  canvas.render_widget_art(renderer.sample_state('braking', document), positions)
+  state = renderer.sample_state('braking', document)
+  canvas.render_widget_art(replace(state, appearance=replace(state.appearance, show_developer_sidebar=sidebar)), positions)
   drawn = rl.draw_texture_pro.call_args.args[2]
   crop = rl.image_crop.call_args.args[1]
   assert crop.x <= drawn.x < drawn.x + drawn.width <= crop.x + crop.width

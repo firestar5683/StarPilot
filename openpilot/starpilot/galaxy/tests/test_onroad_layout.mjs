@@ -3,7 +3,7 @@ import * as documentHelpers from "../web/js/onroad-layout-document.js"
 import * as layoutModule from "../web/js/onroad-layout.js"
 import { readFileSync } from "node:fs"
 import { LayoutWidgetPreview, OnroadLayoutFeed, OnroadLayoutPage, validSnapshot, validDocument, clampPlacement, previewPoint, withAlpha, widgetPalette,
-  withDisplay, layoutDocument } from "../web/js/onroad-layout.js"
+  withDisplay, layoutDocument, previewDocument } from "../web/js/onroad-layout.js"
 import { SettingsPage, SETTINGS_SECTIONS } from "../web/js/settings.js"
 import { loadCatalog } from "../web/js/startup.js"
 
@@ -59,7 +59,7 @@ export function snapshot() {
 }
 
 // The editor keeps its public API while sharing the pure document helpers.
-for (const name of ["layoutDocument", "withDisplay", "orderedWidgetIds", "widgetPalette", "withAlpha", "widgetSize", "placementLimits", "clampBox", "clampPlacement", "overlapsReserved", "previewPoint", "validDocument", "validSnapshot"])
+for (const name of ["layoutDocument", "previewDocument", "withDisplay", "orderedWidgetIds", "widgetPalette", "withAlpha", "widgetSize", "placementLimits", "clampBox", "clampPlacement", "overlapsReserved", "previewPoint", "validDocument", "validSnapshot"])
   assert.equal(layoutModule[name], documentHelpers[name], name)
 
 const data = snapshot()
@@ -139,7 +139,10 @@ function editor() {
   vm.backdropFeed.start = () => { vm.backdropFeed.active = true; backdropCalls.push("start") }
   vm.backdropFeed.update = (...args) => backdropCalls.push(["update", ...args])
   vm.backdropFeed.stop = () => { vm.backdropFeed.active = false; backdropCalls.push("stop") }
-  vm.state.data = snapshot(); vm.state.data.supportedProfiles = ['large', 'compact']; vm.state.draft = copy(vm.state.data.document); vm.state.status = "ready"; vm.state.selected = "current_speed"
+  vm.state.data = snapshot(); vm.state.data.supportedProfiles = ['large', 'compact']
+  // These geometry fixtures represent a previously saved On choice.
+  vm.state.data.document.display = vm.state.data.defaults.display = { DeveloperSidebar: "On" }
+  vm.state.draft = copy(vm.state.data.document); vm.state.status = "ready"; vm.state.selected = "current_speed"
   const publish = vm.feed.publish
   vm.feed = { load: () => calls.push("load"), save: (document) => calls.push(copy(document)) }
   const event = (x, y, pointerId = 1) => ({ clientX: x, clientY: y, pointerId, button: 0, currentTarget: { setPointerCapture() { throw new Error("Capture must belong to the stable preview") } }, preventDefault() {} })
@@ -1004,18 +1007,20 @@ console.log('Widget layer order: movement, selection, profile isolation, validat
 
 // Display preferences travel beside the layout and join the draft.
 const displayRows = [
+  { key: "DeveloperSidebar", label: "Developer Sidebar", group: "Big layout", choices: ["Off", "On"], available: true, reason: "", requires: "" },
   { key: "ShowBrakeStatus", label: "Wheel brake and acceleration colors", group: "widget", choices: ["Off", "On"], available: true, reason: "", requires: "" },
   { key: "HideLeadMarker", label: "Lead Indicator", group: "Lead car", choices: ["Off", "On"], available: true, reason: "", requires: "" },
   { key: "LeadInfo", label: "Lead Info", group: "Lead car", choices: ["Off", "Distance", "Speed"], available: true, reason: "", requires: "HideLeadMarker" },
   { key: "SignalMetrics", label: "C4 amber signal border", group: "Alerts and borders", choices: ["Off", "On"], available: true, reason: "", requires: "" },
 ]
 const withDisplayData = () => ({ ...snapshot(), display: { rows: copy(displayRows),
-  values: { ShowBrakeStatus: "Off", HideLeadMarker: "Off", LeadInfo: "Off", SignalMetrics: "Off" },
-  defaults: { ShowBrakeStatus: "Off", HideLeadMarker: "Off", LeadInfo: "Off", SignalMetrics: "Off" } } })
+  values: { DeveloperSidebar: "On", ShowBrakeStatus: "Off", HideLeadMarker: "Off", LeadInfo: "Off", SignalMetrics: "Off" },
+  defaults: { DeveloperSidebar: "Off", ShowBrakeStatus: "Off", HideLeadMarker: "Off", LeadInfo: "Off", SignalMetrics: "Off" } } })
 const merged = withDisplay(withDisplayData())
 assert.equal(validSnapshot(merged), true)
-assert.deepEqual(merged.document.display, merged.defaults.display)
-assert.equal(merged.display.length, 4)
+assert.deepEqual(merged.document.display, { ...merged.defaults.display, DeveloperSidebar: "On" })
+assert.equal(previewDocument(snapshot().document).developerSidebar, false)
+assert.equal(merged.display.length, 5)
 assert.deepEqual(layoutDocument(merged.document), snapshot().document)
 assert.equal(validDocument({ ...merged.document, display: { SignalMetrics: true } }, merged.metadata), false)
 assert.equal(validDocument({ ...merged.document, showMaxSpeed: "no" }, merged.metadata), false)
@@ -1023,7 +1028,43 @@ assert.equal(validDocument({ ...merged.document, showMaxSpeed: "no" }, merged.me
 const display = editor()
 display.vm.state.data = merged; display.vm.state.draft = copy(merged.document)
 assert.deepEqual(display.vm.displayGroups.map(group => [group.name, group.rows.map(row => row.key)]),
-  [["Lead car", ["HideLeadMarker", "LeadInfo"]], ["Alerts and borders", ["SignalMetrics"]]])
+  [["Big layout", ["DeveloperSidebar"]], ["Lead car", ["HideLeadMarker", "LeadInfo"]], ["Alerts and borders", ["SignalMetrics"]]])
+display.vm.setDisplay("DeveloperSidebar", "Off")
+assert.equal(display.vm.displaySettingRow(display.vm.displayRow("DeveloperSidebar")).value, "Off")
+assert.equal(display.vm.dirty, true)
+assert.equal(previewDocument(display.vm.state.draft).developerSidebar, false)
+assert.equal(display.backdropCalls.at(-1)[1].developerSidebar, false, "the draft choice reaches the native backdrop")
+assert.deepEqual(layoutDocument(display.vm.state.draft), snapshot().document, "preview changes never rewrite widget positions")
+assert.equal(display.vm.roadBounds.width, 2100)
+assert.equal(display.vm.previewX("steering_wheel"), 1888)
+assert.equal(display.vm.previewX("current_speed"), 790)
+assert.equal(display.vm.previewX("cruise_limits"), 88)
+assert.ok(display.vm.previewSnapTargets("steering_wheel").some(target =>
+  target.axis === "x" && target.label === "Current speed" && target.line === "center" && target.value === 780))
+const wheelPoint = x => ({ ...display.event(100 + x / 2, 150), pointerType: "mouse", altKey: true })
+display.vm.startDrag("steering_wheel", wheelPoint(1900))
+display.vm.moveDrag(wheelPoint(1920))
+assert.equal(display.vm.layout.steering_wheel.x, 1608, "dragging saves the movement without adding the runtime anchor offset")
+display.vm.endDrag(wheelPoint(1920))
+display.vm.undo()
+assert.equal(display.vm.previewX("steering_wheel"), 1888)
+display.vm.undo()
+assert.equal(display.vm.displayValue("DeveloperSidebar"), "On")
+assert.equal(display.vm.roadBounds.width, 1800)
+assert.equal(display.vm.previewX("steering_wheel"), 1588)
+assert.equal(previewDocument(display.vm.state.draft).developerSidebar, true)
+const shiftedTray = editor(), shifted = shiftedTray.vm
+shifted.state.data = { ...merged, supportedProfiles: ["large", "compact"] }; shifted.state.draft = copy(merged.document)
+shifted.setDisplay("DeveloperSidebar", "Off")
+shifted.layout.steering_wheel.enabled = false
+const trayPoint = x => ({ ...shiftedTray.event(100 + x / 2, 200), pointerType: "mouse", altKey: true })
+shifted.startDrag("steering_wheel", trayPoint(1900), true)
+shifted.moveDrag(trayPoint(1940))
+assert.equal(shifted.previewX("steering_wheel") + 96, 1940, "a tray drop stays centered under the pointer")
+shifted.endDrag(trayPoint(1940))
+shifted.selectProfile("compact")
+assert.equal(shifted.expandedRoad, false)
+assert.equal(shifted.roadBounds.width, 476)
 const leadInfo = display.vm.displayRow("LeadInfo")
 assert.equal(display.vm.displaySettingRow(leadInfo).reason, "Turn on Lead Indicator first")
 display.vm.setDisplay("LeadInfo", "Distance")

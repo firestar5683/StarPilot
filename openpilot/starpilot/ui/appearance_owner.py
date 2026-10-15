@@ -12,6 +12,7 @@ from openpilot.starpilot.ui.presentation import Profile
 
 # Widget visibility, the stopped timer and Rainbow Road live in the onroad customization document.
 LABELS = {
+  "DeveloperSidebar": "Developer Sidebar",
   "HidePersonalityAlerts": "Hide Personality Alerts",
   "ShowBrakeStatus": "Wheel brake and acceleration colors",
   "DriverCamera": "Driver Camera on Reverse",
@@ -28,12 +29,14 @@ class AppearanceOwner:
     self.params = params
     self.parked = parked
 
-  def snapshot(self, profile: Profile) -> FeatureSettingsState:
+  def snapshot(self, profile: Profile, *, include_large: bool = False) -> FeatureSettingsState:
     parked = self.parked()
     compact_only = ("StockConfidenceBallWidget", "DriverCamera", "HideLeadMarker", "LeadInfo")
     keys = tuple(key for key in DEFAULTS if key not in compact_only and key in LABELS) if profile == Profile.LARGE else \
       ("DriverCamera", "StockConfidenceBallWidget", "HidePersonalityAlerts", "ShowBrakeStatus",
        "HideLeadMarker", "LeadInfo", "SignalMetrics", "BlindSpotMetrics")
+    if profile == Profile.COMPACT and include_large:
+      keys = ("DeveloperSidebar", *keys)
     rows = []
     if profile == Profile.COMPACT:
       saved_camera = read_camera_view(self.params)
