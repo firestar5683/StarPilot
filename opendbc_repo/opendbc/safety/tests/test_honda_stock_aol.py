@@ -144,6 +144,24 @@ class TestHondaStockAol(unittest.TestCase):
           self.assertFalse(self.safety.get_controls_allowed())
           self.assertEqual(self.safety.aol_get_permission_mask(), 1 if self.scoped else 0)
 
+  def test_temporary_eps_during_engagement_keeps_longitudinal(self):
+    # Hard driver override: EPS reports 2/6 while engaged; only lateral may drop.
+    for case in CASES:
+      for eps in (2, 6):
+        with self.subTest(case=case[0], eps=eps):
+          self.configure(case)
+          self.stream()
+          self.normal_engage()
+          self.safety.aol_set_host_request(3)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 3 if self.scoped else 0)
+          self.stream(eps=eps, cruise=1, request=False)
+          self.assertTrue(self.safety.get_controls_allowed())
+          self.assertEqual(self.safety.aol_get_permission_mask(), 2 if self.scoped else 0)
+          self.stream(cruise=1, request=False)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 3 if self.scoped else 0)
+          self.stream(eps=7, cruise=1, request=False)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
   def test_normal_grant_session_loss_before_first_permission_query(self):
     for case in CASES:
       for loss in ("heartbeat", "sources"):

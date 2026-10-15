@@ -94,9 +94,12 @@ static uint8_t honda_stock_aol_request_mask(void) {
 static uint8_t honda_stock_aol_permission_mask(void) {
   const uint8_t request = honda_stock_aol_request_mask();
   uint8_t permission = 0U;
-  if (acc_main_on && honda_stock_aol_drive &&
-      ((honda_stock_aol_eps == 0U) || (honda_stock_aol_eps == 3U) || (honda_stock_aol_eps == 4U))) {
-    if (controls_allowed || honda_stock_aol_token) {
+  // A temporary EPS fault (2/6, e.g. a hard driver override) withdraws lateral only;
+  // longitudinal stays with controls_allowed as in stock openpilot.
+  const bool eps_lateral = (honda_stock_aol_eps == 0U) || (honda_stock_aol_eps == 3U) || (honda_stock_aol_eps == 4U);
+  const bool eps_known = eps_lateral || (honda_stock_aol_eps == 2U) || (honda_stock_aol_eps == 6U);
+  if (acc_main_on && honda_stock_aol_drive && eps_known) {
+    if (eps_lateral && (controls_allowed || honda_stock_aol_token)) {
       permission = request & 1U;
     }
     if (controls_allowed) {
