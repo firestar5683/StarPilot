@@ -33,6 +33,7 @@ class ReplayHTTPTest(unittest.TestCase):
     self.path_override = None
     self.evicted = False
     self.media_ready = True
+    self.replay_state = 'playing'
 
     def replay(payload):
       self.calls.append(payload)
@@ -52,7 +53,7 @@ class ReplayHTTPTest(unittest.TestCase):
         result = rows[0] if sequence == 0 or payload.get('count', 1) == 1 else {'fragments': rows}
         return {'ok': True, 'result': result}
       return {'ok': True, 'result': {'schemaVersion': 1, 'ownerId': OWNER, 'sessionId': SESSION,
-                                    'state': 'playing' if self.media_ready else 'seeking', 'mediaReady': self.media_ready,
+                                    'state': self.replay_state if self.media_ready else 'seeking', 'mediaReady': self.media_ready,
                                     'epoch': 1, 'offroad': True, 'owned': True, 'framePath': '/private/frame'}}
 
     self.server = make_server(port=0, owner=self.access, parked=lambda: True, replay_client=replay, replay_root=self.root)
@@ -136,6 +137,15 @@ class ReplayHTTPTest(unittest.TestCase):
     status, body, _ = self.request(path + '0', cookie=cookie)
     self.assertEqual(status, 503)
     self.assertNotIn(str(self.path_override).encode(), body)
+
+  def test_buffering_keeps_published_media_and_waits_for_missing_fragment(self):
+    self.replay_state = 'buffering'
+    cookie = self.login()
+    path = f'/api/replay/media?sessionId={SESSION}&clientId={CLIENT}&epoch=1&sequence='
+    status, body, _ = self.request(path + '1', cookie=cookie)
+    self.assertEqual(status, 200)
+    self.assertEqual(body, b''.join(f'fragment-{number}'.encode() for number in range(1, 9)))
+    self.assertEqual(self.request(path + '10', cookie=cookie)[0], 202)
 
   def test_logout_during_slow_media_withholds_bytes(self):
     cookie = self.login()

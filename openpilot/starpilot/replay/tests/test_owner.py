@@ -373,6 +373,28 @@ def test_strict_revision_numbers_and_request_identity(owner):
     value.dispatch(dict(control(value, 'pause', 'paused', False, '7' * 32), expectedRevision=accepted['revision'] - 1))
 
 
+def test_accepted_seek_cannot_restore_media_from_unacknowledged_worker_status(owner, tmp_path):
+  value, _, _, _ = owner
+  value.client_id = CLIENT
+  value.status.update(sessionId='c' * 32, target='web', state='playing', revision=1, epoch=1, end=120.,
+                      frameReady=True, mediaReady=True)
+  published = {**value.status, 'event': 'status', 'error': None, 'lastRequestId': None}
+  command = control(value, 'seek', 'position', 30.)
+  accepted = value.dispatch(command)
+  assert accepted['state'] == 'seeking' and not accepted['mediaReady']
+  for status in (published, {**published, 'epoch': 2, 'state': 'buffering', 'frameReady': False, 'mediaReady': False}):
+    value._observe(status, tmp_path)
+    assert value.status['state'] == 'seeking'
+    assert not value.status['frameReady'] and not value.status['mediaReady']
+    assert value.pending == command['requestId']
+    with pytest.raises(Rejected, match='epoch changed'):
+      value.dispatch({'op': 'media', 'sessionId': accepted['sessionId'], 'clientId': CLIENT,
+                      'epoch': value.status['epoch'], 'sequence': 0})
+  value._observe({**published, 'epoch': 2, 'position': 30., 'lastRequestId': command['requestId']}, tmp_path)
+  assert value.status['state'] == 'playing' and value.status['mediaReady'] and value.status['frameReady']
+  assert value.pending is None
+
+
 @pytest.mark.parametrize('ranges', [None, [[0]], [[0, True]], [[0, float('nan')]], [[20, 10]],
                                    [[0, 101]], [[0, 20], [10, 30]]])
 def test_worker_seek_ranges_reject_malformed_or_overlapping_bounds(owner, tmp_path, ranges):

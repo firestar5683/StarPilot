@@ -176,7 +176,7 @@ def test_engine_starts_before_idle_renderer_placement_and_closes_if_renderer_fai
   engine.close.assert_called_once()
 
 
-def test_published_readiness_survives_delivery_jitter_but_expires_and_rejects_old_epochs(tmp_path, monkeypatch):
+def test_published_readiness_survives_buffering_but_rejects_seeks_and_old_epochs(tmp_path, monkeypatch):
   session = tmp_path / ('a' * 32)
   session.mkdir(mode=0o700)
   for key in ('STARPILOT_PROJECTION_READ_ONLY', 'BIG', 'SCALE'):
@@ -190,7 +190,7 @@ def test_published_readiness_survives_delivery_jitter_but_expires_and_rejects_ol
   monkeypatch.setattr('openpilot.starpilot.replay.catalog.ReplayCatalog', lambda path: catalog)
   publisher = Mock()
   monkeypatch.setattr(render, 'ReplayFramePublisher', lambda *args: publisher)
-  times, step = (1, 1.01, 1.11, 1.61, 10, 10.2, 10.4), [0]
+  times, step = (1, 1.01, 1.11, 1.31, 1.61, 10, 10.2, 10.4, 10.6, 10.8), [0]
   monkeypatch.setattr(render.time, 'monotonic', lambda: times[step[0]])
   monkeypatch.setattr(render.time, 'monotonic_ns', lambda: round(times[step[0]] * 1e9))
   engine = Mock(error=None, status={'state': 'playing', 'paused': False, 'epoch': 1, 'position': 0,
@@ -204,7 +204,8 @@ def test_published_readiness_survives_delivery_jitter_but_expires_and_rejects_ol
   core.ui.replay_needs_reprime = False
   available = dict.fromkeys(('modelV2', 'extrinsicsCalibration', 'longitudinalPlan'), True)
   core.ui.sm = SimpleNamespace(seen=available, valid=available, alive=available)
-  core.update.side_effect = lambda: SimpleNamespace(valid=step[0] != 6, epoch=engine.status['epoch'], now_ns=100, boot_ns=100)
+  core.update.side_effect = lambda: None if step[0] == 7 else SimpleNamespace(
+    valid=step[0] not in (3, 6, 8), epoch=2 if step[0] == 6 else engine.status['epoch'], now_ns=100, boot_ns=100)
   core.finish.side_effect = lambda: nullcontext((b'pixels', (1, 0, 1_010_000_000)) if step[0] == 2 else None)
   core._primary_matches.return_value = core._optional_placeholder_ready.return_value = False
   attempts = []
@@ -218,17 +219,20 @@ def test_published_readiness_survives_delivery_jitter_but_expires_and_rejects_ol
       engine.error = 'test complete'
       return
     step[0] += 1
-    if step[0] == 4:
-      engine.status.update(paused=True, state='paused')
     if step[0] == 5:
-      engine.status['epoch'] = 2
+      engine.status.update(paused=True, state='paused')
+    if step[0] == 8:
+      engine.status['state'] = 'seeking'
+    if step[0] == 9:
+      engine.status.update(epoch=2, state='paused')
   monkeypatch.setattr(render.time, 'sleep', next_loop)
   states = []
   with pytest.raises(RuntimeError, match='test complete'):
     render.run(session, 'recorded-route', tmp_path, 'native', 'large', lambda value: states.append(value))
   assert attempts[:2] == [1, 1.01]  # A failed draw retries before the 50 ms frame interval.
   assert [(value['state'], value['frameReady']) for value in states] == [
-    ('preparing', False), ('playing', True), ('buffering', False), ('paused', True), ('seeking', False), ('seeking', False)]
+    ('preparing', False), ('playing', True), ('buffering', True), ('buffering', True), ('paused', True),
+    ('seeking', False), ('seeking', False), ('seeking', False), ('seeking', False)]
   publisher.publish.assert_called_once_with(b'pixels', epoch=1, position=0, captured_ns=1_010_000_000)
 
 
@@ -532,7 +536,7 @@ def test_web_delivery_times_packets_and_flushes_pause_end_and_stall(tmp_path, mo
   core.readback.pending = core.ui.replay_needs_reprime = False
   available = dict.fromkeys(('modelV2', 'extrinsicsCalibration', 'longitudinalPlan'), True)
   core.ui.sm = SimpleNamespace(seen=available, valid=available, alive=available)
-  core.update.side_effect = lambda: SimpleNamespace(valid=True, epoch=engine.status['epoch'], now_ns=100, boot_ns=100)
+  core.update.side_effect = lambda: SimpleNamespace(valid=step[0] != 4, epoch=engine.status['epoch'], now_ns=100, boot_ns=100)
   delivered = {0, 1, 2, 5, 6, 7, 9, 11, 12}
   core.finish.side_effect = lambda: nullcontext((b'pixels', (engine.status['epoch'], 0, round(times[step[0]] * 1e9)))
                                                if step[0] in delivered else None)
@@ -571,6 +575,9 @@ def test_web_delivery_times_packets_and_flushes_pause_end_and_stall(tmp_path, mo
   assert [(call.kwargs['pts_us'], call.kwargs['duration_us']) for call in muxes[1].frame.call_args_list] == [
     (0, 50000), (50000, 50000), (100000, 60000), (160000, 50000)]
   assert states[0]['mediaReady'] is False
+  buffering = [state for state in states if state['state'] == 'buffering']
+  assert len(buffering) == 2  # An invalid clock and a stale publication do not invalidate existing media.
+  assert all(state['frameReady'] and state['mediaReady'] and state['media'] for state in buffering)
   assert any(state['epoch'] == 2 and state['state'] == 'paused' and state['mediaReady'] for state in states)
   assert states[-1]['state'] == 'ended' and states[-1]['mediaReady']
   for mux in muxes:

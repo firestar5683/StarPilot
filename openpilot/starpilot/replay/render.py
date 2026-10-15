@@ -626,6 +626,7 @@ def run(session_dir: Path, route_id: str, data_dir: Path, target: str, profile: 
     last_emit = last_draw = 0.0
     published_at = 0.0
     published_epoch = 0
+    clock_epoch = 0
     from openpilot.starpilot.replay.media import FrameTimeline
     timeline = FrameTimeline()
     pending_frame = None
@@ -641,6 +642,8 @@ def run(session_dir: Path, route_id: str, data_dir: Path, target: str, profile: 
       if status:
         core.wall_minus_mono_ns = parse_wall_offset(status.get('wallMinusMonoNs'))
       sample = core.update()
+      if sample is not None and sample.epoch is not None:
+        clock_epoch = max(clock_epoch, sample.epoch)
       now = time.monotonic()
       valid = bool(status and sample is not None and sample.valid and sample.now_ns is not None and sample.epoch == status.get('epoch'))
       ready_frames = []
@@ -705,11 +708,14 @@ def run(session_dir: Path, route_id: str, data_dir: Path, target: str, profile: 
           # Keep the frame cadence after delivery jitter, without accumulating a catch-up queue.
           last_draw = max(last_draw + interval, now - interval)
       if status and now - last_emit >= .1:
-        # Readiness describes the validated published frame, not the next camera/message pair arriving separately.
-        ready = published_epoch == status.get('epoch') and valid and (status['paused'] or now - published_at <= .5)
+        # A production stall does not invalidate already published media in the same epoch.
+        ready = bool(published_epoch and published_epoch == status.get('epoch') and
+                     status['state'] in ('playing', 'paused', 'buffering', 'ended') and
+                     clock_epoch == published_epoch)
+        fresh = ready and valid and (status['paused'] or now - published_at <= .5)
         value = {key: status.get(key) for key in ('event', 'state', 'position', 'start', 'end', 'rate', 'paused', 'epoch', 'lastRequestId', 'error')}
-        if status['state'] not in ('failed', 'ended') and not ready:
-          value['state'] = 'buffering' if published_epoch == status.get('epoch') else 'seeking' if published_epoch else 'preparing'
+        if status['state'] not in ('failed', 'ended') and not fresh:
+          value['state'] = 'buffering' if ready else 'seeking' if published_epoch else 'preparing'
         if engine.seek_request == value.get('lastRequestId') and not ready:
           value['lastRequestId'] = acknowledged
         if 'seekRanges' in status:

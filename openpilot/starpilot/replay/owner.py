@@ -393,6 +393,8 @@ class ReplayOwner:
           type(value.get('rate')) not in (int, float) or value.get('rate') not in (.5, 1, 2) or type(value.get('paused')) is not bool or
           type(value.get('epoch')) is not int or not 0 <= value['epoch'] < 2**63):
         raise Rejected('worker_failed')
+      applied = value.get('lastRequestId')
+      seeking = self.status['state'] == 'seeking' and self.pending is not None and applied != self.pending
       self.status.update({key: value[key] for key in ('state', 'position', 'start', 'end', 'rate', 'paused', 'epoch')})
       self.status['frameReady'] = value.get('frameReady') is True
       self.status['mediaReady'] = value.get('mediaReady') is True
@@ -421,7 +423,9 @@ class ReplayOwner:
           raise Rejected('worker_failed')
         self.status['media'] = dict(media)
         self.status['codec'] = media['codec']
-      applied = value.get('lastRequestId')
+      # Queued pre-seek status cannot restore media before the new frame is acknowledged.
+      if seeking and value['state'] != 'failed':
+        self.status.update(state='seeking', frameReady=False, mediaReady=False)
       if applied == self.pending and applied is not None:
         self.status['lastRequestId'] = applied
         self.pending = None

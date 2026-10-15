@@ -226,6 +226,24 @@ def prepared_playback(request):
   owner.executor.shutdown(wait=True)
 
 
+def test_buffering_preserves_published_native_frame(prepared_playback):
+  owner, backend, frames, _, factory = prepared_playback
+  frame = NS(session_id=owner.own_session, epoch=1, frame_id=1)
+  frames.append(frame)
+  owner.next_frame = 0
+  pump(owner, lambda: owner.frame is frame)
+  generation = owner.reader_generation
+  backend.status.update(state='buffering', paused=False)
+  owner.next_status = 0
+  pump(owner, lambda: owner.status['state'] == 'buffering')
+  assert owner.frame is frame and owner.reader_generation == generation
+  assert factory.call_count == 1
+  backend.status['offroad'] = False
+  owner.next_status = 0
+  pump(owner, lambda: not owner.available)
+  assert owner.frame is None
+
+
 def test_autoplay_waits_one_second_after_first_valid_frame_and_runs_only_once(prepared_playback):
   owner, backend, frames, clock, factory = prepared_playback
   clock.now = 10

@@ -137,6 +137,25 @@ assert.equal(controlClient.source, null, 'accepted seek removes the old video be
 controlClient.close(false)
 console.log('Replay: pending control acknowledgement and immediate seek media retirement passed')
 
+const bufferedVideo = { currentTime: 12.5, paused: false, pause() { this.paused = true },
+  removeAttribute() {}, load() { this.currentTime = 0 } }
+const bufferedClient = new ReplayClient({ clientId, video: () => bufferedVideo, unauthorized() {}, publish() {},
+  later: () => 1, cancelTimer() {}, revokeURL() {} })
+bufferedClient.active = true; bufferedClient.status = status; bufferedClient.ownedSession = sessionId
+bufferedClient.source = new Source()
+bufferedClient.buffer = { buffered: { length: 1, start: () => 12, end: () => 13.3 } }
+const bufferedSource = bufferedClient.source, bufferedGeneration = bufferedClient.mediaGeneration
+bufferedClient.receive({ ...status, revision: 4, state: 'buffering', frameReady: true, mediaReady: true })
+assert.equal(bufferedClient.source, bufferedSource, 'production buffering preserves valid buffered media')
+assert.equal(bufferedClient.mediaGeneration, bufferedGeneration)
+assert.equal(bufferedVideo.currentTime, 12.5)
+assert.equal(bufferedVideo.paused, false)
+bufferedClient.receive({ ...status, revision: 5, state: 'seeking', frameReady: false, mediaReady: false })
+assert.equal(bufferedClient.source, null, 'an accepted same-epoch seek still retires buffered media')
+assert.equal(bufferedVideo.currentTime, 0)
+bufferedClient.close(false)
+console.log('Replay: production buffering preserves playback and an accepted seek still invalidates it passed')
+
 controlClient.active = true; controlClient.startAttempted = true; controlClient.routeId = 'test-route'; controlClient.ownedSession = null
 controlClient.status = { ...status, revision: 5 }
 controlClient.receive({ ...status, revision: 6, routeId: 'test-route', owned: true })
