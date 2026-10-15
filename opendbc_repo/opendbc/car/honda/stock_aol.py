@@ -29,37 +29,48 @@ NIDEC = frozenset((
 BOSCH_WORDS = frozenset((0, 1, 8, 9, 10, 11))
 NIDEC_WORDS = frozenset((0, 4, 260))
 
+# qualified() runs several times per 100 Hz frame in card and selfdrived, so
+# everything that depends only on this module is computed once, and its flag
+# tests use plain ints: IntFlag operators cost microseconds each in Python.
+_DETECTED = int(HondaFlags.BOSCH_EXT_HUD | HondaFlags.BOSCH_ALT_BRAKE | HondaFlags.HAS_BSM | HondaFlags.EPS_MODIFIED | HondaFlags.HYBRID)
+_ALLOWED_FLAGS = {str(car): int(car.config.flags) | _DETECTED for car in CLASSIC_BOSCH | NIDEC | RADARLESS}
+_BOSCH, _BOSCH_RADARLESS, _BOSCH_ALT_BRAKE = int(HondaFlags.BOSCH), int(HondaFlags.BOSCH_RADARLESS), int(HondaFlags.BOSCH_ALT_BRAKE)
+_NIDEC, _NIDEC_ALT_SCM_MESSAGES = int(HondaFlags.NIDEC), int(HondaFlags.NIDEC_ALT_SCM_MESSAGES)
+_UNSUPPORTED = int(HondaFlags.BOSCH_CANFD | HondaFlags.BOSCH_ALT_RADAR)
+_FIXED = structs.CarParams.FingerprintSource.fixed
+_TRANSMISSIONS = (structs.CarParams.TransmissionType.automatic, structs.CarParams.TransmissionType.cvt)
+_HONDA_NIDEC, _HONDA_BOSCH = structs.CarParams.SafetyModel.hondaNidec, structs.CarParams.SafetyModel.hondaBosch
+
 
 def qualified(cp, *, marked_only=False):
   if (cp.brand != 'honda' or cp.passive or cp.notCar or cp.dashcamOnly or len(cp.safetyConfigs) != 1 or
-      cp.fingerprintSource == structs.CarParams.FingerprintSource.fixed or
-      cp.transmissionType not in (structs.CarParams.TransmissionType.automatic, structs.CarParams.TransmissionType.cvt) or
+      cp.fingerprintSource == _FIXED or cp.transmissionType not in _TRANSMISSIONS or
       cp.alternativeExperience not in ((32,) if marked_only else (0, 32))):
     return False
   safety = cp.safetyConfigs[0]
-  identity = next((candidate for candidate in CLASSIC_BOSCH | NIDEC | RADARLESS if candidate == cp.carFingerprint), None)
-  if identity is None:
+  fingerprint = str(cp.carFingerprint)
+  allowed = _ALLOWED_FLAGS.get(fingerprint)
+  if allowed is None:
     return False
-  detected = int(HondaFlags.BOSCH_EXT_HUD | HondaFlags.BOSCH_ALT_BRAKE | HondaFlags.HAS_BSM | HondaFlags.EPS_MODIFIED | HondaFlags.HYBRID)
-  if int(cp.flags) & ~(int(identity.config.flags) | detected):
+  flags = int(cp.flags)
+  if flags & ~allowed:
     return False
-  flags = HondaFlags(cp.flags)
-  if flags & (HondaFlags.BOSCH_CANFD | HondaFlags.BOSCH_ALT_RADAR):
+  if flags & _UNSUPPORTED:
     return False
-  if cp.carFingerprint in NIDEC and flags & HondaFlags.NIDEC and not flags & HondaFlags.BOSCH:
-    expected = 4 if flags & HondaFlags.NIDEC_ALT_SCM_MESSAGES else 0
-    if cp.carFingerprint == CAR.HONDA_ODYSSEY_TWN and cp.alternativeExperience == 32:
+  if fingerprint in NIDEC and flags & _NIDEC and not flags & _BOSCH:
+    expected = 4 if flags & _NIDEC_ALT_SCM_MESSAGES else 0
+    if fingerprint == CAR.HONDA_ODYSSEY_TWN and cp.alternativeExperience == 32:
       expected |= 256
     return (cp.pcmCruise and cp.openpilotLongitudinalControl and
-            safety.safetyModel == structs.CarParams.SafetyModel.hondaNidec and safety.safetyParam == expected)
-  if cp.carFingerprint in CLASSIC_BOSCH and flags & HondaFlags.BOSCH and not flags & HondaFlags.BOSCH_RADARLESS:
-    expected = int(bool(flags & HondaFlags.BOSCH_ALT_BRAKE))
+            safety.safetyModel == _HONDA_NIDEC and safety.safetyParam == expected)
+  if fingerprint in CLASSIC_BOSCH and flags & _BOSCH and not flags & _BOSCH_RADARLESS:
+    expected = int(bool(flags & _BOSCH_ALT_BRAKE))
     return (cp.pcmCruise and not cp.openpilotLongitudinalControl and
-            safety.safetyModel == structs.CarParams.SafetyModel.hondaBosch and safety.safetyParam == expected)
-  if cp.carFingerprint in RADARLESS and flags & HondaFlags.BOSCH_RADARLESS:
-    expected = 8 | int(bool(flags & HondaFlags.BOSCH_ALT_BRAKE)) | (2 if cp.openpilotLongitudinalControl else 0)
+            safety.safetyModel == _HONDA_BOSCH and safety.safetyParam == expected)
+  if fingerprint in RADARLESS and flags & _BOSCH_RADARLESS:
+    expected = 8 | int(bool(flags & _BOSCH_ALT_BRAKE)) | (2 if cp.openpilotLongitudinalControl else 0)
     return (bool(cp.pcmCruise) == (not cp.openpilotLongitudinalControl) and
-            safety.safetyModel == structs.CarParams.SafetyModel.hondaBosch and safety.safetyParam == expected)
+            safety.safetyModel == _HONDA_BOSCH and safety.safetyParam == expected)
   return False
 
 
