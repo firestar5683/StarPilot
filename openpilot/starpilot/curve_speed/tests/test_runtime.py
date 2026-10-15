@@ -1,7 +1,9 @@
 import unittest
 from dataclasses import replace
+from types import SimpleNamespace as NS
 
 from openpilot.starpilot.curve_speed.runtime import DriverEvent, Frame, Runtime
+from openpilot.starpilot.curve_speed.status import StatusPublisher, observation
 from openpilot.starpilot.curve_speed.target import CurveProfile
 
 
@@ -83,6 +85,58 @@ class TestCurveRuntime(unittest.TestCase):
     self.assertIsNone(rt.step(frame(3, model_ns=BASE + 500_000_000)).ceiling_mps)
     self.assertIsNotNone(rt.step(frame(4)).ceiling_mps)
     self.assertIsNotNone(rt.step(frame(20)).ceiling_mps)  # discontinuity resets filter, then fresh frame can rearm
+
+  def test_isolated_stale_frame_holds_target_without_ceiling(self):
+    rt = Runtime(enabled=True)
+    arm_selected(rt)
+    held = rt.filter.target
+    stale = frame(27, inputs_fresh=False)
+    self.assertIsNone(rt.step(stale).ceiling_mps)
+    rt.confirm_applied(stale.now_ns, applied=False)
+    self.assertTrue(rt.was_controlling)
+    self.assertTrue(rt.glow)
+    self.assertEqual(rt.filter.target, held)
+    resumed = rt.step(frame(28)).ceiling_mps
+    assert resumed is not None
+    self.assertLessEqual(resumed, held)
+
+  def test_stale_hold_publishes_valid_glowing_status(self):
+    rt = Runtime(enabled=True)
+    arm_selected(rt)
+    stale = frame(27, inputs_fresh=False)
+    result = rt.step(stale)
+    rt.confirm_applied(stale.now_ns, applied=False)
+    planner = NS(last_curve_ceiling_applied=False, last_curve_ceiling_status='absent')
+    event = StatusPublisher().attach(None, NS(runtime=rt), result, planner, now_ns=stale.now_ns,
+                                     model_ns=frame(26).now_ns, persistence_status='idle')
+    status = observation(event.slcState, stale.now_ns)
+    assert status is not None
+    self.assertTrue(status.glow)
+    self.assertFalse(status.controlling)
+
+  def test_stale_hold_expires_after_max_step(self):
+    rt = Runtime(enabled=True)
+    arm_selected(rt)
+    for n in range(27, 31):
+      item = frame(n, inputs_fresh=False)
+      rt.step(item)
+      rt.confirm_applied(item.now_ns, applied=False)
+    self.assertIsNotNone(rt.filter.target)
+    item = frame(31, inputs_fresh=False)
+    rt.step(item)
+    rt.confirm_applied(item.now_ns, applied=False)
+    self.assertIsNone(rt.filter.target)
+    self.assertFalse(rt.glow)
+    self.assertFalse(rt.was_controlling)
+
+  def test_gas_override_during_stale_hold_still_latches(self):
+    rt = Runtime(enabled=True)
+    arm_selected(rt)
+    stale = frame(27, inputs_fresh=False, gas_pressed=True)
+    rt.step(stale)
+    rt.confirm_applied(stale.now_ns, applied=False)
+    self.assertIsNone(rt.step(frame(28, gas_pressed=True)).ceiling_mps)
+    self.assertTrue(rt.override)
 
   def test_invalid_document_never_learns_or_persists(self):
     rt = Runtime({'version': 1, 'buckets': {'nan': {'average': 2.0, 'count': 1}}}, enabled=True)
