@@ -1,4 +1,5 @@
 import { widgetArtMetadata } from "./widget-art.js"
+import { widgetSize } from "./onroad-layout-document.js"
 // hiddenOn: screens where the scene looks exactly like another one. The Small screen has no text for these
 // speed-limit states, so they match Engaged there.
 export const PREVIEW_SCENES = [
@@ -44,7 +45,11 @@ export function sceneHidesWidget(scene, profile, id, layout = {}, widgets = {}) 
   if (id === "speed_limit_actions") return !longitudinal || scene === "slc_unavailable" || scene === "slc_display" ||
     profile === "compact" && scene !== "slc_pending"
   const overlaps = (a, b) => a && b && a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
-  const box = key => layout[key]?.enabled && widgets[key] ? { ...widgets[key], ...layout[key] } : null
+  const box = key => {
+    if (!layout[key]?.enabled || !widgets[key]) return null
+    const [width, height] = widgetSize(widgets[key], layout[key])
+    return { ...widgets[key], ...layout[key], width, height }
+  }
   if (profile === "compact" && id === "driver_monitor" && longitudinal) return !!overlaps(box(id), box("max_speed"))
   if (profile === "compact" && id === "speed_limit") {
     if (scene === "slc_unavailable") return true

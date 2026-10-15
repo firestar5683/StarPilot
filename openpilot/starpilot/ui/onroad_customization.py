@@ -19,6 +19,8 @@ PALETTE = {"cardFill": "#000000A6", "cardBorder": "#C4CDD0B4", "text": "#FFFFFFF
 ROAD_COLORS = {"path": "#30FF9CFF", "pathEdge": "#00FF40FF", "laneLines": "#FFFFFFFF"}
 PATH_MODES = ("default", "color", "rainbow", "acceleration")
 WHEEL_SIZES = {"large": (144, 192, 240), "compact": (40, 50, 70)}
+DM_SIZES = {"large": (64, 128, 192), "compact": (40, 60, 90)}
+WIDGET_SIZES = {"steering_wheel": WHEEL_SIZES, "driver_monitor": DM_SIZES}
 
 
 class Bounds(TypedDict):
@@ -32,6 +34,7 @@ class WidgetPlacement(TypedDict):
   x: float
   y: float
   enabled: bool
+  size: NotRequired[int]
 
 
 class Widget(TypedDict):
@@ -77,7 +80,7 @@ PROFILES: dict[str, LayoutProfile] = {
               "cruise_limits": _widget("Cruise and speed limit", "cruise_limits", WIDTH, CARD_HEIGHT, 88, 75),
               "speed_limit_actions": _widget("Speed limit actions", "speed_limit_actions", WIDTH, ACTION_HEIGHT, ACTION_X, ACTION_Y),
               "steering_wheel": _widget("Steering wheel", "steering_wheel", 192, 192, 1588, 75),
-              "driver_monitor": _widget("Driver monitoring", "driver_monitor", 192, 192, 88, 808)}},
+              "driver_monitor": _widget("Driver monitoring", "driver_monitor", 128, 128, 120, 840)}},
   "compact": {"label": "Small UI", "width": 536, "height": 240,
               "bounds": {"x": 0, "y": 0, "width": 476, "height": 240},
               "protectedWidget": "speed_limit_actions",
@@ -91,6 +94,9 @@ PROFILES: dict[str, LayoutProfile] = {
 
 # Coordinates remain anchored at the buttons, preserving saved v4 placements.
 PROFILES["compact"]["widgets"]["speed_limit_actions"]["visualInsetTop"] = 32
+
+for profile, sizes in DM_SIZES.items():
+  PROFILES[profile]['widgets']['driver_monitor']['default']['size'] = sizes[1]
 
 LEGACY_WIDGETS = {"large": {"current_speed", "cruise_limits", "steering_wheel"},
                   "compact": {"max_speed", "speed_limit", "steering_wheel"}}
@@ -226,8 +232,10 @@ def customization_metadata():
   for name, profile in profiles.items():
     for key, widget in profile["widgets"].items():
       widget["colors"] = dict(WIDGET_COLORS[name].get(key, {}))
-    profile["widgets"]["steering_wheel"]["resizable"] = {
-      "min": WHEEL_SIZES[name][0], "default": WHEEL_SIZES[name][1], "max": WHEEL_SIZES[name][2]}
+    for key, sizes in WIDGET_SIZES.items():
+      minimum, default, maximum = sizes[name]
+      profile["widgets"][key]["resizable"] = {"min": minimum, "default": default, "max": maximum}
+      profile["widgets"][key]["default"]["size"] = default
   for profile, data in profiles.items():
     data["widgetOrder"] = list(DEFAULT_WIDGET_ORDER[profile])
     data["runtimePreviewWidgets"] = list(RUNTIME_PREVIEW_WIDGETS[profile])
@@ -241,7 +249,7 @@ def customization_metadata():
 def default_document():
   return {"version": 7, "clock24Hour": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
           "widgetColors": {profile: {} for profile in PROFILES}, "layouts": {
-    profile: {key: {**widget["default"], **({"size": WHEEL_SIZES[profile][1]} if key == "steering_wheel" else {})}
+    profile: {key: {**widget["default"], **({"size": WIDGET_SIZES[key][profile][1]} if key in WIDGET_SIZES else {})}
               for key, widget in data["widgets"].items()}
     for profile, data in PROFILES.items()}}
 
@@ -348,6 +356,14 @@ def validate_document(value, *, _legacy_geometry=False):
   layouts = copy.deepcopy(layouts)
   for profile, data in PROFILES.items():
     if type(layouts[profile]) is dict:
+      monitor = layouts[profile].get('driver_monitor')
+      if type(monitor) is dict and 'size' not in monitor:
+        # Tighten the old 192px box around its 128px icon without moving the icon.
+        if profile == 'large':
+          for axis in ('x', 'y'):
+            if type(monitor.get(axis)) in (int, float):
+              monitor[axis] += 32
+        monitor['size'] = DM_SIZES[profile][1]
       missing = set(data["widgets"]) - set(layouts[profile])
       if missing and missing <= OPTIONAL_WIDGETS:
         for optional in missing:
@@ -392,15 +408,16 @@ def validate_document(value, *, _legacy_geometry=False):
     for key, widget in data["widgets"].items():
       placement = layout[key]
       bounds = widget_bounds(profile, key)
-      expected = {"x", "y", "enabled"} | ({"size"} if key == "steering_wheel" and value["version"] >= 4 else set())
+      scalable = key == 'driver_monitor' or key == 'steering_wheel' and value['version'] >= 4
+      expected = {"x", "y", "enabled"} | ({"size"} if scalable else set())
       if type(placement) is not dict or set(placement) != expected or type(placement["enabled"]) is not bool:
         raise ValueError("Invalid widget placement")
       size = WHEEL_SIZES[profile][1]
-      if key == "steering_wheel" and value["version"] >= 4:
+      if scalable:
         size = placement["size"]
-        minimum, _, maximum = WHEEL_SIZES[profile]
+        minimum, _, maximum = WIDGET_SIZES[key][profile]
         if type(size) is not int or not minimum <= size <= maximum:
-          raise ValueError("Invalid steering wheel size")
+          raise ValueError("Invalid widget size")
       # Only a gauge the saved layout actually placed moves; one filled in from defaults is already in the new box.
       saved_layout = value.get("layouts", {}).get(profile) if type(value.get("layouts")) is dict else None
       old_gauge = key == CEM_GAUGE_WIDGET and value["version"] < 7 and type(saved_layout) is dict and key in saved_layout
@@ -410,12 +427,12 @@ def validate_document(value, *, _legacy_geometry=False):
                   {'cruise_limits': (280, 412), 'speed_limit_actions': (280, 96)})
         dimensions = legacy.get(key) if _legacy_geometry and profile == 'large' else None
         dimension = (dimensions[0 if axis == 'x' else 1] if dimensions else
-                     size if key == 'steering_wheel' else widget[extent])
+                     size if key in WIDGET_SIZES else widget[extent])
         if old_gauge:
           dimension = CEM_GAUGE_FRAME[0 if axis == 'x' else 1]
         if type(number) not in (int, float) or not math.isfinite(number) or not bounds[axis] <= number <= bounds[axis] + bounds[extent] - dimension:
           raise ValueError("Widget outside profile bounds")
-      result["layouts"][profile][key] = {**placement, **({"size": size} if key == "steering_wheel" else {})}
+      result["layouts"][profile][key] = {**placement, **({"size": size} if key in WIDGET_SIZES else {})}
       if old_gauge:
         result["layouts"][profile][key].update(x=placement["x"] + CEM_GAUGE_INSET[0], y=placement["y"] + CEM_GAUGE_INSET[1])
     if profile == "compact":
@@ -427,7 +444,7 @@ def validate_document(value, *, _legacy_geometry=False):
         placement = result["layouts"][profile][key]
         if key in OPTIONAL_WIDGETS and not placement["enabled"]:
           continue
-        width, height = ((placement["size"],) * 2 if key == "steering_wheel" else
+        width, height = ((placement["size"],) * 2 if key in WIDGET_SIZES else
                          (widget["width"], widget["height"]))
         if (placement["x"] < actions["x"] + area["width"] and placement["x"] + width > actions["x"] and
             placement["y"] < actions["y"] + area["height"] and placement["y"] + height > actions["y"]):
@@ -486,7 +503,7 @@ def widget_size(document, profile, widget):
   position = placement(document, profile, widget)
   if widget == "cruise_limits":
     return default["width"], default["height"] + sources_extent(document)
-  return (position.get("size", WHEEL_SIZES[str(profile)][1]),) * 2 if widget == "steering_wheel" else (default["width"], default["height"])
+  return (position.get("size", WIDGET_SIZES[widget][str(profile)][1]),) * 2 if widget in WIDGET_SIZES else (default["width"], default["height"])
 
 
 def offset(document, profile, widget):

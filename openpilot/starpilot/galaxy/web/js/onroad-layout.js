@@ -1011,11 +1011,11 @@ export const OnroadLayoutPage = {
       this.selectedPosition.opacity = value
       this.recordChange(before, this.state.profile + ":" + this.state.selected + ":opacity")
     },
-    setWidgetBackground(event) {
+    setWidgetBackground(value) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.backgroundToggle) return
       this.finishColorEdit()
       const before = clone(this.state.draft)
-      this.selectedPosition.background = event.target.checked
+      this.selectedPosition.background = value === 'On'
       this.recordChange(before)
       this.state.notice = ""
     },
@@ -1365,7 +1365,7 @@ export const OnroadLayoutPage = {
                 <p class="gx-note">Widgets snap to the screen edges, the centre and other widgets. Turn snapping off with the magnet button, or hold Option (Alt) while dragging.</p>
               <p class="gx-note">General edit shows samples of all enabled widgets together. Driving scenes hide widgets that would be absent, and the eyes follow the scene. Eye changes stay with that scene; your General edit eyes are remembered.</p>
               <p class="gx-note">The stopped timer appears in General edit and Stopped timer. Turn off editing aids to see the screen without outlines and guides.</p>
-              <p class="gx-note">The steering wheel can be resized in each layout{{ projection ? ', and the map overlay takes any size and opacity' : '' }}. Existing display preferences and driving state still control when widgets appear.</p>
+              <p class="gx-note">The steering wheel and driver monitoring icon can be resized in each layout{{ projection ? ', and the map overlay takes any size and opacity' : '' }}. Existing display preferences and driving state still control when widgets appear.</p>
               <p v-if="!projection" class="gx-note">Small speed-limit signs can overlap confirmation actions. Live confirmations hide an overlapping sign until the decision ends. Select either widget in the list to edit it.</p>
               <p v-if="!projection && state.showFavoriteZones" class="gx-note">Favorite tap areas apply to enabled slots. Speed-limit controls and the steering wheel take priority when the drawer is closed.</p>
               </div>
@@ -1441,8 +1441,8 @@ export const OnroadLayoutPage = {
                   <input id="layout-widget-opacity" class="gx-slider" type="range" step="1" :min="selectedWidget.opacity.min" :max="selectedWidget.opacity.max"
                     :value="selectedPosition.opacity" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @input="opacityInput($event)" @change="finishColorEdit" @blur="finishColorEdit">
                 </template>
-                <label v-if="selectedWidget.backgroundToggle"><input type="checkbox" :checked="selectedPosition.background"
-                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setWidgetBackground"> Show background</label>
+                <GalaxySettingRow v-if="selectedWidget.backgroundToggle" :row="switchRow('Show background', selectedPosition.background === true)" :index="0"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setWidgetBackground(value)" />
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>

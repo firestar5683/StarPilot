@@ -217,7 +217,7 @@ export function validSnapshot(data) {
         widget.opacity.default > widget.opacity.max)) return false
       if (widget.backgroundToggle != null && (!projection || !["nav_home", "nav_work", "bookmark", "car_exit"].includes(widget.kind) ||
         widget.backgroundToggle !== true || !widget.opacity)) return false
-      if (widget.resizable && (widget.kind !== "steering_wheel" || !Number.isInteger(widget.resizable.min) ||
+      if (widget.resizable && (!["steering_wheel", "driver_monitor"].includes(widget.kind) || !Number.isInteger(widget.resizable.min) ||
         !Number.isInteger(widget.resizable.default) || !Number.isInteger(widget.resizable.max) ||
         widget.resizable.default !== widget.width || widget.width !== widget.height ||
         widget.resizable.min < 24 || widget.resizable.max > area.width || widget.resizable.max > area.height ||

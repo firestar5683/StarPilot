@@ -18,6 +18,33 @@ SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
 
 
 class TestProjectionLayout(unittest.TestCase):
+  def test_exit_defaults_and_monitor_scaling_preserve_saved_appearance(self):
+    document = default_layout(SCREEN)
+    metadata = layout_metadata(SCREEN)
+    self.assertEqual(document['widgets'][CAR_EXIT]['opacity'], 75)
+    self.assertIs(document['widgets'][CAR_EXIT]['background'], False)
+    self.assertIs(document['widgets'][CAR_EXIT]['enabled'], True)
+    self.assertEqual(metadata['widgets'][CAR_EXIT]['opacity']['default'], 75)
+    document['widgets'][CAR_EXIT].update(opacity=60, background=True)
+    monitor = document['widgets']['driver_monitor']
+    self.assertEqual(monitor['size'], 128)
+    monitor.update(x=700, y=600)
+    del monitor['size']
+    restored = validate_layout(document, SCREEN)
+    self.assertEqual(restored['widgets']['driver_monitor'], {'x': 732, 'y': 632, 'enabled': True, 'size': 128})
+    self.assertEqual(restored['widgets'][CAR_EXIT], document['widgets'][CAR_EXIT])
+    self.assertEqual(validate_layout(restored, SCREEN), restored)
+    for size in (64, 192):
+      restored['widgets']['driver_monitor']['size'] = size
+      decoded = decode_layout(json.dumps(restored).encode(), SCREEN)
+      projected = projection_customization(decoded, default_document())
+      self.assertEqual(projected['layouts']['large']['driver_monitor']['size'], size)
+      self.assertEqual(placement_size('driver_monitor', metadata['widgets']['driver_monitor'], decoded['widgets']['driver_monitor']), (size, size))
+    for size in (63, 193, True, 128.5):
+      restored['widgets']['driver_monitor']['size'] = size
+      with self.assertRaises(ValueError):
+        validate_layout(restored, SCREEN)
+
   def test_stopped_timer_migrates_and_keeps_independent_placement_and_order(self):
     document = default_layout(SCREEN)
     metadata = layout_metadata(SCREEN)

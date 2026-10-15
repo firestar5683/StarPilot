@@ -6,7 +6,7 @@ from pathlib import Path
 
 from openpilot.starpilot.system.android_auto.identity import DATA_DIR
 from openpilot.starpilot.system.android_auto.display_profile import screen_geometry
-from openpilot.starpilot.ui.onroad_customization import (CEM_GAUGE_WIDGET, CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET, WHEEL_SIZES,
+from openpilot.starpilot.ui.onroad_customization import (CEM_GAUGE_WIDGET, CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET,
                                                          CEM_GAUGE_FRAME, CEM_GAUGE_INSET, SPEED_ALIGNMENTS, customization_metadata, validate_widget_order)
 from openpilot.starpilot.ui.onroad_stopped_timer import timer_size
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
@@ -111,8 +111,9 @@ def layout_metadata_for_viewport(viewport):
                        'note': "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
                        'default': {'x': 30, 'y': height - 30 - exit_h, 'enabled': True}}
   for key in ACTION_WIDGETS:
-    widgets[key].update(opacity={'min': CAR_EXIT_MIN_OPACITY if key == CAR_EXIT else 0, 'max': 100, 'default': 100}, backgroundToggle=True)
-    widgets[key]['default'].update(opacity=100, background=True)
+    opacity = 75 if key == CAR_EXIT else 100
+    widgets[key].update(opacity={'min': CAR_EXIT_MIN_OPACITY if key == CAR_EXIT else 0, 'max': 100, 'default': opacity}, backgroundToggle=True)
+    widgets[key]['default'].update(opacity=opacity, background=key != CAR_EXIT)
   # Background opacity for the cruise and speed-limit card; its text stays solid.
   widgets['cruise_limits'].update(opacity={'min': 0, 'max': 100, 'default': 100})
   widgets['cruise_limits']['default'].update(opacity=100)
@@ -174,8 +175,8 @@ def default_layout_for_viewport(viewport, display=None):
 def placement_size(key, widget, placement):
   if key in DISPLAY_WIDGETS and placement.get('display') == 'icons':
     return FAVORITE_ICON_SIZE, FAVORITE_ICON_SIZE
-  if key == 'steering_wheel':
-    return placement.get('size', 192), placement.get('size', 192)
+  if widget.get('resizable'):
+    return (placement.get('size', widget['resizable']['default']),) * 2
   if key == NAV_MAP:
     return placement['width'], placement['height']
   return widget['width'], widget['height']
@@ -241,7 +242,12 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
       placement.setdefault('background', True)
     if key == 'cruise_limits' and type(placement) is dict:
       placement.setdefault('opacity', 100)
-    fields = ({'x', 'y', 'enabled'} | ({'size'} if key == 'steering_wheel' else set()) |
+    if key == 'driver_monitor' and type(placement) is dict and 'size' not in placement:
+      for axis in ('x', 'y'):
+        if type(placement.get(axis)) in (int, float):
+          placement[axis] += 32
+      placement['size'] = widget['resizable']['default']
+    fields = ({'x', 'y', 'enabled'} | ({'size'} if widget.get('resizable') else set()) |
               ({'display'} if key in DISPLAY_WIDGETS else set()) |
               ({'opacity', 'background'} if key in ACTION_WIDGETS else set()) |
               ({'opacity'} if key == 'cruise_limits' else set()) |
@@ -259,9 +265,10 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
       raise ValueError('Invalid cruise card opacity')
     if key == CAR_EXIT and placement['opacity'] < CAR_EXIT_MIN_OPACITY:
       raise ValueError('Exit to car opacity must be at least 25%')
-    size = placement.get('size', 192)
-    if key == 'steering_wheel' and (type(size) is not int or not WHEEL_SIZES['large'][0] <= size <= WHEEL_SIZES['large'][2]):
-      raise ValueError('Invalid steering wheel size')
+    if widget.get('resizable'):
+      size, limits = placement['size'], widget['resizable']
+      if type(size) is not int or not limits['min'] <= size <= limits['max']:
+        raise ValueError('Invalid widget size')
     if key == NAV_MAP:
       box, opacity = widget['box'], widget['opacity']
       if (type(placement['width']) is not int or not box['minWidth'] <= placement['width'] <= box['maxWidth'] or

@@ -95,6 +95,7 @@ const vm = {
   editable: true, $refs: { preview: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 2880, height: 1080 }),
     setPointerCapture() {}, hasPointerCapture: () => false, releasePointerCapture() {} } },
   finishColorEdit() { this.state.history.group = null },
+  sceneHidden() { return false },
 }
 Object.defineProperties(vm, {
   canUndo: { get: () => vm.state.history.undo.length > 0 },
@@ -182,7 +183,7 @@ for (const [index, key] of ['nav_home', 'nav_work', 'bookmark', 'car_exit'].entr
   vm.finishColorEdit()
   const before = copy(vm.state.draft)
   vm.opacityInput({target: {value: String(25 + index * 10)}})
-  vm.setWidgetBackground({target: {checked: false}})
+  vm.setWidgetBackground('Off')
   assert.equal(vm.layout[key].opacity, 25 + index * 10)
   assert.equal(vm.layout[key].background, false)
   vm.undo()
@@ -206,7 +207,7 @@ for (const [index, key] of ['nav_home', 'nav_work', 'bookmark', 'car_exit'].entr
   }
   for (const blocked of [{editable: false}, {state: {...vm.state, drag: {}}}, {state: {...vm.state, layerDrag: {}}}]) {
     OnroadLayoutPage.methods.opacityInput.call({...vm, ...blocked}, {target: {value: '90'}})
-    OnroadLayoutPage.methods.setWidgetBackground.call({...vm, ...blocked}, {target: {checked: true}})
+    OnroadLayoutPage.methods.setWidgetBackground.call({...vm, ...blocked}, 'On')
     assert.equal(vm.layout[key].opacity, 25 + index * 10)
     assert.equal(vm.layout[key].background, false)
   }

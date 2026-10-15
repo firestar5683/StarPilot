@@ -21,7 +21,7 @@ from openpilot.starpilot.curve_speed.status import CurveObservation
 from openpilot.starpilot.ui.onroad_state import ConditionalLead
 from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind, OnroadAlert, OnroadState, SourceReading, SpeedLimitObservation
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, OnroadAppearance
-from openpilot.starpilot.ui.onroad_dm import monitor_visible
+from openpilot.starpilot.ui.onroad_dm import draw_monitor_art, monitor_bounds, monitor_visible
 from openpilot.starpilot.ui.onroad_stopped_timer import PREVIEW_DURATION_S
 from openpilot.starpilot.ui.layout_preview_sidebar import SIDEBAR_WIDTH, render_sidebar
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory
@@ -181,17 +181,11 @@ class _DriverMonitorArt:
       raise
 
   def render(self, _content: rl.Rectangle, state: OnroadState, *, top_icons: bool = False) -> None:
-    position = placement(state.customization, self.profile, "driver_monitor")
     if not monitor_visible(self.profile, state, fresh=True, onroad=True, top_icons=top_icons):
       return
-    size = 128 if self.profile == Profile.LARGE else 60
-    x = position["x"] + (192 - size) / 2 if self.profile == Profile.LARGE else position["x"]
-    y = position["y"] + (192 - size) / 2 if self.profile == Profile.LARGE else position["y"]
-    self.renderer._rect = rl.Rectangle(x, y, size, size)
-    widget = PROFILES[str(self.profile)]["widgets"]["driver_monitor"]
-    draw_widget_frame(rl.Rectangle(position["x"], position["y"], widget["width"], widget["height"]),
-                      state.customization, self.profile, "driver_monitor")
-    self.renderer._render(self.renderer._rect)
+    bounds = monitor_bounds(state.customization, self.profile, False)
+    draw_widget_frame(bounds, state.customization, self.profile, "driver_monitor")
+    draw_monitor_art(self.renderer, bounds, self.profile)
 
   def close(self) -> None:
     if rl.is_window_ready():

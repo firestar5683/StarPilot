@@ -11,10 +11,13 @@ metadata.width = 2880
 metadata.bounds.width = 2820
 metadata.widgets.current_speed.default.x += 510
 metadata.widgets.steering_wheel.default.x += 1020
+metadata.widgets.driver_monitor.width = metadata.widgets.driver_monitor.height = 128
+metadata.widgets.driver_monitor.default = {x: 120, y: 840, enabled: true, size: 128}
+metadata.widgets.driver_monitor.resizable = {min: 64, default: 128, max: 192}
 metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96, height: 96, colors: {}, required: true, frontmost: true,
-  opacity: { min: 25, max: 100, default: 100 }, backgroundToggle: true,
+  opacity: { min: 25, max: 100, default: 75 }, backgroundToggle: true,
   note: "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
-  default: { x: 30, y: 954, enabled: true, opacity: 100, background: true } }
+  default: { x: 30, y: 954, enabled: true, opacity: 75, background: false } }
 metadata.widgetOrder = [...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
@@ -26,6 +29,16 @@ const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
 const data = editorSnapshot(raw)
 assert.equal(validSnapshot(data), true)
 assert.equal(validDocument(data.document, data.metadata), true)
+assert.equal(data.document.layouts.large.car_exit.opacity, 75)
+assert.equal(data.document.layouts.large.car_exit.background, false)
+const resizedMonitor = copy(data.document)
+resizedMonitor.layouts.large.driver_monitor.size = 192
+assert.equal(validDocument(resizedMonitor, data.metadata), true)
+assert.equal(projectionPayload({document: resizedMonitor}, data.metadata).document.widgets.driver_monitor.size, 192)
+resizedMonitor.layouts.large.driver_monitor.size = 193
+assert.equal(validDocument(resizedMonitor, data.metadata), false)
+assert.match(OnroadLayoutPage.template, /switchRow\('Show background', selectedPosition.background === true\)/)
+assert.doesNotMatch(OnroadLayoutPage.template, /type="checkbox" :checked="selectedPosition.background"/)
 const exitOpacity = copy(data.document)
 exitOpacity.layouts.large.car_exit.opacity = 24
 assert.equal(validDocument(exitOpacity, data.metadata), false)
