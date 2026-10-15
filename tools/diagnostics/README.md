@@ -60,6 +60,52 @@ Focused tests (standard library compatible):
 python -m unittest tools.diagnostics.tests.test_performance
 ```
 
+## Replay compositor trace (20 FPS)
+
+`replay_render.py` is an opt-in wrapper for an existing owner-created replay worker. The normal worker never imports it.
+Keep the existing owner, private session, decoder, encoder and control procedure. In a separately authorized diagnostic
+owner's spawn callback, replace only `-m openpilot.starpilot.replay.render` with
+`-m tools.diagnostics.replay_render --output /absolute/unused-trace.json --`, preserving all existing worker arguments
+and environment. The wrapper refuses invalid private contexts and an existing output file; it does not connect to a
+device, create an owner, spoof parked authority, or start a session on its own. Do not run a private producer beside live replay.
+
+Records stay in a 30,000-event ring until worker shutdown, when one mode-0600 JSON report is written. Overwritten records
+are counted. Stop through the owning session and wait boundedly for owner idle; a successful stop response alone is insufficient.
+Normal SIGTERM cleanup and worker errors flush the report; SIGKILL cannot. There are no pixel copies or per-frame file/console writes.
+
+The report includes source revision/hashes, worker arguments, attempt IDs, clock and camera metadata before/after acquisition,
+early/late rejection reasons, inclusive and exclusive wall/thread-CPU timings, preparation, camera/model, HUD entry points,
+alerts/PiP, conversion, readback, encoding, muxing, publication, sleep and readback-pending observations. Deadline lateness
+mirrors the existing accepted-draw schedule; the initial draw has no previous deadline. Summary distributions cover only the
+retained event window; outcome counters cover the worker lifetime. GC intervals overlap other spans and have no exclusive/CPU measurement.
+The wrapper also accepts the unchanged worker before this patch: absent eligibility/preparation hooks are declared in
+`capabilities`, and its rejected draws remain `unclassified_rejection` rather than invented early/late classifications.
+
+`connect_import` includes connection checks, possible FD exchange/import and texture setup. `primary_acquisition` includes
+receive/synchronization and matching; the camera span also includes its later receive and submission. These are nested
+boundaries, not isolated receive-only or pure GPU timings. `submit_to_observed_ready_ns` includes GPU queueing and polling
+delay. HUD methods not individually wrapped remain in composition's exclusive remainder. Buffer metadata is an observation,
+not an owned pixel snapshot. The wrapper retains no readback pixels beyond the original delivery context.
+
+Use a fresh unchanged baseline and candidate at the same source bundle, scene, rate and profile; record GPU/browser/encoder
+conditions separately. Collect real CPU/load/temperature alongside this trace with the existing performance capture when
+authorized. Compare instrumentation on/off and reverse promising A/B order. Keep picture/decoded-content comparisons separate.
+This trace does not measure native upload/presentation, browser presentation, physical scanout or complete instrumentation overhead.
+
+Local harness checks: `./dev pytest -q tools/diagnostics/tests/test_replay_render.py`.
+
+Replay compatibility checks:
+
+```sh
+./dev pytest -q openpilot/starpilot/replay/tests tools/diagnostics/tests/test_replay_render.py \
+  openpilot/starpilot/ui/tests/test_replay_settings.py openpilot/starpilot/ui/tests/test_camera_display.py \
+  openpilot/starpilot/ui/tests/test_camera_resources.py openpilot/starpilot/ui/tests/test_onroad_alerts.py \
+  openpilot/starpilot/ui/tests/test_onroad_display_holds.py openpilot/selfdrive/ui/tests/test_camera_speed_gates.py \
+  openpilot/starpilot/galaxy/tests/test_replay_http.py
+node openpilot/starpilot/galaxy/tests/test_replay.mjs
+node openpilot/starpilot/galaxy/tests/test_replay_media.mjs
+```
+
 ## Offline longitudinal trace
 
 `longitudinal.py` reads one existing local rlog or qlog segment and prints one JSON object. It never opens a device, starts a publisher, or writes a log. Example: `./dev python -m tools.diagnostics.longitudinal /absolute/path/2-rlog.zst` (the `./dev` wrapper prints its own build progress before the tool's JSON). The report records input and source hashes, limits, message counts, mode transitions, rejected pairs and distributions.

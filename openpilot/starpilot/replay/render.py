@@ -507,13 +507,28 @@ class Compositor:
     self.render_receipts = {}
     self.last_route_frame = None
 
-  def draw(self, epoch: int, position: float, now_ns: int):
+  def _draw_rejection(self, epoch: int):
     sample = self.ui.replay_sample
-    if sample is None or sample.now_ns is None:
+    if sample is None or sample.now_ns is None or not sample.valid:
+      return 'invalid_clock'
+    if sample.epoch != epoch:
+      return 'wrong_epoch'
+    if (epoch, sample.now_ns) == self.last_route_frame:
+      return 'unchanged_clock'
+    # OnroadView skips the camera layer when unavailable, so this draw cannot publish.
+    if not (self._primary_matches() or self._optional_placeholder_ready()):
+      return 'camera_not_ready'
+    return None
+
+  def _prepare(self):
+    for prepare in tuple(self.gui._render_prepare):
+      prepare()
+
+  def draw(self, epoch: int, position: float, now_ns: int):
+    if self._draw_rejection(epoch) is not None:
       return False
+    sample = self.ui.replay_sample
     key = epoch, sample.now_ns
-    if key == self.last_route_frame:
-      return False
     from openpilot.starpilot.system.android_auto import gpu_nv12
     from openpilot.starpilot.ui.shell import ShellMode
     rl = self.rl
@@ -521,8 +536,7 @@ class Compositor:
     self.placement.maintain(now_ns / 1e9)
     snapshot = self.adapter.build(ShellMode.ONROAD)
     self.primary_ready = False
-    for prepare in tuple(self.gui._render_prepare):
-      prepare()
+    self._prepare()
     rl.begin_texture_mode(self.content)
     try:
       rl.clear_background(rl.BLACK)
