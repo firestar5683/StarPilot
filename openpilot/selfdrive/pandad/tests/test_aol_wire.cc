@@ -6,6 +6,9 @@
 #include <string>
 
 static constexpr uint64_t now = 1000000000ULL;
+static constexpr uint64_t GAP_NOW = 91564707308ULL;
+static constexpr uint64_t CARD_NS = 91560387360ULL;
+static constexpr uint64_t AXIS_SOURCE_NS = 91529338245ULL;
 
 int main() {
   const AolSafetyWireFields fields = {1, true, 100, 200, 5, 34, true, false, true, false, "panda", "axis",
@@ -111,5 +114,47 @@ int main() {
   malformed[0] = 0;
   malformed[8] = 0xff; // malformed root pointer
   assert(!aol_armed_intent(kj::arrayPtr(malformed.data(), malformed.size()), now - 10000000ULL, now - 10000000ULL, now));
+
+  // The exact route2f/1 Card packet is 4.32 ms old, but 31.05 ms newer
+  // than the delayed axis source. Only its acknowledged producer can retain
+  // the physical arm. Optional release and all command leases stay unchanged.
+  intent.setSequence(5206);
+  intent.setCarStateLogMonoTime(CARD_NS);
+  intent.setObservedMonoTime(CARD_NS);
+  intent.setValidUntilMonoTime(CARD_NS + 200000000ULL);
+  intent.setLateralArmed(true);
+  intent.setOptionalSetRelease(true);
+  auto retained = [&](const std::string &producer = "card-session", bool optional = false,
+                      uint64_t stamp = CARD_NS, uint64_t source = AXIS_SOURCE_NS, uint64_t clock = GAP_NOW) {
+    auto wire = capnp::messageToFlatArray(intent_builder);
+    return aol_armed_intent(wire.asBytes(), stamp, source, clock, optional, producer);
+  };
+  assert(retained());
+  assert(retained("card-session", false, CARD_NS, AXIS_SOURCE_NS, CARD_NS + 30000000ULL));
+  assert(retained("card-session", false, CARD_NS, CARD_NS - 200000000ULL));
+  assert(!retained(""));
+  assert(!retained("different-card-session"));
+  assert(!retained("card-session", true));
+  assert(!retained("card-session", false, CARD_NS, CARD_NS + 30000001ULL, CARD_NS + 30000001ULL));
+  assert(!retained("card-session", false, CARD_NS, CARD_NS - 200000001ULL));
+  assert(!retained("card-session", false, CARD_NS, AXIS_SOURCE_NS, CARD_NS + 30000001ULL));
+  assert(!retained("card-session", false, CARD_NS + 1U));
+  intent.setSequence(0);
+  assert(!retained());
+  intent.setSequence(5206);
+  intent.setObservedMonoTime(CARD_NS - 1U);
+  assert(!retained());
+  intent.setObservedMonoTime(CARD_NS);
+  intent.setCarStateLogMonoTime(CARD_NS - 1U);
+  assert(!retained());
+  intent.setCarStateLogMonoTime(CARD_NS);
+  intent.setValidUntilMonoTime(GAP_NOW - 1U);
+  assert(!retained());
+  intent.setValidUntilMonoTime(CARD_NS + 200000000ULL);
+  intent.setSettingsQualified(false);
+  assert(!retained());
+  intent.setSettingsQualified(true);
+  intent.setLateralArmed(false);
+  assert(!retained());
   return 0;
 }

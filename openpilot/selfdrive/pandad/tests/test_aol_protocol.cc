@@ -615,6 +615,63 @@ int main() {
   result = run(paused_negotiator, paused_transport, paused);
   assert(result.plan.request_mask == 0U && !result.plan.retain_lateral_arm);
 
+  // Route 78511c37de32c375/0000002f--338c7a2e1f/1: the latest axis
+  // expired 1.19 ms before pandad's tick while a newer Card arm was current.
+  // Expire both commands, retain only the existing physical arm, and require
+  // a new current axis before steering can resume. LONG never resumes here.
+  AolAxisNegotiator gap_negotiator(TEST_REGISTRY);
+  FakeTransport gap_transport;
+  queue(gap_transport, status(), status());
+  result = run(gap_negotiator, gap_transport, axis("gap-session"));
+  assert(result.plan.request_mask == 0U && result.outcome.compatible);
+  queue(gap_transport, status(), status(3U, 3U));
+  result = run(gap_negotiator, gap_transport, axis("gap-session", true, true));
+  assert(result.plan.request_mask == 3U);
+  auto expired_axis = axis("gap-session", true, true);
+  expired_axis.observed_ns = 91533516787ULL;
+  expired_axis.message_ns = expired_axis.observed_ns;
+  expired_axis.valid_until_ns = 91563516787ULL;
+  expired_axis.retain_lateral_arm = true;
+  constexpr uint64_t GAP_NOW = 91564707308ULL;
+  queue(gap_transport, status(3U, 3U), status());
+  result = run(gap_negotiator, gap_transport, expired_axis, GAP_NOW);
+  assert(result.plan.capable && result.plan.request_mask == 0U && result.plan.retain_lateral_arm);
+  for (int refusal = 0; refusal < 9; ++refusal) {
+    auto denied = expired_axis;
+    if (refusal == 0) denied.retain_lateral_arm = false;
+    if (refusal == 1) denied.alive_valid = false;
+    if (refusal == 2) denied.qualified = false;
+    if (refusal == 3) denied.session = "replacement-session";
+    if (refusal == 4) {
+      denied.observed_ns = denied.message_ns = GAP_NOW - AOL_AXIS_MESSAGE_MAX_AGE_NS - 1U;
+      denied.valid_until_ns = denied.observed_ns + 30000000ULL;
+    }
+    if (refusal == 5) {
+      denied.observed_ns = denied.message_ns = GAP_NOW + 1U;
+      denied.valid_until_ns = denied.observed_ns + 30000000ULL;
+    }
+    if (refusal == 6) denied.valid_until_ns = denied.observed_ns - 1U;
+    if (refusal == 7) denied.observed_ns = 0U;
+    if (refusal == 8) denied.message_ns -= 1U;
+    queue(gap_transport, status(), status());
+    result = run(gap_negotiator, gap_transport, denied, GAP_NOW);
+    assert(result.plan.request_mask == 0U && !result.plan.retain_lateral_arm);
+  }
+  auto resumed = axis("gap-session", true, false);
+  resumed.observed_ns = resumed.message_ns = GAP_NOW;
+  resumed.valid_until_ns = GAP_NOW + 30000000ULL;
+  queue(gap_transport, status(), status(1U, 1U));
+  result = run(gap_negotiator, gap_transport, resumed, GAP_NOW);
+  assert(result.plan.request_mask == 1U && (result.plan.request_mask & 2U) == 0U);
+  gap_transport.write_ok = false;
+  gap_transport.replies.push_back(bytes(status(1U, 1U)));
+  result = run(gap_negotiator, gap_transport, expired_axis, GAP_NOW);
+  assert(!result.outcome.compatible);
+  gap_transport.write_ok = true;
+  queue(gap_transport, status(), status());
+  result = run(gap_negotiator, gap_transport, expired_axis, GAP_NOW);
+  assert(result.plan.request_mask == 0U && !result.plan.retain_lateral_arm);
+
   AolAxisNegotiator boot_negotiator(TEST_REGISTRY);
   FakeTransport boot_transport;
   queue(boot_transport, status(), status());

@@ -93,12 +93,19 @@ inline std::vector<uint8_t> encode_aol_safety_wire(const AolSafetyWireFields &fi
 // Card's armed bit keeps a previously authorized session alive while its axis
 // request is zero. It never grants an actuator request or native permission.
 inline bool aol_armed_intent(kj::ArrayPtr<const capnp::byte> bytes, uint64_t message_ns,
-                             uint64_t car_state_ns, uint64_t now_ns, bool optional_release = false) {
+                             uint64_t car_state_ns, uint64_t now_ns, bool optional_release = false,
+                             const std::string &producer_session = {}) {
   constexpr uint64_t MAX_AGE_NS = 30000000ULL;
+  // A newer, current Card packet can preserve its own arm across a delayed
+  // axis publication. Bind it to the Card producer acknowledged by that axis;
+  // the negotiator separately withdraws expired actuator requests.
+  const bool newer_armed_source = !optional_release && !producer_session.empty() &&
+      message_ns >= car_state_ns && message_ns - car_state_ns <= 200000000ULL;
   if (bytes.size() < 16U || bytes.size() > 512U || bytes.size() % 8U != 0U ||
       message_ns == 0U || car_state_ns == 0U || message_ns > now_ns ||
       car_state_ns > now_ns || now_ns - message_ns > MAX_AGE_NS ||
-      (message_ns > car_state_ns ? message_ns - car_state_ns : car_state_ns - message_ns) > MAX_AGE_NS) return false;
+      (!newer_armed_source &&
+       (message_ns > car_state_ns ? message_ns - car_state_ns : car_state_ns - message_ns) > MAX_AGE_NS)) return false;
   uint32_t segments = 0U, words = 0U;
   std::memcpy(&segments, bytes.begin(), sizeof(segments));
   std::memcpy(&words, bytes.begin() + 4U, sizeof(words));
@@ -114,6 +121,9 @@ inline bool aol_armed_intent(kj::ArrayPtr<const capnp::byte> bytes, uint64_t mes
     auto producer = intent.getProducerSessionId();
     return intent.getKind() == 2U && intent.getVersion() == 1U &&
            producer.size() > 0U && producer.size() <= 96U &&
+           (producer_session.empty() || (producer_session.size() == producer.size() &&
+             std::memcmp(producer_session.data(), producer.begin(), producer.size()) == 0)) &&
+           (!newer_armed_source || (intent.getSequence() > 0U && intent.getObservedMonoTime() == message_ns)) &&
            intent.getSettingsQualified() && (optional_release ? intent.getOptionalSetRelease() : intent.getLateralArmed()) &&
            intent.getCarStateLogMonoTime() == message_ns &&
            intent.getObservedMonoTime() <= now_ns &&

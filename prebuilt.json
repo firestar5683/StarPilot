@@ -1,1 +1,4 @@
-{"protected_inventory_sha256": "18baaf450948131eb868e41426d907c2938e0b988afda183ccbf6a40ec6bec3f", "schema_version": 1}
+{
+  "schema_version": 1,
+  "protected_inventory_sha256": "def334baecc644f3e8e90376c38dc246c1285ee03161aa7eaf92f272399ab496"
+}

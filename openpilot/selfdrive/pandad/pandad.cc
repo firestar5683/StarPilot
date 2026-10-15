@@ -520,7 +520,8 @@ void pandad_run(std::vector<Panda *> &pandas) {
         if (is_onroad && sm.allAliveAndValid({"deviceState", "aolIntentWire"})) {
           auto intent_event = sm["aolIntentWire"];
           axis_input.retain_lateral_arm = aol_armed_intent(intent_event.getAolIntentWire(),
-              intent_event.getLogMonoTime(), axis.getSourceCarStateMonoTime(), now_ns);
+              intent_event.getLogMonoTime(), axis.getSourceCarStateMonoTime(), now_ns,
+              false, axis.getIntentProducerSessionId().cStr());
           axis_input.optional_set_release = axis.getOptionalSetRelease() &&
             aol_armed_intent(intent_event.getAolIntentWire(), intent_event.getLogMonoTime(),
                              axis.getSourceCarStateMonoTime(), now_ns, true);

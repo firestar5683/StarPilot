@@ -143,7 +143,16 @@ public:
                 axis.retain_lateral_arm};
       }
     }
-    return {true, 0U};
+    // A short command lease expiring must withdraw both actuator requests.
+    // A fresh Card arm, bound to this already-negotiated session, may still
+    // retain the physical latch within the existing axis-message age limit.
+    // It cannot negotiate a new session or preserve any command permission.
+    const bool retain_arm = !reset_pending_ && axis.alive_valid && axis.qualified &&
+        !session_.empty() && axis.session == session_ && axis.retain_lateral_arm &&
+        axis.observed_ns > 0U && axis.message_ns == axis.observed_ns &&
+        axis.observed_ns <= now_ns && axis.valid_until_ns >= axis.observed_ns &&
+        now_ns - axis.message_ns <= AOL_AXIS_MESSAGE_MAX_AGE_NS;
+    return {true, 0U, retain_arm};
   }
 
   AolOutcome complete(const AolWritePlan &plan, bool write_ok,
