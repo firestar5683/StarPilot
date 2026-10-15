@@ -22,6 +22,7 @@ from openpilot.starpilot.models.catalog import DEFAULT_SMALL, DEFAULT_SMALL_SHA2
 
 EM_AARCH64 = 183
 ELF_FILES = (
+  "opendbc_repo/opendbc/can/_raw_value.so",
   "openpilot/common/libparams_c.so",
   "openpilot/selfdrive/pandad/pandad",
   "openpilot/system/loggerd/loggerd",
