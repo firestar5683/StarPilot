@@ -8,6 +8,7 @@ from openpilot.cereal import log
 from opendbc.car.structs import car
 import openpilot.cereal.messaging as messaging
 from openpilot.common.constants import CV
+from openpilot.common.hardware import HARDWARE
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority, Ratekeeper, set_core_affinity
 from openpilot.common.swaglog import cloudlog
@@ -495,6 +496,8 @@ def main():
   config_realtime_process(4, Priority.CTRL_HIGH)
   controls = Controls()
   set_core_affinity([4, 5])
+  if HARDWARE.get_device_type() == "mici":
+    os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(Priority.CTRL_HIGH - 1))
   controls.run()
 
 
