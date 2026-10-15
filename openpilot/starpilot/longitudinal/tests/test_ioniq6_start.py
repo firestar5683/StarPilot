@@ -14,7 +14,7 @@ from opendbc.car.structs import car
 from openpilot.cereal import messaging
 from openpilot.selfdrive.controls.controlsd import Controls
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl, LongCtrlState
-from openpilot.starpilot.longitudinal.ioniq6_start import (STRONG_SETTLE_FRAMES, StartEvidence, eligible)
+from openpilot.starpilot.longitudinal.ioniq6_start import StartEvidence, eligible
 
 
 def candidate(*, alternate=False):
@@ -69,86 +69,69 @@ class Ioniq6StartTests(unittest.TestCase):
     self.assertGreaterEqual(output, LIMITS[0])
     self.assertLessEqual(output, LIMITS[1])
 
-  def test_35_fresh_strong_frames_after_stop_and_bounded_start(self):
+  def test_first_fresh_strong_frame_after_stop_starts_bounded(self):
     _, tagged = candidate()
     loc = LongControl(tagged)
     cs = car_state()
     loc.update(True, cs, -0.3, True, LIMITS, context=LongitudinalContext(start_evidence=evidence()))
     self.assertEqual(loc.long_control_state, LongCtrlState.stopping)
-    for frame in range(1, STRONG_SETTLE_FRAMES):
-      loc.update(True, cs, 0.8, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(frame)))
-      self.assertNotEqual(loc.long_control_state, LongCtrlState.starting)
-    self.assertEqual(extension_state(loc, 'ioniq6_start').strong_frames, STRONG_SETTLE_FRAMES - 1)
-    output = loc.update(True, cs, 0.8, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(STRONG_SETTLE_FRAMES)))
+    output = loc.update(True, cs, 0.8, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(1)))
     self.assertEqual(loc.long_control_state, LongCtrlState.starting)
     self.assertAlmostEqual(output, 0.8)
-    self.assertLessEqual(output, LIMITS[1])
+    output = loc.update(True, cs, 2.5, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(2)))
+    self.assertEqual(loc.long_control_state, LongCtrlState.starting)
+    self.assertAlmostEqual(output, LIMITS[1])
     loc.update(True, car_state(speed=0.11, standstill=False), 0.8, False, LIMITS,
-               context=LongitudinalContext(start_evidence=evidence(STRONG_SETTLE_FRAMES + 1)))
+               context=LongitudinalContext(start_evidence=evidence(3)))
     self.assertEqual(loc.long_control_state, LongCtrlState.pid)
 
-  def test_weak_unknown_or_pedal_resets_count_without_delaying_native_pid(self):
+  def test_weak_unknown_or_pedal_keeps_native_pid(self):
     _, tagged = candidate()
-    for interruption in ((car_state(), 0.74, evidence(STRONG_SETTLE_FRAMES)),
-                         (car_state(), 0.8, evidence(STRONG_SETTLE_FRAMES, lead_clear=None)),
-                         (car_state(gas=True), 0.8, evidence(STRONG_SETTLE_FRAMES)),
-                         (car_state(brake=True), 0.8, evidence(STRONG_SETTLE_FRAMES)),
-                         (car_state(timeout=True), 0.8, evidence(STRONG_SETTLE_FRAMES)),
-                         (car_state(), 0.8, evidence(STRONG_SETTLE_FRAMES, plan_fresh=False))):
-      loc = LongControl(tagged)
-      loc.update(True, car_state(), -0.2, True, LIMITS, context=LongitudinalContext(start_evidence=evidence()))
-      for frame in range(1, STRONG_SETTLE_FRAMES):
-        loc.update(True, car_state(), 0.8, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(frame)))
+    for interruption in ((car_state(), 0.74, evidence(2)),
+                         (car_state(), 0.8, evidence(2, lead_clear=None)),
+                         (car_state(gas=True), 0.8, evidence(2)),
+                         (car_state(brake=True), 0.8, evidence(2)),
+                         (car_state(timeout=True), 0.8, evidence(2)),
+                         (car_state(), 0.8, evidence(2, plan_fresh=False)),
+                         (car_state(), 0.8, evidence(2, drive_id=2_000_000_000))):
       cs, target, observed = interruption
-      loc.update(True, cs, target, False, LIMITS, context=LongitudinalContext(start_evidence=observed))
-      self.assertEqual(extension_state(loc, 'ioniq6_start').strong_frames, 0)
-      self.assertNotEqual(loc.long_control_state, LongCtrlState.starting)
-      loc.update(True, car_state(standstill=False), 0.8, False, LIMITS,
-                 context=LongitudinalContext(start_evidence=evidence(STRONG_SETTLE_FRAMES + 1, lead_clear=None)))
-      self.assertEqual(loc.long_control_state, LongCtrlState.pid)
+      fresh = LongControl(tagged)
+      fresh.update(True, car_state(), -0.2, True, LIMITS, context=LongitudinalContext(start_evidence=evidence()))
+      fresh.update(True, cs, target, False, LIMITS, context=LongitudinalContext(start_evidence=observed))
+      self.assertNotEqual(fresh.long_control_state, LongCtrlState.starting)
 
-  def test_fresh_lead_and_negative_target_revoke_start(self):
+      started = LongControl(tagged)
+      started.update(True, car_state(), -0.2, True, LIMITS, context=LongitudinalContext(start_evidence=evidence()))
+      started.update(True, car_state(), 0.8, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(1)))
+      self.assertEqual(started.long_control_state, LongCtrlState.starting)
+      started.update(True, cs, target, False, LIMITS, context=LongitudinalContext(start_evidence=observed))
+      self.assertNotEqual(started.long_control_state, LongCtrlState.starting)
+      started.update(True, car_state(standstill=False), 0.8, False, LIMITS,
+                     context=LongitudinalContext(start_evidence=evidence(3, lead_clear=None)))
+      self.assertEqual(started.long_control_state, LongCtrlState.pid)
+
+  def test_present_lead_starts_without_exceeding_planner_target(self):
+    _, tagged = candidate()
+    loc = LongControl(tagged)
+    loc.update(True, car_state(), -0.2, True, LIMITS, context=LongitudinalContext(start_evidence=evidence(lead_clear=False)))
+    output = loc.update(True, car_state(), 0.9, False, LIMITS,
+                        context=LongitudinalContext(start_evidence=evidence(1, lead_clear=False)))
+    self.assertEqual(loc.long_control_state, LongCtrlState.starting)
+    self.assertAlmostEqual(output, 0.9)
+
+  def test_negative_target_and_disengage_revoke_start(self):
     _, tagged = candidate()
     loc = LongControl(tagged)
     loc.update(True, car_state(), -0.2, True, LIMITS, context=LongitudinalContext(start_evidence=evidence()))
-    for frame in range(1, STRONG_SETTLE_FRAMES + 1):
-      loc.update(True, car_state(), 0.9, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(frame)))
+    loc.update(True, car_state(), 0.9, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(1)))
     self.assertEqual(loc.long_control_state, LongCtrlState.starting)
     loc.update(True, car_state(), -0.2, False, LIMITS,
-               context=LongitudinalContext(start_evidence=evidence(STRONG_SETTLE_FRAMES + 1, lead_clear=False)))
+               context=LongitudinalContext(start_evidence=evidence(2, lead_clear=False)))
     self.assertEqual(loc.long_control_state, LongCtrlState.pid)
-    self.assertEqual(extension_state(loc, 'ioniq6_start').strong_frames, 0)
+    loc.update(True, car_state(), 0.9, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(3)))
+    self.assertEqual(loc.long_control_state, LongCtrlState.starting)
     loc.update(False, car_state(), 0.9, False, LIMITS, context=LongitudinalContext(start_evidence=GOOD))
     self.assertEqual(loc.long_control_state, LongCtrlState.off)
-
-  def test_new_drive_restarts_strong_window(self):
-    _, tagged = candidate()
-    loc = LongControl(tagged)
-    for frame in range(STRONG_SETTLE_FRAMES - 1):
-      loc.update(True, car_state(), 0.9, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(frame)))
-    next_drive = evidence(STRONG_SETTLE_FRAMES - 1, drive_id=950_000_000)
-    loc.update(True, car_state(), 0.9, False, LIMITS, context=LongitudinalContext(start_evidence=next_drive))
-    self.assertNotEqual(loc.long_control_state, LongCtrlState.starting)
-    self.assertEqual(extension_state(loc, 'ioniq6_start').strong_frames, 1)
-
-  def test_loop_gap_and_repeated_clock_do_not_accumulate_history(self):
-    _, tagged = candidate()
-    loc = LongControl(tagged)
-    for frame in range(STRONG_SETTLE_FRAMES - 1):
-      loc.update(True, car_state(), 0.9, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(frame)))
-    loc.update(True, car_state(), 0.9, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(STRONG_SETTLE_FRAMES - 2)))
-    self.assertEqual(extension_state(loc, 'ioniq6_start').strong_frames, 1)
-    loc.update(True, car_state(), 0.9, False, LIMITS, context=LongitudinalContext(start_evidence=evidence(STRONG_SETTLE_FRAMES + 10)))
-    self.assertEqual(extension_state(loc, 'ioniq6_start').strong_frames, 1)
-
-  def test_bursty_calls_cannot_replace_elapsed_340_ms_window(self):
-    _, tagged = candidate()
-    loc = LongControl(tagged)
-    for frame in range(STRONG_SETTLE_FRAMES):
-      burst = StartEvidence(True, True, True, 900_000_000, 1_050_000_000 + frame * 1_000_000)
-      loc.update(True, car_state(), 0.9, False, LIMITS, context=LongitudinalContext(start_evidence=burst))
-    self.assertEqual(extension_state(loc, 'ioniq6_start').strong_frames, STRONG_SETTLE_FRAMES)
-    self.assertNotEqual(loc.long_control_state, LongCtrlState.starting)
 
   def test_serialized_radar_clear_requires_current_drive_and_planner(self):
     now = 1_050_000_000

@@ -1,8 +1,9 @@
-"""Conservative start-state admission for an exact tagged Ioniq 6 LONG session.
+"""Start-state admission for an exact tagged Ioniq 6 LONG session.
 
 This does not qualify ECU ownership; the opt-in prearm still requires a verified
 live handoff before longitudinal control is published.
-Weak or unknown evidence keeps the ordinary longitudinal PID path.
+Weak or unknown evidence keeps the ordinary longitudinal PID path. Admission is
+immediate because the controller's launch jerk only applies in starting.
 """
 
 import math
@@ -12,15 +13,10 @@ from opendbc.car.hyundai.ioniq6_handoff import IONIQ6_DEBUG_LONG_PARAMS
 from opendbc.car.hyundai.values import CAR, HyundaiFlags
 from opendbc.car.structs import car
 
-from openpilot.common.realtime import DT_CTRL
-
 
 LongCtrlState = car.CarControl.Actuators.LongControlState
 STRONG_TARGET_MPS2 = 0.75  # Existing Ioniq controller's standstill launch floor.
 START_SPEED_MPS = 0.1
-STRONG_SETTLE_FRAMES = round(0.35 / DT_CTRL)
-MIN_STRONG_SPAN_NS = (STRONG_SETTLE_FRAMES - 1) * round(DT_CTRL * 1e9)
-MAX_FRAME_GAP_NS = 20_000_000
 
 
 @dataclass(frozen=True)
@@ -52,31 +48,22 @@ def eligible(cp) -> bool:
 
 
 class Ioniq6StartPolicy:
-  def __init__(self) -> None:
-    self.strong_frames = 0
-    self.drive_id: int | None = None
-    self.last_ns: int | None = None
-    self.first_ns: int | None = None
-
   def reset(self) -> None:
-    self.strong_frames = 0
-    self.drive_id = None
-    self.last_ns = None
-    self.first_ns = None
+    pass
 
   def transition(self, native_state, previous_state, *, active: bool, should_stop: bool,
                  brake_pressed: bool, gas_pressed: bool, can_valid: bool, can_timeout: bool,
                  car_fresh: bool, plan_fresh: bool, lead_clear: bool | None,
                  drive_id: int | None, observed_ns: int | None,
                  speed_mps: float, target_mps2: float, accel_limits: tuple[float, float]):
-    """Use native transition except for a fully evidenced, settled start window."""
+    """Use native transition except for a fully evidenced strong start frame."""
     try:
       lower, upper = accel_limits
       physical = all(type(value) in (int, float) and math.isfinite(value)
                      for value in (speed_mps, target_mps2, lower, upper))
       strong = (physical and active is True and should_stop is False and brake_pressed is False and
                 gas_pressed is False and can_valid is True and can_timeout is False and
-                car_fresh is True and plan_fresh is True and lead_clear is True and
+                car_fresh is True and plan_fresh is True and type(lead_clear) is bool and
                 type(drive_id) is int and drive_id > 0 and
                 type(observed_ns) is int and observed_ns > drive_id and
                 0.0 <= speed_mps <= START_SPEED_MPS and lower <= 0.0 <= upper and
@@ -84,24 +71,13 @@ class Ioniq6StartPolicy:
     except (TypeError, ValueError, OverflowError):
       strong = False
 
-    if not strong or observed_ns is None or drive_id is None:
-      self.reset()
-      if previous_state == LongCtrlState.starting:
-        return LongCtrlState.stopping if active and should_stop else (LongCtrlState.pid if active else LongCtrlState.off)
-      return native_state
-
-    if (self.drive_id != drive_id or self.last_ns is None or
-        not 0 < observed_ns - self.last_ns <= MAX_FRAME_GAP_NS):
-      self.strong_frames = 0
-      self.drive_id = drive_id
-      self.first_ns = observed_ns
-    self.last_ns = observed_ns
-    self.strong_frames = min(STRONG_SETTLE_FRAMES, self.strong_frames + 1)
-    if self.strong_frames >= STRONG_SETTLE_FRAMES and self.first_ns is not None and observed_ns - self.first_ns >= MIN_STRONG_SPAN_NS:
+    if strong:
       return LongCtrlState.starting
-    return LongCtrlState.pid if previous_state == LongCtrlState.starting else native_state
+    if previous_state == LongCtrlState.starting:
+      return LongCtrlState.stopping if active and should_stop else (LongCtrlState.pid if active else LongCtrlState.off)
+    return native_state
 
   @staticmethod
   def starting_output(target_mps2: float, accel_limits: tuple[float, float]) -> float:
     """Never add a launch kick above the fresh planner target or native bound."""
-    return max(0.0, min(1.0, target_mps2, accel_limits[1]))
+    return max(0.0, min(target_mps2, accel_limits[1]))

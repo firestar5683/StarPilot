@@ -45,9 +45,9 @@ NATIVE_ALLOW_THROTTLE_PROBABILITY = 0.4
 NATIVE_PLAN_INPUTS = ('carControl', 'carState', 'controlsState', 'vehicleParameters',
                       'radarState', 'modelV2', 'selfdriveState')
 
-# Lookup table for turns
-_A_TOTAL_MAX_V = [1.7, 3.2]
-_A_TOTAL_MAX_BP = [20., 40.]
+# Lookup table for turns. Stock's 1.7 below 20 m/s capped straight-line launches under the profile.
+_A_TOTAL_MAX_V = [3.5, 3.5, 3.2]
+_A_TOTAL_MAX_BP = [0., 20., 40.]
 
 def get_max_accel(v_ego):
   return np.interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)

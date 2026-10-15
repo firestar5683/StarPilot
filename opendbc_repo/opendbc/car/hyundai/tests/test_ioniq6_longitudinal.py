@@ -272,9 +272,6 @@ class TestIoniq6Longitudinal(unittest.TestCase):
             parser.update((1_000_000_000 + frame * 10_000_000, scc))
           return sent.accel, parser.vl['SCC_CONTROL']['aReqValue'] if scc else None
 
-        for frame in range(34):
-          advance(frame, .8)
-          self.assertEqual(host.long_control_state, LongState.pid)
         output, scc = advance(34, .8)
         self.assertEqual(host.long_control_state, LongState.starting)
         self.assertIsNotNone(scc)
