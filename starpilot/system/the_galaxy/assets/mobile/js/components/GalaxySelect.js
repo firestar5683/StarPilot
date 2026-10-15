@@ -21,7 +21,9 @@ export const GalaxySelect = {
       const native = this.$refs.native
       if (!native) return
       if (this.current !== undefined) native.value = String(this.current ?? "")
-      const items = [...native.options].map((option, index) => ({ index, value: option.value, label: option.label, description: option.dataset?.description || "", disabled: option.disabled || (option.parentElement?.tagName === "OPTGROUP" && option.parentElement.disabled), group: option.parentElement?.tagName === "OPTGROUP" ? option.parentElement.label : "" }))
+      const items = [...native.options].map((option, index) => {
+        return { index, value: option.value, label: option.label || "", badge: option.dataset?.badge || "", current: option.dataset?.current === "true", description: option.dataset?.description || "", disabled: option.disabled || (option.parentElement?.tagName === "OPTGROUP" && option.parentElement.disabled), group: option.parentElement?.tagName === "OPTGROUP" ? option.parentElement.label : "" }
+      })
       if (JSON.stringify(items) !== JSON.stringify(this.items)) this.items = items
       this.selected = native.value
       this.label = native.selectedOptions[0]?.dataset?.collapsedLabel || native.selectedOptions[0]?.label || "Choose an option"
@@ -70,12 +72,21 @@ export const GalaxySelect = {
       for (let node = menu; node; node = node.parentElement) zoom *= Number.parseFloat(getComputedStyle(node).zoom) || 1
       const menuWidth = Math.min(Math.max(rect.width, 240), width - 24)
       menu.style.width = `${menuWidth / zoom}px`
-      menu.style.maxHeight = `${(height - 24) / zoom}px`
-      const menuHeight = Math.min(menu.scrollHeight * zoom + 2, height - 24)
-      const below = height - rect.bottom - 12
-      const top = below >= Math.min(menuHeight, 220) ? Math.min(rect.bottom + 6, height - menuHeight - 12) : Math.max(12, rect.top - menuHeight - 6)
+      const spaceBelow = height - rect.bottom - 12
+      const spaceAbove = rect.top - 12
+      const openBelow = spaceBelow >= 120 || spaceBelow >= spaceAbove
+
+      if (openBelow) {
+        const maxH = Math.max(80, spaceBelow)
+        menu.style.maxHeight = `${maxH / zoom}px`
+        menu.style.top = `${(rect.bottom + 6) / zoom}px`
+      } else {
+        const maxH = Math.max(80, spaceAbove)
+        menu.style.maxHeight = `${maxH / zoom}px`
+        const menuHeight = Math.min(menu.scrollHeight * zoom + 2, maxH)
+        menu.style.top = `${Math.max(12, rect.top - menuHeight - 6) / zoom}px`
+      }
       menu.style.left = `${Math.max(12, Math.min(rect.left, width - menuWidth - 12)) / zoom}px`
-      menu.style.top = `${Math.max(12, top) / zoom}px`
     },
     select(item) {
       if (this.disabled) return this.close()
@@ -116,12 +127,14 @@ export const GalaxySelect = {
   mounted() {
     this.sync()
     window.addEventListener("resize", this.position)
+    window.addEventListener("scroll", this.position, { passive: true })
     window.visualViewport?.addEventListener("resize", this.position)
   },
   updated() { this.sync() },
   beforeUnmount() {
     this.$refs.menu?.close()
     window.removeEventListener("resize", this.position)
+    window.removeEventListener("scroll", this.position)
     window.visualViewport?.removeEventListener("resize", this.position)
   },
   template: `
@@ -135,8 +148,15 @@ export const GalaxySelect = {
         <div :id="uid + '-list'" role="listbox" :aria-label="name">
           <template v-for="(item, index) in items" :key="item.index">
             <div v-if="item.group && item.group !== items[index - 1]?.group" class="gx-select-menu__group">{{ item.group }}</div>
-            <button type="button" role="option" :data-value="item.value" :aria-selected="item.value === selected" :disabled="item.disabled" @click="select(item)">
-              <span style="min-width:0; overflow-wrap:anywhere;"><span>{{ item.label }}</span><small v-if="item.description" class="gx-note" style="display:block; margin-top:4px; white-space:normal; line-height:1.4;">{{ item.description }}</small></span><i v-if="item.value === selected" class="bi bi-check-lg" aria-hidden="true"></i>
+            <button type="button" role="option" :data-value="item.value" :data-current="item.current ? 'true' : undefined" :aria-selected="item.value === selected" :disabled="item.disabled" @click="select(item)">
+              <span style="min-width:0; overflow-wrap:anywhere;">
+                <span style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <span>{{ item.label }}</span>
+                  <span v-if="item.badge" class="gx-select-menu__badge" :class="{ 'gx-select-menu__badge--current': item.current }">{{ item.badge }}</span>
+                </span>
+                <small v-if="item.description" class="gx-note" style="display:block; margin-top:4px; white-space:normal; line-height:1.4;">{{ item.description }}</small>
+              </span>
+              <i v-if="item.value === selected" class="bi bi-check-lg" aria-hidden="true"></i>
             </button>
           </template>
         </div>
