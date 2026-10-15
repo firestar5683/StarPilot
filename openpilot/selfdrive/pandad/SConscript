@@ -19,3 +19,12 @@ if arch != "Darwin":
 
   if GetOption('extras') or any(target.startswith('openpilot/selfdrive/pandad/tests/') for target in COMMAND_LINE_TARGETS):
     env.Program('tests/test_panda_owner', ['tests/test_panda_owner.cc', 'panda_safety.cc'], LIBS=[panda] + libs)
+
+  # Exercise the real publisher/worker with injected Panda and sysfs I/O only.
+  if GetOption('extras') or any(target.startswith('openpilot/selfdrive/pandad/tests/') for target in COMMAND_LINE_TARGETS):
+    power_test = env.Clone()
+    power_test.Append(LINKFLAGS=[
+      '-Wl,--wrap=_ZN4util9read_fileERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE',
+      '-Wl,--wrap=_ZN9PubMaster4sendEPKcR14MessageBuilder',
+    ])
+    power_test.Program('tests/test_peripheral_state', ['tests/test_peripheral_state.cc', power_test.Object('tests/peripheral_panda_safety.o', 'panda_safety.cc')], LIBS=[panda] + libs)

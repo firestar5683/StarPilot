@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bitset>
 #include <cassert>
 #include <cerrno>
@@ -33,6 +34,20 @@
 #define SATURATE_IL 1000
 
 ExitHandler do_exit;
+
+// One atomic pair keeps voltage/current from the same hwmon sample together.
+std::atomic<uint64_t> hwmon_power{0};
+
+void hwmon_thread() {
+  if (Hardware::get_device_type() != cereal::InitData::DeviceType::TICI) return;
+  util::set_thread_name("pandad_hwmon");
+  while (!do_exit) {
+    const uint32_t voltage = Hardware::get_voltage();
+    const uint32_t current = Hardware::get_current();
+    hwmon_power.store((uint64_t(voltage) << 32) | current);
+    util::sleep_for(500);
+  }
+}
 
 bool check_all_connected(const std::vector<Panda *> &pandas) {
   for (const auto& panda : pandas) {
@@ -299,9 +314,13 @@ void send_peripheral_state(Panda *panda, PubMaster *pm) {
   auto ps = evt.initPeripheralState();
   ps.setPandaType(panda->hw_type);
 
-  health_t health = *health_opt;
-  ps.setVoltage(health.voltage_pkt);
-  ps.setCurrent(health.current_pkt);
+  const health_t &health = *health_opt;
+  // The original comma 3 measures input power with its SOM hwmon sensor.
+  // Its DOS Panda ADC is not the source used by Dom. Keep slow sysfs reads
+  // in the helper thread; newer devices continue to report Panda power.
+  const uint64_t power = hwmon_power.load();
+  ps.setVoltage(power ? uint32_t(power >> 32) : health.voltage_pkt);
+  ps.setCurrent(power ? uint32_t(power) : health.current_pkt);
 
   uint16_t fan_speed_rpm = panda->get_fan_speed();
   ps.setFanSpeedRpm(fan_speed_rpm);
@@ -443,6 +462,11 @@ void pandad_run(std::vector<Panda *> &pandas) {
 
   // Start helper thread for event-driven sendcan.
   std::thread send_thread(can_send_thread, pandas, fake_send);
+  hwmon_power.store(0);
+  std::thread hardware_thread;
+  if (Hardware::get_device_type() == cereal::InitData::DeviceType::TICI) {
+    hardware_thread = std::thread(hwmon_thread);
+  }
 
   RateKeeper rk("pandad", 100);
   SubMaster sm({"selfdriveState", "deviceState", "aolAxisState", "aolIntentWire"});
@@ -574,6 +598,7 @@ void pandad_run(std::vector<Panda *> &pandas) {
   }
 
   send_thread.join();
+  if (hardware_thread.joinable()) hardware_thread.join();
 }
 
 void pandad_main_thread(std::vector<std::string> serials) {
