@@ -101,9 +101,29 @@ class CoastRuntime:
     return False
 
   def sample(self, params, cp, sm, *, now_ns, target_mps, lead_relevant, stop_context):
-    from openpilot.starpilot.controllers.wheel_actions import eligible, LIFETIME_NS, cp_fingerprint
+    from openpilot.starpilot.controllers.wheel_actions import eligible, LIFETIME_NS, cp_fingerprint, WheelConsumer
     from openpilot.starpilot.conditional_mode.ui_action import fresh_service
     from openpilot.starpilot.saved_source import read_saved
+    # A zero accepted-drive/heartbeat cannot satisfy the admission below.
+    if (type(self) is CoastRuntime and type(getattr(self, 'owner', None)) is CoastOwner and
+        type(getattr(self, 'consumer', None)) is WheelConsumer and 'sample' not in vars(self.owner) and
+        type(getattr(self, 'drive', None)) is int and type(getattr(self.consumer, 'last_heartbeat', None)) is int and
+        (self.drive == 0 or self.consumer.last_heartbeat == 0) and
+        type(stop_context) is bool and type(getattr(self, 'conditional_stop', None)) is bool):
+      from capnp.lib.capnp import _DynamicStructReader
+      from opendbc.car.structs import car
+      from openpilot.cereal import log, messaging
+      from openpilot.common.params import Params
+      if (type(params) is Params and type(sm) is messaging.SubMaster and type(getattr(sm, 'data', None)) is dict and
+          type(cp) is _DynamicStructReader and cp.schema == car.CarParams.schema):
+        device = sm.data.get('deviceState')
+        state = sm.data.get('carState')
+        control = sm.data.get('carControl')
+        if (type(device) is _DynamicStructReader and device.schema == log.DeviceState.schema and
+            type(state) is _DynamicStructReader and state.schema == car.CarState.schema and
+            type(control) is _DynamicStructReader and control.schema == car.CarControl.schema):
+          self.owner.reset()
+          return CoastPlan()
     drive = int(sm["deviceState"].startedMonoTime)
     raw, readable = read_saved(params, "PulseGlideSpeedDelta", 32)
     units, unit_readable = read_saved(params, "IsMetric", 8)
