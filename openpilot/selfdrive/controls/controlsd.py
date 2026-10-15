@@ -496,7 +496,7 @@ def main():
   config_realtime_process(4, Priority.CTRL_HIGH)
   controls = Controls()
   set_core_affinity([4, 5])
-  if HARDWARE.get_device_type() == "mici":
+  if HARDWARE.get_device_type() in ("tici", "tizi", "mici"):
     os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(Priority.CTRL_HIGH - 1))
   controls.run()
 

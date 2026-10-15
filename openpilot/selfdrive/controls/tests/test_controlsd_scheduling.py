@@ -6,7 +6,7 @@ import pytest
 from openpilot.selfdrive.controls import controlsd
 
 
-@pytest.mark.parametrize("device", ("mici", "tizi", "tici", "pc"))
+@pytest.mark.parametrize("device", ("mici", "tizi", "tici", "pc", "unknown"))
 def test_controls_main_priority_is_applied_after_initialization_and_affinity(device):
   calls = []
   controls = mock.Mock()
@@ -25,7 +25,7 @@ def test_controls_main_priority_is_applied_after_initialization_and_affinity(dev
     controlsd.main()
     fifo = controlsd.os.SCHED_FIFO
   expected = [("configure", 4, controlsd.Priority.CTRL_HIGH), ("construct",), ("affinity", [4, 5])]
-  if device == "mici":
+  if device in ("tici", "tizi", "mici"):
     expected.append(("priority", 0, fifo, 52))
   assert calls == [*expected, ("run",)]
 
