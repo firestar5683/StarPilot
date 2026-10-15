@@ -56,6 +56,18 @@ class CANPacker:
 
 
 def set_value(msg: bytearray, sig: Signal, ival: int) -> None:
+  if type(msg) is bytearray and type(sig) is Signal and type(ival) is int:
+    lsb = getattr(sig, 'lsb', None)
+    size = getattr(sig, 'size', None)
+    little_endian = getattr(sig, 'is_little_endian', None)
+    if type(lsb) is int and type(size) is int and type(little_endian) is bool:
+      i, shift = lsb // 8, lsb % 8
+      if 0 < size <= 8 - shift and 0 <= i < len(msg):
+        field_mask = (1 << size) - 1
+        mask = field_mask << shift
+        msg[i] = (msg[i] & ~mask) | ((ival & field_mask) << shift)
+        return
+
   i = sig.lsb // 8
   bits = sig.size
   if sig.size < 64:
