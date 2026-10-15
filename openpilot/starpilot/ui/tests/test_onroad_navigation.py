@@ -99,9 +99,17 @@ def test_native_alert_owns_space(size):
   assert not card.press(120, 40, replace(state(), alert=OnroadAlert(size, 'warning')))
 
 
-def test_slc_decision_keeps_its_touch_priority():
+def test_slc_decision_keeps_its_touch_priority_only_where_it_overlaps():
+  from openpilot.starpilot.ui.onroad_state import ObservationKind
   card = NavigationCard(Mock(profile=Profile.COMPACT))
-  assert card.bounds(replace(state(), longitudinal_active=True, speed_limit=SpeedLimitObservation(action_enabled=True))) is None
+  pending = SpeedLimitObservation(kind=ObservationKind.VALID, source='map', speed_limit_mps=22., pending_speed_limit_mps=22.,
+                                  session_id='s', decision_id=1, presentation_id=1, action_enabled=True)
+  # Compact buttons (y 180-234, header from 136) cover the card's lower edge.
+  assert card.bounds(replace(state(), longitudinal_active=True, speed_limit=pending)) is None
+  # SLC being on, with no decision on screen, leaves the directions up.
+  assert card.bounds(replace(state(), longitudinal_active=True, speed_limit=SpeedLimitObservation(action_enabled=True))) is not None
+  large = NavigationCard(Mock(profile=Profile.LARGE))
+  assert large.bounds(replace(state(), longitudinal_active=True, speed_limit=pending)) is not None
 
 
 @pytest.mark.parametrize('profile', [Profile.COMPACT, Profile.LARGE])

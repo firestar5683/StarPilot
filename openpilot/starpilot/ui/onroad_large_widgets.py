@@ -12,7 +12,7 @@ import json
 import pyray as rl
 
 from openpilot.starpilot.ui.onroad_customization import offset, rgba, widget_size
-from openpilot.starpilot.ui.onroad_state import ObservationKind, OnroadState
+from openpilot.starpilot.ui.onroad_state import OnroadState
 from openpilot.starpilot.ui.onroad_widget_style import draw_control_card
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole
 from openpilot.starpilot.ui.wheel_feedback import wheel_feedback_rgb
@@ -40,7 +40,8 @@ class UnifiedSpeedWidget:
     from openpilot.starpilot.ui.large_speed_geometry import PADDING
     rows = [row for row in state.speed_limit.source_readings if row.enabled]
     if not rows:
-      _center(self.fonts, 'No sources enabled', FontRole.NORMAL, 26, rect, rect.y + 22)
+      text = 'No sources enabled' if state.speed_limit.source_readings else 'No speed limit'
+      _center(self.fonts, text, FontRole.NORMAL, 26, rect, rect.y + 22)
       return
     active = state.speed_limit.accepted_source
     labels = {'dashboard': 'Dash', 'map': 'Map', 'vision': 'Vision', 'online': 'Online'}
@@ -65,8 +66,8 @@ class UnifiedSpeedWidget:
     height = card_height(shown.mode)
     rect = rl.Rectangle(saved['x'], saved['y'], WIDTH, height)
     # Sources follow the Galaxy layout setting: a row in this card, or a small card of its own right below.
-    sources = (state.customization.get('speedSources') is True and shown.mode != 'max_only' and
-               state.speed_limit.kind == ObservationKind.VALID and bool(state.speed_limit.session_id))
+    # Kept up whenever enabled so the card does not pop in and out as limits come and go.
+    sources = state.customization.get('speedSources') is True
     separate = state.customization.get('speedSourcesCard') is True
     if sources and not separate:
       rect.height += SOURCE_ROW_HEIGHT
