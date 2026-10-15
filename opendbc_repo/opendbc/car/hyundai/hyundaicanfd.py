@@ -1,10 +1,10 @@
 import math
+from binascii import crc_hqx
 from typing import cast
 
 import numpy as np
 from opendbc.car import CanBusBase, CanData
 from opendbc.car.common.conversions import Conversions as CV
-from opendbc.car.crc import CRC16_XMODEM
 from opendbc.car.hyundai.ioniq6_bsm import BlindspotStatus, FRONT_NEUTRAL_BODY, rear_body
 from opendbc.car.hyundai.values import CAR, HyundaiFlags
 
@@ -437,11 +437,7 @@ def create_adrv_messages(packer, CAN, frame, *, template=None, drive_gear=False,
 
 
 def hkg_can_fd_checksum(address: int, sig, d: bytearray) -> int:
-  crc = 0
-  for i in range(2, len(d)):
-    crc = ((crc << 8) ^ CRC16_XMODEM[(crc >> 8) ^ d[i]]) & 0xFFFF
-  crc = ((crc << 8) ^ CRC16_XMODEM[(crc >> 8) ^ ((address >> 0) & 0xFF)]) & 0xFFFF
-  crc = ((crc << 8) ^ CRC16_XMODEM[(crc >> 8) ^ ((address >> 8) & 0xFF)]) & 0xFFFF
+  crc = crc_hqx(d[2:] + (address & 0xFFFF).to_bytes(2, "little"), 0)
   if len(d) == 8:
     crc ^= 0x5F29
   elif len(d) == 16:
