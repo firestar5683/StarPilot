@@ -899,27 +899,28 @@ class TestHyundaiIoniq6Long(unittest.TestCase):
           self.safety.aol_set_host_request(1)
           self.assertEqual(self.safety.aol_get_permission_mask(), 0)
 
-  def test_new_physical_set_release_restarts_engaged_heartbeat_grace(self):
+  def test_new_physical_enable_release_restarts_engaged_heartbeat_grace(self):
     if self.release:
       self.skipTest("RELEASE denies the Ioniq 6 AOL profiles")
     for topology, raw in RAW_AOL.items():
-      with self.subTest(topology=topology):
-        _, cp = params(topology)
-        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
-        self.mode(raw)
-        self.refresh_required_rx(packer, 1, 1_000_000)
-        self.safety.set_controls_allowed(True)
-        self.safety.set_aol_test_heartbeat(False)
-        self.safety.set_heartbeat_engaged_mismatches(2)
-        self.safety.set_timer(1_005_000)
-        self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
-          "CRUISE_BUTTONS", 1, {"COUNTER": 2, "CRUISE_BUTTONS": 2}))))
-        self.assertEqual(self.safety.get_heartbeat_engaged_mismatches(), 2)
-        self.safety.set_timer(1_010_000)
-        self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
-          "CRUISE_BUTTONS", 1, {"COUNTER": 3, "CRUISE_BUTTONS": 0}))))
-        self.assertTrue(self.safety.get_controls_allowed())
-        self.assertEqual(self.safety.get_heartbeat_engaged_mismatches(), 0)
+      for button in (1, 2):
+        with self.subTest(topology=topology, button=button):
+          _, cp = params(topology)
+          packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+          self.mode(raw)
+          self.refresh_required_rx(packer, 1, 1_000_000)
+          self.safety.set_controls_allowed(True)
+          self.safety.set_aol_test_heartbeat(False)
+          self.safety.set_heartbeat_engaged_mismatches(2)
+          self.safety.set_timer(1_005_000)
+          self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
+            "CRUISE_BUTTONS", 1, {"COUNTER": 2, "CRUISE_BUTTONS": button}))))
+          self.assertEqual(self.safety.get_heartbeat_engaged_mismatches(), 2)
+          self.safety.set_timer(1_010_000)
+          self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
+            "CRUISE_BUTTONS", 1, {"COUNTER": 3, "CRUISE_BUTTONS": 0}))))
+          self.assertTrue(self.safety.get_controls_allowed())
+          self.assertEqual(self.safety.get_heartbeat_engaged_mismatches(), 0)
 
   def test_aol_long_permission_requires_explicit_host_long_request(self):
     if self.release:

@@ -195,8 +195,6 @@ static bool aol_ioniq6_request_seen = false;
 static bool aol_ioniq6_lateral_token_claimed = false;
 static uint32_t aol_ioniq6_gesture_ts = 0U;
 static bool aol_ioniq6_enable_counter_seen = false;
-static uint8_t aol_ioniq6_enable_counter = 0U;
-static uint32_t aol_ioniq6_enable_ts = 0U;
 static bool aol_ioniq6_enable_pending = false;
 static bool aol_ioniq6_enable_neutral = false;
 static bool aol_ioniq6_enable_release = false;
@@ -542,6 +540,8 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
     const int previous_cruise_button = cruise_button_prev;
     hyundai_common_cruise_buttons_check(cruise_button, main_button);
     if (hyundai_canfd_ioniq6_long && aol_ioniq6_long) {
+      static uint8_t aol_ioniq6_enable_counter = 0U;
+      static uint32_t aol_ioniq6_enable_ts = 0U;
       const uint8_t counter = hyundai_canfd_get_counter(msg);
       const uint32_t now = microsecond_timer_get();
       const uint32_t elapsed = safety_get_ts_elapsed(now, aol_ioniq6_enable_ts);
