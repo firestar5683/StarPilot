@@ -586,6 +586,39 @@ def test_ui_cameras_hub_vasm_and_pip_native_no_embed():
     assert method in api, f"api.js should expose {method}"
 
 
+def test_ui_sentry_history_opens_the_scrubber_on_today():
+  """View history opens the scrubber directly (no paginated card list), seeded to the current day."""
+  sentry = _read("js/views/Sentry.js")
+  for gone in ("HISTORY_PAGE_SIZE", "observeSentinel", "loadHistory", "historyHasMore", "openViewer"):
+    assert gone not in sentry, f"old paginated history list should be removed: {gone}"
+  assert "<SentryScrubber" in sentry
+  toggle = sentry[sentry.index("toggleHistory() {"):]
+  toggle = toggle[:toggle.index("\n    },")]
+  assert "this.dateFrom = localDay()" in toggle and "this.dateTo = localDay()" in toggle
+  assert "loadViewerEvents()" in toggle
+
+
+def test_ui_sentry_history_separates_photo_less_alerts():
+  """Power-off / low-voltage / test events have no photos: listed apart from the scrubber, counted separately."""
+  scrubber = _read("js/components/SentryScrubber.js")
+  assert "export function isCaptureEvent" in scrubber and ".filter(isCaptureEvent)" in scrubber
+  sentry = _read("js/views/Sentry.js")
+  assert "import { SentryScrubber, isCaptureEvent }" in sentry
+  assert "captureEvents()" in sentry and "alertEvents()" in sentry
+  assert '<SentryScrubber v-if="captureEvents.length"' in sentry
+  assert 'v-for="alert in alertEvents"' in sentry
+
+
+def test_ui_sentry_scrubber_captures_open_in_the_page_viewer():
+  """Clicking a scrubber capture opens the shared in-page image viewer, not a new browser tab."""
+  scrubber = _read("js/components/SentryScrubber.js")
+  sentry = _read("js/views/Sentry.js")
+  assert 'target="_blank"' not in scrubber
+  assert '"open-image"' in scrubber and 'this.$emit("open-image"' in scrubber
+  assert "@click=\"openCapture($event, entry)\"" in scrubber
+  assert '@open-image="openImage"' in sentry
+
+
 def test_ui_mobile_polish_regressions():
   system = _read("js/views/SystemTools.js")
   css = _read("css/material.css")
