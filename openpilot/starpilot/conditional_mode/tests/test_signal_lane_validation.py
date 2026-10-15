@@ -115,6 +115,7 @@ class TestSignalLaneValidation(unittest.TestCase):
       self.assertEqual((full.call_count, interp.call_count, median.call_count), (0, 0, 0))
       measured = tracker.update(native_frame(4))
       self.assertTrue(measured.lane_available)
+      assert measured.left_width_m is not None
       self.assertAlmostEqual(measured.left_width_m, 3.6, places=5)
       self.assertEqual((full.call_count, interp.call_count, median.call_count), (1, 4, 4))
       repeated = tracker.update(native_frame(4))
@@ -126,6 +127,7 @@ class TestSignalLaneValidation(unittest.TestCase):
       self.assertEqual((full.call_count, interp.call_count, median.call_count), (1, 4, 4))
       changed = tracker.update(native_frame(8, model=native_model(8, left_outer=-3.8)))
       self.assertFalse(changed.lane_available)
+      assert changed.left_width_m is not None
       self.assertAlmostEqual(changed.left_width_m, 2.0, places=5)
       self.assertEqual((full.call_count, interp.call_count, median.call_count), (2, 8, 8))
 
