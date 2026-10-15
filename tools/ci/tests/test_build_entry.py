@@ -480,7 +480,7 @@ class ArtifactCheckTest(unittest.TestCase):
                  "openpilot/system/loggerd/loggerd", "openpilot/system/loggerd/encoderd",
                  "msgq_repo/msgq/ipc_pyx.so", "msgq_repo/msgq/visionipc/visionipc_pyx.so",
                  "rednose_repo/rednose/helpers/ekf_sym_pyx.so", "openpilot/tools/replay/replay",
-                 "openpilot/tools/replay/libmedia_mux.so"):
+                 "openpilot/tools/replay/libmedia_mux.so", "opendbc_repo/opendbc/can/_raw_value.so"):
       self.write(name, self.elf)
     for name in ("openpilot/cereal/libcereal.a", "openpilot/cereal/libsocketmaster.a"):
       self.write(name, archive)
@@ -511,6 +511,22 @@ class ArtifactCheckTest(unittest.TestCase):
     for name in ("openpilot/tools/replay/replay", "openpilot/tools/replay/libmedia_mux.so"):
       with self.subTest(name=name):
         (self.root / name).unlink()
+        result = self.verify()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(name, result.stderr)
+        self.write(name, self.elf)
+
+  def test_can_decoder_required_and_valid(self):
+    name = "opendbc_repo/opendbc/can/_raw_value.so"
+    wrong = bytearray(self.elf)
+    struct.pack_into("<H", wrong, 18, 62)
+    for defect, data in (("missing", None), ("foreign", wrong), ("header_only", self.elf[:20])):
+      with self.subTest(defect=defect):
+        self.assertEqual(self.verify().returncode, 0)
+        if data is None:
+          (self.root / name).unlink()
+        else:
+          self.write(name, data)
         result = self.verify()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(name, result.stderr)
