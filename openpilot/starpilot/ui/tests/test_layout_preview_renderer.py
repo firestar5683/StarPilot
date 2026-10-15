@@ -4,7 +4,7 @@ import io
 import struct
 from types import SimpleNamespace as NS
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 import zlib
 
 from openpilot.starpilot.ui.layout_preview_renderer import LayoutPreviewRenderer, _Canvas, _DriverMonitorArt, _png_rgba, sample_state
@@ -174,18 +174,28 @@ class LayoutPreviewRendererTests(unittest.TestCase):
     canvas.monitor = _DriverMonitorArt.__new__(_DriverMonitorArt)
     canvas.monitor.profile = Profile.COMPACT
     canvas.monitor.renderer = Mock()
+    matrix = Mock()
+    matrix.attach_mock(canvas.monitor.renderer._render, 'render')
     state = sample_state("engaged", default_document())
-    with patch("openpilot.starpilot.ui.layout_preview_renderer.draw_widget_frame"):
+    with patch("openpilot.starpilot.ui.layout_preview_renderer.draw_widget_frame"), \
+         patch.multiple(rl, rl_push_matrix=matrix.push, rl_translatef=matrix.translate,
+                        rl_scalef=matrix.scale, rl_pop_matrix=matrix.pop):
       canvas._render_driver_monitor(rl.Rectangle(), state)
       canvas.monitor.renderer._render.assert_not_called()
+      self.assertEqual(matrix.mock_calls, [])
       state.customization["layouts"]["compact"]["driver_monitor"].update(x=200, y=100)
       canvas._render_driver_monitor(rl.Rectangle(), state)
       canvas.monitor.renderer._render.assert_called_once()
+      self.assertEqual(matrix.mock_calls, [call.push(), call.translate(200, 100, 0), call.scale(1, 1, 1),
+                                          call.translate(-200, -100, 0), call.render(canvas.monitor.renderer._rect), call.pop()])
+      matrix.reset_mock()
       canvas.monitor.renderer._render.reset_mock()
       state.customization["layouts"]["compact"]["driver_monitor"].update(x=16, y=10)
       canvas.view.compact_hud._set_speed_alpha.x = 0.0
       canvas._render_driver_monitor(rl.Rectangle(), state)
       canvas.monitor.renderer._render.assert_called_once()
+      self.assertEqual(matrix.mock_calls, [call.push(), call.translate(16, 10, 0), call.scale(1, 1, 1),
+                                          call.translate(-16, -10, 0), call.render(canvas.monitor.renderer._rect), call.pop()])
 
   def test_big_sidebar_matches_original_right_rail_and_is_sample_only(self):
     frame = rl.Rectangle(1860, 0, 300, 1080)

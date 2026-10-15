@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 from openpilot.starpilot.ui.presentation import BitmapFonts
 
 from unittest.mock import patch
@@ -158,19 +158,25 @@ class TestDriverMonitor(unittest.TestCase):
     monitor.visionPolicyState.pose.pitch = float('nan')
     layer = DriverMonitorLayer.__new__(DriverMonitorLayer)
     layer.profile = Profile.LARGE
+    matrix = Mock()
     self.enterContext(
       patch.object(
         layer,
         'renderer',
-        NS(set_should_draw=Mock(), set_position=Mock(), _rect=object(), _is_active=True, _fade_filter=NS(update=Mock()), _update_state=Mock(), _render=Mock()),
+        NS(set_should_draw=Mock(), set_position=Mock(), _rect=object(), _is_active=True,
+           _fade_filter=NS(update=Mock()), _update_state=Mock(), _render=matrix.render),
         create=True,
       )
     )
-    layer.render(road(), monitor=monitor, driver=driver, fresh=True, onroad=True)
+    with patch.multiple('openpilot.starpilot.ui.onroad_dm.rl', rl_push_matrix=matrix.push, rl_translatef=matrix.translate,
+                        rl_scalef=matrix.scale, rl_pop_matrix=matrix.pop):
+      layer.render(road(), monitor=monitor, driver=driver, fresh=True, onroad=True)
     layer.renderer._update_state.assert_not_called()
     layer.renderer._render.assert_called_once()
     self.assertFalse(layer.renderer._is_active)
     layer.renderer._fade_filter.update.assert_called_once_with(0.35)
+    self.assertEqual(matrix.mock_calls, [call.push(), call.translate(120, 840, 0), call.scale(1, 1, 1),
+                                        call.translate(-120, -840, 0), call.render(layer.renderer._rect), call.pop()])
 
   def test_visible_face_keeps_person_solid_even_when_vision_policy_is_inactive(self):
     from openpilot.selfdrive.ui.mici.onroad.driver_state import DriverStateRenderer
@@ -196,13 +202,19 @@ class TestDriverMonitor(unittest.TestCase):
     document['layouts']['large']['driver_monitor'].update(x=700.5, y=600.25)
     layer = DriverMonitorLayer.__new__(DriverMonitorLayer)
     layer.profile = Profile.LARGE
+    matrix = Mock()
     self.enterContext(
-      patch.object(layer, 'renderer', NS(set_should_draw=Mock(), set_position=Mock(), _update_state=Mock(), _render=Mock(), _rect=object()), create=True)
+      patch.object(layer, 'renderer', NS(set_should_draw=Mock(), set_position=Mock(), _update_state=Mock(),
+                                       _render=matrix.render, _rect=object()), create=True)
     )
-    layer.render(replace(road(), customization=document), monitor=monitor, driver=driver, fresh=True, onroad=True)
+    with patch.multiple('openpilot.starpilot.ui.onroad_dm.rl', rl_push_matrix=matrix.push, rl_translatef=matrix.translate,
+                        rl_scalef=matrix.scale, rl_pop_matrix=matrix.pop):
+      layer.render(replace(road(), customization=document), monitor=monitor, driver=driver, fresh=True, onroad=True)
     layer.renderer.set_position.assert_called_once_with(700.5, 600.25)
     layer.renderer._update_state.assert_called_once()
     layer.renderer._render.assert_called_once_with(layer.renderer._rect)
+    self.assertEqual(matrix.mock_calls, [call.push(), call.translate(700.5, 600.25, 0), call.scale(1, 1, 1),
+                                        call.translate(-700.5, -600.25, 0), call.render(layer.renderer._rect), call.pop()])
 
   def test_composition_wires_actual_monitor_layer_before_alert(self):
     from contextlib import ExitStack

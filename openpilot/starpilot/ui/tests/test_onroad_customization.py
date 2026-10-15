@@ -1,5 +1,5 @@
 
-from unittest.mock import Mock
+from unittest.mock import Mock, call as mock_call
 from openpilot.starpilot.ui.presentation import BitmapFonts
 import json
 from dataclasses import replace
@@ -607,13 +607,16 @@ def test_driver_frame_matches_native_preview_and_keeps_face_renderer_separate(mo
   state = road(document)
   live = DriverMonitorLayer.__new__(DriverMonitorLayer)
   live.profile = Profile.COMPACT
+  matrix = Mock()
   monkeypatch.setattr(live, 'renderer', NS(set_should_draw=Mock(), set_position=Mock(), _rect=object(),
-                     _fade_filter=NS(update=Mock()), _render=Mock()), raising=False)
+                     _fade_filter=NS(update=Mock()), _render=matrix.live_render), raising=False)
   preview = _DriverMonitorArt.__new__(_DriverMonitorArt)
   preview.profile = Profile.COMPACT
-  monkeypatch.setattr(preview, 'renderer', NS(_render=Mock()), raising=False)
+  monkeypatch.setattr(preview, 'renderer', NS(_render=matrix.preview_render), raising=False)
   with patch('openpilot.starpilot.ui.onroad_dm.draw_widget_frame') as live_frame, \
-       patch('openpilot.starpilot.ui.layout_preview_renderer.draw_widget_frame') as preview_frame:
+       patch('openpilot.starpilot.ui.layout_preview_renderer.draw_widget_frame') as preview_frame, \
+       patch.multiple(rl, rl_push_matrix=matrix.push, rl_translatef=matrix.translate,
+                      rl_scalef=matrix.scale, rl_pop_matrix=matrix.pop):
     live.render(state, monitor=None, driver=None, fresh=False, onroad=True)
     preview.render(rl.Rectangle(0, 0, 536, 240), state)
   assert live_frame.call_args.args[1:] == preview_frame.call_args.args[1:]
@@ -623,6 +626,12 @@ def test_driver_frame_matches_native_preview_and_keeps_face_renderer_separate(mo
   live.renderer._fade_filter.update.assert_called_once_with(0.35)
   live.renderer._render.assert_called_once()
   preview.renderer._render.assert_called_once()
+  assert matrix.mock_calls == [
+    mock_call.push(), mock_call.translate(90, 40, 0), mock_call.scale(1, 1, 1), mock_call.translate(-90, -40, 0),
+    mock_call.live_render(live.renderer._rect), mock_call.pop(),
+    mock_call.push(), mock_call.translate(90, 40, 0), mock_call.scale(1, 1, 1), mock_call.translate(-90, -40, 0),
+    mock_call.preview_render(preview.renderer._rect), mock_call.pop(),
+  ]
 
 
 @pytest.mark.parametrize("enabled", [True, False])
