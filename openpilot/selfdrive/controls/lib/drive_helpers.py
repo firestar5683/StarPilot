@@ -1,6 +1,7 @@
 import numpy as np
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.realtime import DT_CTRL, DT_MDL
+from openpilot.common.scalar_clip import clip_scalar
 
 MIN_SPEED = 1.0
 CONTROL_N = 17
@@ -17,7 +18,7 @@ def should_stop(v_ego: float, a_target: float) -> bool:
   return bool(v_ego < 0.3 and a_target < 0.1)
 
 def clamp(val, min_val, max_val):
-  clamped_val = float(np.clip(val, min_val, max_val))
+  clamped_val = clip_scalar(val, min_val, max_val)
   return clamped_val, clamped_val != val
 
 def smooth_value(val, prev_val, tau, dt=DT_MDL):
