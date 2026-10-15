@@ -716,7 +716,7 @@ class TestRuntimeSnapshot(unittest.TestCase):
     self.assertIsNone(snapshot.onroad.speed_mps)
     ui.sm.put("slcState", NS(**{**vars(ui.sm.messages["slcState"]), "speedLimit": float("nan")}))
     snapshot = RuntimeSnapshotAdapter(ui).build(ShellMode.ONROAD, now_ns=NOW)
-    self.assertEqual(snapshot.onroad.speed_limit.kind, ObservationKind.UNKNOWN)
+    self.assertEqual(snapshot.onroad.speed_limit.kind, ObservationKind.STALE)
 
   def test_pretransition_and_invalid_transport_are_rejected(self):
     ui = ui_fake()

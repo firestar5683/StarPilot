@@ -566,20 +566,21 @@ class RuntimeSnapshotAdapter:
     if mode != ShellMode.ONROAD or drive_key is None:
       self._slc_sign_cache = None
     elif observation.kind == ObservationKind.VALID and slc is not None:
-      if (observation.pending_speed_limit_mps is None and not observation.decision_id and
-          not bool(getattr(slc, 'hasPending', False))):
-        self._slc_sign_cache = (int(sm.logMonoTime['slcState']), drive_key,
-                                observation.session_id or '', observation)
+      shown_mps = displayed_limit_mps(observation)
+      if positive(shown_mps):
+        # Keep only what the sign shows: a proposal or action identity is never retained.
+        sign = replace(observation, speed_limit_mps=shown_mps, pending_speed_limit_mps=None, pending_source='none',
+                       decision_id=None, pending_adjusted_limit_mps=None, action_enabled=False)
+        self._slc_sign_cache = (int(sm.logMonoTime['slcState']), drive_key, observation.session_id or '', sign)
       else:
         self._slc_sign_cache = None
-    elif observation.kind == ObservationKind.UNKNOWN and slc is not None and self._slc_sign_cache is not None:
+    elif observation.kind != ObservationKind.VALID and slc is not None and self._slc_sign_cache is not None:
       stamp, previous_drive, session, previous = self._slc_sign_cache
       if (previous_drive == drive_key and session and session == str(getattr(slc, 'sessionId', '')) and
-          str(getattr(slc, 'observationKind', '')) == 'unknown' and str(getattr(slc, 'source', '')) == 'none' and
-          0 <= now_ns - stamp <= 150_000_000 and not bool(getattr(slc, 'hasPending', False)) and
-          not getattr(slc, 'decisionId', 0)):
-        # Retain the displayed sign and adjusted number, without retaining a
-        # control target, acceptance or action identity during the gap.
+          not bool(getattr(slc, 'hasPending', False)) and not getattr(slc, 'decisionId', 0)):
+        # No source has a limit right now (unknown, absent or stale). Keep showing the
+        # last accepted sign so the card does not flicker, without retaining a control
+        # target, acceptance or action identity during the gap.
         source = previous.accepted_source if positive(previous.accepted_speed_limit_mps) else previous.source
         observation = SpeedLimitObservation(kind=ObservationKind.VALID, source=source,
                                             speed_limit_mps=displayed_limit_mps(previous),
@@ -589,6 +590,10 @@ class RuntimeSnapshotAdapter:
         self._slc_sign_cache = None
     else:
       self._slc_sign_cache = None
+    if (slc is not None and (slc.enabled or slc.displayOnly) and observation.kind != ObservationKind.VALID):
+      # SLC is on but has no limit right now: keep the limit half of the card (as "–")
+      # instead of letting it come and go with the source.
+      observation = SpeedLimitObservation(kind=ObservationKind.STALE, source=observation.source, status=observation.status)
     # Temporary old StarPilot route replay shim. Retire by deleting this call
     # and its import; remaining cleanup is documented in
     # openpilot/starpilot/ui/old_starpilot_route_shim.py.

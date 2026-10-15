@@ -81,7 +81,8 @@ class TestSlcTouch(unittest.TestCase):
     previously_rejected = replace(adoptable, speed_limit=replace(adoptable.speed_limit, accepted_speed_limit_mps=None))
     self.assertEqual(slc_controls(Profile.LARGE, same_accepted)[0].label, "USE LIMIT")
     self.assertEqual(slc_controls(Profile.LARGE, previously_rejected)[0].label, "USE LIMIT")
-    self.assertEqual(slc_controls(Profile.LARGE, replace(adoptable, longitudinal_active=False)), ())
+    # Use-limit is offered without longitudinal control; it is recorded without commanding a speed.
+    self.assertEqual(slc_controls(Profile.LARGE, replace(adoptable, longitudinal_active=False))[0].label, "USE LIMIT")
 
 
 class TestSlcDispatcher(unittest.TestCase):

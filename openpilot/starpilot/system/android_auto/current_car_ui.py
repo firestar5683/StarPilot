@@ -212,6 +212,10 @@ def run(frames_path: str, touch_path: str | None = None, control_path: str | Non
       return bookmark_sender.send(int(ui_state.sm.logMonoTime['carState']))
 
     layout.bookmark = bookmark
+    from openpilot.starpilot.system.android_auto.projection_slc_action import SlcActionSender
+    slc_sender = SlcActionSender()
+    resources.callback(slc_sender.close)
+    layout.slc_action = slc_sender.send
     # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Visible-size targets, GPU NV12 conversion, and async readback limit GPU work and copies.
     # Altering this can degrade video smoothness or introduce lag on Android Auto.
     # Do not change it autonomously; require an explicit user request specifically for this video optimization.

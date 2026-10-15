@@ -245,8 +245,7 @@ class OnroadRequest:
 def _default_slc_controls(profile: Profile, state: OnroadState) -> tuple[SlcControl, ...]:
   """Only render/accept actions backed by a displayed live SLC decision."""
   observation = state.speed_limit
-  if (state.alert.size != AlertSize.NONE or not state.longitudinal_active or not state.slc_system_long_available or
-      not observation.action_enabled or
+  if (state.alert.size != AlertSize.NONE or not observation.action_enabled or
       observation.kind != ObservationKind.VALID or not observation.session_id):
     return ()
   pending = observation.pending_speed_limit_mps
