@@ -330,17 +330,16 @@ class Compositor:
       self.view.compact_sidebar.personality_renderer = self._personality_layer
 
   def _camera_layer(self, rect, state):
+    self.primary_ready = self._primary_matches()
     if self.profile == 'compact':
       if state.appearance.camera_view == 4:
         self.rl.draw_rectangle_rec(rect, self.rl.BLACK)
-        self._receive_primary()
         return
       if ((state.appearance.camera_view == 1 or state.reverse_driver_camera) and not self.cabin or
           state.appearance.camera_view == 3 and not self.wide):
         self.rl.draw_rectangle_rec(rect, self.rl.BLACK)
         from openpilot.system.ui.widgets.label import gui_label
         gui_label(rect, 'recorded camera unavailable', font_size=28)
-        self._receive_primary()
         return
     sm = self.ui.sm
     receipts = {name: sm.recv_frame[name] for name in
@@ -362,9 +361,10 @@ class Compositor:
                                          reverse_driver=state.reverse_driver_camera,
                                          lead_indicator=state.appearance.show_lead_indicator and state.lead_indicator_source_fresh,
                                          lead_info_mode=state.appearance.lead_info_mode, lead_info_metric=state.appearance.lead_info_metric,
-                                         lateral_active=state.lateral_active, road_style=state.customization['roadColors']['compact'])
+                                         lateral_active=state.lateral_active, road_style=state.customization['roadColors']['compact'],
+                                         poll_camera=False)
       else:
-        self.camera.render_camera_model_layer(rect, road_style=state.customization['roadColors']['large'])
+        self.camera.render_camera_model_layer(rect, road_style=state.customization['roadColors']['large'], poll_camera=False)
     finally:
       sm.updated = original
     self.render_receipts.update({name: receipts[name] for name in flags.read if name in receipts})
@@ -397,10 +397,7 @@ class Compositor:
       self.camera.client, self.camera.frame, state, sm.logMonoTime[name], sample.boot_ns))
 
   def _receive_primary(self):
-    if self.camera._ensure_connection():
-      frame = self.camera.client.recv(timeout_ms=0)
-      if frame is not None:
-        self.camera.frame = frame
+    self.camera._poll_camera()
     self.primary_ready = self._primary_matches()
 
   def _pip_layer(self, rect, state, *, submit=None):
@@ -466,13 +463,12 @@ class Compositor:
     self.gui._fallback_fonts.clear()
 
   def update(self):
+    # Select the camera before HUD messages and keep that selection through drawing.
+    self._receive_primary()
     self.ui.update()
     sample = self.ui.replay_sample
     if sample is not None and sample.valid and sample.epoch != self.epoch:
       self.reset_epoch(sample.epoch)
-    # Poll before re-priming: msgq's first receive synchronizes a subscriber
-    # created before its publisher and can discard that publisher's first frame.
-    self._receive_primary()
     # Connect the optional PiP client before the one-shot paused primer.
     if self.cabin and self.pip_saved.enabled is True:
       self.pip_stream.set_active(True)

@@ -49,7 +49,7 @@ class AugmentedRoadView(CameraView):
     self.driver_state_renderer = DriverStateRenderer()
 
   def render_camera_model_layer(self, rect: rl.Rectangle, *, road_style: dict | None = None,
-                                lead_display: tuple[bool, int, bool | None] | None = None) -> None:
+                                lead_display: tuple[bool, int, bool | None] | None = None, poll_camera: bool = True) -> None:
     """Draw the existing calibrated camera/model without stock HUD or alert."""
     if not ui_state.started and ui_state.replay_clock is None:
       return
@@ -61,10 +61,10 @@ class AugmentedRoadView(CameraView):
       self.model_renderer._transform_dirty = True
     self.model_renderer.road_style = style
     self.model_renderer.lead_display = lead_display
-    gui_app.measure_frame_phase("camera", CameraView._render, self, rect)
+    gui_app.measure_frame_phase("camera", CameraView._render, self, rect, poll_camera=poll_camera)
     gui_app.measure_frame_phase("model", self.model_renderer.render, rect)
 
-  def _render(self, rect):
+  def _render(self, rect, *, poll_camera: bool = True):
     # Only render when system is started to avoid invalid data access
     if not ui_state.started:
       return
@@ -92,7 +92,7 @@ class AugmentedRoadView(CameraView):
     )
 
     # Render the base camera view
-    super()._render(self._content_rect)
+    super()._render(self._content_rect, poll_camera=poll_camera)
 
     # Draw all UI overlays
     self.model_renderer.render(self._content_rect)

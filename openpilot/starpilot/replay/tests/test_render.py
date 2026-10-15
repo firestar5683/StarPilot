@@ -111,6 +111,10 @@ def test_recorded_camera_preview_does_not_require_initial_device_state(frame_rea
 @pytest.fixture(params=(Profile.LARGE, Profile.COMPACT))
 def draw_core(request):
   from openpilot.cereal.visionipc import VisionStreamType
+  if request.param == Profile.COMPACT:
+    from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
+  else:
+    from openpilot.selfdrive.ui.onroad.cameraview import CameraView
   from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
 
   class Messages(dict):
@@ -133,7 +137,9 @@ def draw_core(request):
   core.wide = core.cabin = False
   core.ui = SimpleNamespace(sm=sm, replay_sample=ClockSample(1_000_000_000, 9_050_000_000, 100, epoch=2, valid=True))
   core.camera = Mock(client=client, frame=frame, stream_type=VisionStreamType.VISION_STREAM_NARROW_ROAD)
+  core.camera._switching = False
   core.camera._ensure_connection.return_value = True
+  core.camera._poll_camera.side_effect = lambda: CameraView._poll_camera(core.camera)
   core.last_route_frame = None
   core.render_receipts = {'modelV2': 1}
   core.context, core.placement, core.adapter = Mock(), Mock(), Mock()
@@ -143,7 +149,11 @@ def draw_core(request):
   core.scale = 1
   core.view, core.converter, core.readback = Mock(), Mock(), Mock()
   core.output = None
-  core.camera.render_camera_model_layer.side_effect = lambda *args, **kwargs: core._receive_primary()
+
+  def paint(*args, **kwargs):
+    assert kwargs['poll_camera'] is False
+  core.camera.render_camera_model_layer.side_effect = paint
+
   def render_view(state):
     # The real OnroadView enters its camera layer only with this availability flag.
     if state.camera_available:
@@ -185,21 +195,82 @@ def test_invalid_or_other_epoch_clock_never_advances_draw(draw_core, sample):
   core.adapter.build.assert_not_called()
 
 
+def test_camera_poll_precedes_message_snapshot():
+  core: Any = object.__new__(Compositor)
+  order = []
+  core.ui = SimpleNamespace(update=lambda: order.append('messages'), replay_sample=ClockSample(1, 1, 1, epoch=2, valid=True))
+  core.epoch, core.cabin = 2, False
+  core._receive_primary = lambda: order.append('camera')
+  assert core.update() is core.ui.replay_sample
+  assert order == ['camera', 'messages']
+
+
+@pytest.mark.parametrize('profile', ('onroad', 'mici.onroad'))
+def test_camera_paint_does_not_receive_or_switch_selected_frame(monkeypatch, profile):
+  import importlib
+  import numpy as np
+  import pyray as rl
+  from openpilot.cereal.visionipc import VisionStreamType
+  module = importlib.import_module(f'openpilot.selfdrive.ui.{profile}.cameraview')
+  monkeypatch.setattr(module, 'COMMA_HARDWARE', True)
+  camera = object.__new__(module.CameraView)
+  camera.close = Mock()
+  camera.client = Mock()
+  camera.frame = SimpleNamespace(frame_id=5, width=100, height=50)
+  frame = camera.frame
+  camera._stream_type = VisionStreamType.VISION_STREAM_NARROW_ROAD
+  camera._switching = True
+  camera._handle_switch = Mock()
+  camera._ensure_connection = Mock()
+  camera._calc_frame_matrix = Mock(return_value=np.eye(3))
+  camera._render_egl = Mock()
+  camera._render(rl.Rectangle(0, 0, 100, 50), poll_camera=False)
+  assert camera.frame is frame
+  camera.client.recv.assert_not_called()
+  camera._handle_switch.assert_not_called()
+  camera._ensure_connection.assert_not_called()
+  camera._render_egl.assert_called_once()
+
+
+def test_compact_driver_switch_waits_for_camera_poll(monkeypatch):
+  from openpilot.selfdrive.ui.mici.onroad import augmented_road_view as module
+  camera = object.__new__(module.AugmentedRoadView)
+  camera.close = Mock()
+  camera._stream_type = module.NARROW_ROAD_CAM
+  camera._target_stream_type = module.DRIVER_CAM
+  camera._switching = True
+  camera.available_streams = [module.DRIVER_CAM]
+  camera._ensure_connection = Mock()
+  camera._handle_switch = Mock()
+  camera._switch_stream_if_needed = Mock(return_value=module.DRIVER_CAM)
+  monkeypatch.setattr(module.ui_state, 'started', True)
+  monkeypatch.setattr(module.rl, 'draw_rectangle_rec', Mock())
+  monkeypatch.setattr(module, 'gui_label', Mock())
+  camera.render_camera_model_layer(Mock(), camera_view=module.CAMERA_VIEW_DRIVER, poll_camera=False)
+  camera._handle_switch.assert_not_called()
+  camera._ensure_connection.assert_not_called()
+
+
 @pytest.mark.parametrize('replacement_id', (5, 6))
-def test_later_receive_keeps_final_identity_check(draw_core, replacement_id):
+def test_selected_camera_is_painted_before_next_poll(draw_core, replacement_id):
   core = draw_core
   def receive(**kwargs):
     core.camera.client.frame_id = replacement_id
     return SimpleNamespace(frame_id=replacement_id)
   core.camera.client.recv.side_effect = receive
-  assert core.draw(2, 0., 100) is (replacement_id == 5)
+  assert core.draw(2, 0., 100)
+  core.camera.client.recv.assert_not_called()
+  core._receive_primary()
+  core.ui.replay_sample = replace(core.ui.replay_sample, now_ns=1_050_000_000)
+  assert core.draw(2, .05, 150) is (replacement_id == 5)
   core.camera.client.recv.assert_called_once_with(timeout_ms=0)
-  assert core.readback.start.call_count == int(replacement_id == 5)
+  assert core.readback.start.call_count == 1 + int(replacement_id == 5)
 
 
-def test_optional_placeholder_still_allows_later_camera_recovery(draw_core):
+def test_optional_placeholder_still_allows_later_camera_recovery(draw_core, monkeypatch):
   from openpilot.cereal.visionipc import VisionStreamType
   core = draw_core
+  monkeypatch.setattr('openpilot.system.ui.widgets.label.gui_label', Mock())
   core.camera.stream_type = VisionStreamType.VISION_STREAM_WIDE_ROAD
   core.camera.client.frame_id = 4
   def receive(**kwargs):
@@ -207,8 +278,19 @@ def test_optional_placeholder_still_allows_later_camera_recovery(draw_core):
     return SimpleNamespace(frame_id=5)
   core.camera.client.recv.side_effect = receive
   assert core.draw(2, 0., 100)
+  core.camera.client.recv.assert_not_called()
+  core._receive_primary()
+  core.ui.replay_sample = replace(core.ui.replay_sample, now_ns=1_050_000_000)
+  assert core.draw(2, .05, 150)
   core.camera.client.recv.assert_called_once_with(timeout_ms=0)
-  core.readback.start.assert_called_once()
+  assert core.readback.start.call_count == 2
+
+
+def test_selected_buffer_reuse_still_fails_final_identity_check(draw_core):
+  core = draw_core
+  core.camera.render_camera_model_layer.side_effect = lambda *args, **kwargs: setattr(core.camera.frame, 'frame_id', 6)
+  assert not core.draw(2, 0., 100)
+  core.readback.start.assert_not_called()
 
 
 def test_eligible_retained_camera_draws_fresh_hud_and_route_time(draw_core):
@@ -235,7 +317,7 @@ def test_rejected_camera_can_match_next_update_without_losing_model_receipt(draw
   core.ui.sm['narrowRoadEncodeIdx'].frameId = 6
   def consume_model(*args, **kwargs):
     assert core.ui.sm.updated['modelV2']
-    core._receive_primary()
+    assert kwargs['poll_camera'] is False
   core.camera.client.recv.return_value = None
   core.camera.render_camera_model_layer.side_effect = consume_model
   assert core.draw(2, 0., 100)
@@ -258,11 +340,12 @@ def test_optional_missing_camera_still_publishes_existing_placeholder(draw_core,
 
 @pytest.mark.parametrize('camera_view', (1, 3, 4))
 @pytest.mark.parametrize('draw_core', (Profile.COMPACT,), indirect=True)
-def test_compact_hidden_and_unrecorded_camera_keep_acquisition(draw_core, camera_view, monkeypatch):
+def test_compact_hidden_and_unrecorded_camera_keep_selected_frame(draw_core, camera_view, monkeypatch):
   core = draw_core
   core.adapter.build.return_value.onroad = replace(core.adapter.build.return_value.onroad, appearance=replace(
     core.adapter.build.return_value.onroad.appearance, camera_view=camera_view))
   monkeypatch.setattr('openpilot.system.ui.widgets.label.gui_label', Mock())
+  core._receive_primary()
   assert core.draw(2, 0., 100)
   core.camera.client.recv.assert_called_once_with(timeout_ms=0)
   core.camera.render_camera_model_layer.assert_not_called()
@@ -483,6 +566,7 @@ def test_initial_hud_primer_required_even_when_camera_received_a_frame(tmp_path,
 
 def test_early_camera_subscriber_is_polled_before_paused_reprime():
   from openpilot.cereal.visionipc import VisionStreamType
+  from openpilot.selfdrive.ui.onroad.cameraview import CameraView
   sample = SimpleNamespace(valid=True, epoch=1, boot_ns=9_050_000_000)
   idx = SimpleNamespace(frameId=5, timestampSof=9_000_000_000, timestampEof=9_010_000_000)
   sm = Mock()
@@ -493,11 +577,13 @@ def test_early_camera_subscriber_is_polled_before_paused_reprime():
   client = Mock(frame_id=5, timestamp_sof=idx.timestampSof, timestamp_eof=idx.timestampEof)
   # The first receive synchronizes with a publisher created after this client.
   client.recv.side_effect = [None, frame]
-  core = object.__new__(Compositor)
+  core: Any = object.__new__(Compositor)
   core.ui = Mock(replay_sample=sample, sm=sm)
   core.epoch, core.cabin = 1, False
   core.camera = Mock(client=client, frame=None, stream_type=VisionStreamType.VISION_STREAM_NARROW_ROAD)
+  core.camera._switching = False
   core.camera._ensure_connection.return_value = True
+  core.camera._poll_camera.side_effect = lambda: CameraView._poll_camera(core.camera)
   core.update()
   assert not core._primary_matches()
   core.update()

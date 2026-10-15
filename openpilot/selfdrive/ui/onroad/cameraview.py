@@ -213,24 +213,24 @@ class CameraView(Widget):
       [0.0, 0.0, 1.0]
     ])
 
-  def _render(self, rect: rl.Rectangle):
+  def _poll_camera(self) -> bool:
     if self._switching:
       self._handle_switch()
 
     if not self._ensure_connection():
-      self._draw_placeholder(rect)
-      return
+      return False
 
-    # Try to get a new buffer without blocking
     buffer = self.client.recv(timeout_ms=0)
     if buffer:
       self._texture_needs_update = True
       self.frame = buffer
     elif not self.client.is_connected():
-      # ensure we clear the displayed frame when the connection is lost
       self.frame = None
 
-    if not self.frame:
+    return self.frame is not None
+
+  def _render(self, rect: rl.Rectangle, *, poll_camera: bool = True):
+    if (poll_camera and not self._poll_camera()) or self.frame is None:
       self._draw_placeholder(rect)
       return
 

@@ -104,7 +104,7 @@ class TestNativeCameraComposition(unittest.TestCase):
           module.AugmentedRoadView.render_camera_model_layer(view, rect)
         view._switch_stream_if_needed.assert_called_once()
         view._update_calibration.assert_called_once_with()
-        camera.assert_called_once_with(view, rect, **({"paint": True} if module is compact else {}))
+        camera.assert_called_once_with(view, rect, poll_camera=True, **({"paint": True} if module is compact else {}))
         if model_field == "_model_renderer":
           model.render_with_lead.assert_called_once_with(rect, False, 0, None, lateral_active=False, paint=True)
           model.render_with_lead.reset_mock()

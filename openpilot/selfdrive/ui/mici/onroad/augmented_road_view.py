@@ -229,11 +229,12 @@ class AugmentedRoadView(CameraView):
   def render_camera_model_layer(self, rect: rl.Rectangle, *, camera_view: int = CAMERA_VIEW_AUTO,
                                 reverse_driver: bool = False, lead_indicator: bool = False,
                                 lead_info_mode: int = 0, lead_info_metric: bool | None = None,
-                                lateral_active: bool = False, road_style: dict | None = None, paint: bool = True) -> None:
+                                lateral_active: bool = False, road_style: dict | None = None, paint: bool = True,
+                                poll_camera: bool = True) -> None:
     """Draw the existing calibrated camera/model without stock HUD or alert."""
     if not ui_state.started and ui_state.replay_clock is None:
       return
-    if camera_view == CAMERA_VIEW_DRIVER or reverse_driver:
+    if poll_camera and (camera_view == CAMERA_VIEW_DRIVER or reverse_driver):
       self._ensure_connection()
     target = self._switch_stream_if_needed(ui_state.sm, camera_view, reverse_driver)
     if target is None:
@@ -241,7 +242,7 @@ class AugmentedRoadView(CameraView):
         rl.draw_rectangle_rec(rect, rl.BLACK)
       return
     driver_transition = DRIVER_CAM in (self.stream_type, target, self._target_stream_type)
-    if self._switching and driver_transition:
+    if poll_camera and self._switching and driver_transition:
       self._handle_switch()
     if (target == DRIVER_CAM and DRIVER_CAM not in self.available_streams) or \
        (driver_transition and self.stream_type != target):
@@ -254,7 +255,7 @@ class AugmentedRoadView(CameraView):
     self._update_calibration()
     self._content_rect = rect
     self._model_renderer.road_style = road_style or {}
-    gui_app.measure_frame_phase("camera", CameraView._render, self, rect, paint=paint)
+    gui_app.measure_frame_phase("camera", CameraView._render, self, rect, paint=paint, poll_camera=poll_camera)
     if target != DRIVER_CAM and self.frame is not None:
       gui_app.measure_frame_phase("model", self._model_renderer.render_with_lead, rect, lead_indicator,
                                   lead_info_mode, lead_info_metric, lateral_active=lateral_active, paint=paint)
@@ -292,9 +293,9 @@ class AugmentedRoadView(CameraView):
     if not self._bookmark_icon.interacting():
       super()._handle_mouse_release(mouse_pos)
 
-  def _render(self, rect: rl.Rectangle, /, *, paint: bool = True):
+  def _render(self, rect: rl.Rectangle, /, *, paint: bool = True, poll_camera: bool = True):
     if not paint:
-      super()._render(rect, paint=False)
+      super()._render(rect, paint=False, poll_camera=poll_camera)
       return
     # Draw text if not onroad
     if not ui_state.started:
@@ -325,7 +326,7 @@ class AugmentedRoadView(CameraView):
     )
 
     # Render the base camera view
-    super()._render(self._content_rect)
+    super()._render(self._content_rect, poll_camera=poll_camera)
 
     # Draw all UI overlays
     self._model_renderer.render(self._content_rect)

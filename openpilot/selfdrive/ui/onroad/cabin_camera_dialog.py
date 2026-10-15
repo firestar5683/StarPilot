@@ -29,8 +29,8 @@ class CabinCameraDialog(CameraView):
   def __del__(self):
     self.close()
 
-  def _render(self, rect):
-    super()._render(rect)
+  def _render(self, rect, *, poll_camera: bool = True):
+    super()._render(rect, poll_camera=poll_camera)
 
     if not self.frame:
       gui_label(
