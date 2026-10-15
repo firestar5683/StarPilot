@@ -105,6 +105,9 @@ class DeveloperLayoutMici(NavScroller):
     self._debug_mode_toggle = BigParamControl("ui debug mode", "ShowDebugInfo",
                                               toggle_callback=lambda checked: (gui_app.set_show_touches(checked), gui_app.set_show_fps(checked)),
                                               description="Show touch locations and the UI frame rate.")
+    self._cellular_off_toggle = BigParamControl("disable cellular", "CellularDisabled",
+                                                description="Hang up cellular data and don't redial. The modem stays registered and the " +
+                                                            "SIM is untouched. Remote access over cellular stops until this is turned off.")
 
     self._scroller.add_widgets([
       self._adb_toggle,
@@ -114,6 +117,7 @@ class DeveloperLayoutMici(NavScroller):
       self._joystick_toggle,
       self._alpha_long_toggle,
       self._debug_mode_toggle,
+      self._cellular_off_toggle,
     ])
 
     # Toggle lists
@@ -123,6 +127,7 @@ class DeveloperLayoutMici(NavScroller):
       ("JoystickDebugMode", self._joystick_toggle),
       ("AlphaLongitudinalEnabled", self._alpha_long_toggle),
       ("ShowDebugInfo", self._debug_mode_toggle),
+      ("CellularDisabled", self._cellular_off_toggle),
     )
     onroad_blocked_toggles = (self._adb_toggle, self._joystick_toggle)
     release_blocked_toggles = (self._joystick_toggle, self._alpha_long_toggle)

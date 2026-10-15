@@ -29,6 +29,10 @@ DESCRIPTIONS = {
     "Enabling Experimental mode is recommended when enabling openpilot longitudinal control alpha. " +
     "Changing this setting will restart openpilot if the car is powered on."
   ),
+  'cellular_disabled': tr_noop(
+    "Hang up cellular data and don't redial. The modem stays registered and the SIM is untouched. " +
+    "Remote access over cellular stops until this is turned off."
+  ),
 }
 
 
@@ -94,6 +98,13 @@ class DeveloperLayout(Widget):
     )
     self._on_enable_ui_debug(self._params.get_bool("ShowDebugInfo"))
 
+    self._cellular_disabled_toggle = toggle_item(
+      lambda: tr("Disable Cellular"),
+      description=lambda: tr(DESCRIPTIONS["cellular_disabled"]),
+      initial_state=self._params.get_bool("CellularDisabled"),
+      callback=self._on_cellular_disabled,
+    )
+
     self._scroller = Scroller([
       button_item("Arabesque", lambda: tr("OPEN"), callback=on_open_arabesque,
                   enabled=lambda: on_open_arabesque is not None and arabesque_available()),
@@ -105,6 +116,7 @@ class DeveloperLayout(Widget):
       self._lat_maneuver_toggle,
       self._alpha_long_toggle,
       self._ui_debug_toggle,
+      self._cellular_disabled_toggle,
     ], line_separator=True, spacing=0)
 
     # Toggles should be not available to change in onroad state
@@ -152,6 +164,7 @@ class DeveloperLayout(Widget):
       ("LateralManeuverMode", self._lat_maneuver_toggle),
       ("AlphaLongitudinalEnabled", self._alpha_long_toggle),
       ("ShowDebugInfo", self._ui_debug_toggle),
+      ("CellularDisabled", self._cellular_disabled_toggle),
     ):
       item.action_item.set_state(self._params.get_bool(key))
 
@@ -159,6 +172,9 @@ class DeveloperLayout(Widget):
     self._params.put_bool("ShowDebugInfo", state, block=True)
     gui_app.set_show_touches(state)
     gui_app.set_show_fps(state)
+
+  def _on_cellular_disabled(self, state: bool):
+    self._params.put_bool("CellularDisabled", state, block=True)
 
   def _on_enable_adb(self, state: bool):
     self._params.put_bool("AdbEnabled", state, block=True)

@@ -242,6 +242,10 @@ class Modem:
       return True
     return self._read_param("GsmRoaming") == "1"
 
+  def _is_cellular_disabled(self) -> bool:
+    # data only: the modem stays registered and the SIM is left alone
+    return self._read_param("CellularDisabled") == "1"
+
   def _publish_state(self, **kwargs):
     self.S.update(kwargs)
     self.S["seconds_since_boot"] = time.monotonic()
@@ -387,6 +391,8 @@ class Modem:
 
     if reg in ("home", "roaming") and greg in ("home", "roaming"):
       self._publish_state(registration=reg)
+      if self._is_cellular_disabled():
+        return State.SEARCHING
       return State.CONNECTING
 
     if reg != self.S.get("registration"):
@@ -428,6 +434,9 @@ class Modem:
     new_roaming = self._is_roaming_allowed()
     if new_roaming != self._roaming_allowed:
       logging.info(f"roaming changed: {self._roaming_allowed} -> {new_roaming}")
+      return True
+    if self._is_cellular_disabled():
+      logging.info("cellular data disabled")
       return True
     return False
 
