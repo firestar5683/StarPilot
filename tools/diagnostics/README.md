@@ -70,6 +70,8 @@ and environment. The wrapper refuses invalid private contexts and an existing ou
 device, create an owner, spoof parked authority, or start a session on its own. Do not run a private producer beside live replay.
 
 Records stay in a 30,000-event ring until one mode-0600 JSON report is written. Overwritten records are counted.
+Tracing and picture capture affect frame timing; measure cadence in separate lightweight runs.
+Copy reports off the device before `/tmp` fills; log decompression needs the same space.
 After pausing through the owner and confirming readiness, send SIGUSR1 to this diagnostic worker PID to request a checkpoint.
 It writes at the next valid paused loop boundary with no borrowed readback pending; wait for a complete JSON report before stopping.
 The report declares `report_boundary=paused_checkpoint` and excludes subsequent teardown. Without a checkpoint it attempts a

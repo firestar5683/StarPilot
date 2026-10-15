@@ -413,7 +413,15 @@ def test_epoch_reset_preserves_native_camera_stream_and_eligible_paused_frame(mo
   client.is_connected.return_value = True
   frame = SimpleNamespace(frame_id=5)
   core.camera = Mock(client=client, frame=frame, stream_type=0, available_streams=streams)
-  core.camera_class = Mock(return_value=Mock())
+  callbacks = []
+  replacement = Mock()
+  def transition():
+    replacement.client, replacement.frame = Mock(), None
+  replacement._offroad_transition = transition
+  def camera_class(**kwargs):
+    callbacks.append(transition)
+    return replacement
+  core.camera_class = camera_class
   core._close_camera = Mock()
   core._new_view = Mock()
   core.readback = Mock(pending=False)
@@ -424,9 +432,12 @@ def test_epoch_reset_preserves_native_camera_stream_and_eligible_paused_frame(mo
   sm.__getitem__ = Mock(return_value=idx)
   sm.seen = sm.valid = {'narrowRoadEncodeIdx': True}
   sm.logMonoTime = {'narrowRoadEncodeIdx': 9_020_000_000}
-  core.ui = SimpleNamespace(replay_sample=SimpleNamespace(valid=True, boot_ns=9_050_000_000), sm=sm)
+  core.ui = SimpleNamespace(replay_sample=SimpleNamespace(valid=True, boot_ns=9_050_000_000), sm=sm,
+                            _offroad_transition_callbacks=callbacks)
   core.render_receipts = {'modelV2': 1}
   core.reset_epoch(3)
+  for callback in callbacks:
+    callback()
   assert core.render_receipts == {}
   assert core.camera.client is client
   assert core.camera.available_streams == streams

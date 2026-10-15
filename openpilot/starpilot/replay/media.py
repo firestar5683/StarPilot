@@ -25,7 +25,7 @@ def atomic_json(path: Path, value):
   temporary = path.with_suffix('.tmp')
   fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
   with os.fdopen(fd, 'w') as stream:
-    json.dump(value, stream, allow_nan=False, separators=(',', ':'))
+    stream.write(json.dumps(value, allow_nan=False, separators=(',', ':')))
   temporary.replace(path)
 
 

@@ -280,6 +280,8 @@ class Compositor:
         from openpilot.selfdrive.ui.mici.onroad.augmented_road_view import AugmentedRoadView
       self.camera_class = AugmentedRoadView
       self.camera = self.camera_class()
+      # Recorded onroad transitions must not reconnect the replay camera.
+      ui_state._offroad_transition_callbacks.remove(self.camera._offroad_transition)
       self.resources.callback(self._close_camera)
       self.adapter = RuntimeSnapshotAdapter(ui_state)
       from openpilot.starpilot.ui.pip_preferences import read_pip
@@ -486,8 +488,8 @@ class Compositor:
     frame = self.camera.frame if self._primary_matches() else None
     self._close_camera()
     self.camera = self.camera_class(stream_type=stream)
-    # Preserve the already-subscribed client: replacing it after the paused
-    # primer would require another seek and create an endless epoch loop.
+    self.ui._offroad_transition_callbacks.remove(self.camera._offroad_transition)
+    # Preserve the subscriber to avoid repeated seeks while paused.
     self.camera.client = client
     self.camera.frame = frame
     self.camera.available_streams = available
