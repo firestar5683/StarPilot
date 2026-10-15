@@ -60,16 +60,25 @@ class MainActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         share = intent.getStringExtra("share")?.take(8192)
-        if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        AppUpdates.initialize(this)
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !prefs.getBoolean("notificationPermissionRequested", false)) {
+            prefs.edit().putBoolean("notificationPermissionRequested", true).apply()
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
         val cm = Networks.manager(this)
         knownWifi.addAll(cm.allNetworks.filter { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true })
         // Galaxy Wi-Fi may have no internet, so do not require that capability.
         runCatching { cm.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), wifiWatcher, handler) }
-        connect()
+        connect(Networks.localOrigin(intent.getStringExtra(AppUpdates.ORIGIN_EXTRA) ?: ""))
     }
     private fun idle() = resumed && !isFinishing && web == null && ble == null && discovery == null && lanPicker == null && screen?.busy() == false
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); share = intent.getStringExtra("share")?.take(8192); connect() }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        share = intent.getStringExtra("share")?.take(8192)
+        connect(Networks.localOrigin(intent.getStringExtra(AppUpdates.ORIGIN_EXTRA) ?: ""))
+    }
     private fun connect(host: String? = null) {
         stopDiscovery()
         connectionGeneration.incrementAndGet()
@@ -124,7 +133,10 @@ class MainActivity : Activity() {
             // Reveal as soon as Galaxy starts drawing, so a slow asset never trips the watchdog.
             override fun onPageCommitVisible(v: WebView, url: String) { if (web === v && Networks.localOrigin(url) == origin) revealWeb() }
             override fun onPageFinished(v: WebView, url: String) {
-                if (web === v && Networks.localOrigin(url) == origin) { prefs.edit().putString("host", origin).apply(); share = null; revealWeb() }
+                if (web === v && Networks.localOrigin(url) == origin) {
+                    prefs.edit().putString("host", origin).apply(); share = null; revealWeb()
+                    AppUpdates.checkAsync(this@MainActivity)
+                }
             }
         }
         view.setDownloadListener { url, _, _, _, _ ->
@@ -230,7 +242,7 @@ class MainActivity : Activity() {
     }
     private fun message(text: String) { if (isFinishing || isDestroyed) return; AlertDialog.Builder(this).setMessage(text).setPositiveButton("OK", null).show() }
     private fun connections() {
-        val options = arrayOf("Automatic (Wi-Fi first)", "Galaxy Wi-Fi / LAN only", "Bluetooth only", "Enter LAN address", "Pair Bluetooth using Wi-Fi / LAN", "Paste Bluetooth pairing code", "Forget Bluetooth on this phone", "Revoke all paired phones on comma", "Find Galaxy on LAN")
+        val options = arrayOf("Automatic (Wi-Fi first)", "Galaxy Wi-Fi / LAN only", "Bluetooth only", "Enter LAN address", "Pair Bluetooth using Wi-Fi / LAN", "Paste Bluetooth pairing code", "Forget Bluetooth on this phone", "Revoke all paired phones on comma", "Find Galaxy on LAN", "App notification settings")
         AlertDialog.Builder(this).setTitle("Galaxy connection").setItems(options) { _, which ->
             when (which) {
                 0, 1, 2 -> { prefs.edit().putString("transport", arrayOf("auto", "wifi", "bluetooth")[which]).apply(); connect() }
@@ -256,6 +268,7 @@ class MainActivity : Activity() {
                 }
                 6 -> { pairing.forget(); ble?.close(); disconnected() }
                 8 -> discoverLan(fromMenu = true)
+                9 -> startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
                 7 -> AlertDialog.Builder(this).setMessage("Revoke every phone using this comma's Galaxy Bluetooth key, including iPhones? Pair again afterward.")
                     .setPositiveButton("Revoke") { _, _ -> pairOverWifi(true) }.setNegativeButton("Cancel", null).show()
             }
@@ -430,6 +443,7 @@ class MainActivity : Activity() {
     }
     override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, permissions, results)
+        if (code == 1 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) AppUpdates.checkAsync(this)
         if (code == 2) { if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) connectBluetooth()
             else disconnected().apply {
                 route(Route.BLUETOOTH, RouteState.FAILED, "Needs permission")
@@ -512,7 +526,7 @@ class MainActivity : Activity() {
         @JavascriptInterface fun openWifiSettings() { runOnUiThread { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } }
     }
     @Deprecated("Legacy back handling") override fun onBackPressed() { if (web?.canGoBack() == true) web?.goBack() else super.onBackPressed() }
-    override fun onResume() { super.onResume(); resumed = true; recovery.resumed() }
+    override fun onResume() { super.onResume(); resumed = true; recovery.resumed(); AppUpdates.checkAsync(this) }
     override fun onPause() { resumed = false; super.onPause() }
     override fun onStop() {
         recovery.stopped(if (discovery != null || lanPicker != null) discoveryAutomatic else null, web == null && ble == null)

@@ -1,6 +1,16 @@
 # Galaxy Android companion
 
-Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.6 (versionCode 8).
+Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.7 (versionCode 9).
+
+Allow notifications on Android to receive an **App updates** pop-up when your comma
+has a newer APK. The app checks when opened and after connecting, plus about every
+15 minutes in the background (Android may delay background work). Checks use Galaxy
+Wi-Fi or the last connected comma address on the same LAN, independently of phone
+internet sharing. Bluetooth-only connections cannot download or check for APKs.
+Each available version alerts once; tapping opens Galaxy's update page, where
+**Update app** downloads the APK for Android's normal installation confirmation.
+Use **Connections → App notification settings** to enable notifications if previously
+denied, or change the App updates channel's sound and pop-up behavior.
 Wi-Fi/LAN loads live Galaxy screens from comma. Bluetooth uses screens bundled
 in the APK, so Bluetooth screen changes require rebuilding/updating the APK. This directory and the Galaxy changes are source implementation plus a
 signed release artifact; physical phone/comma/in-car acceptance is still required.
