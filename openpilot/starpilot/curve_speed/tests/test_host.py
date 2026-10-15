@@ -101,6 +101,50 @@ class TestCurveHost(unittest.TestCase):
     self.assertFalse(seen[-1][1].following)
     self.assertFalse(seen[-1][1].tracked)
 
+  def capture_frames(self, host):
+    frames = []
+    original = host.runtime.step
+    def runtime_capture(frame, **kwargs):
+      frames.append(frame)
+      return original(frame, **kwargs)
+    self.enterContext(patch.object(host.runtime, 'step', side_effect=runtime_capture))
+    return frames
+
+  def present_lead(self, d_rel=30.0):
+    radar = self.sm.messages['radarState'].leadOne
+    radar.present = True
+    radar.dRel = d_rel
+
+  def test_stale_frame_keeps_lead_consensus(self):
+    host = CurveHost(enabled=True, no_lead=True, replay=True)
+    frames = self.capture_frames(host)
+    self.present_lead()
+    for n in range(1, 17):
+      stamp = NOW + n * 50_000_000
+      self.sm.logMonoTime = dict.fromkeys(self.sm.messages, stamp)
+      host.sample(self.sm, self.cp, stamp, follow_time_s=1.45)
+    self.assertTrue(frames[-1].following_lead)
+    stamp += 45_000_000
+    self.sm.logMonoTime = dict.fromkeys(self.sm.messages, stamp)
+    self.sm.logMonoTime['carState'] = stamp - 30_000_000
+    host.sample(self.sm, self.cp, stamp, follow_time_s=1.45)
+    stamp += 45_000_000
+    self.sm.logMonoTime = dict.fromkeys(self.sm.messages, stamp)
+    host.sample(self.sm, self.cp, stamp, follow_time_s=1.45)
+    self.assertTrue(frames[-1].tracking_lead)
+    self.assertTrue(frames[-1].following_lead)
+
+  def test_present_lead_is_unknown_until_detector_warms_up(self):
+    host = CurveHost(enabled=True, no_lead=True, replay=True)
+    frames = self.capture_frames(host)
+    self.present_lead()
+    for n in range(1, 21):
+      stamp = NOW + n * 50_000_000
+      self.sm.logMonoTime = dict.fromkeys(self.sm.messages, stamp)
+      self.assertIsNone(host.sample(self.sm, self.cp, stamp, follow_time_s=1.45).ceiling_mps)
+    self.assertNotIn(False, [frame.following_lead for frame in frames])
+    self.assertTrue(frames[-1].following_lead)
+
   def test_actual_serialized_schema_projection(self):
     events = {name: messaging.new_message(name) for name in self.sm.messages}
     events['modelV2'].modelV2.orientationRate.z = [0.25] * 33
@@ -176,6 +220,33 @@ class TestCurveHost(unittest.TestCase):
         self.assertEqual(result.ceiling_mps is not None, expected)
         if not expected:
           self.assertFalse(result.training)
+          self.assertEqual(result.reason, 'stale_or_invalid_evidence')
+
+  def test_live_planner_latency_does_not_age_out_loop_inputs(self):
+    offset = 2_000_000_000
+    for latency, input_age, camera_age, expected in (
+        (35_000_000, 5_000_000, 60_000_000, True),
+        (35_000_000, 21_000_000, 60_000_000, False),
+        (35_000_000, 5_000_000, 115_000_000, True),
+        (35_000_000, 5_000_000, 115_000_001, False),
+        (35_000_000, 5_000_000, 140_000_000, False),
+        (35_000_000, 5_000_000, -1, False),
+        (35_000_000, 5_000_000, 150_000_001, False),
+        (150_000_001, 5_000_000, 60_000_000, False),
+    ):
+      with self.subTest(latency=latency, input_age=input_age, camera_age=camera_age):
+        tick = [NOW]
+        host = CurveHost(enabled=True, clock_pair=lambda tick=tick, latency=latency: (tick[0] + latency, tick[0] + latency + offset))
+        result = None
+        for _ in range(4):
+          tick[0] += 50_000_000
+          self.sm.logMonoTime = dict.fromkeys(self.sm.messages, tick[0] - input_age)
+          self.sm.logMonoTime['modelV2'] = tick[0] - 3_000_000
+          self.sm.logMonoTime['radarState'] = tick[0] - 40_000_000
+          self.sm.messages['modelV2'].timestampEof = tick[0] + offset - camera_age
+          result = host.sample(self.sm, self.cp, tick[0])
+        self.assertEqual(result.ceiling_mps is not None, expected)
+        if not expected:
           self.assertEqual(result.reason, 'stale_or_invalid_evidence')
 
 

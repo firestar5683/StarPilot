@@ -5,11 +5,13 @@ import math
 import time
 
 from openpilot.cereal.services import SERVICE_LIST
+from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.curve_speed.runtime import Frame, INPUT_MAX_AGE_NS, MODEL_MAX_AGE_NS, Runtime
 from openpilot.starpilot.curve_speed.target import CurveProfile
-from openpilot.starpilot.lead_tracking import LeadDetector
+from openpilot.starpilot.lead_tracking import FILTER_THRESHOLD, FILTER_TIME_S, LeadDetector
 
 CLOCK_PAIR_MAX_SKEW_NS = 5_000_000
+LEAD_WARMUP_FRAMES = math.ceil(math.log(1 - FILTER_THRESHOLD) / math.log(1 - DT_MDL / (FILTER_TIME_S + DT_MDL)))
 
 
 def clock_pair_ns() -> tuple[int, int] | None:
@@ -67,12 +69,14 @@ class CurveHost:
     self.boot_offset_ns: int | None = None
     self.source_floor_ns = 0
     self.leads = LeadDetector()
+    self.lead_samples = 0
     self.lead_drive_id = 0
     self.previous_long_active = False
     self.previous_active_headway: float | None = None
 
   def _reset_leads(self) -> None:
     self.leads.reset()
+    self.lead_samples = 0
     self.previous_long_active = False
     self.previous_active_headway = None
 
@@ -101,22 +105,20 @@ class CurveHost:
       required = ('modelV2', 'carState', 'carControl', 'controlsState', 'selfdriveState', 'radarState')
       try:
         camera_eof = sm['modelV2'].timestampEof
-        camera_current = (type(camera_eof) is int and 0 < camera_eof <= pair[1] and
-                          pair[1] - camera_eof <= MODEL_MAX_AGE_NS)
+        camera_age = pair[1] - camera_eof if type(camera_eof) is int and camera_eof > 0 else -1
+        camera_current = (0 <= camera_age <= MODEL_MAX_AGE_NS and camera_eof <= now_ns + offset)
       except (KeyError, AttributeError, TypeError, ValueError, OverflowError):
         camera_current = False
       # A newly published model envelope cannot renew the age of its camera
       # input. EOF uses BOOTTIME; only the bracketed clock pair may compare it.
       # Offline replay intentionally keeps its separate recorded timeline.
-      if (not camera_current or not 0 <= pair[0] - now_ns <= INPUT_MAX_AGE_NS or
-          not all(_fresh(sm, name, pair[0]) for name in required)):
+      if (not camera_current or not 0 < frame.model_ns <= now_ns or
+          pair[0] - frame.model_ns > MODEL_MAX_AGE_NS or not 0 <= pair[0] - now_ns <= INPUT_MAX_AGE_NS):
         frame = replace(frame, inputs_fresh=False)
       if rearmed or any(type(sm.logMonoTime.get(name, 0)) is not int or sm.logMonoTime[name] <= self.source_floor_ns
              for name in required):
         frame = replace(frame, inputs_fresh=False)
-    if not frame.inputs_fresh or frame.profile is None:
-      self._reset_leads()
-    else:
+    if frame.inputs_fresh and frame.profile is not None:
       try:
         # Tracking precedes headway reset: the first inactive tick retains the prior headway,
         # then uses zero. Active control requires this cycle's MPC headway.
@@ -131,9 +133,16 @@ class CurveHost:
                                    observed_mono_s=frame.model_ns / 1e9, now_mono_s=now_ns / 1e9,
                                    radar_fresh=_fresh(sm, 'radarState', now_ns), model_fresh=_fresh(sm, 'modelV2', now_ns),
                                    car_fresh=_fresh(sm, 'carState', now_ns), headway_fresh=headway_fresh)
+        if self.leads.last_observed_mono_s is None:
+          self.lead_samples = 0
+        elif observed.tracked is not None and not sm['carState'].standstill:
+          self.lead_samples += 1
+        tracked = observed.tracked
         following = (observed.following if frame.long_active else
                      False if observed.tracked is not None else None)
-        frame = replace(frame, tracking_lead=observed.tracked, following_lead=following)
+        if self.lead_samples < LEAD_WARMUP_FRAMES and not tracked and observed.raw_present:
+          tracked = following = None
+        frame = replace(frame, tracking_lead=tracked, following_lead=following)
         self.previous_long_active = frame.long_active if observed.tracked is not None else False
         self.previous_active_headway = (float(detector_headway) if detector_headway is not None and frame.long_active and headway_fresh and
                                         observed.tracked is not None else None)

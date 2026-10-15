@@ -76,6 +76,7 @@ class Runtime:
     self.filter = TargetFilter()
     self.last_ns = 0
     self.last_model_ns = 0
+    self.last_valid_ns = 0
     self.drive_id = 0
     self.was_controlling = False
     self.was_long_active = False
@@ -94,6 +95,7 @@ class Runtime:
     self.pending_ns = 0
     self.pending_target: float | None = None
     self.pending_cap = False
+    self.pending_hold = False
     self.pending_cruise = 0.0
     self.pending_ego = 0.0
     self.glow = False
@@ -110,6 +112,7 @@ class Runtime:
     self.filter.reset()
     self.last_ns = 0
     self.last_model_ns = 0
+    self.last_valid_ns = 0
     self.drive_id = drive_id
     self.was_controlling = False
     self.was_long_active = False
@@ -127,6 +130,7 @@ class Runtime:
     self.pending_ns = 0
     self.pending_target = None
     self.pending_cap = False
+    self.pending_hold = False
     self.pending_cruise = 0.0
     self.pending_ego = 0.0
     self.glow = False
@@ -149,6 +153,8 @@ class Runtime:
       self.glow = False
       return False
     self.confirmed_ns = frame_ns
+    if self.pending_hold:
+      return True
     target = self.pending_target
     selected = applied and self.pending_cap and target is not None
     self.was_controlling = bool(selected and target < self.pending_cruise - 1.0 and
@@ -230,24 +236,31 @@ class Runtime:
     self.pending_ns = now
     self.pending_target = None
     self.pending_cap = False
+    self.pending_hold = False
     valid_profile = (frame.inputs_fresh and frame.profile is not None and
                      type(frame.model_ns) is int and 0 < frame.model_ns <= now and
                      now - frame.model_ns <= MODEL_MAX_AGE_NS and
                      frame.profile.observed_ns == frame.model_ns and
                      frame.model_ns > self.last_model_ns)
     if not valid_profile:
-      self.filter.reset()
       self.watch_until_ns = 0
       self.last_training_ns = 0
-      self.nudged = False
-      self.override = False
-      self.was_controlling = False
-      self.glow = False
-      self.was_long_active = frame.long_active
-      self.was_gas = frame.gas_pressed
-      self.was_brake = frame.brake_pressed
+      self.pending_hold = (self.filter.target is not None and
+                           now - self.last_valid_ns <= int(MAX_STEP_SECONDS * 1e9))
+      if self.pending_hold:
+        self.pending_target = self.filter.target
+      else:
+        self.filter.reset()
+        self.nudged = False
+        self.override = False
+        self.was_controlling = False
+        self.glow = False
+        self.was_long_active = frame.long_active
+        self.was_gas = frame.gas_pressed
+        self.was_brake = frame.brake_pressed
       return self._result(None, None, 0.0, 'stale_or_invalid_evidence', False, now)
     self.last_model_ns = frame.model_ns
+    self.last_valid_ns = now
     if (not finite_number(frame.cruise_mps) or frame.cruise_mps <= 0 or
         not finite_number(frame.ego_mps) or frame.ego_mps < 0 or
         frame.ego_mps > 100.0 or not finite_number(frame.measured_curvature) or
