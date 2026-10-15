@@ -42,7 +42,7 @@ def profile(brand):
     fp[0][0x5A] = 8
     fp[2].update({0x3D6: 8, 0x186: 8})
   elif brand == 'tesla':
-    fp[0] = dict(TESLA_FINGERPRINTS[models[brand]][0])
+    fp[0] = dict(TESLA_FINGERPRINTS[TESLA.TESLA_MODEL_S_PREAP][0])
   return interfaces[models[brand]].get_params(models[brand], fp, [], brand == 'honda', False, False)
 
 
