@@ -43,5 +43,6 @@ export async function loadCatalog(options) {
     (tool.visibility !== undefined && tool.visibility !== "authenticated"))) {
     throw new Error("Invalid Galaxy catalog")
   }
-  return { tools: catalog.tools.slice().sort((a, b) => a.name.localeCompare(b.name)), mode: runtime.monitor }
+  return { tools: catalog.tools.slice().sort((a, b) => a.name.localeCompare(b.name)), mode: runtime.monitor,
+    instance: typeof runtime.instance === "string" ? runtime.instance : null }
 }

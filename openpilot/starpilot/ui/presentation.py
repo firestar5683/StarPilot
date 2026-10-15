@@ -6,6 +6,8 @@ from pathlib import Path
 import hashlib
 import json
 
+import numpy as np
+from PIL import Image
 import pyray as rl
 
 
@@ -104,9 +106,12 @@ class BitmapFonts:
       raise RuntimeError("Bitmap fonts require an initialized graphics context")
     self._headless_context = headless_context
     self.profile = Profile(profile)
+    self._directory = directory
     self._fonts: dict[str, rl.Font] = {}
     self._measurements: dict[tuple, TextSize] = {}
     self._vertical_ink: dict[tuple, tuple[float, float]] = {}
+    self._horizontal_ink: dict[tuple, tuple[float, float]] = {}
+    self._glyph_ink: dict[str, dict[int, tuple[int, int] | None]] = {}
     default_texture_id = rl.get_font_default().texture.id
     try:
       for filename in dict.fromkeys(font_filename(self.profile, role) for role in FontRole):
@@ -169,6 +174,54 @@ class BitmapFonts:
       self._vertical_ink[key] = (top * scale, bottom * scale)
     return self._vertical_ink[key]
 
+  def horizontal_ink(self, text: str, role: FontRole, size: float) -> tuple[float, float]:
+    """Visible glyph left/right from the draw x, without the font's side bearings."""
+    key = (text, role, size)
+    if key not in self._horizontal_ink:
+      font = self.font(role)
+      width_scale, weight = self._optical_style(role)
+      scale = size * self.profile.font_scale / font.baseSize
+      left = right = None
+      x = 0.
+      columns = self._glyph_columns(role)
+      for char in text:
+        index = rl.get_glyph_index(font, ord(char))
+        glyph, rec = font.glyphs[index], font.recs[index]
+        # Fixed-width fonts (DINish-Speed) pad each glyph cell, so use the atlas's inked columns.
+        ink = None if char.isspace() else columns.get(index, (0, rec.width - 1) if rec.width > 0 else None)
+        if ink is not None:
+          left = x + glyph.offsetX + ink[0] if left is None else min(left, x + glyph.offsetX + ink[0])
+          right = x + glyph.offsetX + ink[1] + 1 if right is None else max(right, x + glyph.offsetX + ink[1] + 1)
+        x += glyph.advanceX or rec.width
+      if left is None:
+        left = right = 0.
+      if len(self._horizontal_ink) >= 1024:
+        self._horizontal_ink.clear()
+      # Match draw(): the optical width scale applies to the whole run and the weight pass shifts right.
+      self._horizontal_ink[key] = (left * scale * width_scale, right * scale * width_scale + (weight if text else 0))
+    return self._horizontal_ink[key]
+
+  def _glyph_columns(self, role: FontRole) -> dict[int, tuple[int, int] | None]:
+    """Measure the reviewed PNG, without GPU readback during a widget render.
+
+    Texture readback depends on the graphics backend and can disturb the active
+    framebuffer used for Galaxy's widget previews. The source atlas has the same
+    pixels and works independently of the current render target.
+    """
+    filename = font_filename(self.profile, role)
+    if filename not in self._glyph_ink:
+      font = self.font(role)
+      with Image.open(font_path(self._directory, filename).with_suffix('.png')) as atlas:
+        alpha = np.asarray(atlas.convert('RGBA').getchannel('A'))
+      columns = {}
+      for index in range(font.glyphCount):
+        rec = font.recs[index]
+        cell = alpha[int(rec.y):int(rec.y + rec.height), int(rec.x):int(rec.x + rec.width)]
+        inked = np.flatnonzero(cell.max(0) > 40) if cell.size else []
+        columns[index] = (int(inked[0]), int(inked[-1])) if len(inked) else None
+      self._glyph_ink[filename] = columns
+    return self._glyph_ink[filename]
+
   def draw(self, text: str, role: FontRole, size: float, x: float, y: float, color: rl.Color = rl.WHITE,
            *, spacing: float = 0, fallback: bool = False) -> None:
     draw = getattr(rl, "_orig_draw_text_ex", rl.draw_text_ex)
@@ -193,6 +246,8 @@ class BitmapFonts:
         rl.unload_font(font)
     self._fonts.clear()
     self._vertical_ink.clear()
+    self._horizontal_ink.clear()
+    self._glyph_ink.clear()
     self._measurements.clear()
 
   def __enter__(self):

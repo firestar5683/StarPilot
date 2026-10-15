@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import sys
+import time
 
 from openpilot.cereal import messaging
 from openpilot.common.hardware import COMMA_HARDWARE, HARDWARE
@@ -15,8 +16,12 @@ from openpilot.starpilot.ui.startup import select_ui
 BIG_UI = gui_app.big_ui()
 
 
-def update_frame(preview=None, controllers=None):
+def update_frame(preview=None, controllers=None, star=None):
   gui_app.measure_frame_phase("ui_state", ui_state.update)
+  if star is not None:
+    # Android Auto bookmarks must be consumed even when the comma screen is off
+    # or another widget covers the StarPilot page.
+    star._poll_projection_bookmark(time.monotonic_ns())
   if controllers is not None:
     gui_app.measure_frame_phase("controllers", controllers.poll)
   if preview is not None:
@@ -55,8 +60,9 @@ def main():
     controllers = None
 
   pm = messaging.PubMaster(['uiDebug'])
+  star = layout.star if star_ui else None
   try:
-    for should_render, frame_time, cpu_time in gui_app.render(before_frame=lambda: update_frame(preview, controllers)):
+    for should_render, frame_time, cpu_time in gui_app.render(before_frame=lambda: update_frame(preview, controllers, star)):
       if should_render:
         if camera_core_ui and not main_thread_configured:
           # Share the camera core with normal scheduling, without FIFO display

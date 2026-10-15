@@ -6,7 +6,7 @@ import pyray as rl
 
 from openpilot.selfdrive.ui.mici.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.starpilot.ui.onroad_customization import PROFILES, placement
+from openpilot.starpilot.ui.onroad_customization import PROFILES, placement, widget_size
 from openpilot.starpilot.ui.onroad_state import AlertSize
 from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
 from openpilot.starpilot.ui.presentation import Profile
@@ -26,11 +26,26 @@ def valid_observation(monitor, driver):
 def monitor_bounds(document, profile, is_rhd):
   position = placement(document, profile, 'driver_monitor')
   widget = PROFILES[str(profile)]['widgets']['driver_monitor']
+  width, height = widget_size(document, profile, 'driver_monitor')
   x, y = position['x'], position['y']
   if profile == Profile.LARGE and is_rhd and (x, y) == (widget['default']['x'], widget['default']['y']):
     bounds = PROFILES['large']['bounds']
-    x = 2 * bounds['x'] + bounds['width'] - x - widget['width']
-  return rl.Rectangle(x, y, widget['width'], widget['height'])
+    x = 2 * bounds['x'] + bounds['width'] - x - width
+  return rl.Rectangle(x, y, width, height)
+
+
+def draw_monitor_art(renderer, bounds, profile):
+  """Scale the native icon and cone together inside the saved square."""
+  base = 128 if profile == Profile.LARGE else 60
+  renderer._rect = rl.Rectangle(bounds.x, bounds.y, base, base)
+  rl.rl_push_matrix()
+  try:
+    rl.rl_translatef(bounds.x, bounds.y, 0)
+    rl.rl_scalef(bounds.width / base, bounds.height / base, 1)
+    rl.rl_translatef(-bounds.x, -bounds.y, 0)
+    renderer._render(renderer._rect)
+  finally:
+    rl.rl_pop_matrix()
 
 
 def monitor_visible(profile, state, *, fresh, onroad, top_icons):
@@ -77,8 +92,7 @@ class DriverMonitorLayer:
     self.renderer.set_should_draw(visible)
     is_rhd = monitor.isRHD if ready else getattr(self.renderer, '_is_rhd', False)
     bounds = monitor_bounds(state.customization, self.profile, is_rhd)
-    size = 128 if self.profile == Profile.LARGE else 60
-    self.renderer.set_position(bounds.x + (bounds.width - size) / 2, bounds.y + (bounds.height - size) / 2)
+    self.renderer.set_position(bounds.x, bounds.y)
     if ready:
       self.renderer._update_state()
     else:
@@ -87,4 +101,4 @@ class DriverMonitorLayer:
       self.renderer._fade_filter.update(0.35 if visible else 0.0)
     if visible:
       draw_widget_frame(bounds, state.customization, self.profile, "driver_monitor")
-      self.renderer._render(self.renderer._rect)
+      draw_monitor_art(self.renderer, bounds, self.profile)

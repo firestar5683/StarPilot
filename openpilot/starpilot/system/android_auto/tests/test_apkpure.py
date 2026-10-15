@@ -112,6 +112,7 @@ def cache(monkeypatch):
   monkeypatch.setattr(apkpure, "_cache", None)
   monkeypatch.setattr(apkpure, "_refresh_after", 0.0)
   monkeypatch.setattr(apkpure, "_in_flight", False)
+  monkeypatch.setattr(apkpure, "_sleep", lambda delay: None)
 
 
 def run_refresh(monkeypatch, result, clock):
@@ -141,12 +142,33 @@ def test_cache_ttls_follow_link_expiry_and_failures(monkeypatch, cache):
   assert apkpure.download_status(now=NOW + 3601) is None
   assert run_refresh(monkeypatch, None, clock) == []  # still fresh
   clock[0] = apkpure._refresh_after
-  assert run_refresh(monkeypatch, None, clock) == [1]
+  assert run_refresh(monkeypatch, None, clock) == [1, 1, 1]  # three tries before giving up
   assert apkpure.download_status(now=NOW) is None
   assert apkpure._refresh_after == pytest.approx(clock[0] + apkpure.FAILURE_TTL)
   clock[0] += apkpure.FAILURE_TTL
   run_refresh(monkeypatch, {**good, "expires": NOW + 3 * 86400}, clock)
   assert apkpure._refresh_after == pytest.approx(clock[0] + apkpure.SUCCESS_TTL)
+
+
+def test_refresh_retries_before_giving_up_and_reports_pending(monkeypatch, cache):
+  monkeypatch.setattr(apkpure, "_now", lambda: NOW)
+  good = {"version": "17.7.663654-release", "code": 1, "url": LINK, "size": 5, "expires": NOW + 2 * 86400}
+  results, waits, pending = [None, good], [], []
+  def fetch():
+    pending.append(apkpure.lookup_pending())
+    return results.pop(0)
+  monkeypatch.setattr(apkpure, "fetch_latest", fetch)
+  monkeypatch.setattr(apkpure, "_sleep", waits.append)
+  class Inline:
+    def __init__(self, target, **kwargs): self.target = target
+    def start(self): self.target()
+  monkeypatch.setattr(apkpure.threading, "Thread", Inline)
+  assert not apkpure.lookup_pending()
+  apkpure.start_background_refresh(now=lambda: 0.0)
+  assert waits == [apkpure.RETRY_DELAYS[0]]
+  assert pending == [True, True]  # the page waits while tries remain
+  assert not apkpure.lookup_pending()
+  assert apkpure.download_status()["url"] == LINK
 
 
 def test_refresh_is_single_flight(monkeypatch, cache):
@@ -164,4 +186,11 @@ def test_refresh_is_single_flight(monkeypatch, cache):
   for thread in threading.enumerate():
     if thread.name == "aa-apkpure":
       thread.join(2)
-  assert calls == [1]
+  assert calls == [1, 1, 1]  # one lookup's three tries; the second start didn't add another
+
+
+def test_version_for_size_names_only_an_exact_size_match(monkeypatch, cache):
+  assert apkpure.version_for_size(5) is None
+  monkeypatch.setattr(apkpure, "_cache", {"version": "17.7.663654-release", "code": 1, "url": LINK, "size": 5, "expires": NOW})
+  assert apkpure.version_for_size(5) == "17.7.663654-release"  # an expired link still names the file it pointed to
+  assert apkpure.version_for_size(6) is None

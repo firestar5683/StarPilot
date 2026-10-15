@@ -11,14 +11,17 @@ metadata.width = 2880
 metadata.bounds.width = 2820
 metadata.widgets.current_speed.default.x += 510
 metadata.widgets.steering_wheel.default.x += 1020
+metadata.widgets.driver_monitor.width = metadata.widgets.driver_monitor.height = 128
+metadata.widgets.driver_monitor.default = {x: 120, y: 840, enabled: true, size: 128}
+metadata.widgets.driver_monitor.resizable = {min: 64, default: 128, max: 192}
 metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96, height: 96, colors: {}, required: true, frontmost: true,
-  opacity: { min: 25, max: 100, default: 100 }, backgroundToggle: true,
+  opacity: { min: 25, max: 100, default: 75 }, backgroundToggle: true,
   note: "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
-  default: { x: 30, y: 954, enabled: true, opacity: 100, background: true } }
+  default: { x: 30, y: 954, enabled: true, opacity: 75, background: false } }
 metadata.widgetOrder = [...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
-const doc = { version: 2, clock24Hour: false, largeUiGammaTrial: false, blindSpotBorder: false, signalBorder: false, blindSpotCamera: false, hidePersonalityAlerts: false, wheelPedalFeedback: false, canvas: { width: 2880, height: 1080 }, widgets }
+const doc = { version: 3, clock24Hour: false, largeUiGammaTrial: false, blindSpotBorder: false, signalBorder: false, blindSpotCamera: false, hidePersonalityAlerts: false, wheelPedalFeedback: false, leadIndicator: false, leadInfo: "Off", speedSources: false, speedSourcesCard: false, speedAlign: "left", canvas: { width: 2880, height: 1080 }, widgets }
 const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
   screen: { width: 1280, height: 720, margin_width: 0, margin_height: 240 },
   revision: "aa-screen-and-layout", editable: true, valid: true,
@@ -26,6 +29,16 @@ const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
 const data = editorSnapshot(raw)
 assert.equal(validSnapshot(data), true)
 assert.equal(validDocument(data.document, data.metadata), true)
+assert.equal(data.document.layouts.large.car_exit.opacity, 75)
+assert.equal(data.document.layouts.large.car_exit.background, false)
+const resizedMonitor = copy(data.document)
+resizedMonitor.layouts.large.driver_monitor.size = 192
+assert.equal(validDocument(resizedMonitor, data.metadata), true)
+assert.equal(projectionPayload({document: resizedMonitor}, data.metadata).document.widgets.driver_monitor.size, 192)
+resizedMonitor.layouts.large.driver_monitor.size = 193
+assert.equal(validDocument(resizedMonitor, data.metadata), false)
+assert.match(OnroadLayoutPage.template, /switchRow\('Show background', selectedPosition.background === true\)/)
+assert.doesNotMatch(OnroadLayoutPage.template, /type="checkbox" :checked="selectedPosition.background"/)
 const exitOpacity = copy(data.document)
 exitOpacity.layouts.large.car_exit.opacity = 24
 assert.equal(validDocument(exitOpacity, data.metadata), false)
@@ -46,6 +59,9 @@ assert.equal(validSnapshot({ ...data, metadata: { ...data.metadata, projection: 
 assert.equal(validDocument(data.document, native.metadata), false)
 assert.deepEqual(projectionPayload({ revision: raw.revision, document: data.document }, data.metadata),
   { revision: raw.revision, document: raw.document })
+data.document.speedSources = true // The sources panel is an Android Auto setting, saved with the layout.
+assert.equal(projectionPayload({ revision: raw.revision, document: data.document }, data.metadata).document.speedSources, true)
+data.document.speedSources = false
 data.document.clock24Hour = true
 assert.equal(projectionPayload({ revision: raw.revision, document: data.document }, data.metadata).document.clock24Hour, true)
 data.document.clock24Hour = false
@@ -53,7 +69,9 @@ data.document.largeUiGammaTrial = true
 assert.equal(projectionPayload({document: data.document}, data.metadata).document.largeUiGammaTrial, true)
 assert.equal(validDocument({...data.document, largeUiGammaTrial: 1}, data.metadata), false)
 data.document.largeUiGammaTrial = false
-assert.match(OnroadLayoutPage.template, /Large UI Gamma Effect Trial/)
+assert.match(OnroadLayoutPage.template, /'Large UI Gamma Effect'/)
+assert.doesNotMatch(OnroadLayoutPage.template, /Effect Trial|type="checkbox" :checked="state\.draft\.wheelPedalFeedback/)
+assert.match(OnroadLayoutPage.template, /switchRow\('Brake and Acceleration Colors', state\.draft\.wheelPedalFeedback === true\)/)
 const gammaChanges = []
 const gammaVm = { projection: true, editable: true,
   state: { draft: { largeUiGammaTrial: false }, drag: null, layerDrag: null, notice: '' },
@@ -70,10 +88,33 @@ for (const blocked of [{ projection: false }, { editable: false }]) {
 assert.equal(data.document.blindSpotBorder, false)
 assert.equal(data.document.signalBorder, false)
 assert.equal(editorSnapshot({ ...raw, document: { ...raw.document, blindSpotBorder: undefined, signalBorder: undefined } }).document.blindSpotBorder, false)
-for (const key of ["blindSpotBorder", "signalBorder", "hidePersonalityAlerts", "wheelPedalFeedback"]) assert.equal(validDocument({ ...data.document, [key]: 1 }, data.metadata), false)
+for (const key of ["blindSpotBorder", "signalBorder", "hidePersonalityAlerts", "wheelPedalFeedback", "leadIndicator"]) assert.equal(validDocument({ ...data.document, [key]: 1 }, data.metadata), false)
+// Android Auto's lead marker and lead info start off and never follow the comma's choices.
+assert.equal(data.document.leadIndicator, false)
+assert.equal(data.document.leadInfo, "Off")
+const legacyLead = editorSnapshot({ ...raw, document: { ...raw.document, leadIndicator: undefined, leadInfo: undefined } }).document
+assert.deepEqual([legacyLead.leadIndicator, legacyLead.leadInfo], [false, "Off"])
+assert.equal(validDocument({ ...data.document, leadInfo: "Speed" }, data.metadata), true)
+assert.equal(validDocument({ ...data.document, leadInfo: "Both" }, data.metadata), false)
+assert.equal(validDocument({ ...native.document, leadIndicator: true }, native.metadata), false, "the comma screen keeps its own lead settings")
+assert.equal(projectionPayload({ document: { ...data.document, leadIndicator: true, leadInfo: "Distance" } }, data.metadata).document.leadInfo, "Distance")
+assert.match(OnroadLayoutPage.template, /'Lead Indicator'/)
+const leadChanges = []
+const leadVm = { projection: true, editable: true, state: { draft: { leadIndicator: false, leadInfo: "Off" }, drag: null, layerDrag: null, notice: '' },
+  recordChange: before => leadChanges.push(before) }
+OnroadLayoutPage.methods.setProjectionLeadInfo.call(leadVm, "Speed")
+assert.equal(leadVm.state.draft.leadInfo, "Off", "lead info waits for the lead marker")
+assert.equal(OnroadLayoutPage.methods.projectionLeadInfoRow.call(leadVm).available, false)
+OnroadLayoutPage.methods.setProjectionDisplay.call(leadVm, "leadIndicator", "On")
+OnroadLayoutPage.methods.setProjectionLeadInfo.call(leadVm, "Speed")
+assert.deepEqual([leadVm.state.draft.leadIndicator, leadVm.state.draft.leadInfo], [true, "Speed"])
+assert.deepEqual(OnroadLayoutPage.methods.projectionLeadInfoRow.call(leadVm).choices, ["Off", "Distance", "Speed"])
+OnroadLayoutPage.methods.setProjectionLeadInfo.call(leadVm, "Both")
+assert.equal(leadVm.state.draft.leadInfo, "Speed")
+assert.equal(leadChanges.length, 2)
 assert.equal(validDocument({ ...native.document, signalBorder: true }, native.metadata), false, "the comma screen keeps its C4 settings")
-assert.match(OnroadLayoutPage.template, /Red blind-spot border/)
-assert.match(OnroadLayoutPage.template, /Amber signal border/)
+assert.match(OnroadLayoutPage.template, /Red Blind-Spot Border/)
+assert.match(OnroadLayoutPage.template, /Amber Signal Border/)
 const borderChanges = []
 const borderVm = { projection: true, editable: true, state: { draft: { blindSpotBorder: false, signalBorder: false }, drag: null, layerDrag: null, notice: '' },
   recordChange: before => borderChanges.push(before) }
@@ -95,7 +136,7 @@ assert.equal(editorSnapshot(olderCameraLayout).document.blindSpotCamera, false)
 for (const value of [1, 0, "true", null, [], {}])
   assert.equal(validDocument({ ...data.document, blindSpotCamera: value }, data.metadata), false)
 assert.equal(validDocument({ ...native.document, blindSpotCamera: true }, native.metadata), false)
-assert.match(OnroadLayoutPage.template, /Show camera on blind-spot warning/)
+assert.match(OnroadLayoutPage.template, /Show Camera on Blind-Spot Warning/)
 assert.match(OnroadLayoutPage.template, /setProjectionDisplay\('blindSpotCamera', value\)/)
 const cameraChanges = []
 const cameraVm = { projection: true, editable: true,
@@ -147,7 +188,7 @@ compile(OnroadLayoutPage.template, { decodeEntities: value => value.replaceAll("
 
 const emissions = [], leaveVm = { projection: true, busy: false, dirty: true,
   state: { status: "ready", data: { editable: true }, draft: {}, drag: null, layerDrag: null, discard: null, leavePresentation: null, removeConfirm: null, error: "", needsReload: false },
-  hideDevicePreview() {}, $emit: (...args) => emissions.push(args), feed: { load() {}, async save() { return true } } }
+  $emit: (...args) => emissions.push(args), feed: { load() {}, async save() { return true } } }
 for (const name of ["pendingLeave", "inlineLeavePrompt", "modalLeavePrompt", "saveAvailable", "canSavePending"])
   Object.defineProperty(leaveVm, name, { get: () => OnroadLayoutPage.computed[name].call(leaveVm) })
 for (const name of ["requestLeave", "cancelLeave", "leave", "saveAndLeave"])
@@ -192,8 +233,8 @@ const draft = copy(feed.data.document)
 draft.layouts.large.current_speed.x += 20
 assert.equal(await feed.save(draft), true)
 assert.equal(requests[0].url, "./api/android-auto/layout")
-assert.equal(requests[1].body.document.version, 2)
-assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["blindSpotBorder", "blindSpotCamera", "canvas", "clock24Hour", "hidePersonalityAlerts", "largeUiGammaTrial", "signalBorder", "version", "wheelPedalFeedback", "widgets"])
+assert.equal(requests[1].body.document.version, 3)
+assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["blindSpotBorder", "blindSpotCamera", "canvas", "clock24Hour", "hidePersonalityAlerts", "largeUiGammaTrial", "leadIndicator", "leadInfo", "signalBorder", "speedAlign", "speedSources", "speedSourcesCard", "version", "wheelPedalFeedback", "widgets"])
 assert.equal(requests[1].body.document.widgets.current_speed.x, 1170)
 assert.equal(updates.at(-1).notice, "Android Auto layout saved.")
 feed.stop()

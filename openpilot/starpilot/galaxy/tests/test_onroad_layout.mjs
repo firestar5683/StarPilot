@@ -51,7 +51,7 @@ export function snapshot() {
   metadata.roadColorFields = [{ id: 'path', label: 'Path', default: '#30FF9CFF' },
     { id: 'pathEdge', label: 'Path edges', default: '#00FF40FF' }, { id: 'laneLines', label: 'Lane lines', default: '#FFFFFFFF' }]
   metadata.profiles.compact.widgets.speed_limit_actions.visualInsetTop = 32
-  const document = { version: 6, roadColors: { large: {}, compact: {} }, widgetColors: { large: {}, compact: {} }, palette: Object.fromEntries(metadata.paletteFields.map((field) => [field.id, field.default])),
+  const document = { version: 7, roadColors: { large: {}, compact: {} }, widgetColors: { large: {}, compact: {} }, palette: Object.fromEntries(metadata.paletteFields.map((field) => [field.id, field.default])),
     layouts: Object.fromEntries(Object.entries(metadata.profiles).map(([id, profile]) => [id,
       Object.fromEntries(Object.entries(profile.widgets).map(([key, definition]) => [key,
         { ...definition.default, ...(definition.resizable ? { size: definition.resizable.default } : {}) }]))])) }
@@ -125,7 +125,7 @@ assert.equal(clampPlacement(data.metadata.profiles.large, "current_speed", NaN, 
 assert.deepEqual(previewPoint({ clientX: 316, clientY: 200 }, { left: 100, top: 92, width: 432, height: 216 }, data.metadata.profiles.large), { x: 1080, y: 540 })
 
 function editor() {
-  const emitted = [], calls = [], previewCalls = [], captures = new Set()
+  const emitted = [], calls = [], backdropCalls = [], captures = new Set()
   const target = { setPointerCapture(id) { captures.add(id) }, hasPointerCapture(id) { return captures.has(id) }, releasePointerCapture(id) { captures.delete(id) } }
   const vm = { ...OnroadLayoutPage.setup({ mode: "local", unauthorized() {} }), $emit: (...args) => emitted.push(args),
     $refs: { preview: { ...target, getBoundingClientRect: () => ({ left: 100, top: 100, width: 1080, height: 540 }) } } }
@@ -135,15 +135,198 @@ function editor() {
   vm.artFeed.start = () => { vm.artFeed.active = true }
   vm.artFeed.update = () => {}
   vm.artFeed.stop = () => { vm.artFeed.active = false }
+  vm.artFeed.pause = () => { vm.artFeed.active = false }
+  vm.backdropFeed.start = () => { vm.backdropFeed.active = true; backdropCalls.push("start") }
+  vm.backdropFeed.update = (...args) => backdropCalls.push(["update", ...args])
+  vm.backdropFeed.stop = () => { vm.backdropFeed.active = false; backdropCalls.push("stop") }
   vm.state.data = snapshot(); vm.state.data.supportedProfiles = ['large', 'compact']; vm.state.draft = copy(vm.state.data.document); vm.state.status = "ready"; vm.state.selected = "current_speed"
   const publish = vm.feed.publish
   vm.feed = { load: () => calls.push("load"), save: (document) => calls.push(copy(document)) }
-  vm.previewFeed.start = () => { vm.previewFeed.active = true; previewCalls.push("start") }
-  vm.previewFeed.update = (...args) => previewCalls.push(["update", ...args])
-  vm.previewFeed.stop = () => { vm.previewFeed.active = false; previewCalls.push("stop") }
   const event = (x, y, pointerId = 1) => ({ clientX: x, clientY: y, pointerId, button: 0, currentTarget: { setPointerCapture() { throw new Error("Capture must belong to the stable preview") } }, preventDefault() {} })
-  return { vm, event, emitted, calls, previewCalls, captures, publish }
+  return { vm, event, emitted, calls, backdropCalls, captures, publish }
 }
+
+// Snapping changes pointer placement only; a drag remains one history entry.
+const snappedDrag = editor(), snapVm = snappedDrag.vm
+const largePoint = (x, y, options = {}) => ({ ...snappedDrag.event(100 + x / 2, 100 + y / 2), pointerType: "mouse", ...options })
+snapVm.startDrag("current_speed", largePoint(640, 30))
+snapVm.moveDrag(largePoint(34, 430))
+assert.equal(snapVm.layout.current_speed.x, 30)
+assert.ok(snapVm.state.snapGuides.some(guide => guide.axis === "x" && guide.kind === "bounds"))
+assert.equal(snapVm.snapSummary, "At the edge")
+const cachedTargets = snapVm.state.drag.targets
+snapVm.moveDrag(largePoint(35, 430))
+assert.equal(snapVm.state.drag.targets, cachedTargets)
+assert.equal(snapVm.snapInBar, false, "a mouse drag keeps the alignment chip on the preview")
+snapVm.endDrag(largePoint(34, 430))
+snapVm.startDrag("current_speed", largePoint(34, 430, { pointerType: "touch" }))
+snapVm.moveDrag(largePoint(34, 300, { pointerType: "touch" }))  // past the finger slop
+snapVm.moveDrag(largePoint(35, 430, { pointerType: "touch" }))
+assert.equal(snapVm.snapInBar, true, "a finger drag shows the alignment in the save bar instead")
+snapVm.endDrag(largePoint(35, 430, { pointerType: "touch" }))
+assert.equal(snapVm.snapInBar, false)
+assert.deepEqual(snapVm.state.snapGuides, [])
+assert.equal(snapVm.state.history.undo.length, 1)
+snapVm.undo()
+assert.deepEqual(snapVm.layout.current_speed, snapshot().document.layouts.large.current_speed)
+for (const bypass of ["alt", "disabled"]) {
+  const free = editor().vm
+  if (bypass === "disabled") free.state.snapEnabled = false
+  free.startDrag("current_speed", largePoint(640, 30))
+  free.endDrag(largePoint(34, 430, { altKey: bypass === "alt" }))
+  assert.equal(free.layout.current_speed.x, 34)
+  assert.deepEqual(free.state.snapGuides, [])
+}
+snapVm.startDrag("current_speed", largePoint(640, 30))
+snapVm.moveDrag(largePoint(34, 430))
+assert.ok(snapVm.state.snapGuides.length)
+snapVm.cancelDrag()
+assert.deepEqual(snapVm.layout.current_speed, snapshot().document.layouts.large.current_speed)
+assert.deepEqual(snapVm.state.snapGuides, [])
+snapVm.changePosition("current_speed", 34, 430)
+snapVm.onKey("current_speed", { key: "ArrowLeft", preventDefault() {} })
+assert.equal(snapVm.layout.current_speed.x, 33)
+snapVm.onKey("current_speed", { key: "ArrowRight", shiftKey: true, preventDefault() {} })
+assert.equal(snapVm.layout.current_speed.x, 43)
+assert.deepEqual(snapVm.state.snapGuides, [])
+
+for (const pointerType of ["mouse", "touch"]) {
+  const phone = editor().vm
+  phone.$refs.preview.getBoundingClientRect = () => ({ left: 0, top: 0, width: 360, height: 180 })
+  for (const id of Object.keys(phone.layout)) if (id !== "current_speed") phone.state.hiddenPreviewWidgets.large[id] = true
+  const phonePoint = (x, y) => ({ ...snappedDrag.event(x / 6, y / 6), pointerType })
+  phone.startDrag("current_speed", phonePoint(640, 30))
+  phone.endDrag(phonePoint(75, 430))
+  assert.equal(phone.layout.current_speed.x, pointerType === "touch" ? 30 : 75)
+}
+const targetVisibility = editor().vm
+targetVisibility.profile.widgets.pip = { ...widget("Side camera", "pip_camera", 60, 60, 400, 300), layer: "underlay" }
+targetVisibility.layout.pip = { x: 400, y: 300, enabled: true }
+targetVisibility.startDrag("current_speed", largePoint(640, 30))
+targetVisibility.moveDrag(largePoint(464, 430))
+assert.equal(targetVisibility.layout.current_speed.x, 460)
+assert.ok(targetVisibility.state.snapGuides.some(guide => guide.label === "Side camera"))
+targetVisibility.cancelDrag()
+targetVisibility.togglePreviewVisibility("pip")
+targetVisibility.startDrag("current_speed", largePoint(640, 30))
+targetVisibility.moveDrag(largePoint(464, 430))
+assert.equal(targetVisibility.layout.current_speed.x, 464)
+targetVisibility.cancelDrag()
+targetVisibility.startDrag("current_speed", largePoint(640, 30))
+targetVisibility.moveDrag(largePoint(443, 430))
+assert.equal(targetVisibility.layout.current_speed.x, 443, "torque arc footprint must not attract other widgets")
+targetVisibility.cancelDrag()
+
+const invalidSnap = editor().vm
+invalidSnap.selectProfile("compact")
+invalidSnap.$refs.preview.getBoundingClientRect = () => ({ left: 0, top: 0, width: 536, height: 240 })
+invalidSnap.state.hiddenPreviewWidgets.compact.speed_limit_actions = true
+const smallPoint = (x, y) => ({ ...snappedDrag.event(x, y), pointerType: "mouse" })
+invalidSnap.startDrag("max_speed", smallPoint(0, 0))
+invalidSnap.moveDrag(smallPoint(100, 18)) // Speed limit's top attracts to y=20, overlapping protected actions.
+assert.equal(clampPlacement(invalidSnap.profile, "max_speed", 100, 20, invalidSnap.layout), null)
+assert.deepEqual(invalidSnap.layout.max_speed, { x: 100, y: 18, enabled: true })
+assert.deepEqual(invalidSnap.state.snapGuides, [])
+assert.equal(invalidSnap.state.placementError, "")
+invalidSnap.moveDrag(smallPoint(100, 100))
+assert.deepEqual(invalidSnap.layout.max_speed, { x: 100, y: 18, enabled: true })
+assert.ok(invalidSnap.state.placementError)
+invalidSnap.cancelDrag()
+
+const traySnap = editor().vm
+traySnap.layout.current_speed.enabled = false
+traySnap.startDrag("current_speed", largePoint(2400, 0), true)
+traySnap.moveDrag(largePoint(324, 550)) // Widget centre follows the tray pointer.
+assert.equal(traySnap.layout.current_speed.x, 30)
+assert.equal(traySnap.layout.current_speed.enabled, true)
+assert.ok(traySnap.state.snapGuides.length)
+traySnap.moveDrag(largePoint(2400, 550))
+assert.equal(traySnap.layout.current_speed.enabled, false)
+assert.deepEqual(traySnap.state.snapGuides, [])
+traySnap.cancelDrag()
+assert.equal(traySnap.layout.current_speed.enabled, false)
+
+const clampedSnap = editor().vm
+clampedSnap.profile.widgets.driver_monitor.bounds = { x: 30, y: 30, width: 300, height: 1020 }
+clampedSnap.layout.current_speed.x = 184
+clampedSnap.startDrag("driver_monitor", largePoint(88, 808))
+clampedSnap.moveDrag(largePoint(187, 400)) // Current speed at 184 is beyond the mover's own bounds.
+assert.equal(clampedSnap.layout.driver_monitor.x, 138)
+assert.deepEqual(clampedSnap.state.snapGuides.filter(guide => guide.axis === "x"),
+  [{ axis: "x", value: 330, kind: "bounds", label: "the edge" }], "a clamped widget reports the edge it rests on, not the target it missed")
+clampedSnap.moveDrag(largePoint(400, 400)) // Pushed far past the edge, it still reports resting on it.
+assert.equal(clampedSnap.layout.driver_monitor.x, 138)
+assert.ok(clampedSnap.state.snapGuides.some(guide => guide.axis === "x" && guide.value === 330 && guide.kind === "bounds"))
+clampedSnap.cancelDrag()
+
+const resizeSnap = editor().vm
+resizeSnap.profile.widgets.map = { ...widget("Map", "nav_map", 200, 200, 300, 300),
+  box: { minWidth: 100, maxWidth: 1000, minHeight: 100, maxHeight: 1000 } }
+resizeSnap.layout.map = { x: 300, y: 300, width: 200, height: 200, enabled: true }
+const resizePoint = (x, y, options = {}) => ({ ...largePoint(x, y, options), stopPropagation() {} })
+resizeSnap.startResize("map", resizePoint(500, 500))
+resizeSnap.moveDrag(resizePoint(564, 671))
+assert.deepEqual([resizeSnap.layout.map.width, resizeSnap.layout.map.height], [268, 375])
+assert.deepEqual([resizeSnap.layout.map.x, resizeSnap.layout.map.y], [300, 300])
+assert.equal(resizeSnap.state.snapGuides.length, 2)
+resizeSnap.endDrag(resizePoint(564, 671))
+assert.deepEqual(resizeSnap.state.snapGuides, [])
+assert.equal(resizeSnap.state.history.undo.length, 1)
+resizeSnap.undo()
+resizeSnap.startResize("map", resizePoint(500, 500))
+resizeSnap.moveDrag(resizePoint(564, 671, { altKey: true }))
+assert.deepEqual([resizeSnap.layout.map.width, resizeSnap.layout.map.height], [264, 371])
+assert.deepEqual(resizeSnap.state.snapGuides, [])
+resizeSnap.cancelDrag()
+resizeSnap.profile.widgets.map.box.maxWidth = 250
+resizeSnap.startResize("map", resizePoint(500, 500))
+resizeSnap.moveDrag(resizePoint(564, 671))
+assert.equal(resizeSnap.layout.map.width, 250)
+assert.deepEqual(resizeSnap.state.snapGuides, [])
+resizeSnap.cancelDrag()
+
+const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage"), preferences = new Map()
+try {
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: key => preferences.get(key) ?? null, setItem: (key, value) => preferences.set(key, value)
+  } })
+  const preference = editor().vm
+  assert.equal(preference.state.snapEnabled, true)
+  preference.toggleSnap()
+  assert.equal(preferences.get("gx-layout-snap-v1"), "0")
+  assert.equal(editor().vm.state.snapEnabled, false)
+  assert.equal(OnroadLayoutPage.setup({ projection: true }).state.snapEnabled, false)
+  preference.toggleSnap()
+  assert.equal(preferences.get("gx-layout-snap-v1"), "1")
+  assert.equal(editor().vm.state.snapEnabled, true)
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("Storage blocked") } })
+  const blocked = editor().vm
+  assert.equal(blocked.state.snapEnabled, true)
+  blocked.toggleSnap()
+  assert.equal(blocked.state.snapEnabled, false)
+} finally {
+  if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage)
+  else delete globalThis.localStorage
+}
+for (const [guides, expected] of [
+  [[{ axis: "x", kind: "center" }, { axis: "y", kind: "center" }], "Centred on the screen"],
+  [[{ axis: "x", kind: "center" }], "Centred across"],
+  [[{ axis: "y", kind: "center" }], "Centred top to bottom"],
+  [[{ label: "Home" }, { label: "Home" }, { label: "Work" }], "Lined up with Home and Work"],
+  [[{ label: "the edge" }, { label: "Home" }], "At the edge, lined up with Home"],
+  [[{ axis: "x", kind: "center", label: "the centre" }, { axis: "y", kind: "bounds", label: "the edge" }], "Centred across, at the edge"],
+  [[{ axis: "y", kind: "center", label: "the centre" }, { axis: "x", kind: "widget", label: "Home" }, { axis: "y", kind: "widget", label: "Work" }],
+    "Centred top to bottom, lined up with Home"],
+]) {
+  snapVm.state.snapGuides = guides
+  assert.equal(snapVm.snapSummary, expected)
+}
+for (const clear of [() => snapVm.selectProfile("compact")]) {
+  snapVm.state.snapGuides = [{ axis: "x", value: 30, kind: "bounds", label: "the edge" }]
+  clear()
+  assert.deepEqual(snapVm.state.snapGuides, [])
+}
+console.log("Layout snapping integration: drag, touch, targets, fallback, resize, history, preference and keyboard passed")
 
 // Layer visibility is local to the arrangement preview, including required widgets.
 for (const projection of [false, true]) {
@@ -231,8 +414,10 @@ torqueEditor.remove("torque_bar")
 assert.equal(torqueEditor.layout.torque_bar.enabled, false)
 torqueEditor.add("torque_bar")
 assert.equal(torqueEditor.layout.torque_bar.enabled, true)
-const { vm, event, emitted, calls, previewCalls, captures } = editor()
-assert.equal(vm.state.devicePreviewOpen, false)
+const { vm, event, emitted, calls, backdropCalls, captures } = editor()
+// The comma's real screen loads behind the arrangement with the editor.
+assert.deepEqual(backdropCalls.map((call) => Array.isArray(call) ? call[0] : call).slice(-2), ["start", "update"])
+assert.deepEqual(backdropCalls.at(-1).slice(2, 5), ["large", "general", false])
 assert.equal(vm.dirty, false)
 vm.changePosition("current_speed", 700, 200)
 vm.selectProfile("compact")
@@ -296,41 +481,80 @@ assert.equal(vm.selectedColors.text, "#FFFFFFFF")
 vm.colorRgb("text", { target: { value: "#abcdef" } })
 vm.colorAlpha("text", { target: { value: "128" } })
 assert.equal(vm.selectedColors.text, "#ABCDEF80")
-assert.deepEqual(previewCalls, []) // Editing does not select or request Device preview.
-const draftBeforePreview = copy(vm.state.draft)
-vm.mode = "local"
-vm.showDevicePreview()
-assert.equal(vm.state.devicePreviewOpen, true)
-assert.equal(vm.state.previewMode, "device")
-assert.deepEqual(previewCalls.map((call) => Array.isArray(call) ? call[0] : call), ["start", "update"])
-assert.deepEqual(previewCalls[1].slice(1), [draftBeforePreview, "large", "engaged", false])
+// Driving scenes do not leave a CEM editing placeholder behind.
+assert.doesNotMatch(OnroadLayoutPage.template, /data-preview-source="cem-hint"/)
+// The Small screen shows the tap-areas chip under the layout instead of over it.
+assert.match(OnroadLayoutPage.template, /state\.profile !== 'compact'" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"><\/i>Tap areas/)
+assert.match(OnroadLayoutPage.template, /state\.profile === 'compact'" class="gx-layout__stage-chip gx-layout__stage-chip--below"/)
+// One scene dropdown, grouped, with every scene exactly once.
+assert.deepEqual(vm.sceneGroups.map(group => group.label), ["Editing", "Driving", "Conditional experimental", "Speed limit"])
+assert.deepEqual(vm.sceneGroups.flatMap(group => group.scenes.map(scene => scene.id)).sort(), vm.scenes.map(scene => scene.id).sort())
+// The Small screen only offers scenes that look different there; a hidden pick falls back to General edit.
+vm.state.scene = "slc_display"
 vm.selectProfile("compact")
-assert.equal(previewCalls.at(-1)[2], "compact")
-vm.state.scene = "braking"
-assert.equal(previewCalls.at(-1)[3], "braking")
+assert.equal(vm.state.scene, "general")
+const smallScenes = vm.sceneGroups.flatMap(group => group.scenes.map(scene => scene.id))
+for (const id of ["slc_pedal", "slc_retained", "slc_display"]) assert.ok(!smallScenes.includes(id), id)
+assert.ok(smallScenes.includes("slc_unavailable") && smallScenes.includes("slc_disengaged"))
 vm.selectProfile("large")
-vm.hideDevicePreview()
-assert.equal(vm.state.devicePreviewOpen, false)
-assert.equal(vm.previewFeed.active, false)
-assert.equal(previewCalls.at(-1), "stop")
-assert.deepEqual(copy(vm.state.draft), draftBeforePreview)
-const previewCount = previewCalls.length
+assert.equal(vm.sceneGroups.flatMap(group => group.scenes).length, vm.scenes.length)
+assert.match(OnroadLayoutPage.template, /<GalaxySelect class="gx-field gx-field--full" aria-label="Preview scene"/)
+// The widget open in Edit glows; the sources panel is a layout setting, not an on-screen toggle.
+assert.match(OnroadLayoutPage.template, /'is-editing': state\.showEditingAids && state\.inspectorPanel === 'edit' && state\.selected === widget\.id/)
+// Sources sit inside the cruise card (or a card right under it), so its box grows and actions right below follow.
+vm.state.data.metadata.profiles.large.widgets.cruise_limits.sourcesExtent = { inline: 76, card: 84 }
+vm.state.selected = "cruise_limits"
+const sourcesCard = vm.layout.cruise_limits, sourcesActions = vm.layout.speed_limit_actions
+const actionsBefore = { ...sourcesActions }
+Object.assign(sourcesActions, { x: sourcesCard.x, y: sourcesCard.y + 522 + 22 })
+vm.setSpeedSources("speedSources", true)
+assert.equal(vm.state.draft.speedSources, true)
+assert.equal(vm.profile.widgets.cruise_limits.height, 522 + 76)
+assert.equal(sourcesActions.y, sourcesCard.y + 522 + 76 + 22)
+vm.setSpeedSources("speedSourcesCard", true)
+assert.equal(vm.profile.widgets.cruise_limits.height, 522 + 84)
+assert.equal(sourcesActions.y, sourcesCard.y + 522 + 84 + 22)
+vm.undo(); vm.undo()
+assert.notEqual(vm.state.draft.speedSources, true)
+assert.equal(vm.profile.widgets.cruise_limits.height, 522)
+assert.equal(vm.layout.speed_limit_actions.y, vm.layout.cruise_limits.y + 522 + 22)
+Object.assign(vm.layout.speed_limit_actions, actionsBefore)
+vm.state.selected = "current_speed"
+vm.setSpeedSources("speedSources", true)
+assert.notEqual(vm.state.draft.speedSources, true) // Only from the cruise widget's own panel.
+vm.state.selected = "cruise_limits"
+vm.setSpeedAlign("center")
+assert.equal(vm.state.draft.speedAlign, "center")
+vm.setSpeedAlign("justify")
+assert.equal(vm.state.draft.speedAlign, "center") // Only left, center or right.
+vm.undo()
+assert.equal(vm.state.draft.speedAlign ?? "left", "left")
+vm.setSpeedSources("palette", true)
+assert.equal(vm.state.draft.palette === true, false) // Only the two sources settings.
+// Moving or removing widgets keeps the same backdrop; scene and size changes replace it.
+const backdropCount = backdropCalls.length
+vm.changePosition("current_speed", 720, 220)
+vm.changePosition("current_speed", 510, 250)
+vm.remove("current_speed")
+vm.add("current_speed")
+assert.equal(backdropCalls.length, backdropCount)
+vm.selectProfile("compact")
+assert.equal(backdropCalls.at(-1)[2], "compact")
+vm.state.scene = "braking"
+assert.equal(backdropCalls.at(-1)[3], "braking")
+vm.selectProfile("large")
 vm.state.scene = "engaged"
 vm.color("text", "#ABCDEF81")
-assert.equal(previewCalls.length, previewCount)
+assert.equal(backdropCalls.length, backdropCount + 5) // Colour edits change the real screen too.
 vm.color("text", "#ABCDEF80")
-const deviceEditor = editor()
-deviceEditor.vm.mode = "local"
-deviceEditor.vm.showDevicePreview()
-const beforeDeviceDrag = copy(deviceEditor.vm.layout.current_speed)
-deviceEditor.vm.startDrag("current_speed", deviceEditor.event(500, 200))
-assert.equal(deviceEditor.vm.state.devicePreviewOpen, true)
-assert.equal(deviceEditor.previewCalls.at(-1).at(-1), true)
-deviceEditor.vm.moveDrag(deviceEditor.event(700, 250))
-deviceEditor.vm.cancelDrag()
-assert.deepEqual(copy(deviceEditor.vm.layout.current_speed), beforeDeviceDrag)
-assert.equal(deviceEditor.vm.state.devicePreviewOpen, true)
-deviceEditor.vm.hideDevicePreview()
+const draggingCount = backdropCalls.length
+vm.startDrag("current_speed", event(500, 200))
+vm.moveDrag(event(700, 250))
+vm.cancelDrag()
+assert.equal(backdropCalls.length, draggingCount)
+vm.state.data.editable = false
+assert.equal(backdropCalls.at(-1), "stop")
+vm.state.data.editable = true
 vm.requestLeave("reload")
 assert.equal(vm.state.discard, "reload")
 assert.equal(calls.length, 0)
@@ -579,14 +803,14 @@ assert.match(appSource, /requestLeave\(proceed, presentation\)/)
 assert.match(appSource, /@click="goFromMenu\(item\.path\)"/)
 assert.match(editorSource, /<LayoutWidgetPreview :widget="widget"/)
 assert.doesNotMatch(editorSource, /<LayoutWidgetPreview v-if="!state\.preview\.url"/)
-assert.match(editorSource, /<section v-if="state\.devicePreviewOpen" class="gx-layout__device"/)
-assert.match(editorSource, /<img v-if="state\.preview\.url"/)
+assert.match(editorSource, /<image v-if="nativeBackdropReady" :href="state\.backdrop\.url"/)
+assert.doesNotMatch(editorSource, /devicePreviewOpen|gx-layout__device|selectPreview/)
 const loadedCatalog = await loadCatalog({ fetcher: async (url) => ({ ok: true,
   json: async () => url.endsWith("catalog.json") ? catalog : { schemaVersion: 1, monitor: "local" },
 }) })
 assert.ok(loadedCatalog.tools.some(tool => tool.path === "/theme_maker"))
 assert.equal(catalog.tools.find((tool) => tool.path === "/theme_maker")?.availability, "local-only")
-console.log("Colors and layout: stable editor, explicit Device preview, placement, drag/cancel, resets, save races, errors, auth and Visual navigation passed")
+console.log("Colors and layout: stable editor, device backdrop, placement, drag/cancel, resets, save races, errors, auth and Visual navigation passed")
 
 const railEditor = editor().vm
 railEditor.selectProfile("compact")

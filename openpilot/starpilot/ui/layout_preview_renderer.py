@@ -21,7 +21,7 @@ from openpilot.starpilot.curve_speed.status import CurveObservation
 from openpilot.starpilot.ui.onroad_state import ConditionalLead
 from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind, OnroadAlert, OnroadState, SourceReading, SpeedLimitObservation
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, OnroadAppearance
-from openpilot.starpilot.ui.onroad_dm import monitor_visible
+from openpilot.starpilot.ui.onroad_dm import draw_monitor_art, monitor_bounds, monitor_visible
 from openpilot.starpilot.ui.onroad_stopped_timer import PREVIEW_DURATION_S
 from openpilot.starpilot.ui.layout_preview_sidebar import SIDEBAR_WIDTH, render_sidebar
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory
@@ -67,9 +67,10 @@ def render_sample_road(rect: rl.Rectangle, state: OnroadState, profile: Profile)
 def sample_state(scene: str, document: dict) -> OnroadState:
   if scene not in SCENES:
     raise ValueError("Unknown layout preview scene")
-  lateral = scene in ("engaged", "aol", "experimental", "braking", "stopped", "slc_pending") or scene in CEM_SCENE_REASONS
-  longitudinal = scene in ("engaged", "long_only", "experimental", "braking", "stopped", "slc_pending") or scene in CEM_SCENE_REASONS
-  longitudinal = longitudinal or scene in ('slc_max', 'slc_equal', 'slc_pedal', 'slc_retained')
+  # SLC presentation changes do not disengage either driving axis. Only the explicit
+  # cruise-off/lateral-only/longitudinal-only scenes change engagement.
+  lateral = scene not in ('long_only', 'slc_disengaged')
+  longitudinal = scene not in ('aol', 'slc_disengaged')
   state = OnroadState(engaged=lateral or longitudinal, camera_available=False,
                      speed_mps=0.0 if scene in ("cem_lead", "stopped") else 22.0, cruise_kph=88.0,
                      stopped_duration_s=PREVIEW_DURATION_S if scene == "stopped" else None,
@@ -93,7 +94,7 @@ def sample_state(scene: str, document: dict) -> OnroadState:
                      longitudinal_active=longitudinal, stock_cruise_active=False,
                      slc_system_long_available=longitudinal, torque_utilization=0.78 if lateral else 0.0,
                      customization=document,
-                     visual_preview=OnroadVisualPreview(cem_reason=CEM_SCENE_REASONS[scene]) if scene in CEM_SCENE_REASONS else None)
+                     visual_preview=OnroadVisualPreview(cem_reason=CEM_SCENE_REASONS[scene], layout_sample=True) if scene in CEM_SCENE_REASONS else None)
 
   if scene == 'cem_lead':
     state = replace(state, conditional_lead=ConditionalLead(12.0, 0.0))
@@ -180,17 +181,11 @@ class _DriverMonitorArt:
       raise
 
   def render(self, _content: rl.Rectangle, state: OnroadState, *, top_icons: bool = False) -> None:
-    position = placement(state.customization, self.profile, "driver_monitor")
     if not monitor_visible(self.profile, state, fresh=True, onroad=True, top_icons=top_icons):
       return
-    size = 128 if self.profile == Profile.LARGE else 60
-    x = position["x"] + (192 - size) / 2 if self.profile == Profile.LARGE else position["x"]
-    y = position["y"] + (192 - size) / 2 if self.profile == Profile.LARGE else position["y"]
-    self.renderer._rect = rl.Rectangle(x, y, size, size)
-    widget = PROFILES[str(self.profile)]["widgets"]["driver_monitor"]
-    draw_widget_frame(rl.Rectangle(position["x"], position["y"], widget["width"], widget["height"]),
-                      state.customization, self.profile, "driver_monitor")
-    self.renderer._render(self.renderer._rect)
+    bounds = monitor_bounds(state.customization, self.profile, False)
+    draw_widget_frame(bounds, state.customization, self.profile, "driver_monitor")
+    draw_monitor_art(self.renderer, bounds, self.profile)
 
   def close(self) -> None:
     if rl.is_window_ready():
@@ -266,8 +261,8 @@ class _Canvas:
       rl.draw_circle_v(center, radius, rl.Color(21, 44, 57, 230))
       rl.draw_ring(center, radius - 3, radius, 0, 360, 64, rl.Color(94, 229, 238, 255))
 
-  def _render_driver_monitor(self, rect: rl.Rectangle, state: OnroadState) -> None:
-    top_icons = (self.profile == Profile.COMPACT and state.alert.size == AlertSize.NONE and
+  def _render_driver_monitor(self, rect: rl.Rectangle, state: OnroadState, *, general: bool = False) -> None:
+    top_icons = (not general and self.profile == Profile.COMPACT and state.alert.size == AlertSize.NONE and
                  state.appearance.camera_view != CameraViewChoice.DRIVER and not state.reverse_driver_camera and
                  self.view.compact_hud._set_speed_alpha.x > 0.01 and
                  placement(state.customization, self.profile, "max_speed")["enabled"])
@@ -294,9 +289,11 @@ class _Canvas:
     try:
       rl.clear_background(rl.BLACK)
       self.view.render(state)
+      if self.viewport is not None:
+        # ProjectionOnroad adds this permanent brand after the shared onroad view.
+        self.fonts.draw('StarPilot', FontRole.BRAND, 30, width - 210, height - 90)
       if self.profile == Profile.LARGE and self.viewport is None:
         render_sidebar(self.fonts, rl.Rectangle(width - SIDEBAR_WIDTH, 0, SIDEBAR_WIDTH, height))
-      self._label(scene)
     finally:
       rl.end_texture_mode()
     image = rl.load_image_from_texture(self.target.texture)
@@ -311,13 +308,16 @@ class _Canvas:
     finally:
       rl.unload_image(image)
 
-  def render_widget_art(self, state: OnroadState, positions: dict) -> bytes:
+  def render_widget_art(self, state: OnroadState, positions: dict, *, general: bool = False) -> bytes:
     """Transparent arrangement art from the same widgets/fonts as the live view."""
     if self.view is None or self.fonts is None or self.target is None:
       raise RuntimeError("Layout preview resources are closed")
     self._settle(state)
     canvas_width, canvas_height = self.viewport or self.profile.size
-    content = (rl.Rectangle(30, 30, canvas_width - 60, canvas_height - 60) if self.profile == Profile.LARGE
+    # Native Large has a 300px sidebar outside the onroad viewport. Including it
+    # here shifts right-anchored artwork beyond its saved crop (notably the wheel).
+    road_width = self.viewport[0] if self.viewport else state.viewport_width
+    content = (rl.Rectangle(30, 30, road_width - 60, canvas_height - 60) if self.profile == Profile.LARGE
                else rl.Rectangle(0, 0, 476, 240))
     sprites = {}
     # A bounded subset covers the edited widgets without adding an onroad render loop.
@@ -328,6 +328,15 @@ class _Canvas:
       position = positions[key]
       crop_x, crop_y = math.floor(position['x']), math.floor(position['y'])
       offset_x, offset_y = crop_x - position['x'], crop_y - position['y']
+      if key == 'speed_limit_actions' and self.profile == Profile.COMPACT:
+        # The native pending-limit heading sits above the buttons, or below them
+        # when they are placed at the top edge. Include it in the exported sprite.
+        inset = PROFILES['compact']['widgets'][key]['visualInsetTop']
+        if position['y'] >= inset:
+          crop_y -= inset
+          offset_y -= inset
+        else:
+          logical_height += inset
       width, height = math.ceil(logical_width - offset_x), math.ceil(logical_height - offset_y)
       if x + width > 1024:
         x, y, row_height = 0, y + row_height, 0
@@ -343,7 +352,15 @@ class _Canvas:
         rl.rl.rlSetBlendFactorsSeparate(0x0302, 0x0303, 1, 0x0303, 0x8006, 0x8006)
         rl.begin_blend_mode(rl.BlendMode.BLEND_CUSTOM_SEPARATE)
         try:
-          self.view._ordered_widgets(content, state, only_widget=key)
+          if general and key == 'driver_monitor':
+            self._render_driver_monitor(content, state, general=True)
+          else:
+            # General edit shows a representative CEM sample even though its backdrop
+            # remains engaged. Driving scenes always use their unmodified state.
+            sample = {'cem_gauge': 'cem_curve', 'speed_limit_actions': 'slc_pending'}.get(key) if general else None
+            widget_state = sample_state(sample, state.customization) if sample is not None else state
+            self._settle(widget_state)
+            self.view._ordered_widgets(content, widget_state, only_widget=key)
         finally:
           rl.end_blend_mode()
       finally:
@@ -388,21 +405,12 @@ class _Canvas:
       hud._wheel_y.x = 0.0 if state.lateral_active else 25.0
     self.view.torque_bar._torque_filter.x = state.torque_utilization if state.lateral_active else 0.0
     self.view.torque_bar._alpha_filter.x = 1.0 if state.lateral_active else 0.0
-
-  def _label(self, scene: str) -> None:
-    if self.fonts is None:
-      return
-    large = self.profile == Profile.LARGE
-    names = {"experimental": "MANUAL EXPERIMENTAL", "cem_stop_light": "CEM TRAFFIC LIGHT",
-             "cem_lead": "CEM STOPPED LEAD", "cem_curve": "CEM CURVE"}
-    label = "SAMPLE: " + names.get(scene, scene.replace("_", " ").upper())
-    size = 27 if large else 14
-    measured = self.fonts.measure(label, FontRole.SEMI_BOLD, size)
-    x = (1860 if large else 476) - measured.width - (38 if large else 8)
-    y = 1000 if large else 213
-    rl.draw_rectangle_rounded(rl.Rectangle(x - 8, y - 3, measured.width + 16, measured.height + 6),
-                              0.2, 4, rl.Color(0, 0, 0, 220))
-    self.fonts.draw(label, FontRole.SEMI_BOLD, size, x, y, rl.Color(255, 255, 255, 255))
+    if gauge := getattr(self.view, 'cem_gauge', None):
+      from openpilot.starpilot.ui.onroad_cem_gauge import gauge_data, _get_road_height
+      data = gauge_data(state)
+      gauge._drive_frame = state.drive_frame
+      gauge._lead_stopped = data is not None and data.indicator_extra == 'stopped'
+      gauge._road_h_filter.x = gauge._current_road_h = _get_road_height(data)
 
   def close(self) -> None:
     if self.map is not None:
@@ -434,7 +442,7 @@ class LayoutPreviewRenderer:
   def __call__(self, payload: dict) -> bytes:
     if type(payload) is not dict or set(payload) not in ({"document", "profile", "scene"}, {"document", "profile", "scene", "art"}):
       raise ValueError("Invalid layout preview request")
-    if "art" in payload and payload["art"] is not True:
+    if "art" in payload and not (payload["art"] is True or payload["art"] == "backdrop"):
       raise ValueError("Invalid widget art request")
     viewport = None
     if payload['profile'] == 'projection':
@@ -461,7 +469,12 @@ class LayoutPreviewRenderer:
     self._last_use = time.monotonic()
     if payload.get('art') is True:
       positions = payload['document']['layout']['widgets'] if viewport else document['layouts'][str(profile)]
-      return self._canvas.render_widget_art(state, positions)
+      return self._canvas.render_widget_art(state, positions, general=scene == 'general')
+    if payload.get('art') == 'backdrop':
+      # Everything the car draws except the movable widgets, which the editor places over it.
+      # A non-empty order that names no widget keeps the ordered path and draws none of them.
+      order = {**state.customization.get('widgetOrder', {}), str(profile): ['backdrop']}
+      return self._canvas.render(replace(state, customization={**state.customization, 'widgetOrder': order}), scene)
     return self._canvas.render(state, scene)
 
   def expire(self) -> None:

@@ -304,6 +304,7 @@ def identity_status(directory: Path | None = None) -> dict:
     "certificate_sha256": provenance.get("certificate_sha256", ""),
     "imported": provenance.get("imported", ""),
     "source": provenance.get("source", ""),
+    "app_version": provenance.get("app_version", ""),
   }
 
 
@@ -357,16 +358,16 @@ class ImportJob:
     self.work_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     return self.work_dir / "android-auto-upload.bin"
 
-  def start(self, *, path: Path | None = None, url: str = "", enabled=None) -> None:
+  def start(self, *, path: Path | None = None, url: str = "", enabled=None, app_version: str | None = None) -> None:
     with self.lock:  # check and claim together, so two requests cannot both start
       if self.busy():
         raise IdentityImportError("An import is already running")
       self.state = {"state": "running", "stage": "downloading" if url else "reading", "started": datetime.now(UTC).timestamp(),
                     "downloaded": 0, "total": 0}
-      self.thread = threading.Thread(target=self._run, args=(path, url, enabled), name="android_auto_identity_import", daemon=True)
+      self.thread = threading.Thread(target=self._run, args=(path, url, enabled, app_version), name="android_auto_identity_import", daemon=True)
       self.thread.start()
 
-  def _run(self, path: Path | None, url: str, enabled=None) -> None:
+  def _run(self, path: Path | None, url: str, enabled=None, app_version: str | None = None) -> None:
     def progress(**values):
       if enabled is not None and not enabled():
         raise IdentityImportError("Import cancelled: Android Auto is disabled", "CANCELLED")
@@ -378,6 +379,8 @@ class ImportJob:
       if url:
         download(url, source, lambda done, total: progress(downloaded=done, total=total))
       files, metadata = extract_identity(source, root_sha256=self.root_sha256, progress=lambda stage: progress(stage=stage))
+      if app_version and "app_version" not in metadata:
+        metadata["app_version"] = app_version
       progress(stage="installing")
       install_identity(files, metadata, self.identity_dir)
       self._set(state="done", stage="done", finished=datetime.now(UTC).timestamp(), expires=metadata["expires"],

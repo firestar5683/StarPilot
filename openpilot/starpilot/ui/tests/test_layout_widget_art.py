@@ -13,7 +13,8 @@ from openpilot.starpilot.ui.onroad_customization import RUNTIME_PREVIEW_WIDGETS,
 def test_widget_art_request_uses_same_validated_document_and_scene():
   request = {'document': default_document(), 'profile': 'compact', 'scene': 'cem_curve', 'art': True}
   assert _payload(request) == request
-  for art in (False, None, 1, 'yes'):
+  assert _payload({**request, 'art': 'backdrop'}) == {**request, 'art': 'backdrop'}
+  for art in (False, None, 1, 'yes', 'Backdrop'):
     with pytest.raises(PreviewInvalid):
       _payload({**request, 'art': art})
   with pytest.raises(PreviewInvalid):
@@ -76,3 +77,68 @@ def test_static_compact_sample_settles_actual_hud_without_changing_live_blink_po
   lateral_only = sample_state('aol', default_document())
   canvas._settle(lateral_only)
   assert hud._set_speed_opacity(lateral_only, time.monotonic_ns()) == 0.
+
+
+def test_scene_switches_settle_cem_geometry_independently_of_previous_scene():
+  from types import SimpleNamespace as NS
+  from unittest.mock import Mock
+  from openpilot.starpilot.ui.layout_preview_renderer import _Canvas, sample_state
+  from openpilot.starpilot.ui.onroad_cem_gauge import AetherGauge, _get_road_height, gauge_data
+  from openpilot.starpilot.ui.onroad import OnroadView
+  from openpilot.starpilot.ui.presentation import Profile
+
+  gauge = AetherGauge(Mock())
+  canvas = _Canvas.__new__(_Canvas)
+  canvas.profile = Profile.LARGE
+  canvas.view = cast(OnroadView, NS(cem_gauge=gauge, torque_bar=NS(_torque_filter=NS(x=0), _alpha_filter=NS(x=0))))
+  for scene in ('cem_stop_light', 'cem_curve', 'cem_lead', 'engaged', 'cem_curve'):
+    state = sample_state(scene, default_document())
+    gauge._road_h_filter.x = -1  # A previous animation must never leak into a static scene.
+    canvas._settle(state)
+    assert gauge._road_h_filter.x == _get_road_height(gauge_data(state))
+    assert gauge._drive_frame == state.drive_frame
+
+
+@pytest.mark.parametrize('viewport', (None, (2880, 1080)))
+def test_large_wheel_art_is_drawn_inside_its_crop_with_or_without_sidebar(monkeypatch, viewport):
+  from pathlib import Path
+  from types import SimpleNamespace as NS
+  from unittest.mock import Mock
+  import pyray as rl
+  from openpilot.starpilot.ui import layout_preview_renderer as renderer
+  from openpilot.starpilot.ui.onroad import OnroadView
+  from openpilot.starpilot.ui.onroad_large_widgets import SteeringWheelWidget
+  from openpilot.starpilot.ui.presentation import Profile
+  from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport, projection_customization
+
+  document = default_document()
+  positions = document['layouts']['large']
+  if viewport:
+    projection = default_layout_for_viewport(viewport)
+    positions = projection['widgets']
+    document = projection_customization(projection, document)
+  canvas = renderer._Canvas.__new__(renderer._Canvas)
+  canvas.profile, canvas.viewport = Profile.LARGE, viewport
+  canvas.fonts = NS(profile=Profile.LARGE)
+  canvas.target = NS(texture=object())
+  view = OnroadView.__new__(OnroadView)
+  view.fonts, view.projection_viewport = canvas.fonts, viewport
+  view.steering_wheel = SteeringWheelWidget(Path('/unused'))
+  view.steering_wheel._texture = object()  # Real widget geometry, without loading a GL texture.
+  canvas.view = view
+  monkeypatch.setattr(canvas, '_settle', lambda state: None)
+  monkeypatch.setitem(renderer.RUNTIME_PREVIEW_WIDGETS, 'large', ('steering_wheel',))
+  monkeypatch.setattr(rl, 'rl', NS(rlSetBlendFactorsSeparate=Mock()))
+  for method in ('begin_texture_mode', 'clear_background', 'begin_blend_mode', 'end_blend_mode', 'end_texture_mode',
+                 'image_format', 'image_flip_vertical', 'image_crop', 'unload_image', 'draw_circle', 'draw_ring', 'draw_texture_pro'):
+    monkeypatch.setattr(rl, method, Mock())
+  pixels = rl.ffi.new('unsigned char[]', 192 * 192 * 4)
+  monkeypatch.setattr(rl, 'load_image_from_texture', Mock(return_value=NS(data=pixels)))
+  monkeypatch.setattr(renderer, '_png_rgba', Mock(return_value=b'png'))
+  canvas.render_widget_art(renderer.sample_state('braking', document), positions)
+  drawn = rl.draw_texture_pro.call_args.args[2]
+  crop = rl.image_crop.call_args.args[1]
+  assert crop.x <= drawn.x < drawn.x + drawn.width <= crop.x + crop.width
+  assert crop.y <= drawn.y < drawn.y + drawn.height <= crop.y + crop.height
+  color = rl.draw_texture_pro.call_args.args[-1]
+  assert (color.r, color.g, color.b) == (255, 0, 0), 'The braking wheel must remain visible and red'

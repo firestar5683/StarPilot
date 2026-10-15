@@ -113,6 +113,15 @@ fallback.installOpen = true
 const mirror = nodes(fallback).find(node => node.type === "a" && node.props?.href === APKMIRROR_URL)
 assert(mirror, "falls back to APKMirror when the comma has no link")
 assert.equal(mirror.props.target, "_blank")
+assert(JSON.stringify(nodes(fallback).map(node => node.children)).includes("Download APK"), "APKMirror fallback shows the steps")
+// While the comma is still trying APKPure, wait rather than jumping to APKMirror.
+assert.deepEqual(page({ ...setup, download: null, downloadPending: true }).download, { direct: false, pending: true, url: "" })
+assert.equal(page({ ...setup, downloadPending: true }).download.direct, true)
+const waiting = page({ ...setup, download: null, downloadPending: true })
+waiting.installOpen = true
+const waitingNodes = nodes(waiting)
+assert(!waitingNodes.some(node => node.type === "a" && node.props?.href === APKMIRROR_URL), "no APKMirror while still trying")
+assert(waitingNodes.some(node => node.type === "button" && node.props && "disabled" in node.props && /Finding the newest/.test(JSON.stringify(node.children))))
 // Upload progress uses the software-update bar so both share one palette.
 const sending = page()
 Object.assign(sending, { installOpen: true, installAttempted: true, uploadProgress: { loaded: 25, total: 100 } })

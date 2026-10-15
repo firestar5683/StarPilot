@@ -139,13 +139,14 @@ def test_saved_valid_layouts_survive_independently():
 def test_v3_layout_migrates_wheel_size_without_changing_saved_placement_or_color():
   document = default_document()
   document["version"] = 3
+  del document["layouts"]["large"]["cem_gauge"]  # Version 3 predates the CEM gauge.
   document["palette"]["text"] = "#ABCDEF80"
   document["layouts"]["large"]["steering_wheel"].update(x=1300, y=100, enabled=False)
   document["layouts"]["compact"]["steering_wheel"].update(x=90, y=150)
   for profile in ("large", "compact"):
     del document["layouts"][profile]["steering_wheel"]["size"]
   migrated = validate_document(document)
-  assert migrated["version"] == 6
+  assert migrated["version"] == 7
   assert migrated["palette"] == document["palette"]
   assert migrated["layouts"]["large"]["steering_wheel"] == {"x": 1300, "y": 100, "enabled": False, "size": 192}
   assert migrated["layouts"]["compact"]["steering_wheel"] == {"x": 90, "y": 150, "enabled": True, "size": 50}
@@ -155,6 +156,7 @@ def test_v3_layout_migrates_wheel_size_without_changing_saved_placement_or_color
 def test_pre_action_saved_layout_migrates_without_losing_positions_or_palette(removed):
   document = default_document()
   document["version"] = 1
+  del document["layouts"]["large"]["cem_gauge"]  # Version 1 predates the CEM gauge.
   del document["widgetColors"]
   del document["roadColors"]
   document["palette"]["cardFill"] = "#12345678"
@@ -193,7 +195,7 @@ def test_malformed_pre_action_cruise_placement_is_rejected():
 def test_duplicate_key_cannot_apply_otherwise_valid_placement():
   document = default_document()
   document["layouts"]["large"]["current_speed"]["x"] = 100
-  raw = json.dumps(document).replace('"version": 6', '"version": 6, "version": 6').encode()
+  raw = json.dumps(document).replace('"version": 7', '"version": 7, "version": 7').encode()
   with patch("openpilot.starpilot.ui.onroad_customization.read_saved", return_value=(raw, True)):
     assert read_customization(Mock()) == default_document()
 
@@ -285,12 +287,13 @@ def test_large_draw_origins_and_wheel_input_move_together():
   document["layouts"]["large"]["current_speed"].update(x=680, y=70)
   document["layouts"]["large"]["steering_wheel"].update(x=1300, y=100)
   state = road(document, experimental_available=True)
-  fonts = NS(measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7), draw=Mock())
+  fonts = NS(measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7),
+             horizontal_ink=lambda text, role, size: (0., 10.), draw=Mock())
   content = rl.Rectangle(30, 30, 1800, 1020)
   with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card, patch.object(rl, "draw_line_ex"):
     UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
     rect = card.call_args.args[0]
-    assert (rect.x, rect.y, rect.width, rect.height) == (188, 95, 344, 210)
+    assert (rect.x, rect.y, rect.width, rect.height) == (188, 95, 320, 210)
   CurrentSpeedHud(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
   assert fonts.draw.call_args_list[-2].args[3:5] == (965, 112)
   wheel = SteeringWheelWidget.__new__(SteeringWheelWidget)
@@ -323,7 +326,7 @@ def test_speed_limit_actions_move_independently_of_cruise_card_and_keep_touch_pr
                                      presentation_id=2, action_enabled=True)
   state = road(document, speed_limit=observation, longitudinal_active=True, slc_system_long_available=True)
   controls = slc_controls(Profile.LARGE, state)
-  assert controls[0].bounds == (388, 644, 554, 708)
+  assert controls[0].bounds == (388, 644, 542, 708)
   assert slc_controls(Profile.COMPACT, state)[0].bounds == (174, 180, 310, 234)
   emit = Mock()
   inputs = OnroadInput(emit)
@@ -367,12 +370,13 @@ def test_moved_compact_actions_relocate_hitboxes_without_weakening_state_gate():
 
 def test_frozen_default_draw_geometry_and_neutral_colors():
   state = road()
-  fonts = NS(measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7), draw=Mock())
+  fonts = NS(measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7),
+             horizontal_ink=lambda text, role, size: (0., 10.), draw=Mock())
   content = rl.Rectangle(30, 30, 1800, 1020)
   with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card, patch.object(rl, "draw_line_ex"):
     UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
     rect = card.call_args.args[0]
-    assert (rect.x, rect.y, rect.width, rect.height) == (88, 75, 344, 210)
+    assert (rect.x, rect.y, rect.width, rect.height) == (88, 75, 320, 210)
     fill, border = card.call_args.kwargs["fill"], card.call_args.kwargs["border"]
     assert (fill.r, fill.g, fill.b, fill.a) == (16, 25, 31, 255)
     assert (border.r, border.g, border.b, border.a) == (53, 67, 77, 255)
@@ -393,7 +397,8 @@ def test_compact_us_sign_keeps_camera_visible_at_saved_position(speed, size):
   state = road(document, metric=True, speed_limit=SpeedLimitObservation(
     kind=ObservationKind.VALID, speed_limit_mps=speed / 3.6))
   state = replace(state, appearance=replace(state.appearance, show_speed_limit_sign=True))
-  fonts = NS(measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7), draw=Mock())
+  fonts = NS(measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7),
+             horizontal_ink=lambda text, role, size: (0., 10.), draw=Mock())
   hud = CompactHudRenderer(Mock(spec=BitmapFonts, **vars(fonts)), Mock())
   with patch.object(rl, "draw_rectangle_rounded") as fill, \
        patch.object(rl, "draw_rectangle_rounded_lines_ex") as outline:
@@ -477,6 +482,7 @@ def test_v1_palette_positions_and_visibility_migrate_without_mutating_source():
 
   old = default_document()
   old['version'] = 1
+  del old['layouts']['large']['cem_gauge']  # Version 1 predates the CEM gauge.
   del old['widgetColors']
   del old['roadColors']
   old['palette'].update(cardFill='#12345678', text='#AABBCCDD')
@@ -487,7 +493,7 @@ def test_v1_palette_positions_and_visibility_migrate_without_mutating_source():
   original = copy.deepcopy(old)
   result = decode_document(json.dumps(old).encode())
   assert old == original
-  assert result['version'] == 6
+  assert result['version'] == 7
   assert result['palette'] == old['palette']
   for profile, layout in old['layouts'].items():
     for key, position in layout.items():
@@ -524,7 +530,8 @@ def test_widget_color_isolation_and_native_text_resolution():
   assert rgba(validated, 'text', 'compact', 'max_speed') == (16, 32, 48, 64)
   assert rgba(validated, 'text', 'large', 'cruise_limits') == (16, 32, 48, 64)
   assert widget_palette(validated, 'compact', 'conditional_mode')['cardFill'] == '#00000000'
-  fonts = NS(measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7), draw=Mock())
+  fonts = NS(measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7),
+             horizontal_ink=lambda text, role, size: (0., 10.), draw=Mock())
   CurrentSpeedHud(Mock(spec=BitmapFonts, **vars(fonts))).render(rl.Rectangle(30, 30, 1800, 1020), road(validated))
   actual = fonts.draw.call_args_list[0].args[-1]
   assert (actual.r, actual.g, actual.b, actual.a) == (170, 187, 204, 221)
@@ -578,7 +585,8 @@ def test_colored_slc_controls_retain_requests_and_touch_bounds(monkeypatch):
     'cardFill': '#12345678', 'cardBorder': '#ABCDEF90', 'text': '#FEDCBAFF'}
   assert slc_controls(Profile.COMPACT, state) == before
   assert before
-  fonts = NS(profile=Profile.COMPACT, measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7), draw=Mock())
+  fonts = NS(profile=Profile.COMPACT, measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7),
+             horizontal_ink=lambda text, role, size: (0., 10.), draw=Mock())
   view = OnroadView.__new__(OnroadView)
   monkeypatch.setattr(view, 'fonts', fonts, raising=False)
   with patch.object(rl, 'draw_rectangle_rounded') as fill, patch.object(rl, 'draw_rectangle_rounded_lines_ex'):
@@ -648,7 +656,8 @@ def test_saved_small_actions_near_top_preserve_anchor_and_header_stays_visible(m
   state = road(document, speed_limit=observation, longitudinal_active=True, slc_system_long_available=True)
   view = OnroadView.__new__(OnroadView)
   fonts = NS(profile=Profile.COMPACT, measure=lambda *a, **k: NS(width=10, height=20),
-             vertical_ink=lambda text, role, size: (0., size * .7), draw=Mock())
+             vertical_ink=lambda text, role, size: (0., size * .7),
+             horizontal_ink=lambda text, role, size: (0., 10.), draw=Mock())
   monkeypatch.setattr(view, 'fonts', fonts, raising=False)
   with patch.object(rl, "draw_rectangle_rounded"), patch.object(rl, "draw_rectangle_rounded_lines_ex"):
     view._slc_actions(state)
@@ -664,7 +673,8 @@ def test_overlapping_small_sign_restores_after_pending_and_actions_keep_exact_in
                                      pending_speed_limit_mps=15, session_id="drive", decision_id=1,
                                      presentation_id=2, action_enabled=True)
   state = road(document, speed_limit=observation, longitudinal_active=True, slc_system_long_available=True)
-  fonts = NS(measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7), draw=Mock())
+  fonts = NS(measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7),
+             horizontal_ink=lambda text, role, size: (0., 10.), draw=Mock())
   hud = CompactHudRenderer(Mock(spec=BitmapFonts, **vars(fonts)), Mock())
   state = replace(state, appearance=replace(state.appearance, show_speed_limit_sign=True))
   hud._speed_limit_sign(state)

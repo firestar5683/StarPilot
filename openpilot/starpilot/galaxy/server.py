@@ -57,6 +57,7 @@ from openpilot.starpilot.audio.downloads import SoundDownloads, SoundDownloadErr
 
 
 WEB = Path(__file__).resolve().parent / 'web'
+INSTANCE = secrets.token_hex(8)
 def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashes=None, software=None, maps=None, models=None, settings=None,
                 plots=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
                 sentry_events=None, notifications=None, flm_operations=None, bluetooth=None, vehicle_selection=None,
@@ -672,7 +673,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                f'<rect width="100%" height="100%" fill="white"/><g fill="black">{cells}</g></svg>')
         self.respond(200, svg.encode(), 'image/svg+xml')
       elif path == '/data/runtime.json':
-        self.json(200, {'schemaVersion': 1, 'monitor': 'local'})
+        self.json(200, {'schemaVersion': 1, 'monitor': 'local', 'instance': INSTANCE})
       elif path in ('/api/local-access', '/api/tmux/live', '/api/troubleshoot'):
         if not self.require_session():
           return
@@ -813,7 +814,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(503, {'error': 'Software status is unavailable'})
         else:
           if self.settings_session() == identity:
-            self.json(200, result)
+            self.json(200, {**result, 'instance': INSTANCE})
           else:
             if self.require_session():
               self.json(401, {'error': 'Sign in to Galaxy'})
@@ -2030,7 +2031,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(403, {'error': 'Park before pairing the car'})
           return
         if not aa_setup_owner().enabled():
-          self.json(403, {'error': 'Enable experimental Android Auto first'})
+          self.json(403, {'error': 'Enable Android Auto first'})
           return
         try:
           setup_state = aa_setup_owner().status(identity)

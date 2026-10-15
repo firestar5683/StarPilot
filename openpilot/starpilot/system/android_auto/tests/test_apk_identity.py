@@ -237,12 +237,24 @@ def test_import_stops_when_master_switch_is_disabled(monkeypatch, tmp_path):
   assert not source.exists()
 
 
+def test_import_job_labels_metadata_free_package_with_offered_version(tmp_path, ident, monkeypatch):
+  installed = {}
+  monkeypatch.setattr(apk_identity, "install_identity", lambda files, metadata, directory: installed.update(metadata))
+  for path, hint, expected in ((make_xapk(tmp_path, ident), "16.2.1-release", "16.2.1-release"), (make_apk(tmp_path, ident), None, None)):
+    installed.clear()
+    job = apk_identity.ImportJob(work_dir=tmp_path, root_sha256=ident["root_sha"])
+    job.start(path=path, app_version=hint)
+    job.thread.join(timeout=5)
+    assert job.status()["state"] == "done" and installed.get("app_version") == expected
+
+
 def test_status_reports_expiry(tmp_path):
   cert, root, key_pem, _ = build_identity(days=5)
   directory = tmp_path / "identity"
-  apk_identity.install_identity({"phone-cert.pem": cert, "phone-key.pem": key_pem, "root-cert.pem": root}, {"subject": "O=CarService"}, directory)
+  apk_identity.install_identity({"phone-cert.pem": cert, "phone-key.pem": key_pem, "root-cert.pem": root}, {"subject": "O=CarService", "app_version": "16.2.1-release"}, directory)
   status = apk_identity.identity_status(directory)
   assert status["installed"] and status["days_left"] in (4, 5) and "renew" in status["warning"]
+  assert status["app_version"] == "16.2.1-release"
 
 
 def test_certificate_days_left_reads_only_the_certificate(tmp_path):

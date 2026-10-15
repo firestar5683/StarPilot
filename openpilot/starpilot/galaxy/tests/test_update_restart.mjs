@@ -64,6 +64,23 @@ for (const request of [null, { state: 'failed' }, { state: 'complete', outcome: 
   assert.equal(recovery.reloads, 1)
 }
 
+const rebooted = fixture({ ...baseline, instance: 'one' })
+rebooted.requests[0].resolve({ ...status(), instance: 'one' })
+await flush()
+assert.equal(rebooted.reloads, 0)
+rebooted.tick()
+rebooted.requests[1].resolve({ ...status(), instance: 'two' })
+await flush()
+assert.equal(rebooted.reloads, 1)
+const busy = fixture({ ...baseline, instance: 'one' })
+busy.requests[0].resolve({ ...status(baseline.commit, pending), instance: 'two' })
+await flush()
+assert.equal(busy.reloads, 0)
+const kept = fixture()
+kept.recovery.start({ ...baseline, instance: 'one' })
+kept.recovery.start({ ...baseline, instance: 'two' })
+assert.equal(JSON.parse(kept.values.get(UPDATE_RESTART_KEY)).instance, 'one')
+
 // Only update-related restarts/disconnects trigger the full-screen handoff.
 const restarts = []
 const feed = new SoftwareStatusFeed({ publish() {}, restarting: value => restarts.push(value) })

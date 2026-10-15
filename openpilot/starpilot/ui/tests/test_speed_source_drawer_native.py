@@ -16,7 +16,7 @@ from openpilot.starpilot.ui.onroad_state import OnroadState, OnroadInput, SpeedL
 from openpilot.starpilot.ui.presentation import Profile, FontRole
 from openpilot.starpilot.ui.onroad_large_widgets import UnifiedSpeedWidget
 from openpilot.starpilot.ui.runtime_snapshot import display_message
-from openpilot.starpilot.ui.onroad_customization import default_document, validate_document, set_speed_sources
+from openpilot.starpilot.ui.onroad_customization import default_document, validate_document
 from openpilot.starpilot.ui import clip
 
 
@@ -43,7 +43,7 @@ class DrawerNativeTest(unittest.TestCase):
     empty = messaging.new_message('slcState')
     self.assertEqual(len(empty.slcState.sourceReadings), 0)
 
-  def test_drawer_tap_is_preference_only_and_never_accepts_pending(self):
+  def test_sources_have_no_onscreen_tap_target(self):
     obs = SpeedLimitObservation(ObservationKind.VALID, 'dashboard', 25, session_id='drawer', presentation_id=1)
     state = OnroadState(False, False, 20, 100, obs)
     doc = default_document()
@@ -51,20 +51,17 @@ class DrawerNativeTest(unittest.TestCase):
     state = replace(state, customization=doc)
     emitted = []
     touch = OnroadInput(emitted.append, Profile.LARGE)
-    from openpilot.starpilot.ui.large_speed_geometry import source_toggle_bounds
-    left, top, _, _ = source_toggle_bounds(state)
+    from openpilot.starpilot.ui.large_speed_geometry import CARD_HEIGHT
+    card = doc['layouts']['large']['cruise_limits']
+    left, top = card['x'], card['y'] + CARD_HEIGHT + 22
+    # The sources panel follows the Galaxy layout setting only; the old toggle row is not a touch target.
     touch.press(left + 12, top + 12, state)
-    touch.release(left + 12, top + 12, state)
-    self.assertEqual([(r.kind, r.value) for r in emitted], [('set_speed_sources', False)])
-    touch.press(120, 320, state)
     self.assertFalse(touch.claimed)
+    touch.release(left + 12, top + 12, state)
     pending = replace(state, speed_limit=replace(obs, pending_speed_limit_mps=30, decision_id=2))
     touch.press(left + 12, top + 12, pending)
     touch.release(left + 12, top + 12, pending)
-    self.assertEqual(len(emitted), 2)
-    touch.press(left + 12, top + 12, state)
-    touch.release(left + 12, top + 12, replace(state, speed_limit=SpeedLimitObservation()))
-    self.assertEqual(len(emitted), 2)
+    self.assertEqual(emitted, [])
 
   def test_nested_drawer_clip_restores_parent_after_exception(self):
     calls = []
@@ -79,18 +76,29 @@ class DrawerNativeTest(unittest.TestCase):
     self.assertNotIn('speedSources', validate_document(doc))
     doc['speedSources'] = True
     self.assertIs(validate_document(doc)['speedSources'], True)
-    doc['speedSources'] = 1
-    with self.assertRaises(ValueError):
-      validate_document(doc)
+    doc['speedSourcesCard'] = True
+    self.assertIs(validate_document(doc)['speedSourcesCard'], True)
+    for key in ('speedSources', 'speedSourcesCard'):
+      with self.assertRaises(ValueError):
+        validate_document({**doc, key: 1})
+    self.assertNotIn('speedAlign', validate_document(default_document()))  # Left, the original look, by default.
+    for align in ('left', 'center', 'right'):
+      self.assertEqual(validate_document({**doc, 'speedAlign': align})['speedAlign'], align)
+    for bad in ('justify', 1, None):
+      with self.assertRaises(ValueError):
+        validate_document({**doc, 'speedAlign': bad})
 
-  def test_invalid_saved_layout_is_preserved_without_write(self):
-    params = SimpleNamespace(put=lambda *args: self.fail('invalid saved layout overwritten'))
-    with patch('openpilot.starpilot.ui.onroad_customization.read_saved', return_value=(b'{broken', True)):
-      with self.assertRaises(ValueError):
-        set_speed_sources(params, True)
-    with patch('openpilot.starpilot.ui.onroad_customization.read_saved', return_value=(None, False)):
-      with self.assertRaises(ValueError):
-        set_speed_sources(params, True)
+  def test_sources_grow_the_cruise_widget_by_one_row_or_an_attached_card(self):
+    from openpilot.starpilot.ui.large_speed_geometry import CARD_HEIGHT, GAP, SOURCE_ROW_HEIGHT, WIDTH
+    from openpilot.starpilot.ui.onroad_customization import customization_metadata, widget_size
+    doc = default_document()
+    self.assertEqual(widget_size(doc, 'large', 'cruise_limits'), (WIDTH, CARD_HEIGHT))
+    doc['speedSources'] = True
+    self.assertEqual(widget_size(doc, 'large', 'cruise_limits'), (WIDTH, CARD_HEIGHT + SOURCE_ROW_HEIGHT))
+    doc['speedSourcesCard'] = True
+    self.assertEqual(widget_size(doc, 'large', 'cruise_limits'), (WIDTH, CARD_HEIGHT + GAP + SOURCE_ROW_HEIGHT))
+    self.assertEqual(customization_metadata()['profiles']['large']['widgets']['cruise_limits']['sourcesExtent'],
+                     {'inline': SOURCE_ROW_HEIGHT, 'card': GAP + SOURCE_ROW_HEIGHT})
 
   def test_expired_producer_and_old_drive_transport_cannot_supply_readings(self):
     sm, cp = replay_inputs()
@@ -145,25 +153,7 @@ class DrawerNativeTest(unittest.TestCase):
     drawn = []
     fonts = SimpleNamespace(measure=lambda *args: SimpleNamespace(width=20, height=20), draw=lambda text, role, *args: drawn.append((text, role)))
     widget = UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts)))
-    widget._draw_source_contents(rl.Rectangle(264, 271, 248, 215), state)
-    self.assertIn(('Dashboard', FontRole.MEDIUM), drawn)
-    self.assertIn(('Vision', FontRole.NORMAL), drawn)
-
-  def test_custom_right_edge_keeps_panel_and_toggle_inside_viewport(self):
-    from openpilot.starpilot.ui.large_speed_geometry import source_toggle_bounds
-    obs = SpeedLimitObservation(ObservationKind.VALID, 'dashboard', 25, session_id='edge')
-    doc = default_document()
-    doc['speedSources'] = True
-    doc['layouts']['large']['cruise_limits']['x'] = 1350
-    state = OnroadState(False, False, 20, 100, obs, customization=validate_document(doc))
-    left, top, right, bottom = source_toggle_bounds(state)
-    self.assertLessEqual(right, 1830)
-    self.assertLessEqual(bottom, 1050)
-    emitted = []
-    touch = OnroadInput(emitted.append, Profile.LARGE)
-    touch.press(1850, top + 12, state)
-    touch.release(1850, top + 12, state)
-    self.assertEqual(emitted, [])
-    touch.press(left + 12, top + 12, state)
-    touch.release(left + 12, top + 12, state)
-    self.assertEqual(len(emitted), 1)
+    widget._draw_sources(rl.Rectangle(88, 545, 320, 76), state)
+    self.assertEqual([text for text, _ in drawn], ['Dash', '56', 'Vision', '56'])
+    self.assertIn(('56', FontRole.MEDIUM), drawn)  # The accepted source's reading is emphasised.
+    self.assertIn(('56', FontRole.NORMAL), drawn)

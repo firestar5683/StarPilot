@@ -258,9 +258,12 @@ def _default_slc_controls(profile: Profile, state: OnroadState) -> tuple[SlcCont
       from openpilot.starpilot.ui.large_speed_geometry import WIDTH, ACTION_HEIGHT, ACTION_X, ACTION_Y, ACTION_HEADER_HEIGHT
       target = observation.pending_adjusted_limit_mps
       label = f'Apply {round(target * (3.6 if state.metric else 2.2369362921))}' if target is not None and target > 0 else 'Apply'
+      # Name the speed each choice leaves you at: the new target, or the limit already in use.
+      current = observation.accepted_adjusted_limit_mps
+      keep = f'Keep {round(current * (3.6 if state.metric else 2.2369362921))}' if current is not None and current > 0 else 'Keep'
       return (SlcControl(request(SlcActionKind.ACCEPT), label,
                          (ACTION_X, ACTION_Y + ACTION_HEADER_HEIGHT, ACTION_X + WIDTH // 2 - 6, ACTION_Y + ACTION_HEIGHT)),
-              SlcControl(request(SlcActionKind.REJECT), 'Keep',
+              SlcControl(request(SlcActionKind.REJECT), keep,
                          (ACTION_X + WIDTH // 2 + 6, ACTION_Y + ACTION_HEADER_HEIGHT, ACTION_X + WIDTH, ACTION_Y + ACTION_HEIGHT)))
     return (SlcControl(request(SlcActionKind.ACCEPT), "ACCEPT", (174, 180, 310, 234)),
             SlcControl(request(SlcActionKind.REJECT), "REJECT", (320, 180, 456, 234)))
@@ -323,20 +326,6 @@ class OnroadInput:
     self.profile = profile
     self._press: tuple[float, float, bool, str] | None = None
     self._slc_press: tuple[float, float, SlcUiRequest] | None = None
-    self._source_press = None
-
-  def _source_target(self, x, y, state):
-    if (self.profile != Profile.LARGE or state.alert.size != AlertSize.NONE or
-        state.speed_limit.kind != ObservationKind.VALID or not state.speed_limit.session_id or
-        not placement(state.customization, 'large', 'cruise_limits')['enabled']):
-      return False
-    from openpilot.starpilot.ui.large_speed_geometry import source_toggle_bounds
-    left, top, right, bottom = source_toggle_bounds(state)
-    return left <= x <= right and top <= y <= bottom
-
-  @property
-  def source_pressed(self):
-    return self._source_press is not None
 
   @property
   def pressed_action(self):
@@ -344,7 +333,7 @@ class OnroadInput:
 
   @property
   def claimed(self) -> bool:
-    return self._press is not None or self._slc_press is not None or self._source_press is not None
+    return self._press is not None or self._slc_press is not None
 
   def press(self, x: float, y: float, state: OnroadState) -> None:
     self.cancel()
@@ -354,9 +343,6 @@ class OnroadInput:
       if left <= x <= right and top <= y <= bottom:
         self._slc_press = (x, y, control.request)
         return
-    if self._source_target(x, y, state):
-      self._source_press = (x, y, state.speed_limit.session_id, state.customization.get('speedSources', False))
-      return
     # Only the large-profile wheel is an experimental-mode touch target.
     if self.profile != Profile.LARGE:
       self.cancel()
@@ -365,12 +351,6 @@ class OnroadInput:
     self._press = (x, y, state.experimental_enabled, state.experimental_action_token) if inside and state.experimental_available else None
 
   def move(self, x: float, y: float, state: OnroadState) -> None:
-    if self._source_press:
-      px, py, session, opened = self._source_press
-      if (abs(x - px) > 5 or abs(y - py) > 5 or session != state.speed_limit.session_id or
-          opened != state.customization.get('speedSources', False) or not self._source_target(x, y, state)):
-        self.cancel()
-      return
     if self._slc_press:
       px, py, request = self._slc_press
       current = next((item for item in slc_controls(self.profile, state) if item.request == request), None)
@@ -386,8 +366,6 @@ class OnroadInput:
 
   def release(self, x: float, y: float, state: OnroadState) -> None:
     self.move(x, y, state)
-    if self._source_press:
-      self.emit(OnroadRequest('set_speed_sources', not self._source_press[3]))
     if self._slc_press:
       self.emit(self._slc_press[2])
     if self._press:
@@ -397,7 +375,6 @@ class OnroadInput:
   def cancel(self) -> None:
     self._press = None
     self._slc_press = None
-    self._source_press = None
 
 
 class SlcStateMessage(Protocol):

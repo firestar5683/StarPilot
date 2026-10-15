@@ -68,7 +68,7 @@ class LayoutPreviewRendererTests(unittest.TestCase):
     pending = sample_state("slc_pending", document)
     for profile in (Profile.LARGE, Profile.COMPACT):
       self.assertEqual([item.label for item in slc_controls(profile, pending)],
-                       ["Apply 54", "Keep"] if profile == Profile.LARGE else ["ACCEPT", "REJECT"])
+                       ["Apply 54", "Keep 49"] if profile == Profile.LARGE else ["ACCEPT", "REJECT"])
       self.assertEqual(len(slc_controls(profile, sample_state("engaged", document))), 1 if profile == Profile.LARGE else 0)
     manual = sample_state("experimental", document)
     self.assertTrue(manual.experimental_enabled)
@@ -80,7 +80,12 @@ class LayoutPreviewRendererTests(unittest.TestCase):
         self.assertTrue(sample.experimental_enabled)
         self.assertEqual(sample.visual_preview.cem_reason, reason)
         self.assertIsNone(sample.conditional_effective)
-        self.assertEqual(sample.visual_preview.label, "SYNTHETIC REPLAY PREVIEW")
+        self.assertTrue(sample.visual_preview.layout_sample)  # Drawn as the car would, without replay labels.
+        from openpilot.starpilot.ui.onroad_conditional import status
+        # The gauge still reads the real reason, but the mode caption itself is not drawn in the editor.
+        family, detail, _ = status(sample)
+        self.assertEqual(family, "CEM")
+        self.assertFalse(detail.startswith("PREVIEW"))
     self.assertEqual(sample_state("cem_lead", document).speed_mps, 0.0)
     with self.assertRaises(ValueError):
       sample_state("live", document)
@@ -108,6 +113,24 @@ class LayoutPreviewRendererTests(unittest.TestCase):
       first.close.assert_called_once()
       renderer.expire()
       second.close.assert_called_once()
+
+  def test_backdrop_draws_the_real_screen_without_movable_widgets(self):
+    renderer = LayoutPreviewRenderer()
+    document = default_document()
+    with patch("openpilot.starpilot.ui.layout_preview_renderer.rl.is_window_ready", return_value=True), \
+         patch("openpilot.starpilot.ui.layout_preview_renderer._Canvas") as canvas_type:
+      canvas = Mock(profile=Profile.COMPACT, viewport=None)
+      canvas.render.return_value = b"png"
+      canvas_type.return_value = canvas
+      self.assertEqual(renderer({"document": document, "profile": "compact", "scene": "braking", "art": "backdrop"}), b"png")
+    state, scene = canvas.render.call_args.args
+    self.assertEqual(scene, "braking")
+    self.assertEqual(canvas.render.call_args.kwargs, {})
+    # An order naming no widget keeps the ordered path, so no movable widget is drawn.
+    self.assertEqual(state.customization["widgetOrder"]["compact"], ["backdrop"])
+    self.assertEqual(state.customization["layouts"], document["layouts"])
+    with self.assertRaises(ValueError):
+      renderer({"document": document, "profile": "compact", "scene": "braking", "art": "widgets"})
 
   def test_png_encoder_preserves_rgba_pixels(self):
     pixels = bytes((255, 0, 0, 255, 0, 255, 0, 128))
@@ -182,7 +205,7 @@ class LayoutPreviewRendererTests(unittest.TestCase):
          patch("openpilot.starpilot.ui.layout_preview_sidebar.rl.draw_rectangle_rounded_lines_ex"):
       render_sidebar(fonts, rl.Rectangle(1860, 0, 300, 1080), metric)
     labels = [call.args[0] for call in fonts.draw.call_args_list]
-    self.assertEqual(labels, ["ACCEL", "1.08 ft/s²", "SAMPLE DATA"])
+    self.assertEqual(labels, ["ACCEL", "1.08 ft/s²"])
 
 
 if __name__ == "__main__":

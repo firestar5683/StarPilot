@@ -15,6 +15,8 @@ class OnroadVisualPreview:
   cem_reason: str | None = None
   curve_curvature: float | None = None
   label: str = "SYNTHETIC REPLAY PREVIEW"
+  # The Galaxy layout editor's sample: draw exactly as the car would, without the replay labels.
+  layout_sample: bool = False
 
 
 def parse_flags(raw: str) -> frozenset[str]:

@@ -189,9 +189,9 @@ def run(frames_path: str, touch_path: str | None = None, control_path: str | Non
     gui_app._scale = 1.0
     gui_app._render_texture = None
     from openpilot.starpilot.system.android_auto.identity import certificate_days_left
-    from openpilot.starpilot.system.android_auto.projection_layout_runtime import ProjectionLayoutWatcher
+    from openpilot.starpilot.system.android_auto.projection_layout_runtime import ProjectionLayoutWatcher, comma_display_seed
     viewport = (geometry.logical_width, geometry.logical_height)
-    watcher = ProjectionLayoutWatcher(viewport)
+    watcher = ProjectionLayoutWatcher(viewport, display_seed=comma_display_seed)
     layout = ProjectionOnroad(viewport=viewport, customization=watcher.load(),
                               certificate_days=certificate_days_left(), layout_watcher=watcher)
     resources.callback(layout.close)

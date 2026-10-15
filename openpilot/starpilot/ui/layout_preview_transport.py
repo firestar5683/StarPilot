@@ -23,7 +23,7 @@ RENDER_DEADLINE = 2.0
 MIN_INTERVAL = 0.5
 ERROR_LOG_INTERVAL = 10.0
 PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
-SCENES = frozenset(('engaged', 'aol', 'long_only', 'experimental', 'braking', 'stopped',
+SCENES = frozenset(('general', 'engaged', 'aol', 'long_only', 'experimental', 'braking', 'stopped',
                     'cem_stop_light', 'cem_lead', 'cem_curve', 'slc_pending', 'slc_max', 'slc_equal',
                     'slc_pedal', 'slc_retained', 'slc_disengaged', 'slc_unavailable', 'slc_display'))
 PROFILES = frozenset(('large', 'compact'))
@@ -60,7 +60,7 @@ class _Job:
 def _payload(value: object) -> dict:
   if not isinstance(value, dict) or type(value) is not dict or set(value) not in ({'document', 'profile', 'scene'}, {'document', 'profile', 'scene', 'art'}):
     raise PreviewInvalid('Invalid preview request')
-  if 'art' in value and value['art'] is not True:
+  if 'art' in value and not (value['art'] is True or value['art'] == 'backdrop'):
     raise PreviewInvalid('Invalid widget art request')
   if type(value['profile']) is not str or type(value['scene']) is not str or \
      value['profile'] not in RENDER_PROFILES or value['scene'] not in SCENES:
@@ -79,7 +79,7 @@ def _payload(value: object) -> dict:
   except (ValueError, TypeError, OverflowError, RecursionError) as error:
     raise PreviewInvalid('Invalid layout document') from error
   return {'document': document, 'profile': value['profile'], 'scene': value['scene'],
-          **({'art': True} if value.get('art') is True else {})}
+          **({'art': value['art']} if 'art' in value else {})}
 
 
 def validate_png(value: object) -> bytes:

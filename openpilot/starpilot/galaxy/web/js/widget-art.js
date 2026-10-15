@@ -27,7 +27,9 @@ export async function widgetArtMetadata(blob) {
     if (!/^[a-z_]+$/.test(id) || !rect || ![rect.x,rect.y,rect.width,rect.height].every(Number.isInteger) ||
         rect.x < 0 || rect.y < 0 || rect.width < 1 || rect.height < 1 ||
         rect.x + rect.width > metadata.width || rect.y + rect.height > metadata.height ||
-        ![rect.offsetX ?? 0, rect.offsetY ?? 0].every(value => Number.isFinite(value) && value > -1 && value <= 0)) throw new Error("Invalid widget art rectangle")
+        !Number.isFinite(rect.offsetX ?? 0) || (rect.offsetX ?? 0) <= -1 || (rect.offsetX ?? 0) > 0 ||
+        !Number.isFinite(rect.offsetY ?? 0) || (rect.offsetY ?? 0) <= (id === 'speed_limit_actions' ? -33 : -1) ||
+        (rect.offsetY ?? 0) > 0) throw new Error("Invalid widget art rectangle")
   }
   return metadata
 }

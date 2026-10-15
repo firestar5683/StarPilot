@@ -72,8 +72,9 @@ class FakeImport:
     self.running = False
   def busy(self): return self.running
   def status(self): return {'state': 'running' if self.running else 'idle'}
-  def start(self, *, path, enabled):
+  def start(self, *, path, enabled, app_version=None):
     self.started.append((path, path.read_bytes(), enabled))
+    self.app_version = app_version
     self.running = True
 
 
@@ -93,6 +94,8 @@ def test_status_explains_phone_role_and_hides_key(tmp_path):
   service, _ = setup(tmp_path, state)
   result = service.status(session)
   assert result['identity'] == {'installed': False, 'message': 'No identity'}
+  service.identity_status = lambda: {'installed': True, 'app_version': '16.2.1-release', 'source': 'upload'}
+  assert service.status(session)['identity'] == {'installed': True, 'app_version': '16.2.1-release'}
   assert result['bluetoothEnabled'] is True
   assert 'phone' in result['steps'][0] and 'Wi-Fi access point' in result['steps'][3]
   assert result['wiredAvailable'] is False and result['maxUploadBytes'] == MAX_FILE_BYTES
@@ -113,6 +116,17 @@ def test_upload_is_bounded_private_and_session_bound(tmp_path, parked, enabled):
   assert admission() is False
   with pytest.raises(SetupRejected, match='session expired'):
     service.upload(('galaxy', '1'), io.BytesIO(b'abc'), 3)
+
+
+def test_upload_matching_offered_release_size_is_labelled_with_its_version(tmp_path, monkeypatch):
+  state: SetupState = {'parked': True, 'enabled': True, 'session': ('galaxy', '1')}
+  session = state['session']
+  assert session is not None
+  monkeypatch.setattr(apkpure, '_cache', {'version': '17.7.663654-release', 'url': '', 'size': 14, 'expires': 0})
+  for data, expected in ((b'not-a-real-apk', '17.7.663654-release'), (b'other-size', None)):
+    service, job = setup(tmp_path, state)
+    service.upload(session, io.BytesIO(data), len(data))
+    assert job.app_version == expected
 
 
 def test_invalid_or_truncated_upload_never_starts_job(tmp_path):

@@ -6,8 +6,8 @@ from pathlib import Path
 
 from openpilot.starpilot.system.android_auto.identity import DATA_DIR
 from openpilot.starpilot.system.android_auto.display_profile import screen_geometry
-from openpilot.starpilot.ui.onroad_customization import (CEM_GAUGE_WIDGET, CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET, WHEEL_SIZES,
-                                                         customization_metadata, validate_widget_order)
+from openpilot.starpilot.ui.onroad_customization import (CEM_GAUGE_WIDGET, CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET,
+                                                         CEM_GAUGE_FRAME, CEM_GAUGE_INSET, SPEED_ALIGNMENTS, customization_metadata, validate_widget_order)
 from openpilot.starpilot.ui.onroad_stopped_timer import timer_size
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
 
@@ -111,23 +111,36 @@ def layout_metadata_for_viewport(viewport):
                        'note': "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
                        'default': {'x': 30, 'y': height - 30 - exit_h, 'enabled': True}}
   for key in ACTION_WIDGETS:
-    widgets[key].update(opacity={'min': CAR_EXIT_MIN_OPACITY if key == CAR_EXIT else 0, 'max': 100, 'default': 100}, backgroundToggle=True)
-    widgets[key]['default'].update(opacity=100, background=True)
+    opacity = 75 if key == CAR_EXIT else 100
+    widgets[key].update(opacity={'min': CAR_EXIT_MIN_OPACITY if key == CAR_EXIT else 0, 'max': 100, 'default': opacity}, backgroundToggle=True)
+    widgets[key]['default'].update(opacity=opacity, background=key != CAR_EXIT)
+  # Background opacity for the cruise and speed-limit card; its text stays solid.
+  widgets['cruise_limits'].update(opacity={'min': 0, 'max': 100, 'default': 100})
+  widgets['cruise_limits']['default'].update(opacity=100)
   profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], STOPPED_TIMER_WIDGET, NAV_CARD, *DISPLAY_WIDGETS, CAR_EXIT]
   return profile
 
 
 # Android Auto display switches, independent of the comma screen's preferences.
 DISPLAY_DEFAULTS = {'blindSpotBorder': False, 'signalBorder': False, 'blindSpotCamera': False,
-                    'hidePersonalityAlerts': False, 'wheelPedalFeedback': False}
+                    'hidePersonalityAlerts': False, 'wheelPedalFeedback': False,
+                    'leadIndicator': False, 'leadInfo': 'Off', 'speedSources': False,
+                    'speedSourcesCard': False, 'speedAlign': 'left'}
+# Lead info shown above the lead marker, in LeadInfoMode order.
+LEAD_INFO_CHOICES = ('Off', 'Distance', 'Speed')
 
 
 def projection_appearance(appearance, document):
   """The comma's onroad appearance with every car-screen choice taken from the AA layout instead."""
   from dataclasses import replace
-  from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
+  from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, LeadInfoMode
+  lead_indicator = document.get('leadIndicator', False) is True
+  lead_info = document.get('leadInfo', 'Off')
+  # Like the comma, lead info only shows with the lead marker on.
+  lead_info_mode = LeadInfoMode(LEAD_INFO_CHOICES.index(lead_info)) if lead_indicator and lead_info in LEAD_INFO_CHOICES else LeadInfoMode.OFF
   # The car screen always shows the road camera; the comma's camera choices stay on the comma.
   return replace(appearance,
+                 show_lead_indicator=lead_indicator, lead_info_mode=lead_info_mode,
                  show_blindspot_border=document.get('blindSpotBorder', False) is True,
                  show_signal_border=document.get('signalBorder', False) is True,
                  hide_personality_alerts=document.get('hidePersonalityAlerts', False) is True,
@@ -135,14 +148,26 @@ def projection_appearance(appearance, document):
                  camera_view=CameraViewChoice.STANDARD, driver_camera_on_reverse=False)
 
 
-def default_layout(screen):
+def comma_display(appearance):
+  """The comma screen's display choices as AA switches, to start a car screen that has no saved layout."""
+  lead_indicator = appearance.show_lead_indicator is True
+  return {'blindSpotBorder': appearance.show_blindspot_border is True,
+          'signalBorder': appearance.show_signal_border is True,
+          'hidePersonalityAlerts': appearance.hide_personality_alerts is True,
+          'wheelPedalFeedback': appearance.wheel_pedal_feedback is True,
+          'leadIndicator': lead_indicator,
+          'leadInfo': LEAD_INFO_CHOICES[appearance.lead_info_mode] if lead_indicator else 'Off'}
+
+
+def default_layout(screen, display=None):
   geometry = screen_geometry(screen)
-  return default_layout_for_viewport((geometry.logical_width, geometry.logical_height))
+  return default_layout_for_viewport((geometry.logical_width, geometry.logical_height), display)
 
 
-def default_layout_for_viewport(viewport):
+def default_layout_for_viewport(viewport, display=None):
   metadata = layout_metadata_for_viewport(viewport)
-  return {'version': 2, 'clock24Hour': False, 'largeUiGammaTrial': False, **DISPLAY_DEFAULTS, 'canvas': {key: metadata[key] for key in ('width', 'height')},
+  display = {**DISPLAY_DEFAULTS, **{key: value for key, value in (display or {}).items() if key in DISPLAY_DEFAULTS}}
+  return {'version': 3, 'clock24Hour': False, 'largeUiGammaTrial': False, **display, 'canvas': {key: metadata[key] for key in ('width', 'height')},
           'widgets': {key: {**widget['default'], **({'size': 192} if key == 'steering_wheel' else {})}
                       for key, widget in metadata['widgets'].items()}}
 
@@ -150,8 +175,8 @@ def default_layout_for_viewport(viewport):
 def placement_size(key, widget, placement):
   if key in DISPLAY_WIDGETS and placement.get('display') == 'icons':
     return FAVORITE_ICON_SIZE, FAVORITE_ICON_SIZE
-  if key == 'steering_wheel':
-    return placement.get('size', 192), placement.get('size', 192)
+  if widget.get('resizable'):
+    return (placement.get('size', widget['resizable']['default']),) * 2
   if key == NAV_MAP:
     return placement['width'], placement['height']
   return widget['width'], widget['height']
@@ -179,7 +204,7 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
   if type(value) is dict:
     fields |= {field for field in ('widgetOrder', 'clock24Hour', 'largeUiGammaTrial', *DISPLAY_DEFAULTS) if field in value}
   if (type(value) is not dict or set(value) != fields or
-      type(value['version']) is not int or value['version'] not in (1, 2) or
+      type(value['version']) is not int or value['version'] not in (1, 2, 3) or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
       type(value['widgets']) is not dict or not set(value['widgets']) <= set(metadata['widgets']) or
       not set(metadata['widgets']) - set(value['widgets']) <= {CEM_GAUGE_WIDGET, MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS}):
@@ -192,7 +217,9 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
     raise ValueError('Invalid large UI gamma trial')
   result.setdefault('largeUiGammaTrial', False)
   for field, default in DISPLAY_DEFAULTS.items():
-    if field in value and type(value[field]) is not bool:
+    if field in value and (type(value[field]) is not type(default) or
+                           (field == 'leadInfo' and value[field] not in LEAD_INFO_CHOICES) or
+                           (field == 'speedAlign' and value[field] not in SPEED_ALIGNMENTS)):
       raise ValueError('Invalid projection display setting')
     result.setdefault(field, default)
   for key in set(metadata['widgets']) - set(value['widgets']):
@@ -213,9 +240,17 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
     if key in ACTION_WIDGETS and type(placement) is dict:
       placement.setdefault('opacity', 100)
       placement.setdefault('background', True)
-    fields = ({'x', 'y', 'enabled'} | ({'size'} if key == 'steering_wheel' else set()) |
+    if key == 'cruise_limits' and type(placement) is dict:
+      placement.setdefault('opacity', 100)
+    if key == 'driver_monitor' and type(placement) is dict and 'size' not in placement:
+      for axis in ('x', 'y'):
+        if type(placement.get(axis)) in (int, float):
+          placement[axis] += 32
+      placement['size'] = widget['resizable']['default']
+    fields = ({'x', 'y', 'enabled'} | ({'size'} if widget.get('resizable') else set()) |
               ({'display'} if key in DISPLAY_WIDGETS else set()) |
               ({'opacity', 'background'} if key in ACTION_WIDGETS else set()) |
+              ({'opacity'} if key == 'cruise_limits' else set()) |
               ({'width', 'height', 'opacity'} if key == NAV_MAP else set()))
     if type(placement) is not dict or set(placement) != fields or type(placement['enabled']) is not bool:
       raise ValueError('Invalid projection widget')
@@ -226,11 +261,14 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
     if key in ACTION_WIDGETS and (type(placement['opacity']) is not int or not 0 <= placement['opacity'] <= 100 or
                                   type(placement['background']) is not bool):
       raise ValueError('Invalid action widget appearance')
+    if key == 'cruise_limits' and (type(placement['opacity']) is not int or not 0 <= placement['opacity'] <= 100):
+      raise ValueError('Invalid cruise card opacity')
     if key == CAR_EXIT and placement['opacity'] < CAR_EXIT_MIN_OPACITY:
       raise ValueError('Exit to car opacity must be at least 25%')
-    size = placement.get('size', 192)
-    if key == 'steering_wheel' and (type(size) is not int or not WHEEL_SIZES['large'][0] <= size <= WHEEL_SIZES['large'][2]):
-      raise ValueError('Invalid steering wheel size')
+    if widget.get('resizable'):
+      size, limits = placement['size'], widget['resizable']
+      if type(size) is not int or not limits['min'] <= size <= limits['max']:
+        raise ValueError('Invalid widget size')
     if key == NAV_MAP:
       box, opacity = widget['box'], widget['opacity']
       if (type(placement['width']) is not int or not box['minWidth'] <= placement['width'] <= box['maxWidth'] or
@@ -238,6 +276,10 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
           type(placement['opacity']) is not int or not opacity['min'] <= placement['opacity'] <= opacity['max']):
         raise ValueError('Invalid map overlay size or opacity')
     dimensions = placement_size(key, widget, placement)
+    # Version 2 and older saved the CEM gauge's full drawing frame; check that, then move to the inset box.
+    old_gauge = key == CEM_GAUGE_WIDGET and value['version'] < 3 and key in value['widgets']
+    if old_gauge:
+      dimensions = CEM_GAUGE_FRAME
     if _legacy_geometry and key in ('cruise_limits', 'speed_limit_actions'):
       historic = {'cruise_limits': ((176, 483), (280, 412)), 'speed_limit_actions': ((176, 58), (280, 96))}
       # Both shapes were published as v1; validate the whole footprint before migrating.
@@ -250,6 +292,10 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
       if (type(number) not in (int, float) or not math.isfinite(number) or
           not bounds[axis] <= number <= bounds[axis] + bounds[extent] - dimension):
         raise ValueError('Projection widget outside screen')
+    if old_gauge and not _legacy_geometry:
+      placement.update(x=placement['x'] + CEM_GAUGE_INSET[0], y=placement['y'] + CEM_GAUGE_INSET[1])
+  if not _legacy_geometry:
+    result['version'] = 3
   if len(json.dumps(result, separators=(',', ':'), allow_nan=False).encode()) > MAX_BYTES:
     raise ValueError('Projection layout too large')
   return result
@@ -305,4 +351,14 @@ def projection_customization(document, base_customization):
   for key, placement in document['widgets'].items():
     dx, dy = shifts.get(key, (0, 0))
     result['layouts']['large'][key] = {**placement, 'x': placement['x'] - dx, 'y': placement['y'] - dy}
+  from openpilot.starpilot.ui.onroad_customization import rgba
+  # Card opacity is a colour, not a placement: fold it into the fill and keep the native placement shape.
+  opacity = result['layouts']['large'].get('cruise_limits', {}).pop('opacity', 100)
+  if opacity != 100:
+    red, green, blue, alpha = rgba(result, 'cardFill', 'large', 'cruise_limits')
+    fill = f'#{red:02X}{green:02X}{blue:02X}{round(alpha * opacity / 100):02X}'
+    result['widgetColors']['large'].setdefault('cruise_limits', {})['cardFill'] = fill
+  for key in ('speedSources', 'speedSourcesCard', 'speedAlign'):
+    if key in document:
+      result[key] = document[key]
   return result

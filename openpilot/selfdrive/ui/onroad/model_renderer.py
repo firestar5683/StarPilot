@@ -6,13 +6,15 @@ from opendbc.car.structs import car
 from dataclasses import dataclass, field
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
+from openpilot.starpilot.ui.appearance_preferences import format_lead_info
 from openpilot.starpilot.ui.rainbow_path import RainbowPath
 from openpilot.starpilot.ui.road_colors import edge_gradient, lane_color, path_mode, solid_gradient
 from openpilot.starpilot.ui.onroad_customization import ROAD_COLORS
 from openpilot.starpilot.lateral.lane_feedback import BLUE, direction as lane_centering_direction
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.system.ui.lib.application import gui_app
+from openpilot.system.ui.lib.application import FontWeight, gui_app
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.lib.shader_polygon import draw_polygon, Gradient
 from openpilot.system.ui.widgets import Widget
 
@@ -59,6 +61,8 @@ class ModelRenderer(Widget):
     self._lane_centering_direction = 0
     self._road_edge_stds = np.zeros(2, dtype=np.float32)
     self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
+    # (show marker, LeadInfoMode, metric) from a screen with its own lead choices; None keeps the stock chevrons.
+    self.lead_display: tuple[bool, int, bool | None] | None = None
     self._path_offset_z = HEIGHT_INIT[0]
 
     # Initialize ModelPoints objects
@@ -123,7 +127,9 @@ class ModelRenderer(Widget):
     model = sm['modelV2']
     radar_state = sm['radarState'] if sm.valid['radarState'] else None
     lead_one = radar_state.leadOne if radar_state else None
-    render_lead_indicator = self._longitudinal_control and radar_state is not None
+    lead_display = self.lead_display
+    show_lead = self._longitudinal_control if lead_display is None else lead_display[0]
+    render_lead_indicator = show_lead and radar_state is not None
 
     # Update model data when needed
     model_updated = sm.updated['modelV2']
@@ -146,6 +152,10 @@ class ModelRenderer(Widget):
 
     if render_lead_indicator and radar_state:
       self._draw_lead_indicator()
+      if lead_display is not None and self._lead_vehicles[0].chevron:
+        text = format_lead_info(lead_one, lead_display[1], lead_display[2])
+        if text:
+          self._draw_lead_info(self._lead_vehicles[0], text)
 
   def _update_raw_points(self, model):
     """Update raw 3D points from model data"""
@@ -366,6 +376,17 @@ class ModelRenderer(Widget):
 
       rl.draw_triangle_fan(lead.glow, len(lead.glow), rl.Color(218, 202, 37, 255))
       rl.draw_triangle_fan(lead.chevron, len(lead.chevron), rl.Color(201, 34, 49, lead.fill_alpha))
+
+  def _draw_lead_info(self, lead: LeadVehicle, text: str) -> None:
+    # Centered just above the chevron's glow, kept on screen.
+    font = gui_app.font(FontWeight.SEMI_BOLD)
+    size = measure_text_cached(font, text, 48)
+    tip_x, tip_y = lead.glow[1]
+    x = min(max(tip_x - size.x / 2, self._rect.x), self._rect.x + self._rect.width - size.x)
+    y = max(tip_y - size.y - 12, self._rect.y)
+    for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+      rl.draw_text_ex(font, text, rl.Vector2(x + dx, y + dy), 48, 0, rl.BLACK)
+    rl.draw_text_ex(font, text, rl.Vector2(x, y), 48, 0, rl.WHITE)
 
   @staticmethod
   def _get_path_length_idx(pos_x_array: np.ndarray, path_distance: float) -> int:

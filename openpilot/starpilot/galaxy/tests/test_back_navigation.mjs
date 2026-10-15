@@ -42,7 +42,7 @@ assert.equal(cancelled, 1)
 
 let closed = 0
 const editor = { busy: false, dirty: true, state: { drag: null, discard: null },
-  leave: OnroadLayoutPage.methods.leave, hideDevicePreview() {}, $emit(event) { if (event === "close") closed++ } }
+  leave: OnroadLayoutPage.methods.leave, $emit(event) { if (event === "close") closed++ } }
 settings.state = { layoutOpen: true }; settings.busy = false
 settings.$refs = { layoutEditor: { requestLeave(action) { OnroadLayoutPage.methods.requestLeave.call(editor, action) } } }
 assert.equal(SettingsPage.methods.navigateBack.call(settings), true)

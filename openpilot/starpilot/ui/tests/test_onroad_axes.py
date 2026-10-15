@@ -56,6 +56,7 @@ class TestOnroadAxes(unittest.TestCase):
         fonts = Mock()
         fonts.measure.return_value = NS(width=20, height=10)
         fonts.vertical_ink.return_value = (0, 10)
+        fonts.horizontal_ink.return_value = (0, 20)
         with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card"), patch.object(rl, "draw_line_ex"):
           UnifiedSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), state)
         label_color = fonts.draw.call_args_list[0].args[-1]
@@ -119,7 +120,7 @@ class TestOnroadAxes(unittest.TestCase):
         with self.subTest(profile=profile, lateral=lateral, longitudinal=longitudinal):
           view = onroad.OnroadView.__new__(onroad.OnroadView)
           object.__setattr__(view, "fonts", NS(profile=profile, draw=Mock(), measure=Mock(return_value=NS(width=100, height=30)),
-                                              vertical_ink=Mock(return_value=(0, 20))))
+                                              vertical_ink=Mock(return_value=(0, 20)), horizontal_ink=Mock(return_value=(0, 100))))
           view.camera_layer = Mock()
           view.extra_overlays = None
           view.alert = Mock()
@@ -196,6 +197,7 @@ class TestOnroadAxes(unittest.TestCase):
     fonts = Mock()
     fonts.measure.return_value = NS(width=20, height=10)
     fonts.vertical_ink.return_value = (0, 10)
+    fonts.horizontal_ink.return_value = (0, 20)
     with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card"), patch.object(rl, "draw_line_ex"):
       UnifiedSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), state)
     self.assertEqual(rgba(fonts.draw.call_args_list[0].args[-1]), (172, 190, 203, 255))

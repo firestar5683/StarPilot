@@ -305,14 +305,20 @@ function visit(node) {
 visit(tree)
 assert(!tags.includes('template'), 'setup cannot live inside an inert template element')
 assert(tags.includes('input') && tags.includes('button'), 'setup renders package selection and actions')
-// Once installed, Manage package shows status and removal only; setup needs removal first.
+// Once installed, Update / Install newer version opens the installer itself; no removal first.
 const managed = page({ ...setup, identity: { ...setup.identity, installed: true } })
-managed.installOpen = true
+managed.openInstall()
+assert.equal(managed.installState, 'choose')
 const managedTags = []
 const collect = (node) => { if (!node || typeof node !== 'object') return; if (typeof node.type === 'string') managedTags.push(node.type); if (Array.isArray(node.children)) node.children.forEach(collect) }
 collect(render(managed, []))
-assert(!managedTags.includes('input'), 'manage view offers no setup inputs')
-assert(managedTags.includes('dl'), 'manage view shows status')
+assert(managedTags.includes('input'), 'an installed package can be replaced by a newer one')
+assert.match(AndroidAutoPage.template, /Install a Newer Version/)
+assert.equal(page({ ...setup, identity: { ...setup.identity, installed: true, app_version: '17.8.163804-release.daily' } }).installedVersion, '17.8.163804')
+assert.equal(managed.installedVersion, '', 'an unknown version shows nothing')
+assert.match(AndroidAutoPage.template, /You have \{\{ installedVersion \}\}/)
+assert.match(AndroidAutoPage.template, /Current version: \{\{ installedVersion \}\}/)
+assert.doesNotMatch(AndroidAutoPage.template, /remove it first/)
 for (const [field, reason] of [['installReady', /display|encoder/],
                              ['serviceReady', /service/], ['bluetoothEnabled', /Bluetooth/], ['parked', /Park/]]) {
   const blocked = page({ ...setup, [field]: false })
@@ -403,7 +409,21 @@ connectingPage.runtime.state = 'streaming'
 assert.equal(connectingPage.projecting, true)
 
 assert.match(AndroidAutoPage.template, /Remove Android Auto support/)
-assert.match(AndroidAutoPage.template, /Manage package/)
+assert.doesNotMatch(AndroidAutoPage.template, /Manage package|>Turn On<|>Turn Off</)
+assert.match(AndroidAutoPage.template, /Install newer version/)
+assert.match(AndroidAutoPage.template, /switchRow\('Android Auto', setup\.enabled/)
+assert.doesNotMatch(AndroidAutoPage.template, /Scan For Devices/)
+assert.match(AndroidAutoPage.template, /href="#\/navigation\/maps"/)
+// Returning drivers get a status card; the setup steps fold away until asked for.
+const returning = page(setup)
+assert.equal(returning.setupDone, false, 'no car chosen yet')
+returning.selected = { address: "AA:BB:CC:DD:EE:FF", name: "Civic" }
+assert.equal(returning.setupDone, true)
+returning.pairing = { active: true }
+assert.equal(returning.setupDone, false, 'pairing keeps the steps open')
+returning.pairing = null
+assert.equal(page({ ...setup, enabled: false }).setupDone, false, 'turned off shows the steps')
+assert.match(AndroidAutoPage.template, /v-show="!setupDone \|\| showSteps"/)
 const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
 try {
   for (const [browser, mobile] of [

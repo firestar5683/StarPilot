@@ -316,13 +316,14 @@ export const APKMIRROR_URL = "https://www.apkmirror.com/apk/google-inc/android-a
 export const DOWNLOAD_LINK = /^https:\/\/download\.pureapk\.com\/b\/X?APK\/[!-~]+$/
 const WRONG_DOWNLOAD = "That’s not the Android Auto download. Download it again in step 1."
 
-export function downloadLink(release) {
+// While the comma is still trying APKPure, wait instead of sending people to APKMirror.
+export function downloadLink(release, pending = false) {
   if (typeof release?.url === "string" && DOWNLOAD_LINK.test(release.url) && typeof release.version === "string" &&
-      release.version.length <= 128 && /^[0-9]+(?:\.[0-9]+)+-release$/.test(release.version) &&
-      Number.isSafeInteger(release.size) && release.size > 0) {
+    release.version.length <= 128 && /^[0-9]+(?:\.[0-9]+)+-release$/.test(release.version) &&
+    Number.isSafeInteger(release.size) && release.size > 0) {
     return { direct: true, url: release.url, version: release.version.replace(/-release$/, ""), megabytes: Math.ceil(release.size / 1048576) }
   }
-  return { direct: false, url: APKMIRROR_URL }
+  return pending ? { direct: false, pending: true, url: "" } : { direct: false, url: APKMIRROR_URL }
 }
 const STAGES = ["reading", "searching", "decrypting", "verifying", "installing", "done"]
 const CHECKS = [
@@ -421,7 +422,7 @@ export const AndroidAutoPage = {
     setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
     pairValue: "", packageFile: null, uploadProgress: null, installOpen: false, removeOpen: false, installAttempted: false, installBaseline: null,
     downloadStarted: false, packageMagicError: "", packageChecking: false, packageSelection: 0,
-    installFileName: "", pairWhenReady: false, enableOpen: false
+    installFileName: "", pairWhenReady: false, enableOpen: false, showSteps: false
   }),
   mounted() {
     this.feed = new AndroidAutoFeed({ publish: (value) => Object.assign(this, value), unauthorized: this.unauthorized })
@@ -447,8 +448,14 @@ export const AndroidAutoPage = {
     canRespond() { return validPromptInput(this.pairing?.prompt, this.pairValue) },
     expiry() { return expiryInfo(this.setup?.identity) },
     projecting() { return this.runtime?.state === "streaming" },
+    installedVersion() {
+      const version = this.setup?.identity.installed && this.setup.identity.app_version
+      return typeof version === "string" ? version.replace(/-release.*$/, "") : ""
+    },
     supportReady() { return !!(this.setup?.enabled && this.setup.identity.installed) },
-    download() { return downloadLink(this.setup?.download) },
+    // Returning drivers see a status card; the setup steps fold away below it.
+    setupDone() { return !!(this.supportReady && this.selected && !this.pairing?.active) },
+    download() { return downloadLink(this.setup?.download, this.setup?.downloadPending === true) },
     uploadPercent() {
       const { loaded, total } = this.uploadProgress || {}
       return total > 0 ? Math.min(100, Math.round(100 * loaded / total)) : 0
@@ -635,7 +642,27 @@ export const AndroidAutoPage = {
       <GxNotice tone="warn">Android Auto uses the comma’s Wi-Fi to project to your car and disconnects it from your current Wi-Fi network. Use the Galaxy hotspot for local access during projection. Remote Galaxy access requires Internet on the comma.</GxNotice>
       <GxNotice tone="danger" v-if="error && setup">{{ error }}</GxNotice>
       <GxNotice v-if="!setup" :busy="!error" :tone="error ? 'danger' : 'info'">{{ error || "Checking Android Auto setup… Reconnecting automatically…" }}</GxNotice>
-      <ol v-else class="gx-aa__steps">
+      <section v-if="setup && setupDone" class="gx-card gx-aa-step gx-aa-home" aria-labelledby="gx-aa-home-title">
+        <div class="gx-aa-step__head">
+          <span class="gx-aa-step__num" :class="{ 'gx-aa-home__icon--live': projecting }" aria-hidden="true"><i class="bi bi-car-front"></i></span>
+          <div><h3 id="gx-aa-home-title">{{ projecting ? 'Connected to ' + selected.name : runtime?.running ? 'Connecting to ' + selected.name : selected.name }}</h3>
+            <p role="status">{{ runtime?.running && runtime.state !== 'streaming' && runtime.label ? runtime.label : runtime?.running ? 'Showing StarPilot on your car’s screen.' : runtime?.auto_connect ? 'Connects automatically when you start driving.' : 'Ready to connect.' }}</p></div>
+        </div>
+        <div class="gx-aa-step__body">
+          <p v-if="expiry.level === 'soon'" class="gx-aa-pill gx-aa-pill--soon" role="status">{{ expiry.label }}</p>
+          <button v-if="!runtime?.running" class="gx-btn gx-aa-cta" :disabled="!!connectReason" @click="connect">Connect</button>
+          <button v-else class="gx-btn gx-btn--tonal gx-aa-cta" @click="control('stop')">Disconnect</button>
+          <GalaxySettingRow :row="switchRow('Automatic Connection', runtime?.auto_connect, 'Connect to your car whenever you start driving.')"
+            :index="0" :busy="busy" :disabled="!setup.enabled || !setup.parked || !!pairing?.active"
+            :save-value="(index, value) => control('auto_connect', { enabled: value === 'On' })" />
+          <div class="gx-actions">
+            <a class="gx-btn gx-btn--tonal" href="#/theme_maker/android_auto"><i class="bi bi-layout-text-window" aria-hidden="true"></i> Customize Layout</a>
+            <button type="button" class="gx-btn gx-btn--tonal" :aria-expanded="showSteps" aria-controls="gx-aa-steps" @click="showSteps = !showSteps">
+              <i :class="showSteps ? 'bi bi-chevron-up' : 'bi bi-gear'" aria-hidden="true"></i> {{ showSteps ? 'Hide Setup' : 'Setup and Pairing' }}</button>
+          </div>
+        </div>
+      </section>
+      <ol v-if="setup" v-show="!setupDone || showSteps" id="gx-aa-steps" class="gx-aa__steps">
         <li class="gx-card gx-aa-step" :class="{ 'gx-aa-step--done': supportReady }">
           <div class="gx-aa-step__head">
             <span class="gx-aa-step__num" aria-hidden="true"><i v-if="supportReady" class="bi bi-check-lg"></i><template v-else>1</template></span>
@@ -645,17 +672,17 @@ export const AndroidAutoPage = {
             <p v-if="!setup.installReady" class="gx-aa-pill gx-aa-pill--expired" role="status">Not available on this build — the Android Auto display and encoder are missing.</p>
             <template v-else>
               <div class="gx-aa-status">
-                <span class="gx-aa-pill" :class="'gx-aa-pill--' + expiry.level" role="status">{{ expiry.label }}<template v-if="hasPackage && !setup.enabled"> · Off</template></span>
+                <span class="gx-aa-pill" :class="'gx-aa-pill--' + expiry.level" role="status">{{ expiry.label }}</span>
                 <button v-if="hasPackage" type="button" class="gx-icon-btn gx-recordings__danger" aria-label="Delete Package" :disabled="!!removeReason" :title="removeReason || 'Delete Package'" @click="openRemove"><i class="bi bi-trash3"></i></button>
                 <span v-if="setup.enabled && !setup.serviceReady" class="gx-note" role="status">Starting…</span>
                 <div class="gx-actions gx-aa-status__actions">
                   <button v-if="!setup.identity.installed" class="gx-btn" @click="openInstall">{{ setup.identity.expired || setup.identity.error ? 'Reinstall' : 'Install support' }}</button>
                   <button v-else-if="expiry.level === 'soon'" class="gx-btn" @click="openInstall">Update</button>
-                  <button v-if="setup.identity.installed" class="gx-btn gx-btn--tonal" @click="openInstall">Manage package</button>
-                  <button v-if="setup.identity.installed && !setup.enabled" class="gx-btn" @click="setEnabled(true)">Turn On</button>
-                  <button v-if="setup.enabled" class="gx-btn gx-btn--tonal" @click="setEnabled(false)">Turn Off</button>
+                  <button v-else class="gx-btn gx-btn--tonal" @click="openInstall">Install newer version</button>
                 </div>
               </div>
+              <GalaxySettingRow :row="switchRow('Android Auto', setup.enabled, 'Turn off to stop connecting to your car. Your setup and paired car stay saved.')"
+                :index="0" :busy="busy" :disabled="enableOpen" :save-value="(index, value) => setEnabled(value === 'On')" />
               <p v-if="setup.import?.state === 'running' && !installOpen" class="gx-note" role="status">Checking your package…</p>
             </template>
             <details class="gx-aa-wiki"><summary>Stuck installing? Common problems</summary>
@@ -726,7 +753,7 @@ export const AndroidAutoPage = {
             <details class="gx-aa-wiki"><summary>Stuck pairing? Pairing order and wireless adapters</summary>
               <ul>
                 <li><strong>Keep this page open while pairing</strong> so the car’s PIN or code doesn’t time out.</li>
-                <li><strong>Cars with built-in wireless Android Auto:</strong>  Set the car into pairing (search) mode. On Comma, go to Settings -> Bluetooth -> Scan For Devices. Choose your car, then confirm the code on both screens.</li>
+                <li><strong>Cars with built-in wireless Android Auto:</strong> open the car’s phone pairing screen, then tap <strong>Find car</strong> above. Choose your car, then confirm the code on both screens.</li>
                 <li><strong>Wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit…): pair your car in <a href="#/bluetooth">Bluetooth</a> first so calls keep working, then put the adapter in pairing mode and pair it here. Adapter names often look like AndroidAuto-XXXX.</li>
               </ul>
               <p><strong>Start fresh:</strong></p>
@@ -774,7 +801,9 @@ export const AndroidAutoPage = {
             <div><h3>Customize Your Dashboard</h3><p>Once connected, customize your dashboard setup.</p></div>
           </div>
           <div class="gx-aa-step__body">
-            <a class="gx-btn gx-btn--tonal gx-aa-cta" href="#/theme_maker/android_auto">Customize Dashboard</a>
+            <a class="gx-btn gx-btn--tonal gx-aa-cta" href="#/theme_maker/android_auto">Customize Layout</a>
+            <a class="gx-btn gx-btn--tonal gx-aa-cta" href="#/navigation/maps"><i class="bi bi-map" aria-hidden="true"></i> Offline Road Maps</a>
+            <p class="gx-note">Save road lines for the map overlay so it keeps drawing roads with no signal.</p>
           </div>
         </li>
       </ol>
@@ -921,32 +950,13 @@ export const AndroidAutoPage = {
             <ul class="gx-aa-checks"><li v-for="check in checks" :key="check.label" :class="'gx-aa-check--' + check.status">{{ check.label }}</li></ul>
             <button class="gx-btn gx-aa-cta" @click="closeInstall">Done</button>
           </div>
-          <div v-else-if="setup.identity.installed && !installAttempted" class="gx-stack">
-            <div class="gx-stack gx-aa-sheet__head">
-              <div class="gx-cluster gx-aa-sheet__lead">
-                <div class="gx-aa-sheet__icon-badge"><i class="bi bi-shield-check"></i></div>
-                <div>
-                  <h3 id="gx-aa-install-title">Android Auto Support</h3>
-                  <p class="gx-note">Support is set up on this comma. To set it up again, remove it first.</p>
-                </div>
-              </div>
-            </div>
-            <dl class="gx-stack gx-aa-manage__facts">
-              <div class="gx-card gx-info-card">
-                <dt>Status</dt>
-                <dd><span class="gx-aa-pill" :class="'gx-aa-pill--' + expiry.level">{{ expiry.label }}</span></dd>
-              </div>
-            </dl>
-            <div class="gx-actions">
-              <button type="button" class="gx-btn gx-btn--danger" :disabled="!!removeReason" :title="removeReason || undefined" @click="closeInstall(); openRemove()"><i class="bi bi-trash3" aria-hidden="true"></i> Remove Android Auto support</button>
-            </div>
-          </div>
           <div v-else class="gx-stack">
             <div class="gx-stack gx-aa-sheet__head">
               <div class="gx-cluster gx-aa-sheet__lead">
                 <div>
-                  <h3 id="gx-aa-install-title">Set Up Android Auto Support</h3>
-                  <p class="gx-note">One-time setup so your car accepts your comma.</p>
+                  <h3 id="gx-aa-install-title">{{ setup.identity.installed ? 'Install a Newer Version' : 'Set Up Android Auto Support' }}</h3>
+                  <p v-if="setup.identity.installed" class="gx-note"><template v-if="installedVersion">Current version: {{ installedVersion }} · </template>{{ expiry.label }}. Your paired car and settings stay as they are.</p>
+                  <p v-else class="gx-note">One-time setup so your car accepts your comma.</p>
                 </div>
               </div>
             </div>
@@ -956,16 +966,26 @@ export const AndroidAutoPage = {
                   <span class="gx-aa-step__num gx-aa-step-card__num">1</span>
                   <div class="gx-aa-step-card__title">
                     <strong>Download Android Auto</strong>
-                    <small>{{ download.direct ? 'Saves the app to this ' + (onPhone ? 'phone' : 'computer') : 'Get the newest release from APKMirror' }}</small>
+                    <small>{{ download.direct ? 'Saves the app to this ' + (onPhone ? 'phone' : 'computer') : download.pending ? 'Looking up the newest release…' : 'Get the newest release from APKMirror' }}<template v-if="installedVersion"> · You have {{ installedVersion }}</template></small>
                   </div>
                 </div>
                 <div class="gx-aa-step-card__body">
                   <a v-if="download.direct" class="gx-btn gx-btn--tonal" :href="download.url" rel="noreferrer" download @click="markDownloadStarted">
                     <i class="bi bi-download" aria-hidden="true"></i> Download Android Auto {{ download.version }} · {{ download.megabytes }} MB
                   </a>
+                  <button v-else-if="download.pending" class="gx-btn gx-btn--tonal" type="button" disabled>
+                    <i class="bi bi-hourglass-split" aria-hidden="true"></i> Finding the newest Android Auto…
+                  </button>
                   <a v-else class="gx-btn gx-btn--tonal" :href="download.url" target="_blank" rel="noopener noreferrer" @click="markDownloadStarted">
                     <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Open APKMirror
                   </a>
+                  <ol v-if="!download.direct && !download.pending" class="gx-note gx-aa-mirror-steps">
+                    <li>Open <strong>Android Auto</strong> on APKMirror, then open the <strong>All versions</strong> list and click through the versions to compare their release dates.</li>
+                    <li>Open the version with the <strong>newest release date</strong>.</li>
+                    <li>Scroll down to <strong>Available downloads</strong>. Under <strong>Variant</strong>, click the <strong>17.x.xxxx‑release</strong> or <strong>18.x.xxxx‑release</strong> entry.</li>
+                    <li>Click <strong>Download APK Bundle</strong> (or <strong>Download APK</strong>). You get an <strong>.apk</strong>, <strong>.xapk</strong> or <strong>.apkm</strong> file. Leave it zipped.</li>
+                  </ol>
+                  <small v-if="!download.direct && !download.pending" class="gx-note">You don’t need the APKMirror Installer app.</small>
                   <small v-if="download.direct" class="gx-note">From APKPure, a third-party mirror (<a class="gx-link" href="https://apkpure.com/terms.html" target="_blank" rel="noopener noreferrer">terms</a>). Don’t unzip it.</small>
                 </div>
               </li>

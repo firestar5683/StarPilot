@@ -94,6 +94,7 @@ class TestLayoutPreviewHttp(unittest.TestCase):
     self.assertEqual(self.request('/api/ui/layout/preview', self.payload, cookie, origin='http://evil.example')[0], 403)
     self.assertEqual(self.request('/api/ui/layout/preview', {**self.payload, 'extra': 1}, cookie)[0], 400)
     self.assertEqual(self.request('/api/ui/layout/preview', {**self.payload, 'scene': 'unknown'}, cookie)[0], 400)
+    self.assertEqual(self.request('/api/ui/layout/preview', {**self.payload, 'art': 'widgets'}, cookie)[0], 400)
     self.assertEqual(self.request('/api/ui/layout/preview', {**self.payload, 'document': {'version': 99}}, cookie)[0], 400)
     self.assertEqual(self.request('/api/ui/layout/preview', cookie=cookie,
                                   raw='{"scene":"aol","scene":"engaged"}')[0], 400)

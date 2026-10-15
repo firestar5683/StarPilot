@@ -232,7 +232,6 @@ class StarShellSession:
                             native_panels=NATIVE_SETTINGS_PANELS if profile == Profile.LARGE and settings_layer is not None else ())
     if profile == Profile.LARGE:
       self.view.onroad.pressed_action = lambda: self.input.onroad.pressed_action
-      self.view.onroad.unified_speed.source_pressed = lambda: self.input.onroad.source_pressed
     self.selected = Destination.STAR
     self.sidebar_expanded = True
     self._onroad_width = 1860.0
@@ -260,6 +259,8 @@ class StarShellSession:
         self._visual_preview_flags = parse_flags(raw_preview)
     self._visual_preview_start_ns = time.monotonic_ns()
     self._native_favorite_actions: Callable[[], dict] = dict
+    # The native layout's bookmark publisher, for car-screen taps that are not taps on this screen.
+    self._publish_bookmark: Callable[[], None] | None = None
     self._wheel_sock = messaging.sub_sock("slcCruiseEvent", conflate=False)
     self._aol_save = None
     self._aol_save_closed = False
@@ -463,13 +464,15 @@ class StarShellSession:
     receiver = getattr(self, '_projection_bookmarks', None)
     if receiver is None:
       return
-    authorized = bool(ui_state.started and self._favorite_authority() and
-                      current_message(ui_state.sm, 'carState', now_ns, after_frame=ui_state.started_frame) is not None)
+    # A car-screen tap bookmarks whenever onroad with live car state, like the wheel button: this
+    # screen's alerts and page do not gate it. A render frame gap past carState's 20 ms control
+    # limit must not drop it either (drained requests are not retried).
+    publish = getattr(self, '_publish_bookmark', None)
+    authorized = bool(publish is not None and ui_state.started and getattr(ui_state, "replay_clock", None) is None and
+                      display_message(ui_state.sm, 'carState', now_ns, after_frame=ui_state.started_frame) is not None)
     stamp = int(ui_state.sm.logMonoTime['carState']) if authorized else 0
     for _ in range(receiver.drain(now_ns, stamp, authorized=authorized)):
-      action = self._native_favorite_actions().get(BOOKMARK)
-      if action is not None and action.available and action.invoke is not None:
-        action.invoke()
+      publish()
 
   def _poll_wheel(self, now_ns):
     if getattr(ui_state, "replay_clock", None) is not None:
@@ -1286,7 +1289,6 @@ class StarShellSession:
         self._snapshot_cache = None
     snapshot = self.snapshot(mode)
     self._mode = mode
-    self._poll_projection_bookmark(time.monotonic_ns())
     if mode == ShellMode.ONROAD and self.slc_actions is not None:
       observation = snapshot.onroad.speed_limit
       snapshot = replace(snapshot, onroad=replace(snapshot.onroad, speed_limit=replace(
@@ -1358,17 +1360,6 @@ class StarShellSession:
     self._request_emitted = True
     previous_destination = self.selected
     action = request.action
-    if request.source == "onroad" and getattr(action, "kind", None) == "set_speed_sources":
-      from openpilot.starpilot.ui.onroad_customization import set_speed_sources
-      if self._mode == ShellMode.ONROAD and type(action.value) is bool:
-        try:
-          set_speed_sources(self.adapter.ui_state.params, action.value)
-        except (AttributeError, OSError, TypeError, ValueError, UnicodeError, RecursionError):
-          self._unavailable('speed source drawer preference; saved layout needs review')
-        else:
-          self.adapter.invalidate_appearance()
-          self._snapshot_cache = None
-      return
     if request.source == "onroad" and getattr(action, "kind", None) == "set_experimental":
       binding = self._native_favorite_actions().get(EXPERIMENTAL)
       if not (binding is not None and binding.available and binding.invoke is not None and
@@ -1781,6 +1772,7 @@ class StarMainLayout(MainLayout):
                              on_destination_change=self._network_destination)
     self.star.set_request_owner(self._deliver_settings_request)
     self.star._native_favorite_actions = self._native_favorites
+    self.star._publish_bookmark = self._on_bookmark_clicked
 
   def _native_favorites(self):
     from openpilot.selfdrive.ui.layouts.settings.settings import PanelType
@@ -2012,6 +2004,7 @@ class StarMiciMainLayout(MiciMainLayout):
     self._scroller.set_scrolling_enabled(lambda: not self._native_onroad.is_swiping_left())
     self._on_body_changed()
     self.star._native_favorite_actions = self._native_favorites
+    self.star._publish_bookmark = self._on_bookmark_clicked
 
   def _render(self, _) -> None:
     rect = _

@@ -85,8 +85,6 @@ class ShellView:
       acquired.pop_all()
 
   def render(self, snapshot: ShellSnapshot, drag_x: float = 0.0) -> None:
-    if snapshot.mode != ShellMode.ONROAD and self.profile == Profile.LARGE:
-      self.onroad.unified_speed.collapse_sources()
     if snapshot.mode == ShellMode.HOME:
       self.home.render(snapshot.home)
     elif snapshot.mode == ShellMode.ONROAD:

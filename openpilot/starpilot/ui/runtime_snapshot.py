@@ -41,6 +41,7 @@ from openpilot.starpilot.ui.home_state import HomeMode, HomeState
 from openpilot.starpilot.ui.onroad_state import conditional_lead_from_message
 from openpilot.starpilot.ui.onroad_state import (AlertSize, BorderSignals, ObservationKind, OnroadAlert,
                                                 OnroadState, SpeedLimitObservation, is_personality_notice, speed_limit_from_message)
+from openpilot.starpilot.ui.unified_speed_presentation import displayed_adjusted_limit_mps, displayed_limit_mps, positive
 from openpilot.starpilot.ui.onroad_stopped_timer import StoppedTimer
 from openpilot.starpilot.ui.onroad_lane_alerts import lateral_lane_alert
 from openpilot.starpilot.ui.onroad_camera import ReverseDriverCamera
@@ -572,9 +573,13 @@ class RuntimeSnapshotAdapter:
           str(getattr(slc, 'observationKind', '')) == 'unknown' and str(getattr(slc, 'source', '')) == 'none' and
           0 <= now_ns - stamp <= 150_000_000 and not bool(getattr(slc, 'hasPending', False)) and
           not getattr(slc, 'decisionId', 0)):
-        observation = SpeedLimitObservation(kind=ObservationKind.VALID, source=previous.source,
-                                            speed_limit_mps=previous.speed_limit_mps,
-                                            offset_mps=previous.offset_mps, status='display_hold')
+        # Retain the displayed sign and adjusted number, without retaining a
+        # control target, acceptance or action identity during the gap.
+        source = previous.accepted_source if positive(previous.accepted_speed_limit_mps) else previous.source
+        observation = SpeedLimitObservation(kind=ObservationKind.VALID, source=source,
+                                            speed_limit_mps=displayed_limit_mps(previous),
+                                            offset_mps=previous.offset_mps, status='display_hold',
+                                            presentation_adjusted_limit_mps=displayed_adjusted_limit_mps(previous))
       else:
         self._slc_sign_cache = None
     else:

@@ -19,11 +19,11 @@ function fixture() {
   return { feed, requests, updates, timers, revoked, tick, reply, get unauthorized() { return unauthorized } }
 }
 
-assert.deepEqual(PREVIEW_SCENES.map(({ id }) => id), ["engaged", "aol", "long_only", "experimental", "braking", "stopped",
+assert.deepEqual(PREVIEW_SCENES.map(({ id }) => id), ["general", "engaged", "aol", "long_only", "experimental", "braking", "stopped",
   "cem_stop_light", "cem_lead", "cem_curve", "slc_pending", "slc_max", "slc_equal",
   "slc_pedal", "slc_retained", "slc_disengaged", "slc_unavailable", "slc_display"])
 assert.equal(PREVIEW_SCENES.find(({ id }) => id === "experimental").label, "Manual experimental")
-for (const scene of ["cem_stop_light", "cem_lead", "cem_curve", "slc_pending", "slc_max", "slc_equal",
+for (const scene of ["general", "cem_stop_light", "cem_lead", "cem_curve", "slc_pending", "slc_max", "slc_equal",
   "slc_pedal", "slc_retained", "slc_disengaged", "slc_unavailable", "slc_display"]) {
   const cem = fixture()
   cem.feed.start(); cem.feed.update(document, "compact", scene); cem.tick()
@@ -98,6 +98,22 @@ timeout.tick()
 assert.equal(timeout.requests[0].options.signal.aborted, true)
 timeout.requests[0].reject(new Error("aborted")); await flush()
 assert.equal(timeout.updates.at(-1).status, "unavailable")
+
+// The backdrop asks for the real screen without widgets, and only its key decides when to refetch.
+const backdrop = fixture()
+backdrop.feed.backdrop = true
+backdrop.feed.start()
+backdrop.feed.update(document, "large", "aol", false, { palette: document.palette })
+backdrop.tick()
+assert.equal(JSON.parse(backdrop.requests[0].options.body).art, "backdrop")
+assert.deepEqual(JSON.parse(backdrop.requests[0].options.body).document, document)
+await backdrop.reply(0)
+const moved = { ...document, layouts: { large: { current_speed: { x: 9, y: 9, enabled: true } }, compact: {} } }
+backdrop.feed.update(moved, "large", "aol", false, { palette: document.palette })
+assert.equal(backdrop.timers.size, 0)
+backdrop.feed.update(moved, "large", "braking", false, { palette: document.palette })
+assert.equal(backdrop.timers.size, 1)
+backdrop.feed.stop()
 
 const late = fixture()
 late.feed.start(); late.feed.update(document, "large", "engaged"); late.tick(); late.feed.stop(); await late.reply(0)

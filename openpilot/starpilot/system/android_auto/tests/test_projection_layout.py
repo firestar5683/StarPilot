@@ -18,6 +18,33 @@ SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
 
 
 class TestProjectionLayout(unittest.TestCase):
+  def test_exit_defaults_and_monitor_scaling_preserve_saved_appearance(self):
+    document = default_layout(SCREEN)
+    metadata = layout_metadata(SCREEN)
+    self.assertEqual(document['widgets'][CAR_EXIT]['opacity'], 75)
+    self.assertIs(document['widgets'][CAR_EXIT]['background'], False)
+    self.assertIs(document['widgets'][CAR_EXIT]['enabled'], True)
+    self.assertEqual(metadata['widgets'][CAR_EXIT]['opacity']['default'], 75)
+    document['widgets'][CAR_EXIT].update(opacity=60, background=True)
+    monitor = document['widgets']['driver_monitor']
+    self.assertEqual(monitor['size'], 128)
+    monitor.update(x=700, y=600)
+    del monitor['size']
+    restored = validate_layout(document, SCREEN)
+    self.assertEqual(restored['widgets']['driver_monitor'], {'x': 732, 'y': 632, 'enabled': True, 'size': 128})
+    self.assertEqual(restored['widgets'][CAR_EXIT], document['widgets'][CAR_EXIT])
+    self.assertEqual(validate_layout(restored, SCREEN), restored)
+    for size in (64, 192):
+      restored['widgets']['driver_monitor']['size'] = size
+      decoded = decode_layout(json.dumps(restored).encode(), SCREEN)
+      projected = projection_customization(decoded, default_document())
+      self.assertEqual(projected['layouts']['large']['driver_monitor']['size'], size)
+      self.assertEqual(placement_size('driver_monitor', metadata['widgets']['driver_monitor'], decoded['widgets']['driver_monitor']), (size, size))
+    for size in (63, 193, True, 128.5):
+      restored['widgets']['driver_monitor']['size'] = size
+      with self.assertRaises(ValueError):
+        validate_layout(restored, SCREEN)
+
   def test_stopped_timer_migrates_and_keeps_independent_placement_and_order(self):
     document = default_layout(SCREEN)
     metadata = layout_metadata(SCREEN)
@@ -103,7 +130,7 @@ class TestProjectionLayout(unittest.TestCase):
     document = default_layout(SCREEN)
     self.assertIs(document['blindSpotBorder'], False)
     self.assertIs(document['signalBorder'], False)
-    for key in ('blindSpotBorder', 'signalBorder', 'hidePersonalityAlerts', 'wheelPedalFeedback'):
+    for key in ('blindSpotBorder', 'signalBorder', 'hidePersonalityAlerts', 'wheelPedalFeedback', 'leadIndicator'):
       older = {k: v for k, v in document.items() if k != key}
       self.assertEqual(validate_layout(older, SCREEN)[key], document[key], 'older layouts get the defaults')
       flipped = validate_layout({**document, key: not document[key]}, SCREEN)
@@ -111,6 +138,17 @@ class TestProjectionLayout(unittest.TestCase):
       for value in (1, 0, 'true', None, [], {}):
         with self.subTest(key=key, value=value), self.assertRaises(ValueError):
           validate_layout({**document, key: value}, SCREEN)
+
+  def test_lead_info_starts_off_and_takes_only_known_choices(self):
+    document = default_layout(SCREEN)
+    self.assertEqual((document['leadIndicator'], document['leadInfo']), (False, 'Off'))
+    older = {k: v for k, v in document.items() if k not in ('leadIndicator', 'leadInfo')}
+    self.assertEqual(validate_layout(older, SCREEN), document, 'older layouts get the lead defaults')
+    for choice in ('Off', 'Distance', 'Speed'):
+      self.assertEqual(validate_layout({**document, 'leadInfo': choice}, SCREEN)['leadInfo'], choice)
+    for value in ('speed', 'Both', 1, True, None, [], {}):
+      with self.subTest(value=value), self.assertRaises(ValueError):
+        validate_layout({**document, 'leadInfo': value}, SCREEN)
 
   def test_blind_spot_camera_migrates_and_survives_serialization(self):
     document = default_layout(SCREEN)
@@ -161,6 +199,38 @@ class TestProjectionLayout(unittest.TestCase):
         validate_layout(broken, SCREEN)
     with self.assertRaises(ValueError):
       decode_layout(b'{"version":1,"version":1}', SCREEN)
+
+  def test_cruise_background_opacity_and_sources_are_android_auto_settings(self):
+    from openpilot.starpilot.system.android_auto.projection_layout import (
+      default_layout_for_viewport, projection_customization, validate_layout_for_viewport)
+    from openpilot.starpilot.ui.onroad_customization import rgba
+    layout = default_layout_for_viewport((1920, 1080))
+    self.assertEqual(layout['widgets']['cruise_limits']['opacity'], 100)
+    self.assertIs(layout['speedSources'], False)
+    self.assertEqual(layout['speedAlign'], 'left')
+    base = default_document()
+    solid = rgba(base, 'cardFill', 'large', 'cruise_limits')
+    native = projection_customization(layout, base)
+    self.assertEqual(rgba(native, 'cardFill', 'large', 'cruise_limits'), solid)
+    self.assertNotIn('opacity', native['layouts']['large']['cruise_limits'])
+    layout['widgets']['cruise_limits']['opacity'] = 40
+    layout['speedSources'] = True
+    native = projection_customization(validate_layout_for_viewport(layout, (1920, 1080)), base)
+    self.assertEqual(rgba(native, 'cardFill', 'large', 'cruise_limits'), (*solid[:3], round(solid[3] * .4)))
+    self.assertEqual(rgba(native, 'text', 'large', 'cruise_limits'), rgba(base, 'text', 'large', 'cruise_limits'))
+    self.assertIs(native['speedSources'], True)
+    saved = copy.deepcopy(layout)
+    del saved['widgets']['cruise_limits']['opacity']
+    del saved['speedSources']
+    restored = validate_layout_for_viewport(saved, (1920, 1080))
+    self.assertEqual((restored['widgets']['cruise_limits']['opacity'], restored['speedSources']), (100, False))
+    self.assertEqual(projection_customization(validate_layout_for_viewport({**layout, 'speedAlign': 'right'}, (1920, 1080)), base)['speedAlign'], 'right')
+    with self.assertRaises(ValueError):
+      validate_layout_for_viewport({**layout, 'speedAlign': 'justify'}, (1920, 1080))
+    for bad in (-1, 101, 50.5, True):
+      layout['widgets']['cruise_limits']['opacity'] = bad
+      with self.assertRaises(ValueError):
+        validate_layout_for_viewport(layout, (1920, 1080))
 
   def test_projection_offsets_are_applied_once_and_separate(self):
     base = default_document()

@@ -6,7 +6,7 @@ import unittest
 from dataclasses import replace
 from types import SimpleNamespace as NS
 
-from openpilot.starpilot.ui.onroad_customization import default_document, validate_document
+from openpilot.starpilot.ui.onroad_customization import DM_SIZES, customization_metadata, default_document, validate_document, widget_size
 from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer, StableDriverStateRenderer, monitor_bounds, monitor_visible, valid_observation
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
@@ -86,13 +86,35 @@ class TestDriverMonitor(unittest.TestCase):
     document = default_document()
     left = monitor_bounds(document, Profile.LARGE, False)
     right = monitor_bounds(document, Profile.LARGE, True)
-    self.assertEqual((left.x, left.y, left.width, left.height), (88, 808, 192, 192))
-    self.assertEqual((right.x, right.y), (1580, 808))
+    self.assertEqual((left.x, left.y, left.width, left.height), (120, 840, 128, 128))
+    self.assertEqual((right.x, right.y), (1612, 840))
     document['layouts']['large']['driver_monitor'].update(x=700.5, y=600.25)
     custom = monitor_bounds(validate_document(document), Profile.LARGE, True)
     self.assertEqual((custom.x, custom.y), (700.5, 600.25))
     compact = monitor_bounds(default_document(), Profile.COMPACT, True)
     self.assertEqual((compact.x, compact.y, compact.width, compact.height), (16, 10, 60, 60))
+
+  def test_saved_monitor_box_tightens_without_moving_icon_and_round_trips_size(self):
+    document = default_document()
+    document['layouts']['large']['driver_monitor'] = {'x': 700, 'y': 600, 'enabled': True}
+    migrated = validate_document(document)
+    self.assertEqual(migrated['layouts']['large']['driver_monitor'], {'x': 732, 'y': 632, 'enabled': True, 'size': 128})
+    self.assertEqual(document['layouts']['large']['driver_monitor']['x'], 700)
+    self.assertEqual(validate_document(migrated), migrated)
+    for profile, (minimum, default, maximum) in DM_SIZES.items():
+      metadata = customization_metadata()['profiles'][profile]['widgets']['driver_monitor']
+      self.assertEqual(metadata['resizable'], {'min': minimum, 'default': default, 'max': maximum})
+      for size in (minimum, default, maximum):
+        saved = default_document()
+        saved['layouts'][profile]['driver_monitor']['size'] = size
+        restored = validate_document(saved)
+        self.assertEqual(widget_size(restored, profile, 'driver_monitor'), (size, size))
+        bounds = monitor_bounds(restored, Profile(profile), False)
+        self.assertEqual((bounds.width, bounds.height), (size, size))
+      for size in (minimum - 1, maximum + 1, True, 64.5):
+        saved['layouts'][profile]['driver_monitor']['size'] = size
+        with self.assertRaises(ValueError):
+          validate_document(saved)
 
   def test_visibility_reserves_critical_alerts_and_respects_saved_choice(self):
     state = road()
@@ -178,7 +200,7 @@ class TestDriverMonitor(unittest.TestCase):
       patch.object(layer, 'renderer', NS(set_should_draw=Mock(), set_position=Mock(), _update_state=Mock(), _render=Mock(), _rect=object()), create=True)
     )
     layer.render(replace(road(), customization=document), monitor=monitor, driver=driver, fresh=True, onroad=True)
-    layer.renderer.set_position.assert_called_once_with(732.5, 632.25)
+    layer.renderer.set_position.assert_called_once_with(700.5, 600.25)
     layer.renderer._update_state.assert_called_once()
     layer.renderer._render.assert_called_once_with(layer.renderer._rect)
 
