@@ -180,8 +180,20 @@ def fast_update(repo, branch, *, params, parked, expected_commit, current_os=Non
   if not valid_receipt(git, target) and revision_digest(git, previous) != revision_digest(git, target):
     raise FastUpdateIncompatible('Native build inputs or artifacts changed without a matching build receipt; use a full validated update')
   tracked = set(git('ls-tree', '-rz', '--name-only', target).split('\0')) - {''}
-  untracked = set(git('ls-files', '--others', '-z').split('\0')) - {''}
-  directories = {str(parent) for name in tracked for parent in Path(name).parents if str(parent) != '.'}
+  indexed = set(git('ls-files', '-z').split('\0')) - {''}
+  candidates = tracked - indexed
+  for name in tuple(candidates):
+    for parent in Path(name).parents:
+      if str(parent) != '.' and str(parent) not in indexed:
+        local = repo / parent
+        if local.is_symlink() or local.exists() and not local.is_dir():
+          candidates.add(str(parent))
+  paths = sorted(candidates)
+  untracked = set()
+  for offset in range(0, len(paths), 256):
+    untracked.update(git('--literal-pathspecs', 'ls-files', '--others', '-z', '--', *paths[offset:offset + 256]).split('\0'))
+  untracked.discard('')
+  directories = {str(parent) for name in tracked for parent in Path(name).parents if str(parent) != '.'} if untracked else set()
   for name in untracked:
     if name in tracked or name in directories or any(str(parent) in tracked for parent in Path(name).parents):
       raise FastUpdateError('Update would overwrite untracked data')
@@ -218,7 +230,7 @@ def fast_update(repo, branch, *, params, parked, expected_commit, current_os=Non
       raise FastUpdateError('Parked state changed before restart')
     notify('submodules', 'No submodules configured; dependencies are vendored in this release.')
     notify('rebooting', 'Update complete. Device is rebooting; please wait for reconnection.')
-    (sleep or time.sleep)(6.0)
+    (sleep or time.sleep)(0.25)
     if not parked():
       raise FastUpdateError('Parked state changed before restart')
     notify('complete', 'Update installed. Device is restarting; please wait for reconnection.')

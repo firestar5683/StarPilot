@@ -435,7 +435,7 @@ class TestFastUpdate(unittest.TestCase):
     self.assertEqual(self.git(self.repo, 'symbolic-ref', '--short', 'HEAD'), 'Other')
     self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), other)
     self.assertEqual(self.git(self.repo, 'config', '--get', 'starpilot.previousVersion'), f'{self.previous} Dom')
-    self.assertIn(('sleep', 6.0), stages)
+    self.assertIn(('sleep', 0.25), stages)
     arguments['expected_commit'] = other
     self.assertEqual(owner.fast_update(self.repo, 'Other', rollback=True, **arguments), 'reboot-requested')
     self.assertEqual(self.git(self.repo, 'symbolic-ref', '--short', 'HEAD'), 'Dom')
@@ -486,7 +486,7 @@ class TestFastUpdate(unittest.TestCase):
 
     with self.assertRaises(owner.FastUpdateError):
       self.update(parked=lambda: parked[0], sleep=notice)
-    self.assertEqual(waits, [6.0])
+    self.assertEqual(waits, [0.25])
     self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
     self.assertFalse(self.params.calls)
 
@@ -499,6 +499,70 @@ class TestFastUpdate(unittest.TestCase):
       self.update()
     self.assertEqual((self.repo / 'new-model').read_bytes(), b'model')
     self.assertFalse(self.invalidations)
+
+  def test_ignored_model_cache_is_not_scanned_or_removed(self):
+    self.git(self.repo, 'config', 'core.excludesFile', str(self.repo / '.git/local-ignore'))
+    (self.repo / '.git/local-ignore').write_text('models/\n')
+    cache = self.repo / 'models/nested/download'
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b'keep downloaded model')
+    commands = []
+
+    def traced(command, cwd):
+      commands.append(command)
+      return owner.run(command, cwd)
+
+    self.assertEqual(self.update(run=traced), 'reboot-requested')
+    self.assertEqual(cache.read_bytes(), b'keep downloaded model')
+    self.assertFalse(any('--others' in command for command in commands))
+
+  def test_ignored_update_collision_is_rejected(self):
+    self.git(self.repo, 'config', 'core.excludesFile', str(self.repo / '.git/local-ignore'))
+    (self.repo / '.git/local-ignore').write_text('[[]model]\n')
+    local = self.repo / '[model]'
+    local.write_bytes(b'private model')
+    (self.remote / '[model]').write_bytes(b'new tracked model')
+    self.git(self.remote, 'add', '[model]')
+    self.receipt_commit()
+    with self.assertRaisesRegex(owner.FastUpdateError, 'overwrite untracked data'):
+      self.update()
+    self.assertEqual(local.read_bytes(), b'private model')
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+
+  def test_untracked_parent_file_and_directory_contents_are_protected(self):
+    for parent_file in (True, False):
+      with self.subTest(parent_file=parent_file):
+        folder = self.repo / 'new-data'
+        target = self.remote / 'new-data'
+        if parent_file:
+          folder.write_bytes(b'private data')
+          target.mkdir()
+          (target / 'source').write_text('new tracked source')
+        else:
+          folder.mkdir()
+          (folder / 'download').write_bytes(b'private data')
+          target.write_text('new tracked source')
+        self.git(self.remote, 'add', 'new-data')
+        self.receipt_commit()
+        with self.assertRaisesRegex(owner.FastUpdateError, 'overwrite untracked data'):
+          self.update()
+        self.assertEqual((folder if parent_file else folder / 'download').read_bytes(), b'private data')
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+        self.git(self.remote, 'reset', '--hard', self.target)
+        if parent_file:
+          folder.unlink()
+        else:
+          (folder / 'download').unlink()
+          folder.rmdir()
+
+  def test_tracked_directory_can_be_replaced_by_file(self):
+    self.git(self.remote, 'rm', '-r', 'openpilot/starpilot/ui')
+    (self.remote / 'openpilot/starpilot').mkdir(parents=True, exist_ok=True)
+    (self.remote / 'openpilot/starpilot/ui').write_text('replacement')
+    self.git(self.remote, 'add', '.')
+    self.receipt_commit()
+    self.assertEqual(self.update(), 'reboot-requested')
+    self.assertEqual((self.repo / 'openpilot/starpilot/ui').read_text(), 'replacement')
 
   def test_post_apply_validation_failure_rolls_back(self):
     original = owner.validate_revision
