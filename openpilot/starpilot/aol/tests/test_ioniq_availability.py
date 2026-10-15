@@ -234,7 +234,7 @@ class IoniqAvailabilityTests(unittest.TestCase):
       for panda, config in zip(pandas.pandaStates, cp.safetyConfigs, strict=True):
         panda.safetyModel, panda.safetyParam = config.safetyModel, config.safetyParam
         panda.alternativeExperience = cp.alternativeExperience
-        panda.controlsAllowed = full_op
+        panda.controlsAllowed = full_op if native_request_long is None else native_request_long
         panda.safetyRxChecksInvalid = panda_fault
         if relay_fault:
           panda.faults = ['relayMalfunction']
@@ -248,12 +248,12 @@ class IoniqAvailabilityTests(unittest.TestCase):
       native = messaging.new_message('aolSafetyWire', 0, valid=native_valid, logMonoTime=now)
       native.aolSafetyWire = encode_safety(SafetyState(1, True, now, now + 200_000_000,
         int(cp.safetyConfigs[-1].safetyModel.raw), cp.safetyConfigs[-1].safetyParam,
-        allowed, full_op and long_allowed, native_request_lat,
+        allowed, (full_op or native_request_long is True) and long_allowed, native_request_lat,
         full_op if native_request_long is None else native_request_long, 'authority-panda', sd.aol_session_id,
         now if genuine_events else 0, tuple(
           PandaSlot(index, 'authority-panda' if index == len(cp.safetyConfigs) - 1 else f'silent-panda-{index}',
                     int(config.safetyModel.raw), config.safetyParam,
-                    cp.alternativeExperience, full_op, panda_fault, False,
+                    cp.alternativeExperience, full_op if native_request_long is None else native_request_long, panda_fault, False,
                     1 if relay_fault else 0)
           for index, config in enumerate(cp.safetyConfigs)) if genuine_events else ()))
       if companion:
@@ -296,7 +296,7 @@ class IoniqAvailabilityTests(unittest.TestCase):
       return sd.pm.messages['aolAxisState'].aolAxisState, sd.pm.messages['selfdriveState'].selfdriveState, command
     return sd, controls, step
 
-  def _ioniq_availability_callers(self, full_op=True):
+  def _ioniq_availability_callers(self, full_op=True, *, initially_armed=True):
     from opendbc.car.hyundai.interface import CarInterface
     from opendbc.car.hyundai.radar_interface import RadarInterface
     from openpilot.selfdrive.car.card import Car
@@ -324,10 +324,11 @@ class IoniqAvailabilityTests(unittest.TestCase):
     cs = car_state()
     cs.cruiseState.available = True
     card.aol_card_intent.update(cs, now_ns=9_980_000_000)
-    cs.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.lkas, pressed=True)]
-    card.aol_card_intent.update(cs, now_ns=9_990_000_000)
-    cs.buttonEvents = []
-    self.assertTrue(card.aol_card_intent.allowed_latch)
+    if initially_armed:
+      cs.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.lkas, pressed=True)]
+      card.aol_card_intent.update(cs, now_ns=9_990_000_000)
+      cs.buttonEvents = []
+    self.assertEqual(card.aol_card_intent.allowed_latch, initially_armed)
 
     def receive(now, *, axis=None, event=None, state=None):
       frames = []
@@ -338,7 +339,7 @@ class IoniqAvailabilityTests(unittest.TestCase):
         setattr(message, service, sd.sm[service])
         # Card receives the exact envelope bytes, including validity and stamps.
         frames.append(messaging.log_from_bytes(message.to_bytes()))
-      card.sm.update_msgs(now / 1e9, frames + [m for m in (axis, event) if m is not None])
+      card.sm.update_msgs(now / 1e9, frames + [m for m in (axis, event, sd.pm.messages.get('selfdriveState')) if m is not None])
       observed = state if state is not None else car_state()
       observed.cruiseState.available = True
       card.CC_prev = card.sm['carControl']
@@ -361,11 +362,45 @@ class IoniqAvailabilityTests(unittest.TestCase):
       if full_op:
         self.assertTrue(axis.lateralActive and axis.longitudinalActive and command.latActive and command.longActive)
       else:
+        self.assertEqual(bool(axis.lateralActive and command.latActive), initially_armed)
+        self.assertFalse(sd.enabled or sd.active or axis.longitudinalActive or command.longActive)
+      self.assertEqual(receive(10_000_000_000 + tick * 10_000_000,
+                              axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']), initially_armed)
+    return sd, controls, drive, card, receive
+
+  def test_full_set_engagement_arms_aol_and_brake_keeps_lateral_without_lkas(self):
+    from opendbc.car.hyundai.values import Buttons
+
+    with OpenpilotPrefix():
+      sd, _, step, card, receive = self._ioniq_availability_callers(full_op=False, initially_armed=False)
+      self.assertFalse(card.aol_card_intent.allowed_latch)
+      for tick, previous, current in ((2, Buttons.NONE, Buttons.SET_DECEL),
+                                      (3, Buttons.SET_DECEL, Buttons.NONE)):
+        cs = car_state()
+        cs.buttonEvents = card.CI.CS.create_cruise_button_events(current, previous)
+        cs.buttonEnable = card.CI.CS.update_button_enable(cs.buttonEvents)
+        step(tick, observed_state=cs, native_request_long=False)
+        receive(10_000_000_000 + tick * 10_000_000, state=cs,
+                axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      self.assertIn(log.OnroadEvent.EventName.buttonEnable, sd.events.names)
+      self.assertTrue(sd.enabled and sd.active)
+      # PandaStates updates at 10 Hz. Grant LONG only once its actual fresh
+      # health observation agrees, retaining the production latest-Panda veto.
+      for tick in range(4, 13):
+        granted = tick >= 10
+        axis, _, command = step(tick, native_request_long=granted)
+        self.assertTrue(axis.lateralActive and command.latActive)
+        self.assertEqual(bool(axis.longitudinalActive and command.longActive), granted)
+        receive(10_000_000_000 + tick * 10_000_000,
+                axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      self.assertTrue(card.aol_card_intent.allowed_latch)
+      for tick in (13, 14, 15):
+        axis, _, command = step(tick, brake=tick == 13, native_request_long=False)
         self.assertTrue(axis.lateralActive and command.latActive)
         self.assertFalse(sd.enabled or sd.active or axis.longitudinalActive or command.longActive)
-      self.assertTrue(receive(10_000_000_000 + tick * 10_000_000,
-                              axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
-    return sd, controls, drive, card, receive
+        self.assertTrue(receive(10_000_000_000 + tick * 10_000_000, state=car_state(brake=tick == 13),
+                                axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
+      self.assertFalse(any(e.type == car.CarState.ButtonEvent.Type.lkas for e in card.CI.CS.out.buttonEvents))
 
   def test_ioniq_caroutput_communication_fault_joined_delivery_and_recovery(self):
     for order in ('axis_first', 'event_first', 'together'):

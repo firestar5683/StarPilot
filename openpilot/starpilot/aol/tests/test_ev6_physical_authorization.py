@@ -98,9 +98,13 @@ class TestEv6ConfiguredDesire(unittest.TestCase):
     state.cruiseState.available = available
     state.cruiseState.enabled = cruise_enabled
     state.accFaulted = acc_fault
-    owner.observe_physical_samples(SimpleNamespace(ev6_aol_sample_stamp_ns=100,
-      ev6_aol_source_healthy=True, ev6_aol_timeout_ns=1_000_000_000, ev6_aol_samples=samples), now_ns=100)
-    owner.update(state, now_ns=100, fault_active=fault, standard_active=active)
+    now = getattr(owner, '_test_clock_ns', 90) + 10
+    owner._test_clock_ns = now
+    owner.observe_physical_samples(SimpleNamespace(ev6_aol_sample_stamp_ns=now,
+      ev6_aol_source_healthy=True, ev6_aol_timeout_ns=1_000_000_000, ev6_aol_samples=samples), now_ns=now)
+    owner.update(state, now_ns=now, fault_active=fault)
+    owner.observe_full_engagement(state, enabled=active, active=active, source_ns=now,
+                                 observation_valid=True, now_ns=now, fault_active=bool(fault))
     return state
 
   def test_exact_main_and_lkas_action_ownership(self):
@@ -144,6 +148,32 @@ class TestEv6ConfiguredDesire(unittest.TestCase):
         self.assertFalse(owner.allowed_latch)  # Physical release alone never forces desire.
         self.sample(owner, [], active=True)
         self.assertEqual(owner.allowed_latch, lkas_action == AOL_TOGGLE)
+
+  def test_raw_manual_off_wins_over_full_engagement_without_net_button_event(self):
+    owner = self.owner(main=AOL_TOGGLE)
+    self.sample(owner, [(0, 0, Buttons.NONE)])
+    self.sample(owner, [(0, 1, Buttons.NONE), (0, 0, Buttons.NONE)])
+    self.sample(owner, [(1, 0, Buttons.NONE), (0, 0, Buttons.NONE)])
+    self.assertTrue(owner.allowed_latch and owner.physical.authorized)
+    cs = self.sample(owner, [(1, 0, Buttons.NONE), (0, 0, Buttons.NONE)], active=True)
+    self.assertTrue(owner.physical.authorized)
+    self.assertFalse(cs.buttonEvents)
+    self.assertFalse(owner.allowed_latch or owner.output(cs)[0])
+    self.sample(owner, [], active=True)
+    self.assertFalse(owner.allowed_latch)
+
+  def test_auxiliary_off_after_pending_activation_cannot_rearm_same_engagement(self):
+    owner = self.owner(lkas=AOL_TOGGLE)
+    self.sample(owner, [(0, 0, Buttons.NONE)])
+    cs = self.sample(owner, [(0, 1, Buttons.NONE), (0, 0, Buttons.NONE)])
+    self.assertTrue(owner.allowed_latch and owner.physical.authorized)
+    now = owner._test_clock_ns + 1
+    owner.observe_full_engagement(cs, enabled=True, active=False, source_ns=now,
+                                 observation_valid=True, now_ns=now, fault_active=False)
+    owner._perform(AOL_TOGGLE)
+    self.assertFalse(owner.allowed_latch)
+    self.sample(owner, [], active=True)
+    self.assertFalse(owner.allowed_latch)
 
   def test_cold_held_no_source_and_unphysical_auxiliary_cannot_create_output(self):
     for main_action, lkas_action in ((0, 0), (AOL_TOGGLE, 0), (0, AOL_TOGGLE),

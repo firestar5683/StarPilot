@@ -21,6 +21,10 @@ class TeslaPreapCardIntent(AolCardIntent):
     self.pull_held = False
     self.pull_neutral = False
 
+  def _arm_from_full_engagement(self, CS, *, source_ns):
+    # Set already arms through the physical stalk owner, including neutral credit.
+    pass
+
   def update(self, CS, **kwargs):
     state = structs.CarState(**CS.to_dict())
     pull = False

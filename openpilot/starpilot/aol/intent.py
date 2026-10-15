@@ -153,6 +153,10 @@ class AolCardIntent:
     self._fault_inhibit = False
     self._last_latch_edge_ns = 0
     self._native_rejection_ns = 0
+    self._engagement_source_ns = 0
+    self._engagement_consumed = True
+    self._engagement_withdrawal_ns = 0
+    self._engagement_observed_ns = 0
     self._calibration_inhibit = False
     self._calibration_fault = False
     self._calibration_rearm_required = False
@@ -176,12 +180,66 @@ class AolCardIntent:
     if action == AOL_TOGGLE and self.settings.enabled and not self.explicit_latch:
       self._record_latch_clear('configured_toggle')
       self.allowed_latch = not self.allowed_latch
+      if not self.allowed_latch:
+        self._withdraw_full_engagement()
       if self.allowed_latch:
         self.pause_lateral = False
     elif action == PAUSE_LATERAL:
       self.pause_lateral = not self.pause_lateral
+      if self.pause_lateral:
+        self._withdraw_full_engagement()
     elif action == PAUSE_LONGITUDINAL:
       self.pause_longitudinal = not self.pause_longitudinal
+
+  def _withdraw_full_engagement(self) -> None:
+    self._engagement_consumed = True
+    self._engagement_withdrawal_ns = max(self._engagement_withdrawal_ns, self._engagement_observed_ns)
+
+  def observe_full_engagement(self, CS, *, enabled: bool, active: bool, source_ns: int,
+                              observation_valid: bool, now_ns: int, fault_active: bool, native_rejection_ns: int = 0) -> None:
+    """Consume one successful activation per freshly observed enabled epoch.
+
+    Missing/reordered control packets do not invent a disengagement. This is
+    driver intent only; the existing vehicle and native owners retain authority.
+    """
+    self._engagement_observed_ns = now_ns
+    manual = any(event.type not in (ButtonType.setCruise, ButtonType.accelCruise,
+                                     ButtonType.decelCruise, ButtonType.resumeCruise)
+                 for event in CS.buttonEvents)
+    blocked = bool(manual or self._main_held or self._lkas_held or
+                   any(self._held.values()) or getattr(self, 'cancel_held', False) or
+                   getattr(self, 'screen_held', False) or getattr(self, '_lkas_down', False) or
+                   getattr(self, '_engagement_manual_withdrawal', False) or
+                   not self.settings.enabled or fault_active or not CS.canValid or CS.canTimeout or CS.steerFaultPermanent or
+                   CS.accFaulted or self._fault_inhibit or self._calibration_inhibit or
+                   self._calibration_rearm_required or native_rejection_ns)
+    # A local withdrawal also cancels pending preEnabled intent when Controls
+    # has not published another packet yet. It cannot be undone by delayed ACKs.
+    if blocked:
+      self._withdraw_full_engagement()
+    if not observation_valid or not self._engagement_source_ns < source_ns <= now_ns:
+      return
+    blocked = blocked or 0 < source_ns <= self._native_rejection_ns
+    first = self._engagement_source_ns == 0
+    self._engagement_source_ns = source_ns
+    if first:
+      # A process starting during engagement has no new driver gesture.
+      self._engagement_consumed = bool(enabled)
+    if not enabled:
+      self._engagement_consumed = source_ns <= self._engagement_withdrawal_ns
+      return
+    if self._engagement_consumed or not active and not blocked:
+      return
+    self._engagement_consumed = True
+    if (blocked or not active or not self.settings.enabled or not CS.cruiseState.available or
+        CS.gearShifter in (GearShifter.park, GearShifter.neutral, GearShifter.reverse, GearShifter.unknown)):
+      return
+    self._arm_from_full_engagement(CS, source_ns=source_ns)
+
+  def _arm_from_full_engagement(self, CS, *, source_ns: int) -> None:
+    self.allowed_latch = True
+    self.pause_lateral = False
+    self._last_latch_edge_ns = source_ns
 
   def update(self, CS, *, consumed_buttons: frozenset[int] = frozenset(), fault_active: bool | None = None,
              now_ns: int = 0, native_rejection_ns: int = 0, standard_enabled: bool = False) -> None:

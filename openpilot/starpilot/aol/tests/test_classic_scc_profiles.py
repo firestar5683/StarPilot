@@ -149,7 +149,11 @@ class TestClassicSccProfiles(unittest.TestCase):
           setattr(state, field, True)
         owner.update(state, now_ns=4, standard_enabled=False, fault_active=False)
         self.assertFalse(owner.allowed_latch)
+        owner.observe_full_engagement(state, enabled=False, active=False, source_ns=4,
+                                     observation_valid=True, now_ns=4, fault_active=False)
         owner.update(state, now_ns=5, standard_enabled=True, fault_active=False)
+        owner.observe_full_engagement(state, enabled=True, active=True, source_ns=5,
+                                     observation_valid=True, now_ns=5, fault_active=False)
         self.assertEqual(owner.allowed_latch, field is None)
     # Cancel and a deliberate LKAS press take precedence over auto engage.
     for button in ('cancel', 'lkas'):

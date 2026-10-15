@@ -6,7 +6,6 @@ from openpilot.starpilot.aol.intent import AolCardIntent, AOL_TOGGLE, ButtonType
 
 class Ev6CardIntent(AolCardIntent):
   observe_stock_engagement = True
-  observe_active_engagement = True
 
   def __init__(self, settings):
     # Explicit identifies the native-ACK contract, not a universal button mapping.
@@ -14,10 +13,10 @@ class Ev6CardIntent(AolCardIntent):
     self.physical = Ev6PhysicalAuthorization(lkas_on_engage=settings.enabled and settings.lkas_action == AOL_TOGGLE)
     self._samples = ()
     self._buttons_current = False
-    self._active_previous = False
     self._raw_neutral_seen = False
     self._acc_faulted = False
     self._controller_override = None
+    self._engagement_manual_withdrawal = False
 
   def observe_physical_samples(self, state, *, now_ns):
     stamp = int(state.ev6_aol_sample_stamp_ns)
@@ -30,6 +29,7 @@ class Ev6CardIntent(AolCardIntent):
       if self.allowed_latch:
         # Withdrawal is always allowed, including the press that removes physical authority.
         self.allowed_latch = False
+        self._withdraw_full_engagement()
       elif (self.settings.enabled and self._buttons_current and self.physical.authorized
             and self._last_latch_edge_ns > 0 and not self._fault_inhibit and not self._acc_faulted):
         self.allowed_latch = True
@@ -51,7 +51,8 @@ class Ev6CardIntent(AolCardIntent):
     return True
 
   def update(self, CS, *, consumed_buttons=frozenset(), fault_active=None, now_ns=0, native_rejection_ns=0,
-             standard_enabled=False, standard_active=False):
+             standard_enabled=False):
+    self._engagement_manual_withdrawal = False
     self.physical.lkas_on_engage = self.settings.enabled and self.settings.lkas_action == AOL_TOGGLE
     self._acc_faulted = bool(CS.accFaulted)
     ordinary = CS.as_reader().as_builder()
@@ -83,6 +84,7 @@ class Ev6CardIntent(AolCardIntent):
         self.physical.observe(main, lkas, cruise, main_available=CS.cruiseState.available)
         main_press = bool(main and not previous_main)
         lkas_press = bool(lkas and not previous_lkas)
+        self._engagement_manual_withdrawal |= main_press or lkas_press
         engagement_release = (self.physical.lkas_on_engage and cruise != previous_cruise
                               and previous_cruise in (Buttons.SET_DECEL, Buttons.RES_ACCEL))
         if main_press or lkas_press or engagement_release:
@@ -98,15 +100,16 @@ class Ev6CardIntent(AolCardIntent):
         self.physical.main_on = False
       if auto_main:
         self.allowed_latch = bool(CS.cruiseState.available and self._controller_override is not False)
-    engagement_started = bool(standard_active and not self._active_previous)
-    self._active_previous = bool(standard_active)
-    if (engagement_started and lkas_managed and healthy and not rejected and not self._fault_inhibit
-        and not CS.accFaulted and self.physical.authorized and self._last_latch_edge_ns > 0):
-      self.allowed_latch = True
     # Retain current fail-closed startup/reset contracts in addition to Dom's gate.
     if not (healthy and self.physical.authorized and self._last_latch_edge_ns > 0):
       self.allowed_latch = False
     self._samples = ()
+
+  def _arm_from_full_engagement(self, CS, *, source_ns):
+    if (self._buttons_current and self.physical.authorized and self._last_latch_edge_ns > 0
+        and self._controller_override is not False and not self._acc_faulted and not self.pause_lateral):
+      # Keep the raw physical edge credit; host engagement cannot manufacture it.
+      self.allowed_latch = True
 
   def output(self, CS):
     desired, pause_lateral, pause_longitudinal = super().output(CS)

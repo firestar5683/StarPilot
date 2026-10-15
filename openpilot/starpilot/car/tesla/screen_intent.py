@@ -53,6 +53,12 @@ class TeslaScreenCardIntent(AolCardIntent):
                               not self.brake_blocked and not fault and not cancel and self.settings.enabled)
     self.previous_enabled, self.previous_available = engaged, available
 
+  def _arm_from_full_engagement(self, CS, *, source_ns):
+    if not (self.brake_blocked or self.brake_disengage and CS.brakePressed or
+            CS.steeringDisengage or CS.doorOpen or CS.gearShifter != structs.CarState.GearShifter.drive):
+      self.screen_override = True
+      super()._arm_from_full_engagement(CS, source_ns=source_ns)
+
   @property
   def settings(self):
     return self._settings

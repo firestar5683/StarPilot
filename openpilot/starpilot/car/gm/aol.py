@@ -52,6 +52,10 @@ class GmAolCardIntent(AolCardIntent):
       self.allowed_latch = False
       self.startup_calibration_pending = False
 
+  def _arm_from_full_engagement(self, CS, *, source_ns):
+    if not self._main_cycle_required:
+      super()._arm_from_full_engagement(CS, source_ns=source_ns)
+
   def observe_calibration(self, CS, *, events=None, standard_enabled=False):
     from openpilot.cereal import log
     # Cold calibration readiness is not a previously revoked driver gesture.

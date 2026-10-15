@@ -82,3 +82,8 @@ class ForteCardIntent(AolCardIntent):
       self.fault_rearm = False
     allowed = CS.cruiseState.available if main_managed else self.physical_latch
     self.allowed_latch = bool(settings.enabled and allowed and not invalid and not fatal and not self.fault_rearm)
+
+  def _arm_from_full_engagement(self, CS, *, source_ns):
+    if not self.fault_rearm:
+      self.physical_latch = True
+      super()._arm_from_full_engagement(CS, source_ns=source_ns)

@@ -283,7 +283,9 @@ class _Ev6CancelCaller:
     now = self.last_now if now is None else now
     owner = self.card.aol_card_intent
     owner.observe_physical_samples(self.card.CI.CS, now_ns=now)
-    owner.update(self.cs, now_ns=now, fault_active=fault, standard_active=active, standard_enabled=active)
+    owner.update(self.cs, now_ns=now, fault_active=fault, standard_enabled=active)
+    owner.observe_full_engagement(self.cs, enabled=active, active=active, source_ns=now,
+                                 observation_valid=True, now_ns=now, fault_active=fault)
     return owner
 
   def arm(self):
@@ -294,7 +296,7 @@ class _Ev6CancelCaller:
     assert not self.intent().allowed_latch
     self.parse(Buttons.NONE)
     assert not self.intent().allowed_latch
-    assert self.intent(active=True).allowed_latch
+    assert self.intent(active=True, now=self.last_now + 1).allowed_latch
     assert self.card.aol_card_intent.physical.authorized
 
   def evidence(self, *, partial=False, lat_only=False, now=None, mutation=None, event=None):

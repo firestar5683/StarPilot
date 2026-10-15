@@ -161,7 +161,7 @@ class Car:
     self.conditional_replay = os.getenv('CONDITIONAL_MODE_REPLAY_RUNTIME') == '1' or feature_requested(self.params, 'conditional')
     subscribed_services = ['pandaStates', 'carControl', 'onroadEvents', 'deviceState']
     if self.aol_replay:
-      subscribed_services.extend(('aolSafetyWire', 'managerState', 'aolAxisState'))
+      subscribed_services.extend(('aolSafetyWire', 'managerState', 'aolAxisState', 'selfdriveState'))
     if self.slc_replay:
       subscribed_services.append('slcState')
     self.sm = messaging.SubMaster(subscribed_services)
@@ -227,7 +227,7 @@ class Car:
       enroll_missing_preference(self.params, cp)
       if not self.aol_replay and feature_requested(self.params, 'aol'):
         self.aol_replay = True
-        subscribed_services.extend(('aolSafetyWire', 'managerState', 'aolAxisState'))
+        subscribed_services.extend(('aolSafetyWire', 'managerState', 'aolAxisState', 'selfdriveState'))
         self.sm = messaging.SubMaster(subscribed_services)
         self.pm.sock['aolIntentWire'] = messaging.pub_sock('aolIntentWire')
 
@@ -349,7 +349,7 @@ class Car:
     aol_policy = aol_policy_for(self.CP)
     if aol_policy.full_axis_runtime_required and not self.aol_replay:
       self.aol_replay = True
-      subscribed_services.extend(('aolSafetyWire', 'managerState', 'aolAxisState'))
+      subscribed_services.extend(('aolSafetyWire', 'managerState', 'aolAxisState', 'selfdriveState'))
       self.sm = messaging.SubMaster(subscribed_services)
       self.pm.sock['aolIntentWire'] = messaging.pub_sock('aolIntentWire')
     initialize_aol_preference(self.CP)
@@ -614,15 +614,23 @@ class Car:
           fault_active = True
       rejected = native_reset or native_latch_rejected(self.CP, native, state=CS if angle_panda_ready else None)
       rejection_ns = now_ns if native_reset else int(native.observedMonoTime) if rejected else 0
-      engagement_observation = ({"standard_active": bool(host_enabled and
-        (self.sm['carControl'].latActive or self.sm['carControl'].longActive))}
-        if getattr(self.aol_card_intent, 'observe_active_engagement', False) else {})
       observe_physical = getattr(self.aol_card_intent, 'observe_physical_samples', None)
       if observe_physical is not None:
         observe_physical(self.CI.CS, now_ns=now_ns)
       self.aol_card_intent.update(CS, fault_active=fault_active, now_ns=now_ns, native_rejection_ns=rejection_ns,
                                   standard_enabled=(host_enabled if getattr(self.aol_card_intent, 'observe_stock_engagement', False)
-                                                    else host_control_enabled), **engagement_observation)
+                                                    else host_control_enabled))
+      # Observe ordinary state directly: independent AOL actuator activity is
+      # not evidence that ordinary preEnabled has become active engagement.
+      engagement_ns = int(self.sm.logMonoTime.get('selfdriveState', 0))
+      engagement_seen = self.sm.seen.get('selfdriveState', False)
+      engagement = self.sm['selfdriveState'] if engagement_seen else None
+      self.aol_card_intent.observe_full_engagement(
+        CS, enabled=bool(engagement is not None and engagement.enabled),
+        active=bool(engagement is not None and engagement.active), source_ns=engagement_ns,
+        now_ns=now_ns, fault_active=fault_active, native_rejection_ns=rejection_ns,
+        observation_valid=bool(engagement_seen and self.sm.valid['selfdriveState'] and self.sm.alive['selfdriveState'] and
+          0 < engagement_ns <= now_ns and now_ns - engagement_ns <= AXIS_MAX_AGE_NS))
     if self.aol_card_intent is not None and preap_aol:
       self.CI.CS.preap_lateral_authorized = bool(
         native is not None and native.lateralAllowed and self.aol_card_intent.allowed_latch and
