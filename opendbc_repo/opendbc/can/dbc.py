@@ -61,6 +61,20 @@ class Signal:
   checksum_fields: tuple['Signal', ...] = ()
 
   def get_raw_value(self, dat: bytes | bytearray) -> int:
+    msb_byte = self.msb // 8
+    lsb_byte = self.lsb // 8
+    if self.is_little_endian:
+      first, last = lsb_byte, msb_byte
+      contiguous = self.size == self.msb - self.lsb + 1
+      byteorder = "little"
+    else:
+      first, last = msb_byte, lsb_byte
+      contiguous = self.size == 8 * (last - first) + self.msb % 8 - self.lsb % 8 + 1
+      byteorder = "big"
+    if contiguous and 0 < self.size and 0 <= first <= last < len(dat):
+      raw = dat[first] if first == last else int.from_bytes(dat[first:last + 1], byteorder)
+      return (raw >> (self.lsb % 8)) & ((1 << self.size) - 1)
+
     ret = 0
     i = self.msb // 8
     bits = self.size
