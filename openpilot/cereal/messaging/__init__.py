@@ -180,8 +180,8 @@ class FrequencyTracker:
 
 class SubMaster:
   def __init__(self, services: list[str], poll: str | None = None,
-               ignore_alive: list[str] | None = None, ignore_avg_freq: list[str] | None = None,
-               ignore_valid: list[str] | None = None, addr: str = "127.0.0.1", frequency: float | None = None):
+               ignore_alive: list[str] | set[str] | None = None, ignore_avg_freq: list[str] | set[str] | None = None,
+               ignore_valid: list[str] | set[str] | None = None, addr: str = "127.0.0.1", frequency: float | None = None):
     self.frame = -1
     self.services = services
     self.seen = dict.fromkeys(services, False)

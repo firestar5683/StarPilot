@@ -19,7 +19,7 @@ from openpilot.starpilot.flm.learner_factory import from_evidence
 from openpilot.starpilot.flm.runtime_adapter_registry import read_source
 from openpilot.starpilot.flm.tests.test_registered_controls_global import published_cp, frame
 from openpilot.starpilot.flm.tests.test_registered_accepted_profile import computed_registered_fit, accepted_frame
-from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY as CONTROLLER_KEY, replace_mode
+from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY as CONTROLLER_KEY, ControllerMode, replace_mode
 from openpilot.starpilot.lateral.learning_preferences import KEY, replace_preference
 from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY, FieldChoice, PlatformProfile, serialize_document
 
@@ -45,7 +45,7 @@ def fixed_controls(*, factor=True, friction=True, legacy=False, learning=True):
     selected = published_cp(cp, params)
     params.put('CarParams', selected.to_bytes(), block=True)
     params.put(KEY, replace_preference(None, cp, learning), block=True)
-    params.put(CONTROLLER_KEY, json.loads(replace_mode(None, cp, 'starpilot')), block=True)
+    params.put(CONTROLLER_KEY, json.loads(replace_mode(None, cp, ControllerMode.STARPILOT)), block=True)
     profile = profile_for(cp, factor, friction)
     if legacy:
       if factor:
@@ -143,7 +143,7 @@ def test_actual_controller_checkpoint_reconstructs_the_fixed_custom_baseline():
         assert adapter.identity == runtime.identity
         assert adapter.prepare_control(evidence) is evidence
         return
-    pytest.fail('No source-bound fixed manual baseline checkpoint reached the real learner factory')
+    raise pytest.fail.Exception('No source-bound fixed manual baseline checkpoint reached the real learner factory')
 
 
 @pytest.mark.parametrize('raw', (b'nan', b'99999', b'not-a-number'))

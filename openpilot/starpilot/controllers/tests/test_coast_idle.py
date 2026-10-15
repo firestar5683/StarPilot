@@ -109,7 +109,7 @@ class TestCoastIdle(unittest.TestCase):
             continue
           runtime, changes = CoastRuntime(), {}
           if field == 'heartbeat':
-            runtime.consumer.last_heartbeat = value
+            setattr(runtime.consumer, f'last_{field}', value)
           elif field == 'stop_context':
             changes[field] = value
           else:
