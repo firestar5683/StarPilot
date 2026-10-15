@@ -116,7 +116,7 @@ def test_custom_placement_disable_layer_migration_preserve_existing_widgets():
   sample = state(customization=migrated)
   with patch.object(gauge, '_render_unified_road') as draw:
     gauge.render(sample)
-    # The saved box is inset 44 x 24 inside the gauge's drawing frame, which is centred at (172, 145 - 60).
+    # The saved box is inset 44 x 24 inside the gauge's drawing frame, which is centered at (172, 145 - 60).
     assert draw.call_args.args[1:3] == (960. - 44 + 172, 600. - 24 + 85)
     migrated['layouts']['large'][CEM_GAUGE_WIDGET]['enabled'] = False
     draw.reset_mock()

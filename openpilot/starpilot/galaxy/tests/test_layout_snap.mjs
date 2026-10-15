@@ -32,7 +32,7 @@ assert.deepEqual(pure(snapMove, { ...box, x: 253 }, targets, 6), { x: 253, y: 11
 assert.deepEqual(pure(snapMove, box, bounds, 0), { x: 34, y: 113, guides: [] })
 const target = (value, line = "start", kind = "widget", axis = "x", label = "Home") => ({ axis, value, line, kind, label })
 result = pure(snapMove, { ...box, x: 100 }, [target(104), target(146, "center", "center")], 6)
-assert.equal(result.x, 96) // Equal distance prefers bounds centre.
+assert.equal(result.x, 96) // Equal distance prefers bounds center.
 assert.equal(result.guides[0].kind, "center")
 for (const kinds of [["zone", "widget"], ["widget", "bounds"], ["bounds", "center"]]) {
   const first = target(104, "start", kinds[0]), second = target(96, "start", kinds[1])

@@ -16,13 +16,13 @@ export function snapTargets(profile, layout, id, visible) {
   const add = (box, kind, label, names) => {
     for (const axis of ["x", "y"]) {
       const values = lines(box, axis)
-      // Keep the line role so widget centres cannot attract moving edges.
+      // Keep the line role so widget centers cannot attract moving edges.
       for (const line of names) targets.push({ axis, value: values[line], kind, label, line })
     }
   }
   const bounds = profile.widgets[id].bounds || profile.bounds
   add(bounds, "bounds", "the edge", ["start", "end"])
-  add(bounds, "center", "the centre", ["center"])
+  add(bounds, "center", "the center", ["center"])
   for (const [key, widget] of Object.entries(profile.widgets)) {
     const at = layout[key]
     if (key === id || !at?.enabled || !Number.isFinite(at.x) || !Number.isFinite(at.y) ||

@@ -1,6 +1,5 @@
 """Regression checks for qualified values, saved geometry and request feedback."""
 from dataclasses import replace
-from types import SimpleNamespace as N
 from unittest.mock import Mock
 
 from openpilot.starpilot.ui.onroad_state import ObservationKind, OnroadInput, OnroadState, SlcActionKind, SlcUiRequest, SpeedLimitObservation

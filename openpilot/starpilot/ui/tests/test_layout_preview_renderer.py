@@ -83,7 +83,9 @@ class LayoutPreviewRendererTests(unittest.TestCase):
         self.assertTrue(sample.visual_preview.layout_sample)  # Drawn as the car would, without replay labels.
         from openpilot.starpilot.ui.onroad_conditional import status
         # The gauge still reads the real reason, but the mode caption itself is not drawn in the editor.
-        family, detail, _ = status(sample)
+        observed = status(sample)
+        assert observed is not None
+        family, detail, _ = observed
         self.assertEqual(family, "CEM")
         self.assertFalse(detail.startswith("PREVIEW"))
     self.assertEqual(sample_state("cem_lead", document).speed_mps, 0.0)

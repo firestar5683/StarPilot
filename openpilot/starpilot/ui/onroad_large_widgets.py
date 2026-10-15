@@ -5,6 +5,7 @@ HudRenderer and ExpButton. See the adjacent UI LICENSE for retained source.
 """
 
 from pathlib import Path
+from typing import cast
 import hashlib
 import json
 
@@ -132,12 +133,12 @@ class UnifiedSpeedWidget:
       status_size = fit_size(status, FontRole.NORMAL, 30) if status else 30
       status_ink = self.fonts.horizontal_ink(status, FontRole.NORMAL, status_size) if status else None
       status_v = self.fonts.vertical_ink(status, FontRole.NORMAL, status_size) if status else None
-      status_h = (status_v[1] - status_v[0]) if status else 0
+      status_h = (cast(tuple[float, float], status_v)[1] - cast(tuple[float, float], status_v)[0]) if status else 0
 
       footer_size = fit_size(footer, FontRole.NORMAL, 30) if footer else 30
       footer_ink = self.fonts.horizontal_ink(footer, FontRole.NORMAL, footer_size) if footer else None
       footer_v = self.fonts.vertical_ink(footer, FontRole.NORMAL, footer_size) if footer else None
-      footer_h = (footer_v[1] - footer_v[0]) if footer else 0
+      footer_h = (cast(tuple[float, float], footer_v)[1] - cast(tuple[float, float], footer_v)[0]) if footer else 0
 
       if align == 'center':
         # Every line shares the card's horizontal center, and the entire stack is visually vertically centered.
@@ -151,16 +152,21 @@ class UnifiedSpeedWidget:
           lambda y: self.fonts.draw(value, FontRole.SPEED, size, start(*number_ink), y - number_v[0] + dash_offset, text)
         ))
         if has_value:
+          unit_v = cast(tuple[float, float], unit_v)
           segments.append((
             unit_v[0], unit_h,
             lambda y: self.fonts.draw(shown.unit, FontRole.NORMAL, unit_size, start(*unit_ink), y - unit_v[0], muted)
           ))
         if status:
+          status_ink = cast(tuple[float, float], status_ink)
+          status_v = cast(tuple[float, float], status_v)
           segments.append((
             status_v[0], status_h,
             lambda y: self.fonts.draw(status, FontRole.NORMAL, status_size, start(*status_ink), y - status_v[0], accent if active else muted)
           ))
         if footer:
+          footer_ink = cast(tuple[float, float], footer_ink)
+          footer_v = cast(tuple[float, float], footer_v)
           segments.append((
             footer_v[0], footer_h,
             lambda y: self.fonts.draw(footer, FontRole.NORMAL, footer_size, start(*footer_ink), y - footer_v[0], footer_color)
@@ -183,6 +189,7 @@ class UnifiedSpeedWidget:
         left = start(*number_ink)
         self.fonts.draw(value, FontRole.SPEED, size, left, number_y, text)
         if has_value:
+          unit_v = cast(tuple[float, float], unit_v)
           unit_x = left + number_ink[0] - 14 - unit_ink[1] if align == 'right' else left + number_ink[1] + 14 - unit_ink[0]
           unit_y = number_y + number_v[1] - unit_v[1]
           self.fonts.draw(shown.unit, FontRole.NORMAL, unit_size, unit_x, unit_y, muted)

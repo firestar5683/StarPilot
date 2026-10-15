@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -197,7 +198,7 @@ def test_projection_bookmark_is_saved_once_without_rendering_starpilot(frame, mo
   source = Path(__file__).parents[3] / 'starpilot/ui/runtime_app.py'
   method = next(node for node in ast.walk(ast.parse(source.read_text()))
                 if isinstance(node, ast.FunctionDef) and node.name == '_poll_projection_bookmark')
-  namespace = {'ui_state': state, 'display_message': Mock(return_value=object())}
+  namespace: dict[str, Any] = {'ui_state': state, 'display_message': Mock(return_value=object()), 'cast': cast}
   exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)
   # Short Unix socket path for macOS. The real transport and native dispatch run
   # while the top widget is unrelated to StarPilot, or no widget is drawn at all.

@@ -119,10 +119,11 @@ def test_large_wheel_art_is_drawn_inside_its_crop_with_or_without_sidebar(monkey
     document = projection_customization(projection, document)
   canvas = renderer._Canvas.__new__(renderer._Canvas)
   canvas.profile, canvas.viewport = Profile.LARGE, viewport
-  canvas.fonts = NS(profile=Profile.LARGE)
+  monkeypatch.setattr(canvas, 'fonts', NS(profile=Profile.LARGE), raising=False)
   canvas.target = NS(texture=object())
   view = OnroadView.__new__(OnroadView)
-  view.fonts, view.projection_viewport = canvas.fonts, viewport
+  monkeypatch.setattr(view, 'fonts', canvas.fonts, raising=False)
+  view.projection_viewport = viewport
   view.steering_wheel = SteeringWheelWidget(Path('/unused'))
   view.steering_wheel._texture = object()  # Real widget geometry, without loading a GL texture.
   canvas.view = view

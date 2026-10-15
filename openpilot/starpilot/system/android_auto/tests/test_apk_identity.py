@@ -251,7 +251,8 @@ def test_import_job_labels_metadata_free_package_with_offered_version(tmp_path, 
 def test_status_reports_expiry(tmp_path):
   cert, root, key_pem, _ = build_identity(days=5)
   directory = tmp_path / "identity"
-  apk_identity.install_identity({"phone-cert.pem": cert, "phone-key.pem": key_pem, "root-cert.pem": root}, {"subject": "O=CarService", "app_version": "16.2.1-release"}, directory)
+  apk_identity.install_identity({"phone-cert.pem": cert, "phone-key.pem": key_pem, "root-cert.pem": root},
+                                {"subject": "O=CarService", "app_version": "16.2.1-release"}, directory)
   status = apk_identity.identity_status(directory)
   assert status["installed"] and status["days_left"] in (4, 5) and "renew" in status["warning"]
   assert status["app_version"] == "16.2.1-release"

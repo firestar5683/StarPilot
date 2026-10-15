@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 import time
 import threading
-from typing import Any
+from typing import Any, cast
 from collections.abc import Callable
 
 import pyray as rl
@@ -472,7 +472,7 @@ class StarShellSession:
                       display_message(ui_state.sm, 'carState', now_ns, after_frame=ui_state.started_frame) is not None)
     stamp = int(ui_state.sm.logMonoTime['carState']) if authorized else 0
     for _ in range(receiver.drain(now_ns, stamp, authorized=authorized)):
-      publish()
+      cast('Callable[[], None]', publish)()
 
   def _poll_wheel(self, now_ns):
     if getattr(ui_state, "replay_clock", None) is not None:

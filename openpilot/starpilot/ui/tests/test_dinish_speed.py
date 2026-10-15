@@ -169,9 +169,10 @@ def test_galaxy_card_pixels_align_without_reading_font_textures():
         widget = UnifiedSpeedWidget(fonts)
         canvas = _Canvas.__new__(_Canvas)
         canvas.profile, canvas.viewport, canvas.fonts, canvas.target = Profile.LARGE, viewport, fonts, target
-        canvas.view = SimpleNamespace(_ordered_widgets=lambda content, state, widget=widget, **kw: widget.render(content, state))
-        canvas._settle = lambda state: None
-        with patch.dict('openpilot.starpilot.ui.layout_preview_renderer.RUNTIME_PREVIEW_WIDGETS', large=('cruise_limits',)), \
+        with patch.object(canvas, 'view',
+                          SimpleNamespace(_ordered_widgets=lambda content, state, widget=widget, **kw: widget.render(content, state)), create=True), \
+             patch.object(canvas, '_settle', lambda state: None), \
+             patch.dict('openpilot.starpilot.ui.layout_preview_renderer.RUNTIME_PREVIEW_WIDGETS', large=('cruise_limits',)), \
              patch.object(rl, 'load_image_from_texture', side_effect=mobile_readback) as readback:
           png = canvas.render_widget_art(state, document['layouts']['large'])
           # A saved 50% background must show on the first frame, without a slider

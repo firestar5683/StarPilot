@@ -3,6 +3,7 @@ import ast
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace as NS
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
@@ -29,8 +30,8 @@ def native_poll():
   source = Path(__file__).parents[3] / 'ui/runtime_app.py'
   tree = ast.parse(source.read_text())
   method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == '_poll_projection_bookmark')
-  namespace = {'ui_state': NS(started=True, started_frame=1, sm=NS(logMonoTime={'carState': 50})),
-               'display_message': Mock(return_value=object())}
+  namespace: dict[str, Any] = {'ui_state': NS(started=True, started_frame=1, sm=NS(logMonoTime={'carState': 50})),
+                             'display_message': Mock(return_value=object()), 'cast': cast}
   exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)
   return namespace
 

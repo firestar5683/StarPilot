@@ -50,6 +50,7 @@ class Widget(TypedDict):
   defaultAnchor: NotRequired[str]
   colors: NotRequired[dict[str, str | None]]
   resizable: NotRequired[dict[str, int]]
+  sourcesExtent: NotRequired[dict[str, float]]
 
 
 class LayoutProfile(TypedDict):
@@ -151,7 +152,7 @@ PROFILES["compact"]["widgets"][STOPPED_TIMER_WIDGET] = _timer_widget
 # Restore the Dom road graphic in the gap between the speed card and main speed.
 # It has no background and appears only with a current selected source.
 CEM_GAUGE_WIDGET = 'cem_gauge'
-# The gauge draws centred in a 344 x 300 frame; its box is the part it can actually fill, at this offset inside
+# The gauge draws centered in a 344 x 300 frame; its box is the part it can actually fill, at this offset inside
 # that frame. Version 6 and older layouts saved the frame's corner and move by this offset when they load.
 CEM_GAUGE_FRAME = (344, 300)
 CEM_GAUGE_INSET = (44, 24)

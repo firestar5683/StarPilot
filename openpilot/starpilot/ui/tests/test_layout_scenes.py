@@ -1,9 +1,11 @@
 """Scene sketches and eye controls must agree with the native driving presentation."""
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 import shutil
 import subprocess
+from typing import NoReturn, cast
 
 import pytest
 
@@ -23,7 +25,7 @@ from openpilot.starpilot.ui.unified_speed_presentation import resolve_unified_sp
 def test_every_scene_matches_native_border_mode_and_widget_visibility(target):
   node = shutil.which('node')
   if node is None:
-    pytest.skip('Node is required for the browser/native scene contract')
+    cast('Callable[[str], NoReturn]', pytest.skip)('Node is required for the browser/native scene contract')
   profile = Profile.COMPACT if target == 'compact' else Profile.LARGE
   document = default_document()
   if target == 'projection':

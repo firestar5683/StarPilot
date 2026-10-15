@@ -168,7 +168,9 @@ def test_refresh_retries_before_giving_up_and_reports_pending(monkeypatch, cache
   assert waits == [apkpure.RETRY_DELAYS[0]]
   assert pending == [True, True]  # the page waits while tries remain
   assert not apkpure.lookup_pending()
-  assert apkpure.download_status()["url"] == LINK
+  status = apkpure.download_status()
+  assert status is not None
+  assert status["url"] == LINK
 
 
 def test_refresh_is_single_flight(monkeypatch, cache):

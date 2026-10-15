@@ -155,5 +155,5 @@ class DrawerNativeTest(unittest.TestCase):
     widget = UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts)))
     widget._draw_sources(rl.Rectangle(88, 545, 320, 76), state)
     self.assertEqual([text for text, _ in drawn], ['Dash', '56', 'Vision', '56'])
-    self.assertIn(('56', FontRole.MEDIUM), drawn)  # The accepted source's reading is emphasised.
+    self.assertIn(('56', FontRole.MEDIUM), drawn)  # The accepted source's reading is emphasized.
     self.assertIn(('56', FontRole.NORMAL), drawn)

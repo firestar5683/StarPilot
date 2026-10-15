@@ -236,7 +236,7 @@ invalidSnap.cancelDrag()
 const traySnap = editor().vm
 traySnap.layout.current_speed.enabled = false
 traySnap.startDrag("current_speed", largePoint(2400, 0), true)
-traySnap.moveDrag(largePoint(324, 550)) // Widget centre follows the tray pointer.
+traySnap.moveDrag(largePoint(324, 550)) // Widget center follows the tray pointer.
 assert.equal(traySnap.layout.current_speed.x, 30)
 assert.equal(traySnap.layout.current_speed.enabled, true)
 assert.ok(traySnap.state.snapGuides.length)
@@ -309,14 +309,14 @@ try {
   else delete globalThis.localStorage
 }
 for (const [guides, expected] of [
-  [[{ axis: "x", kind: "center" }, { axis: "y", kind: "center" }], "Centred on the screen"],
-  [[{ axis: "x", kind: "center" }], "Centred across"],
-  [[{ axis: "y", kind: "center" }], "Centred top to bottom"],
+  [[{ axis: "x", kind: "center" }, { axis: "y", kind: "center" }], "Centered on the screen"],
+  [[{ axis: "x", kind: "center" }], "Centered across"],
+  [[{ axis: "y", kind: "center" }], "Centered top to bottom"],
   [[{ label: "Home" }, { label: "Home" }, { label: "Work" }], "Lined up with Home and Work"],
   [[{ label: "the edge" }, { label: "Home" }], "At the edge, lined up with Home"],
-  [[{ axis: "x", kind: "center", label: "the centre" }, { axis: "y", kind: "bounds", label: "the edge" }], "Centred across, at the edge"],
-  [[{ axis: "y", kind: "center", label: "the centre" }, { axis: "x", kind: "widget", label: "Home" }, { axis: "y", kind: "widget", label: "Work" }],
-    "Centred top to bottom, lined up with Home"],
+  [[{ axis: "x", kind: "center", label: "the center" }, { axis: "y", kind: "bounds", label: "the edge" }], "Centered across, at the edge"],
+  [[{ axis: "y", kind: "center", label: "the center" }, { axis: "x", kind: "widget", label: "Home" }, { axis: "y", kind: "widget", label: "Work" }],
+    "Centered top to bottom, lined up with Home"],
 ]) {
   snapVm.state.snapGuides = guides
   assert.equal(snapVm.snapSummary, expected)
@@ -545,7 +545,7 @@ assert.equal(backdropCalls.at(-1)[3], "braking")
 vm.selectProfile("large")
 vm.state.scene = "engaged"
 vm.color("text", "#ABCDEF81")
-assert.equal(backdropCalls.length, backdropCount + 5) // Colour edits change the real screen too.
+assert.equal(backdropCalls.length, backdropCount + 5) // Color edits change the real screen too.
 vm.color("text", "#ABCDEF80")
 const draggingCount = backdropCalls.length
 vm.startDrag("current_speed", event(500, 200))

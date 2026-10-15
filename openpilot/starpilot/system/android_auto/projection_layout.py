@@ -352,7 +352,7 @@ def projection_customization(document, base_customization):
     dx, dy = shifts.get(key, (0, 0))
     result['layouts']['large'][key] = {**placement, 'x': placement['x'] - dx, 'y': placement['y'] - dy}
   from openpilot.starpilot.ui.onroad_customization import rgba
-  # Card opacity is a colour, not a placement: fold it into the fill and keep the native placement shape.
+  # Card opacity is a color, not a placement: fold it into the fill and keep the native placement shape.
   opacity = result['layouts']['large'].get('cruise_limits', {}).pop('opacity', 100)
   if opacity != 100:
     red, green, blue, alpha = rgba(result, 'cardFill', 'large', 'cruise_limits')

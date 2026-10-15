@@ -437,12 +437,12 @@ export const OnroadLayoutPage = {
     // A finger covers the preview chip, so touch drags show the alignment in the sticky save bar.
     snapInBar() { return !!(this.state.drag?.touch && this.state.snapGuides.length) },
     snapSummary() {
-      const guides = this.state.snapGuides, centred = new Set(guides.filter(guide => guide.kind === "center").map(guide => guide.axis))
-      if (centred.size === 2) return "Centred on the screen"
-      // A centred axis is described once; the other axis still says what it lines up with.
-      const labels = [...new Set(guides.filter(guide => !centred.has(guide.axis)).map(guide => guide.label))]
+      const guides = this.state.snapGuides, centered = new Set(guides.filter(guide => guide.kind === "center").map(guide => guide.axis))
+      if (centered.size === 2) return "Centered on the screen"
+      // A centered axis is described once; the other axis still says what it lines up with.
+      const labels = [...new Set(guides.filter(guide => !centered.has(guide.axis)).map(guide => guide.label))]
       const others = labels.filter(label => label !== "the edge").slice(0, 2)
-      const text = [centred.has("x") ? "centred across" : centred.has("y") ? "centred top to bottom" : "",
+      const text = [centered.has("x") ? "centered across" : centered.has("y") ? "centered top to bottom" : "",
         labels.includes("the edge") ? "at the edge" : "", others.length ? "lined up with " + others.join(" and ") : ""].filter(Boolean).join(", ")
       return text && text[0].toUpperCase() + text.slice(1)
     },
@@ -1273,7 +1273,7 @@ export const OnroadLayoutPage = {
                     <option v-for="scene in group.scenes" :key="scene.id" :value="scene.id">{{ scene.label }}</option>
                   </optgroup>
                 </GalaxySelect>
-                <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.snapEnabled" :disabled="!!state.drag || !!state.layerDrag" aria-label="Snap to edges and centres" title="Snap to edges and centres" @click="toggleSnap"><i class="bi bi-magnet" aria-hidden="true"></i></button>
+                <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.snapEnabled" :disabled="!!state.drag || !!state.layerDrag" aria-label="Snap to edges and centers" title="Snap to edges and centers" @click="toggleSnap"><i class="bi bi-magnet" aria-hidden="true"></i></button>
                 <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.showEditingAids" aria-label="Show editing aids" title="Show editing aids" @click="toggleEditingAids"><i class="bi bi-bounding-box" aria-hidden="true"></i></button>
                 <button v-if="!projection && profile.inputZones?.length" class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.showFavoriteZones" aria-label="Show Favorite tap areas" title="Show Favorite tap areas" @click="state.showFavoriteZones = !state.showFavoriteZones"><i class="bi bi-grid-3x3-gap" aria-hidden="true"></i></button>
                 <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-expanded="state.tipsOpen" aria-controls="gx-layout-tips" aria-label="Preview tips and display behavior" title="Preview tips and display behavior" @click="state.tipsOpen = !state.tipsOpen"><i class="bi bi-question-circle" aria-hidden="true"></i></button>
@@ -1362,7 +1362,7 @@ export const OnroadLayoutPage = {
               <span v-if="!projection && state.showFavoriteZones && state.showEditingAids && state.profile === 'compact'" class="gx-layout__stage-chip gx-layout__stage-chip--below" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i>Tap areas</span>
               <div v-show="state.tipsOpen" id="gx-layout-tips" class="gx-layout__tips">
                 <p class="gx-note">Drag widgets to place them. Behind them is the comma's own screen for the chosen scene, including its border, road and alerts. Readings are samples.</p>
-                <p class="gx-note">Widgets snap to the screen edges, the centre and other widgets. Turn snapping off with the magnet button, or hold Option (Alt) while dragging.</p>
+                <p class="gx-note">Widgets snap to the screen edges, the center and other widgets. Turn snapping off with the magnet button, or hold Option (Alt) while dragging.</p>
               <p class="gx-note">General edit shows samples of all enabled widgets together. Driving scenes hide widgets that would be absent, and the eyes follow the scene. Eye changes stay with that scene; your General edit eyes are remembered.</p>
               <p class="gx-note">The stopped timer appears in General edit and Stopped timer. Turn off editing aids to see the screen without outlines and guides.</p>
               <p class="gx-note">The steering wheel and driver monitoring icon can be resized in each layout{{ projection ? ', and the map overlay takes any size and opacity' : '' }}. Existing display preferences and driving state still control when widgets appear.</p>
