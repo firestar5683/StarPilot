@@ -78,9 +78,10 @@ class FavoritesOwner:
   def __init__(self, params, actions: Callable[[], Mapping[str, FavoriteAction]], configurable: Callable[[], bool]):
     self.params, self.actions, self.configurable = params, actions, configurable
 
-  def snapshot(self):
+  def snapshot(self, *, include_options=True):
     saved, raw, readable, valid = read_slots(self.params)
-    options = self.actions()
+    # Empty render slots need no action metadata until the picker is opened.
+    options = self.actions() if include_options or any(slot["key"] is not None for slot in saved) else {}
     token = revision(raw)
     slots = []
     for index, slot in enumerate(saved):

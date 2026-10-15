@@ -275,6 +275,7 @@ class StarShellSession:
     self._favorite_snapshot = None
     self._favorite_data = None
     self._favorite_read_at = None
+    self._favorite_include_options = False
     self._favorite_claimed = False
     self._projection_bookmarks = None
     if getattr(ui_state, 'replay_clock', None) is None:
@@ -533,9 +534,12 @@ class StarShellSession:
       return True
 
   def _update_favorites(self, state, now):
-    if (self._favorite_read_at is None or now < self._favorite_read_at or now - self._favorite_read_at >= 1):
-      self._favorite_snapshot = self.favorites_owner.snapshot()
+    include_options = self.favorites.mode == "picker"
+    if (self._favorite_read_at is None or now < self._favorite_read_at or now - self._favorite_read_at >= 1 or
+        include_options and not getattr(self, "_favorite_include_options", False)):
+      self._favorite_snapshot = self.favorites_owner.snapshot(include_options=include_options)
       self._favorite_data = asdict(self._favorite_snapshot)
+      self._favorite_include_options = include_options
       self._favorite_read_at = now
     self.favorites.update(state, self._favorite_data, now)
 
@@ -557,6 +561,7 @@ class StarShellSession:
     if success:
       self._favorite_snapshot = self.favorites_owner.snapshot()
       self._favorite_data = asdict(self._favorite_snapshot)
+      self._favorite_include_options = True
       self.favorites.data = self._favorite_data
       self._favorite_read_at = time.monotonic()
     else:

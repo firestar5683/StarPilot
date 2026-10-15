@@ -419,7 +419,7 @@ class TestOnroadFavorites(unittest.TestCase):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
     session._favorite_read_at = None
     self.enterContext(patch.object(session, 'favorites_owner', NS(snapshot=Mock(return_value=object())), create=True))
-    self.enterContext(patch.object(session, 'favorites', NS(update=Mock()), create=True))
+    self.enterContext(patch.object(session, 'favorites', NS(update=Mock(), mode='collapsed'), create=True))
     with patch.object(runtime_app, 'asdict', return_value={'revision': 'r'}) as serialize:
       session._update_favorites(object(), 10)
       for now in (10.01, 10.02, 10.9):
