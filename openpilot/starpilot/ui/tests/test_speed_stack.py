@@ -94,4 +94,3 @@ def test_publisher_receipt_survives_next_cycle_and_resets_with_session():
   assert runtime._ui_receipt is None
   assert runtime._command_ui_sequence == 0
 
-

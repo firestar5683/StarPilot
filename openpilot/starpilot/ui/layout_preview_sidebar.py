@@ -65,4 +65,3 @@ def render_sidebar(fonts: BitmapFonts, frame: rl.Rectangle,
       fonts.draw(line, FontRole.SEMI_BOLD, font_size,
                  rect.x + (rect.width - measured.width) / 2, y, rl.WHITE)
       y += measured.height
-

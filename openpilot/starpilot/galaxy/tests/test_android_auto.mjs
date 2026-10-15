@@ -317,6 +317,7 @@ assert.match(AndroidAutoPage.template, /Install a Newer Version/)
 assert.equal(page({ ...setup, identity: { ...setup.identity, installed: true, app_version: '17.8.163804-release.daily' } }).installedVersion, '17.8.163804')
 assert.equal(managed.installedVersion, '', 'an unknown version shows nothing')
 assert.match(AndroidAutoPage.template, /You have \{\{ installedVersion \}\}/)
+assert.match(AndroidAutoPage.template, /Current version: \{\{ installedVersion \}\}/)
 assert.doesNotMatch(AndroidAutoPage.template, /remove it first/)
 for (const [field, reason] of [['installReady', /display|encoder/],
                              ['serviceReady', /service/], ['bluetoothEnabled', /Bluetooth/], ['parked', /Park/]]) {

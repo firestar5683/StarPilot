@@ -955,7 +955,8 @@ export const AndroidAutoPage = {
               <div class="gx-cluster gx-aa-sheet__lead">
                 <div>
                   <h3 id="gx-aa-install-title">{{ setup.identity.installed ? 'Install a Newer Version' : 'Set Up Android Auto Support' }}</h3>
-                  <p class="gx-note">{{ setup.identity.installed ? 'Current version: ' + expiry.label + '. Your paired car and settings stay as they are.' : 'One-time setup so your car accepts your comma.' }}</p>
+                  <p v-if="setup.identity.installed" class="gx-note"><template v-if="installedVersion">Current version: {{ installedVersion }} · </template>{{ expiry.label }}. Your paired car and settings stay as they are.</p>
+                  <p v-else class="gx-note">One-time setup so your car accepts your comma.</p>
                 </div>
               </div>
             </div>

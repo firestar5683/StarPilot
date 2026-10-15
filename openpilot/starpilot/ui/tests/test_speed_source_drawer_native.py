@@ -157,4 +157,3 @@ class DrawerNativeTest(unittest.TestCase):
     self.assertEqual([text for text, _ in drawn], ['Dash', '56', 'Vision', '56'])
     self.assertIn(('56', FontRole.MEDIUM), drawn)  # The accepted source's reading is emphasised.
     self.assertIn(('56', FontRole.NORMAL), drawn)
-

@@ -253,4 +253,3 @@ def test_committed_projection_v1_right_edge_is_preserved_and_clamped():
   assert migrated['widgets']['cruise_limits']['x'] == 1510
   assert migrated['widgets']['speed_limit_actions'] == {'x': 1510, 'y': 567, 'enabled': True}
 
-
