@@ -107,6 +107,7 @@ def fixture(alpha=False):
   card.is_metric = False
   sent = []
   card.publish_sendcan = Mock(side_effect=lambda frames, valid: sent.append((frames, valid)))
+  card.learning_send_committed_mono_ns = 0
   controls.sm.all_alive = lambda names: all(controls.sm.alive[name] for name in names)
   return controls, card, ci, packer, sent, base, offset
 

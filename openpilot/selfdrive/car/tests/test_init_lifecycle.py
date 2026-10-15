@@ -189,6 +189,7 @@ class CardInitLifecycleTest(unittest.TestCase):
     self.enterContext(patch.object(card, 'sm', sm, create=True))
     sent = []
     self.enterContext(patch.object(card, 'publish_sendcan', lambda frames, valid=True: sent.extend(frames)))
+    card.learning_send_committed_mono_ns = 0
     # These saved requests cannot acquire startup brake ownership.
     card.CI.CC.gm_auto_hold = True
     card.CI.CC.volt_one_pedal = True

@@ -584,6 +584,7 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card.vehicle_startup = VehicleStartupOwner()
     card.sm = FakeSM()
     card.publish_sendcan = Mock()
+    card.learning_send_committed_mono_ns = 0
     card.ioniq6_panda_matches = Mock(return_value=False)
     return card
 
