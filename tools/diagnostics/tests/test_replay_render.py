@@ -3,6 +3,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import Mock
 import gc
 import json
+import signal
 import stat
 import sys
 
@@ -206,6 +207,43 @@ def test_snapshot_does_not_dereference_disconnected_buffer():
   assert trace.snapshot()['buffer']['frame_id'] is None
 
 
+def test_requested_checkpoint_waits_for_a_valid_paused_frame_without_borrowed_pixels():
+  trace = diagnostic.Trace()
+  reports = []
+  module = NS(Compositor=Compositor, MediaMux=Output, MediaStore=Output, ReplayFramePublisher=Output,
+              FRAME_INTERVAL=.05, time=diagnostic.time)
+  with diagnostic.instrument(module, trace, flush=lambda: reports.append(trace.report())):
+    core = Compositor()
+    trace.flush_requested = True
+    module.time.sleep(0)
+    assert reports == []
+    core.ui.replay_sample.paused = True
+    core.readback.pending = True
+    module.time.sleep(0)
+    assert reports == []
+    core.readback.pending = False
+    core.ui.replay_sample.valid = False
+    module.time.sleep(0)
+    assert reports == []
+    core.ui.replay_sample.valid = True
+    module.time.sleep(0)
+    module.time.sleep(0)
+    assert len(reports) == 1 and reports[0]['events']
+
+
+def test_report_keeps_a_stable_window_when_gc_records_during_summary(monkeypatch):
+  trace = diagnostic.Trace()
+  trace.record({'stage': 'draw', 'wall_ns': 100})
+  original = diagnostic.Distribution.add
+  def add(distribution, *args):
+    trace.record({'stage': 'gc', 'wall_ns': 1})
+    return original(distribution, *args)
+  monkeypatch.setattr(diagnostic.Distribution, 'add', add)
+  report = trace.report()
+  assert len(report['events']) == 1 and report['events'][0]['stage'] == 'draw'
+  assert report['overwritten_events'] == 0
+
+
 def test_cli_refuses_invalid_context_and_existing_output(tmp_path, monkeypatch):
   from openpilot.starpilot.replay import render
   output = tmp_path / 'trace.json'
@@ -233,4 +271,28 @@ def test_cli_flushes_partial_report_on_worker_failure(tmp_path, monkeypatch):
     diagnostic.main(['--output', str(output), '--', '--session-dir', str(tmp_path)])
   assert sys.argv is previous
   assert stat.S_IMODE(output.stat().st_mode) == 0o600
-  assert json.loads(output.read_text())['events'] == []
+  report = json.loads(output.read_text())
+  assert not any(event['stage'] == 'draw' for event in report['events'])
+  assert report['report_boundary'] == 'worker_exit'
+
+
+def test_cli_checkpoint_is_complete_before_teardown_and_is_not_appended_on_exit(tmp_path, monkeypatch):
+  from openpilot.starpilot.replay import render
+  output = tmp_path / 'trace.json'
+  monkeypatch.setattr(render, 'validate_context', lambda _: None)
+  monkeypatch.setattr(render, 'Compositor', Compositor)
+  saved = []
+  def worker():
+    core = render.Compositor()
+    core.ui.replay_sample.paused = True
+    signal.raise_signal(signal.SIGUSR1)
+    render.time.sleep(0)
+    saved.append(output.read_text())
+    assert json.loads(saved[0])['report_boundary'] == 'paused_checkpoint'
+    raise SystemExit(1)
+  monkeypatch.setattr(render, 'main', worker)
+  previous = signal.getsignal(signal.SIGUSR1)
+  with pytest.raises(SystemExit):
+    diagnostic.main(['--output', str(output), '--', '--session-dir', str(tmp_path)])
+  assert signal.getsignal(signal.SIGUSR1) is previous
+  assert output.read_text() == saved[0]

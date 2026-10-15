@@ -69,9 +69,13 @@ owner's spawn callback, replace only `-m openpilot.starpilot.replay.render` with
 and environment. The wrapper refuses invalid private contexts and an existing output file; it does not connect to a
 device, create an owner, spoof parked authority, or start a session on its own. Do not run a private producer beside live replay.
 
-Records stay in a 30,000-event ring until worker shutdown, when one mode-0600 JSON report is written. Overwritten records
-are counted. Stop through the owning session and wait boundedly for owner idle; a successful stop response alone is insufficient.
-Normal SIGTERM cleanup and worker errors flush the report; SIGKILL cannot. There are no pixel copies or per-frame file/console writes.
+Records stay in a 30,000-event ring until one mode-0600 JSON report is written. Overwritten records are counted.
+After pausing through the owner and confirming readiness, send SIGUSR1 to this diagnostic worker PID to request a checkpoint.
+It writes at the next valid paused loop boundary with no borrowed readback pending; wait for a complete JSON report before stopping.
+The report declares `report_boundary=paused_checkpoint` and excludes subsequent teardown. Without a checkpoint it attempts a
+shutdown report, but the owner's cleanup deadline can kill it before that completes. Stop through the owning session and wait
+boundedly for owner idle; a successful stop response alone is insufficient. SIGKILL cannot flush. There are no pixel copies or
+per-frame file/console writes.
 
 The report includes source revision/hashes, worker arguments, attempt IDs, clock and camera metadata before/after acquisition,
 early/late rejection reasons, inclusive and exclusive wall/thread-CPU timings, preparation, camera/model, HUD entry points,

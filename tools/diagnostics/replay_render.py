@@ -8,6 +8,7 @@ import itertools
 import json
 import os
 from pathlib import Path
+import signal
 import sys
 import threading
 import time
@@ -35,6 +36,7 @@ class Trace:
     self.connection_generation = 0
     self.capabilities = {}
     self.configuration = {}
+    self.flush_requested = False
 
   def record(self, event):
     self.events.append(event)
@@ -90,8 +92,9 @@ class Trace:
             'observation_ns': time.monotonic_ns() - began}
 
   def report(self):
+    events, count = list(self.events), self.count
     stages = {}
-    for event in self.events:
+    for event in events:
       values = stages.setdefault(event['stage'], {key: Distribution() for key in
                                 ('wall_ms', 'cpu_ms', 'exclusive_wall_ms', 'exclusive_cpu_ms')})
       for key, distribution in values.items():
@@ -99,14 +102,14 @@ class Trace:
         distribution.add(value / 1e6 if value is not None else None)
     return {'schemaVersion': 1, 'kind': 'replay-render-trace', 'compositor_fps': 20,
             'capabilities': self.capabilities, 'configuration': self.configuration,
-            'max_events': MAX_EVENTS, 'overwritten_events': self.count - len(self.events),
+            'max_events': MAX_EVENTS, 'overwritten_events': count - len(events),
             'lifetime_draw_outcomes': dict(self.outcomes),
             'retained_window_stages': {stage: {key: value.summary() for key, value in values.items()}
-                                       for stage, values in stages.items()}, 'events': list(self.events)}
+                                       for stage, values in stages.items()}, 'events': events}
 
 
 @contextmanager
-def instrument(render, trace):
+def instrument(render, trace, *, flush=None):
   """Patch only this diagnostic worker; restore callbacks even when a frame fails."""
   patched = set()
   trace.capabilities = {name: hasattr(render.Compositor, method) for name, method in
@@ -251,6 +254,11 @@ def instrument(render, trace):
       with trace.span('scheduler_sleep') as event:
         event['requested_ns'] = round(seconds * 1e9)
         time.sleep(seconds)
+      sample = trace.core.ui.replay_sample if trace.core is not None else None
+      if (flush is not None and trace.flush_requested and sample is not None and sample.valid and sample.paused and
+          not trace.core.readback.pending):
+        trace.flush_requested = False
+        flush()
 
     pending_gc = {}
     def gc_event(phase, info):
@@ -315,13 +323,23 @@ def main(argv=None):
   previous = sys.argv
   try:
     with os.fdopen(fd, 'w') as output:
+      saved = False
+      def save(boundary):
+        nonlocal saved
+        if not saved:
+          output.write(json.dumps({**trace.report(), 'source': source, 'worker_args': args.worker_args[1:],
+                                   'report_boundary': boundary}, separators=(',', ':'), allow_nan=False))
+          output.write('\n')
+          output.flush()
+          saved = True
+      previous_signal = signal.signal(signal.SIGUSR1, lambda *_: setattr(trace, 'flush_requested', True))
       try:
         sys.argv = ['replay-render-diagnostic', *args.worker_args[1:]]
-        with instrument(render, trace):
+        with instrument(render, trace, flush=lambda: save('paused_checkpoint')):
           render.main()
       finally:
-        json.dump({**trace.report(), 'source': source, 'worker_args': args.worker_args[1:]}, output, allow_nan=False)
-        output.write('\n')
+        signal.signal(signal.SIGUSR1, previous_signal)
+        save('worker_exit')
   finally:
     sys.argv = previous
 
