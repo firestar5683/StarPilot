@@ -3010,6 +3010,26 @@
         "settings_tier": "simple"
       },
       {
+        "key": "EuSignBlendStyle",
+        "label": "Speed Limit Sign Blend",
+        "description": "comma4 only. How translucent the Vienna-style speed-limit sign is against the road view: Simple keeps the ring and number fully opaque and only softens the white disk; Full also softens the ring and number for a more blended look.",
+        "picker_description": "comma4 only. Chooses how translucent the Vienna sign is (Simple/Full).",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Simple"
+          },
+          {
+            "value": 1,
+            "label": "Full"
+          }
+        ],
+        "parent_key": "NavigationUI",
+        "settings_tier": "simple"
+      },
+      {
         "key": "QOLVisuals",
         "label": "Quality of Life",
         "description": "Miscellaneous visual changes to fine-tune how the driving screen looks.",
