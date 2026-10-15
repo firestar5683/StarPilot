@@ -1,0 +1,457 @@
+.bluetoothPage {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 0 auto;
+  max-width: var(--width-xxxl);
+  padding: var(--padding-base) var(--padding-lg) var(--padding-xxl);
+}
+
+.bluetoothHeader,
+.bluetoothTitle,
+.bluetoothToolbar,
+.bluetoothActions,
+.bluetoothDeviceName,
+.bluetoothSectionHeader,
+.bluetoothSectionHeader > div {
+  align-items: center;
+  display: flex;
+}
+
+.bluetoothHeader {
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.bluetoothTitle {
+  gap: 14px;
+}
+
+.bluetoothTitle > i {
+  align-items: center;
+  background: rgba(139, 108, 197, 0.16);
+  border: 1px solid rgba(169, 140, 229, 0.34);
+  border-radius: 16px;
+  color: #b99bec;
+  display: flex;
+  font-size: 2rem;
+  height: 58px;
+  justify-content: center;
+  width: 58px;
+}
+
+.bluetoothHeader h2,
+.bluetoothHeader p,
+.bluetoothDeviceRow h3,
+.bluetoothDeviceRow p,
+.bluetoothEmptyPage h3,
+.bluetoothEmptyPage p,
+.bluetoothSectionHeader h3 {
+  margin: 0;
+}
+
+.bluetoothHeader p {
+  margin-top: 4px;
+  opacity: 0.72;
+}
+
+.bluetoothNotice,
+.bluetoothError,
+.bluetoothPrompt {
+  background: var(--sidebar-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-lg);
+  padding: 14px 16px;
+}
+
+.bluetoothNotice,
+.bluetoothPrompt {
+  color: #ffe2a3;
+}
+
+.bluetoothPromptHeader,
+.bluetoothPromptActions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.bluetoothPromptHeader {
+  color: #ffe2a3;
+}
+
+.bluetoothPromptHeader i {
+  font-size: 1.15rem;
+}
+
+.bluetoothPrompt p {
+  margin: 8px 0 0;
+}
+
+.bluetoothPromptPasskey {
+  font-size: 1.05rem;
+}
+
+.bluetoothPromptInput {
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-md);
+  color: var(--text-color);
+  font: inherit;
+  margin-top: 12px;
+  max-width: 260px;
+  padding: 10px 12px;
+}
+
+.bluetoothPromptActions {
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.bluetoothPromptActions button {
+  background: linear-gradient(135deg, #765bb6, #9474ce);
+  border: 0;
+  border-radius: var(--border-radius-md);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 9px 14px;
+}
+
+.bluetoothPromptActions button.bluetoothPromptReject {
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  color: var(--text-color);
+}
+
+.bluetoothPromptActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.bluetoothError {
+  color: #ff9ab3;
+}
+
+.bluetoothAudioCountdown {
+  align-items: center;
+  background: rgba(64, 201, 124, 0.12);
+  border: 1px solid rgba(64, 201, 124, 0.45);
+  border-radius: var(--border-radius-lg);
+  display: flex;
+  gap: 18px;
+  padding: 16px 20px;
+}
+
+.bluetoothAudioCountdown strong {
+  color: #b8ffd4;
+  font-size: 2rem;
+  min-width: 72px;
+  text-align: center;
+}
+
+.bluetoothSwitch,
+.bluetoothToolbar button,
+.bluetoothActions button {
+  align-items: center;
+  background: linear-gradient(135deg, #765bb6, #9474ce);
+  border: 0;
+  border-radius: var(--border-radius-md);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: center;
+  padding: 10px 14px;
+  transition: filter 140ms ease, opacity 140ms ease, transform 140ms ease;
+}
+
+.bluetoothSwitch:hover,
+.bluetoothToolbar button:hover:not(:disabled),
+.bluetoothActions button:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.bluetoothSwitch input {
+  accent-color: #c4a7ff;
+  margin: 0;
+}
+
+.bluetoothToolbar {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.bluetoothToolbar button.scanning i {
+  animation: bluetoothSpin 1s linear infinite;
+}
+
+.bluetoothToolbar .bluetoothSecondaryButton {
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  color: var(--text-color);
+}
+
+.bluetoothScanHint {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  margin-left: auto;
+  opacity: 0.78;
+}
+
+.bluetoothDeviceList {
+  display: grid;
+  gap: 16px;
+}
+
+.bluetoothSection {
+  background: var(--secondary-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.bluetoothSectionHeader {
+  background: var(--input-bg);
+  justify-content: space-between;
+  padding: 12px 16px;
+}
+
+.bluetoothSectionHeader > div {
+  gap: 10px;
+}
+
+.bluetoothSectionHeader i {
+  color: #b99bec;
+  font-size: 1.15rem;
+}
+
+.bluetoothSectionHeader h3 {
+  font-size: 1rem;
+}
+
+.bluetoothSectionHeader > span {
+  background: rgba(169, 140, 229, 0.16);
+  border-radius: 999px;
+  color: #d9c9ff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-width: 26px;
+  padding: 4px 8px;
+  text-align: center;
+}
+
+.bluetoothSectionBody > .bluetoothDeviceRow + .bluetoothDeviceRow {
+  border-top: 1px solid var(--sidebar-border-color);
+}
+
+.bluetoothDeviceRow {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 48px minmax(180px, 1fr) auto;
+  padding: 15px 16px;
+  transition: background-color 140ms ease;
+}
+
+.bluetoothDeviceRow:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.bluetoothDeviceRow.connected {
+  box-shadow: inset 3px 0 0 #40c97c;
+}
+
+.bluetoothDeviceIcon {
+  align-items: center;
+  background: rgba(169, 140, 229, 0.12);
+  border: 1px solid rgba(169, 140, 229, 0.24);
+  border-radius: 50%;
+  color: #cbb2fa;
+  display: flex;
+  font-size: 1.25rem;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.bluetoothDeviceDetails {
+  min-width: 0;
+}
+
+.bluetoothDeviceName {
+  gap: 9px;
+}
+
+.bluetoothDeviceName h3 {
+  font-size: 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bluetoothConnectedDot {
+  background: #40c97c;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(64, 201, 124, 0.13);
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+
+.bluetoothDeviceRow p {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-top: 3px;
+  opacity: 0.75;
+}
+
+.bluetoothDeviceStatus {
+  color: #cbb2fa;
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.bluetoothActions {
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.bluetoothActions button.selected {
+  background: linear-gradient(135deg, #258b58, #40c97c);
+}
+
+.bluetoothActions .bluetoothIconButton {
+  min-width: 42px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.bluetoothActions .bluetoothForgetButton {
+  background: rgba(217, 90, 123, 0.13);
+  border: 1px solid rgba(217, 90, 123, 0.34);
+  color: #ff9ab3;
+}
+
+.bluetoothToolbar button:disabled,
+.bluetoothActions button:disabled,
+.bluetoothSwitch:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
+}
+
+.bluetoothEmptyState,
+.bluetoothEmptyPage,
+.bluetoothLoading {
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.bluetoothEmptyState {
+  padding: 28px 18px;
+}
+
+.bluetoothEmptyPage {
+  background: var(--secondary-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-lg);
+  padding: 46px 20px;
+}
+
+.bluetoothEmptyPage > i {
+  color: #b99bec;
+  display: block;
+  font-size: 2.5rem;
+  margin-bottom: 10px;
+}
+
+.bluetoothEmptyPage p {
+  margin-top: 6px;
+}
+
+.bluetoothLoading {
+  padding: 36px;
+}
+
+.bluetoothLoading span {
+  animation: bluetoothBounce 1.1s infinite ease-in-out;
+  background: #b99bec;
+  border-radius: 50%;
+  display: inline-block;
+  height: 8px;
+  margin: 0 4px;
+  width: 8px;
+}
+
+.bluetoothLoading span:nth-child(2) {
+  animation-delay: 0.14s;
+}
+
+.bluetoothLoading span:nth-child(3) {
+  animation-delay: 0.28s;
+}
+
+@keyframes bluetoothSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes bluetoothBounce {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-7px); }
+}
+
+@media (max-width: 760px) {
+  .bluetoothPage {
+    padding-left: var(--padding-base);
+    padding-right: var(--padding-base);
+  }
+
+  .bluetoothHeader,
+  .bluetoothToolbar {
+    align-items: stretch;
+  }
+
+  .bluetoothHeader {
+    flex-direction: column;
+  }
+
+  .bluetoothSwitch {
+    align-self: flex-start;
+  }
+
+  .bluetoothScanHint {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+
+  .bluetoothDeviceRow {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .bluetoothActions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    padding-left: 58px;
+  }
+}
+
+@media (max-width: 480px) {
+  .bluetoothToolbar button {
+    flex: 1;
+  }
+
+  .bluetoothActions {
+    padding-left: 0;
+  }
+
+  .bluetoothActions button:not(.bluetoothIconButton) {
+    flex: 1 1 auto;
+  }
+}

@@ -1,0 +1,2 @@
+# Preserve the imported snapshot byte-for-byte, including upstream line endings.
+upstream/** -text

@@ -38,10 +38,11 @@ def validate_config(value):
   return dict(value)
 
 
-def atomic_json(path, value):
+def atomic_json(path, value, mode=0o600):
   path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
   fd, temporary = tempfile.mkstemp(prefix='.' + path.name, dir=path.parent)
   try:
+    os.fchmod(fd, mode)
     with os.fdopen(fd, 'w') as handle:
       json.dump(value, handle)
       handle.flush()

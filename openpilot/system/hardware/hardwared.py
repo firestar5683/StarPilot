@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from openpilot.starpilot.galaxy.companion import phone_uplink_active
+
 import fcntl
 import os
 import queue
@@ -172,7 +174,8 @@ def hw_state_thread(end_event, hw_queue):
     if (count % int(10. / DT_HW)) == 0 or usb_changed:
       prev_usb_topology = usb_topology
       try:
-        network_type = HARDWARE.get_network_type()
+        phone_uplink = phone_uplink_active()
+        network_type = NetworkType.cell4G if phone_uplink else HARDWARE.get_network_type()
         modem_temps = HARDWARE.get_modem_temperatures()
         if len(modem_temps) == 0 and prev_hw_state is not None:
           modem_temps = prev_hw_state.modem_temps
@@ -184,7 +187,7 @@ def hw_state_thread(end_event, hw_queue):
           network_info=HARDWARE.get_network_info(),
           network_strength=HARDWARE.get_network_strength(network_type),
           network_stats={'wwanTx': tx, 'wwanRx': rx},
-          network_metered=HARDWARE.get_network_metered(network_type),
+          network_metered=phone_uplink or HARDWARE.get_network_metered(network_type),
           modem_temps=modem_temps,
           usb_state=get_usb_state(),
         )

@@ -249,6 +249,6 @@ console.log("Local HTTP search UUID fallback passed")
   assert.deepEqual(actions[1], ['configure', { patch: { token: 'pk.replacement' } }])
   assert.ok(NavigationPage.template.includes("selectTab('setup')"))
   assert.ok(NavigationPage.template.includes('Save key'))
-  assert.ok(NavigationPage.template.includes('<NavigationMap v-if="ready"'))
+  assert.ok(NavigationPage.template.includes('<NavigationMap v-if="ready && !bluetooth"'))
 }
 await import("./test_navigation_map.mjs")

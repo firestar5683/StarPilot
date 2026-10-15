@@ -1,0 +1,5205 @@
+[
+  {
+    "name": "Favorites",
+    "icon": "bi-star",
+    "params": [
+      {
+        "key": "StarPilotFavoriteSlots",
+        "label": "Favorite Slots",
+        "description": "Configure up to three favorite toggles for on-road buttons and steering-wheel bindings.",
+        "data_type": "json",
+        "ui_type": "favorites",
+        "settings_tier": "advanced"
+      }
+    ]
+  },
+  {
+    "name": "Lateral (Steering)",
+    "icon": "bi-arrows-move",
+    "params": [
+      {
+        "key": "AdvancedLateralTune",
+        "label": "Advanced Lateral Tuning",
+        "description": "Advanced steering control changes to fine-tune how openpilot drives.",
+        "picker_description": "Fine-tunes openpilot's steering control.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "UseAutoSteerDelay",
+        "label": "Use Auto-Learned Delay",
+        "description": "Automatically learn the full steering delay. The manual actuator delay is ignored while enabled.",
+        "picker_description": "Learns steering delay; ignores the manual value.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedLateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SteerDelay",
+        "label": "Actuator Delay",
+        "description": "Exact full delay between steering command and vehicle response.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.01,
+        "max": 1.0,
+        "step": 0.01,
+        "precision": 2,
+        "disabled_when_key_true": "UseAutoSteerDelay",
+        "disabled_reason": "Auto-learned delay is enabled.",
+        "parent_key": "AdvancedLateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SteerFriction",
+        "label": "Friction",
+        "description": "Friction",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "AdvancedLateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SteerKP",
+        "label": "Kp Factor",
+        "description": "Kp Factor",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "AdvancedLateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SteerLatAccel",
+        "label": "Lateral Acceleration",
+        "description": "Lateral Acceleration",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "AdvancedLateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SteerRatio",
+        "label": "Steer Ratio",
+        "description": "Steer Ratio",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "AdvancedLateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ForceAutoTune",
+        "label": "Force Auto-Tune On",
+        "description": "Force-enable openpilot's live auto-tuning for \"Friction\" and \"Lateral Acceleration\".",
+        "picker_description": "Auto-tunes steering friction and lateral acceleration.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedLateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ForceAutoTuneOff",
+        "label": "Force Auto-Tune Off",
+        "description": "Force-disable openpilot's live auto-tuning for \"Friction\" and \"Lateral Acceleration\" and use the set value instead.",
+        "picker_description": "Uses fixed values instead of live steering auto-tuning.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedLateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ForceTorqueController",
+        "label": "Force Torque Controller",
+        "description": "Use torque-based steering control instead of angle-based control for smoother lane keeping, especially in curves.",
+        "picker_description": "Uses torque-based steering for smoother lane keeping.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedLateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "AlwaysOnLateral",
+        "label": "Always On Lateral",
+        "description": "openpilot's steering remains active even when the accelerator or brake pedals are pressed.",
+        "picker_description": "Keeps steering active when pressing the gas or brake.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PauseAOLOnBrake",
+        "label": "Pause on Brake Press Below",
+        "description": "Pause \"Always On Lateral\" below the set speed while the brake pedal is pressed.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "parent_key": "AlwaysOnLateral",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "TeslaAOLDisengageOnBrake",
+        "label": "Disengage AOL on Brake",
+        "description": "Pressing the brake fully turns off Always On Lateral. Steering stays off after the brake is released until openpilot is engaged again or AOL is manually toggled back on.",
+        "picker_description": "Keep steering off after pressing the brake until you deliberately re-engage it.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AlwaysOnLateral",
+        "vehicle_makes": ["Tesla"],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "TeslaAOLScreenTap",
+        "label": "Three-Finger AOL Tap",
+        "description": "Toggle Always On Lateral by touching the Tesla screen with three fingers. Requires the Model 3/Y Vehicle CAN add-on cable, which is detected automatically. Does not engage or cancel cruise control. Restart the device after changing this setting or the AOL brake behavior when screen taps are enabled.",
+        "picker_description": "Toggle steering with a three-finger screen touch using the Vehicle CAN add-on cable.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AlwaysOnLateral",
+        "vehicle_makes": ["Tesla"],
+        "requires_offroad": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LaneChanges",
+        "label": "Lane Changes",
+        "description": "Allow openpilot to change lanes.",
+        "picker_description": "Enables openpilot lane changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NudgelessLaneChange",
+        "label": "Automatic Lane Changes",
+        "description": "When the turn signal is on, openpilot will automatically change lanes. If a vehicle is detected in the blind spot, the lane change waits until it is clear. No steering-wheel nudge required!",
+        "picker_description": "Changes lanes automatically when the turn signal is on.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LaneChanges",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NudgelessLaneChangeOnlyWhenEngaged",
+        "label": "Automatic Lane Changes Only When Engaged",
+        "description": "Require a steering-wheel nudge for lane changes while using Always On Lateral without full engagement.",
+        "picker_description": "Requires a nudge unless full openpilot control is engaged.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LaneChanges",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LaneChangeTime",
+        "label": "Lane Change Delay",
+        "description": "Delay between turn signal activation and the start of an automatic lane change.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 5.0,
+        "step": 0.1,
+        "parent_key": "LaneChanges",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "MinimumLaneChangeSpeed",
+        "label": "Minimum Lane Change Speed",
+        "description": "Lowest speed at which openpilot will change lanes.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 150.0,
+        "parent_key": "LaneChanges",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LaneDetectionWidth",
+        "label": "Minimum Lane Width",
+        "description": "Prevent automatic lane changes into lanes narrower than the set width.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 15.0,
+        "step": 0.1,
+        "parent_key": "LaneChanges",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "OneLaneChange",
+        "label": "One Lane Change Per Signal",
+        "description": "Limit automatic lane changes to one per turn-signal activation.",
+        "picker_description": "Limits automatic lane changes to one per signal.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LaneChanges",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LaneChangeSmoothing",
+        "label": "Lane Change Smoothing",
+        "description": "Controls how smoothly openpilot commits to a lane change. 10 is stock behavior; lower values produce a gentler, more gradual maneuver. 1 stretches the maneuver to ~8 seconds.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 1.0,
+        "max": 10.0,
+        "step": 1.0,
+        "parent_key": "LaneChanges",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LaneChangeCloseGap",
+        "label": "Close Gap On Lane Change",
+        "description": "Allows for a temporary shorter follow distance behind lead so that openpilot merges smoothly out of current lane, it will allow car to accelerate as it changes lanes.",
+        "picker_description": "Temporarily shortens the follow gap during lane changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LaneChanges",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LaneChangeCloseGapSeconds",
+        "label": "Temporary Follow Distance",
+        "description": "Follow distance to hold while changing lanes. Only applied when shorter than your normal gap.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.25,
+        "max": 1.0,
+        "step": 0.05,
+        "parent_key": "LaneChanges",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LateralTune",
+        "label": "Lateral Tuning",
+        "description": "Miscellaneous steering control changes to fine-tune how openpilot drives.",
+        "picker_description": "Additional settings for fine-tuning steering control.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TurnDesires",
+        "label": "Force Turn Desires Below Lane Change Speed",
+        "description": "While driving below the minimum lane change speed with an active turn signal, instruct openpilot to turn left/right.",
+        "picker_description": "Allows turn desires below lane-change speed with a signal.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "NavDesiresAllowed",
+        "label": "Use Route Desires for Turns",
+        "description": "Allow an active navigation route to request low-speed turn desires.",
+        "picker_description": "Allows navigation to request low-speed turns.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "NavLanePositioningAllowed",
+        "label": "Use Route Desires for Lane Positioning",
+        "description": "Allow route lane bias only after steering torque confirms the requested direction. It never initiates a lane change by itself.",
+        "picker_description": "Uses route-based lane positioning after torque confirmation.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "NNFF",
+        "label": "Neural Network Feedforward (NNFF)",
+        "description": "Twilsonco's \"Neural Network FeedForward\" controller. Uses a trained neural network model to predict steering torque based on vehicle speed, roll, and past/future planned path data for smoother, model-based steering.",
+        "picker_description": "Uses a neural network to smooth steering torque.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "NNFFLite",
+        "label": "Neural Network Feedforward (NNFF) Lite",
+        "description": "A lightweight version of Twilsonco's \"Neural Network FeedForward\" controller. Uses the \"look-ahead\" planned lateral jerk logic from the full model to help smoothen steering adjustments in curves, but does not use the full neural network for torque calculation.",
+        "picker_description": "Uses planned path data to smooth steering in curves.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LateralTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "QOLLateral",
+        "label": "Quality of Life",
+        "description": "Steering control changes to fine-tune how openpilot drives.",
+        "picker_description": "Adds quality-of-life steering changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PauseLateralSpeed",
+        "label": "Pause Steering Below",
+        "description": "Pause steering below the set speed.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 150.0,
+        "parent_key": "QOLLateral",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PauseLateralOnSignal",
+        "label": "Turn Signal Only",
+        "description": "Only pause steering when the turn signal is active.",
+        "picker_description": "Pauses steering when the turn signal is active.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "QOLLateral",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LateralResumeDelay",
+        "label": "Lateral Resume Delay",
+        "description": "Delay before lateral control resumes after the turn signal is turned off. Only applies when the vehicle speed dropped below half the \"Pause Steering Below\" speed during the turn signal. Set to 0 to disable.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 5.0,
+        "step": 0.1,
+        "parent_key": "QOLLateral",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "FordHumanTurnDetection",
+        "label": "Manual Turn Release",
+        "description": "Yield during an intentional manual turn while keeping the Ford steering session ready.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
+        "vehicle_makes": [
+          "Ford"
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "FordHandsFreeCluster",
+        "label": "Hands-Free Cluster Display",
+        "description": "Show the hands-free assistance graphic on supported CAN-FD Ford clusters while lateral control is active. Driver monitoring requirements do not change.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
+        "vehicle_makes": [
+          "Ford"
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "FordCurvatureBlendLow",
+        "label": "Small-Curve Prediction Blend",
+        "description": "Blend model-predicted curvature into gentle turns. 0 uses planner curvature only; 1 uses model prediction only.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.05,
+        "precision": 2,
+        "galaxy_only": true,
+        "vehicle_makes": [
+          "Ford"
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "FordCurvatureBlendHigh",
+        "label": "Large-Curve Prediction Blend",
+        "description": "Blend model-predicted curvature into tighter turns. 0 uses planner curvature only; 1 uses model prediction only.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.05,
+        "precision": 2,
+        "galaxy_only": true,
+        "vehicle_makes": [
+          "Ford"
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "FordCurvatureLaneChangeFactor",
+        "label": "Curvature Lane-Change Factor",
+        "description": "Scale steering during high-speed lane changes.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.5,
+        "max": 1.25,
+        "step": 0.05,
+        "precision": 2,
+        "galaxy_only": true,
+        "vehicle_makes": [
+          "Ford"
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "VASMEnabled",
+        "label": "Enable V-ASM",
+        "description": "Camera-based adjacent spot monitoring using the driver camera. Supplements factory blind spot monitoring.",
+        "picker_description": "Uses the driver camera for adjacent-spot monitoring.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "requires_nonempty_key": "VASMAnnotationConfig",
+        "disabled_reason": "Configure window annotations first in Galaxy > V-Adj Spot Monitor",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VASMConfidenceThreshold",
+        "label": "Confidence Threshold",
+        "description": "Minimum vehicle-detection confidence (0.80-1.00, default 0.94). Higher values reduce false positives but may miss detections.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.80,
+        "max": 1.00,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "VASMEnabled",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VASMSmoothSeconds",
+        "label": "Smoothing Duration",
+        "description": "Temporal smoothing duration (0.1-0.5 seconds, default 0.2). Higher values reduce flicker but add latency.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.1,
+        "max": 0.5,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "VASMEnabled",
+        "settings_tier": "advanced"
+      }
+    ]
+  },
+  {
+    "name": "Longitudinal (Speed & Following)",
+    "icon": "bi-speedometer2",
+    "params": [
+      {
+        "key": "AdvancedLongitudinalTune",
+        "label": "Advanced Longitudinal Tuning",
+        "description": "Advanced acceleration and braking control changes to fine-tune how openpilot drives.",
+        "picker_description": "Fine-tunes openpilot's acceleration and braking.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "EVTuning",
+        "label": "EV Tuning",
+        "description": "Use acceleration profiles tuned for EVs. Defaults to the vehicle's detected powertrain type but can be overridden if the automatic choice doesn't match.",
+        "picker_description": "Uses acceleration profiles tuned for EV powertrains.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TruckTuning",
+        "label": "Truck Tuning",
+        "description": "Use aggressive acceleration profiles tuned for trucks. Intended for heavy vehicles that need stronger throttle.",
+        "picker_description": "Uses stronger acceleration profiles for heavy vehicles.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TrailerLoad",
+        "label": "Trailer Load",
+        "description": "Add trailer weight to vehicle mass for tow-aware gas, brake, and conservative lateral assist. Enter the loaded trailer weight in pounds.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0,
+        "max": 15000,
+        "step": 500,
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfile",
+        "label": "Custom Accel Profile",
+        "description": "Replace the built-in acceleration profile with your own speed breakpoints and maximum-acceleration values. The starting curve mirrors the selected acceleration profile plus EV or Truck tuning.",
+        "picker_description": "Uses custom maximum-acceleration values by speed.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePointCount",
+        "label": "Breakpoint Count",
+        "description": "Choose how many points define the custom acceleration curve.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 2,
+        "max": 12,
+        "step": 1,
+        "parent_key": "CustomAccelProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint1MPH",
+        "label": "Point 1 Speed",
+        "description": "Vehicle speed in mph for curve point 1. Breakpoint speeds must increase from one point to the next.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint1Accel",
+        "label": "Point 1 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 1.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint2MPH",
+        "label": "Point 2 Speed",
+        "description": "Vehicle speed in mph for curve point 2.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint2Accel",
+        "label": "Point 2 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 2.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint3MPH",
+        "label": "Point 3 Speed",
+        "description": "Vehicle speed in mph for curve point 3.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint3Accel",
+        "label": "Point 3 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 3.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint4MPH",
+        "label": "Point 4 Speed",
+        "description": "Vehicle speed in mph for curve point 4.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint4Accel",
+        "label": "Point 4 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 4.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint5MPH",
+        "label": "Point 5 Speed",
+        "description": "Vehicle speed in mph for curve point 5.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [5, 6, 7, 8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint5Accel",
+        "label": "Point 5 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 5.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [5, 6, 7, 8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint6MPH",
+        "label": "Point 6 Speed",
+        "description": "Vehicle speed in mph for curve point 6.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [6, 7, 8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint6Accel",
+        "label": "Point 6 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 6.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [6, 7, 8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint7MPH",
+        "label": "Point 7 Speed",
+        "description": "Vehicle speed in mph for curve point 7.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [7, 8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint7Accel",
+        "label": "Point 7 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 7.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [7, 8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint8MPH",
+        "label": "Point 8 Speed",
+        "description": "Vehicle speed in mph for curve point 8.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint8Accel",
+        "label": "Point 8 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 8.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [8, 9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint9MPH",
+        "label": "Point 9 Speed",
+        "description": "Vehicle speed in mph for curve point 9.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint9Accel",
+        "label": "Point 9 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 9.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [9, 10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint10MPH",
+        "label": "Point 10 Speed",
+        "description": "Vehicle speed in mph for curve point 10.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint10Accel",
+        "label": "Point 10 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 10.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [10, 11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint11MPH",
+        "label": "Point 11 Speed",
+        "description": "Vehicle speed in mph for curve point 11.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint11Accel",
+        "label": "Point 11 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 11.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [11, 12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfileBreakpoint12MPH",
+        "label": "Point 12 Speed",
+        "description": "Vehicle speed in mph for curve point 12.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 150.0,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CustomAccelProfilePoint12Accel",
+        "label": "Point 12 Max Accel",
+        "description": "Maximum acceleration in m/s² at curve point 12.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 6.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "CustomAccelProfile",
+        "visible_when_key": "CustomAccelProfilePointCount",
+        "visible_when_values": [12],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "LongitudinalActuatorDelay",
+        "label": "Actuator Delay",
+        "description": "Actuator Delay",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "MaxDesiredAcceleration",
+        "label": "Maximum Acceleration",
+        "description": "Limit the strongest acceleration openpilot can command.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.1,
+        "max": 4.0,
+        "step": 0.1,
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StartAccel",
+        "label": "Start Acceleration",
+        "description": "Start Acceleration",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 4.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VEgoStarting",
+        "label": "Start Speed",
+        "description": "Start Speed",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.01,
+        "max": 1.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StopAccel",
+        "label": "Stop Acceleration",
+        "description": "Stop Acceleration",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -4.0,
+        "max": 0.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StoppingDecelRate",
+        "label": "Stopping Rate",
+        "description": "Stopping Rate",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.001,
+        "max": 1.0,
+        "step": 0.001,
+        "precision": 2,
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VEgoStopping",
+        "label": "Stop Speed",
+        "description": "Stop Speed",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.01,
+        "max": 1.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ConditionalExperimental",
+        "label": "Conditional Experimental Mode",
+        "description": "Automatically switch to \"Experimental Mode\" when set conditions are met. Allows the model to handle challenging situations with smarter decision making.",
+        "picker_description": "Enables Experimental Mode for configured conditions.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PersistExperimentalState",
+        "label": "Persist Experimental State",
+        "description": "Keep your manual Conditional Experimental override through reboots until you manually clear it.",
+        "picker_description": "Keeps a manual Experimental Mode override after reboot.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ConditionalExperimental",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CESpeed",
+        "label": "Below",
+        "description": "Switch to \"Experimental Mode\" when driving below this speed without a lead to help openpilot handle low-speed situations more smoothly.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 150.0,
+        "parent_key": "ConditionalExperimental",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CESpeedLead",
+        "label": "Below (With Lead)",
+        "description": "Switch to \"Experimental Mode\" when driving below this speed with a lead.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 150.0,
+        "parent_key": "ConditionalExperimental",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CECurves",
+        "label": "Curve Detected Ahead",
+        "description": "Switch to \"Experimental Mode\" when a curve is detected to allow the model to set an appropriate speed for the curve.",
+        "picker_description": "Enables Experimental Mode when a curve is detected ahead.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ConditionalExperimental",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CEStopLights",
+        "label": "\\\"Detected\\\" Stop Lights/Signs",
+        "description": "Switch to \"Experimental Mode\" whenever the driving model \"detects\" a red light or stop sign.\n\nDisclaimer: openpilot does not explicitly detect traffic lights or stop signs. In \"Experimental Mode\", openpilot makes end-to-end driving decisions from camera input, which means it may stop even when there's no clear reason!",
+        "picker_description": "Uses Experimental Mode for predicted red lights or stops.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ConditionalExperimental",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CELead",
+        "label": "Lead Detected Ahead",
+        "description": "Switch to \"Experimental Mode\" when a slower or stopped vehicle is detected. Can make braking smoother and more reliable on some vehicles.",
+        "picker_description": "Uses Experimental Mode for a slower or stopped lead.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ConditionalExperimental",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CEOpenRoad",
+        "label": "Open Road",
+        "description": "Keep Experimental Mode active on an open road after reaching the set speed when no lead vehicle is detected. This can help the model anticipate braking sooner.",
+        "picker_description": "Keeps Experimental Mode active on open roads without a lead.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ConditionalExperimental",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CESlowerLead",
+        "label": "Slower Lead",
+        "description": "Switch to \"Experimental Mode\" when a slower lead vehicle is detected ahead.",
+        "picker_description": "Uses Experimental Mode when a slower lead is detected.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CELead",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CEStoppedLead",
+        "label": "Stopped Lead",
+        "description": "Switch to \"Experimental Mode\" when a stopped lead vehicle is detected ahead.",
+        "picker_description": "Uses Experimental Mode when a stopped lead is detected.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CELead",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CEModelStopTime",
+        "label": "Predicted Stop In",
+        "description": "Switch to \"Experimental Mode\" when openpilot predicts a stop within the set time. This is usually triggered when the model \"sees\" a red light or stop sign ahead.\n\nDisclaimer: openpilot does not explicitly detect traffic lights or stop signs. In \"Experimental Mode\", openpilot makes end-to-end driving decisions from camera input, which means it may stop even when there's no clear reason!",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 9.0,
+        "step": 0.1,
+        "parent_key": "ConditionalExperimental",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CESignalSpeed",
+        "label": "Turn Signal Below",
+        "description": "Switch to \"Experimental Mode\" when using a turn signal below the set speed to allow the model to choose an appropriate speed for smoother left and right turns.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 150.0,
+        "parent_key": "ConditionalExperimental",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ShowCEMStatus",
+        "label": "Status Widget",
+        "description": "Show which condition triggered \"Experimental Mode\" on the driving screen.",
+        "picker_description": "Shows which condition triggered Experimental Mode.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ConditionalExperimental",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CurveSpeedController",
+        "label": "Curve Speed Controller",
+        "description": "Automatically slow down for upcoming curves using data learned from your driving style, adapting to curves as you would.",
+        "picker_description": "Slows for upcoming curves using your driving history.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ShowCSCStatus",
+        "label": "Status Widget",
+        "description": "Show the \"Curve Speed Controller\" target speed on the driving screen.",
+        "picker_description": "Shows the Curve Speed Controller target speed.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CurveSpeedController",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CurveSpeedControllerNoLead",
+        "label": "Only Without Lead",
+        "description": "Only use Curve Speed Controller when not following a lead vehicle.",
+        "picker_description": "Uses Curve Speed Controller only without a lead.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CurveSpeedController",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CalibratedLateralAcceleration",
+        "label": "Calibrated Lateral Accel",
+        "description": "The learned lateral acceleration from collected driving data. Higher values allow faster cornering.",
+        "picker_description": "Learned cornering comfort from your driving data.",
+        "data_type": "float",
+        "ui_type": "readout",
+        "precision": 2,
+        "unit": " m/s²",
+        "parent_key": "CurveSpeedController",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CalibrationProgress",
+        "label": "Calibration Progress",
+        "description": "How much curve data has been collected. Normal for the value to stay low.",
+        "picker_description": "How much curve data has been collected.",
+        "data_type": "float",
+        "ui_type": "readout",
+        "precision": 2,
+        "unit": "%",
+        "parent_key": "CurveSpeedController",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ResetCurveData",
+        "label": "Reset Curve Data",
+        "description": "Clear learned Curve Speed Controller data and begin training again from the default lateral acceleration.",
+        "ui_type": "action",
+        "action_label": "Reset",
+        "action_endpoint": "/api/curve_speed_controller/reset",
+        "confirm_message": "Reset all learned Curve Speed Controller data? Training will restart from the default value.",
+        "parent_key": "CurveSpeedController",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CustomPersonalities",
+        "label": "Driving Personalities",
+        "description": "Customize braking, acceleration, and following distance for each profile.",
+        "picker_description": "Customizes driving personalities to match your style.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TrafficPersonalityProfile",
+        "label": "Traffic Mode",
+        "description": "Customize the \"Traffic Mode\" personality profile. Designed for stop-and-go driving.",
+        "picker_description": "Customizes Traffic Mode for stop-and-go driving.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomPersonalities",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "AggressivePersonalityProfile",
+        "label": "Aggressive",
+        "description": "Customize the \"Aggressive\" personality profile. Designed for assertive driving with tighter gaps.",
+        "picker_description": "Customizes Aggressive Mode for assertive driving.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomPersonalities",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandardPersonalityProfile",
+        "label": "Standard",
+        "description": "Customize the \"Standard\" personality profile. Designed for balanced driving with moderate gaps.",
+        "picker_description": "Customizes Standard Mode for balanced driving.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomPersonalities",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "RelaxedPersonalityProfile",
+        "label": "Relaxed",
+        "description": "Customize the \"Relaxed\" personality profile. Designed for smoother, more comfortable driving with larger gaps.",
+        "picker_description": "Customizes Relaxed Mode for smoother driving.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomPersonalities",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TrafficFollow",
+        "label": "Following Distance",
+        "description": "The minimum following distance to the lead vehicle. openpilot blends between this value and the \"Relaxed\" profile as speed increases. Increase for more space; decrease for tighter gaps.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.5,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "TrafficPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TrafficJerkAcceleration",
+        "label": "Acceleration Smoothness",
+        "description": "How smoothly openpilot accelerates. Increase for gentler starts; decrease for faster but more abrupt takeoffs.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "TrafficPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TrafficJerkDeceleration",
+        "label": "Braking Smoothness",
+        "description": "How smoothly openpilot brakes. Increase for gentler stops; decrease for quicker but sharper braking.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "TrafficPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TrafficJerkDanger",
+        "label": "Safety Gap Bias",
+        "description": "How much extra space openpilot keeps from the vehicle ahead. Increase for larger gaps and more cautious following; decrease for tighter gaps and closer following.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "TrafficPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TrafficJerkSpeedDecrease",
+        "label": "Slowdown Response",
+        "description": "How smoothly openpilot slows down. Increase for more gradual deceleration; decrease for faster but sharper slowdowns.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "TrafficPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TrafficJerkSpeed",
+        "label": "Speed-Up Response",
+        "description": "How smoothly openpilot speeds up. Increase for more gradual acceleration; decrease for quicker but more jolting acceleration.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "TrafficPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "AggressiveFollow",
+        "label": "Following Distance",
+        "description": "How many seconds openpilot follows behind lead vehicles when using the \"Aggressive\" profile. Increase for more space; decrease for tighter gaps.\n\nDefault: 1.25 seconds.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.5,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "AggressivePersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "AggressiveFollowHigh",
+        "label": "High Speed Following Distance",
+        "description": "Following distance for higher speeds in the \"Aggressive\" profile. openpilot smoothly blends from the base value to this value as speed rises.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.5,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "AggressivePersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "AggressiveJerkAcceleration",
+        "label": "Acceleration Smoothness",
+        "description": "How smoothly openpilot accelerates. Increase for gentler starts; decrease for faster but more abrupt takeoffs.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "AggressivePersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "AggressiveJerkDeceleration",
+        "label": "Braking Smoothness",
+        "description": "How smoothly openpilot brakes. Increase for gentler stops; decrease for quicker but sharper braking.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "AggressivePersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "AggressiveJerkDanger",
+        "label": "Safety Gap Bias",
+        "description": "How much extra space openpilot keeps from the vehicle ahead. Increase for larger gaps and more cautious following; decrease for tighter gaps and closer following.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "AggressivePersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "AggressiveJerkSpeedDecrease",
+        "label": "Slowdown Response",
+        "description": "How smoothly openpilot slows down. Increase for more gradual deceleration; decrease for faster but sharper slowdowns.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "AggressivePersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "AggressiveJerkSpeed",
+        "label": "Speed-Up Response",
+        "description": "How smoothly openpilot speeds up. Increase for more gradual acceleration; decrease for quicker but more jolting acceleration.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "AggressivePersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandardFollow",
+        "label": "Following Distance",
+        "description": "How many seconds openpilot follows behind lead vehicles when using the \"Standard\" profile. Increase for more space; decrease for tighter gaps.\n\nDefault: 1.45 seconds.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.5,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "StandardPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandardFollowHigh",
+        "label": "High Speed Following Distance",
+        "description": "Following distance for higher speeds in the \"Standard\" profile. openpilot smoothly blends from the base value to this value as speed rises.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.5,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "StandardPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandardJerkAcceleration",
+        "label": "Acceleration Smoothness",
+        "description": "How smoothly openpilot accelerates. Increase for gentler starts; decrease for faster but more abrupt takeoffs.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "StandardPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandardJerkDeceleration",
+        "label": "Braking Smoothness",
+        "description": "How smoothly openpilot brakes. Increase for gentler stops; decrease for quicker but sharper braking.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "StandardPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandardJerkDanger",
+        "label": "Safety Gap Bias",
+        "description": "How much extra space openpilot keeps from the vehicle ahead. Increase for larger gaps and more cautious following; decrease for tighter gaps and closer following.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "StandardPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandardJerkSpeedDecrease",
+        "label": "Slowdown Response",
+        "description": "How smoothly openpilot slows down. Increase for more gradual deceleration; decrease for faster but sharper slowdowns.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "StandardPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandardJerkSpeed",
+        "label": "Speed-Up Response",
+        "description": "How smoothly openpilot speeds up. Increase for more gradual acceleration; decrease for quicker but more jolting acceleration.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "StandardPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "RelaxedFollow",
+        "label": "Following Distance",
+        "description": "How many seconds openpilot follows behind lead vehicles when using the \"Relaxed\" profile. Increase for more space; decrease for tighter gaps.\n\nDefault: 1.6 seconds.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.5,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "RelaxedPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "RelaxedFollowHigh",
+        "label": "High Speed Following Distance",
+        "description": "Following distance for higher speeds in the \"Relaxed\" profile. openpilot smoothly blends from the base value to this value as speed rises.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.5,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "RelaxedPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "RelaxedJerkAcceleration",
+        "label": "Acceleration Smoothness",
+        "description": "How smoothly openpilot accelerates. Increase for gentler starts; decrease for faster but more abrupt takeoffs.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "RelaxedPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "RelaxedJerkDeceleration",
+        "label": "Braking Smoothness",
+        "description": "How smoothly openpilot brakes. Increase for gentler stops; decrease for quicker but sharper braking.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "RelaxedPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "RelaxedJerkDanger",
+        "label": "Safety Gap Bias",
+        "description": "How much extra space openpilot keeps from the vehicle ahead. Increase for larger gaps and more cautious following; decrease for tighter gaps and closer following.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "RelaxedPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "RelaxedJerkSpeedDecrease",
+        "label": "Slowdown Response",
+        "description": "How smoothly openpilot slows down. Increase for more gradual deceleration; decrease for faster but sharper slowdowns.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "RelaxedPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "RelaxedJerkSpeed",
+        "label": "Speed-Up Response",
+        "description": "How smoothly openpilot speeds up. Increase for more gradual acceleration; decrease for quicker but more jolting acceleration.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25,
+        "max": 200,
+        "step": 1,
+        "parent_key": "RelaxedPersonalityProfile",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "LongitudinalTune",
+        "label": "Longitudinal Tuning",
+        "description": "Acceleration and braking control changes to fine-tune how openpilot drives.",
+        "picker_description": "Additional acceleration and braking tuning.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "AccelerationProfile",
+        "label": "Acceleration Profile",
+        "description": "How quickly openpilot speeds up. \"Eco\" is gentle and efficient, \"Sport\" is firmer and more responsive, and \"Sport+\" accelerates at the maximum rate allowed.",
+        "picker_description": "Chooses how quickly openpilot accelerates.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Standard"
+          },
+          {
+            "value": 1,
+            "label": "Eco"
+          },
+          {
+            "value": 2,
+            "label": "Sport"
+          },
+          {
+            "value": 3,
+            "label": "Sport+"
+          }
+        ],
+        "parent_key": "LongitudinalTune",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "DecelerationProfile",
+        "label": "Deceleration Profile",
+        "description": "How firmly openpilot slows down. \"Eco\" favors coasting, \"Sport\" applies stronger braking.",
+        "picker_description": "Chooses how firmly openpilot slows down.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Standard"
+          },
+          {
+            "value": 1,
+            "label": "Eco"
+          },
+          {
+            "value": 2,
+            "label": "Sport"
+          }
+        ],
+        "parent_key": "LongitudinalTune",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HumanLaneChanges",
+        "label": "Human-Like Lane Changes",
+        "description": "Lane-change behavior that mimics human drivers by anticipating and tracking adjacent vehicles during lane changes.",
+        "picker_description": "Anticipates nearby traffic during lane changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LongitudinalTune",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LeadDetectionThreshold",
+        "label": "Lead Detection Sensitivity",
+        "description": "How sensitive openpilot is to detecting vehicles. Higher sensitivity allows quicker detection at longer distances but may react to non-vehicle objects; lower sensitivity is more conservative and reduces false detections.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 25.0,
+        "max": 50.0,
+        "parent_key": "LongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TacoTune",
+        "label": "\\\"Taco Bell Run\\\" Turn Speed Hack",
+        "description": "The turn-speed hack from comma's 2022 \"Taco Bell Run\". Designed to slow down for left and right turns.",
+        "picker_description": "Slows for turns using the Taco Bell Run hack.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "NavLongitudinalAllowed",
+        "label": "Use Route Speed Control",
+        "description": "Allow an active navigation route to reduce cruise speed for upcoming turns, ramps, and roundabouts.",
+        "picker_description": "Lets navigation lower cruise speed for upcoming turns.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "QOLLongitudinal",
+        "label": "Quality of Life",
+        "description": "Miscellaneous acceleration and braking control changes to fine-tune how openpilot drives.",
+        "picker_description": "Adds quality-of-life acceleration and braking changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CustomCruise",
+        "label": "Cruise Interval",
+        "description": "How much the set speed increases or decreases for each + or – cruise control button press.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 1.0,
+        "max": 99.0,
+        "step": 1.0,
+        "precision": 0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 150.0,
+        "excluded_vehicle_makes": [
+          "Lexus",
+          "Toyota"
+        ],
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CustomCruiseLong",
+        "label": "Cruise Interval (Hold)",
+        "description": "How much the set speed increases or decreases while holding the + or – cruise control buttons.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 1.0,
+        "max": 99.0,
+        "step": 1.0,
+        "precision": 0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 150.0,
+        "excluded_vehicle_makes": [
+          "Lexus",
+          "Toyota"
+        ],
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ReverseCruise",
+        "label": "Reverse Cruise Increase",
+        "description": "Reverse Toyota/Lexus cruise-button behavior so a short press changes the dashboard set speed by 5 and a hold changes it by 1.",
+        "picker_description": "Swaps Toyota/Lexus short-press and hold cruise increments.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "vehicle_makes": [
+          "Lexus",
+          "Toyota"
+        ],
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ForceStops",
+        "label": "Force Stop at \\\"Detected\\\" Stop Lights/Signs",
+        "description": "Force openpilot to stop whenever the driving model \"detects\" a red light or stop sign.\n\nDisclaimer: openpilot does not explicitly detect traffic lights or stop signs. In \"Experimental Mode\", openpilot makes end-to-end driving decisions from camera input, which means it may stop even when there's no clear reason!",
+        "picker_description": "Commands stops for model-predicted red lights or stop signs.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ForceStopDistanceOffset",
+        "label": "Force Stop Distance Offset",
+        "description": "Tune where Force Stops bring the car to rest. Positive values let the car roll further before stopping (longer stop, closer to the line). Negative values stop the car sooner (more buffer before the line).",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": -20.0,
+        "max": 20.0,
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ForceStandstill",
+        "label": "Force Standstill State",
+        "description": "Keep openpilot in the standstill state until you press the gas pedal or the Resume/+ cruise button.\n\nThis applies to any engaged stop, not just red lights or stop signs.",
+        "picker_description": "Holds standstill until you press gas or Resume/+.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RadarTakeoffs",
+        "label": "Radar for Takeoffs",
+        "description": "Turns on/off using radar data to track leads at standstill, making following/takeoffs more responsive once leads move.",
+        "picker_description": "Uses radar to improve lead takeoffs from a stop.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IncreasedStoppedDistance",
+        "label": "Increase Stopped Distance by:",
+        "description": "Add extra space when stopped behind vehicles. Increase for more room; decrease for shorter gaps.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 10.0,
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "MapGears",
+        "label": "Map Accel/Decel to Gears",
+        "description": "Map the Acceleration or Deceleration profiles to the vehicle's \"Eco\" and \"Sport\" gear modes.",
+        "picker_description": "Maps Accel/Decel profiles to Eco and Sport gear modes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SetSpeedOffset",
+        "label": "Offset Set Speed by:",
+        "description": "Increase the set speed by the chosen offset. For example, set +5 if you usually drive 5 over the limit.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "precision": 0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 150.0,
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PulseGlideSpeedDelta",
+        "label": "Pulse and Glide Speed Delta",
+        "description": "Developer-only: when Pulse and Glide is assigned to a wheel button, coast this far below the current cruise target before accelerating back up.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.5,
+        "max": 30.0,
+        "step": 0.5,
+        "precision": 1,
+        "unit_type": "vehicle_speed",
+        "imperial_max": 15.0,
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "WeatherPresets",
+        "label": "Weather Condition Offsets",
+        "description": "Automatically adjust driving behavior based on real-time weather. Helps maintain comfort and safety in low visibility, rain, or snow.",
+        "picker_description": "Adjusts driving behavior for current weather.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LowVisibilityOffsets",
+        "label": "Low Visibility (fog)",
+        "description": "Customise settings for driving in low visibility situations",
+        "ui_type": "group",
+        "is_parent_toggle": true,
+        "parent_key": "WeatherPresets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IncreaseFollowingLowVisibility",
+        "label": "Increase Following Distance by:",
+        "description": "Add extra space behind lead vehicles in low visibility. Increase for more space; decrease for tighter gaps.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "LowVisibilityOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IncreasedStoppedDistanceLowVisibility",
+        "label": "Increase Stopped Distance by:",
+        "description": "Add extra buffer when stopped behind vehicles in low visibility. Increase for more room; decrease for shorter gaps.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 10.0,
+        "parent_key": "LowVisibilityOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ReduceAccelerationLowVisibility",
+        "label": "Reduce Acceleration by:",
+        "description": "Lower the maximum acceleration in low visibility. Increase for softer takeoffs; decrease for quicker but less stable takeoffs.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "parent_key": "LowVisibilityOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ReduceLateralAccelerationLowVisibility",
+        "label": "Reduce Speed in Curves by:",
+        "description": "Lower the desired speed while driving through curves in low visibility. Increase for safer, gentler turns; decrease for more aggressive driving in curves.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "parent_key": "LowVisibilityOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RainOffsets",
+        "label": "Light/Medium Rain",
+        "description": "Customise settings for driving in light & medium rain",
+        "ui_type": "group",
+        "is_parent_toggle": true,
+        "parent_key": "WeatherPresets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IncreaseFollowingRain",
+        "label": "Increase Following Distance by:",
+        "description": "Add extra space behind lead vehicles in rain. Increase for more space; decrease for tighter gaps.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "RainOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IncreasedStoppedDistanceRain",
+        "label": "Increase Stopped Distance by:",
+        "description": "Add extra buffer when stopped behind vehicles in rain. Increase for more room; decrease for shorter gaps.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 10.0,
+        "parent_key": "RainOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ReduceAccelerationRain",
+        "label": "Reduce Acceleration by:",
+        "description": "Lower the maximum acceleration in rain. Increase for softer takeoffs; decrease for quicker but less stable takeoffs.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "parent_key": "RainOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ReduceLateralAccelerationRain",
+        "label": "Reduce Speed in Curves by:",
+        "description": "Lower the desired speed while driving through curves in rain. Increase for safer, gentler turns; decrease for more aggressive driving in curves.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "parent_key": "RainOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RainStormOffsets",
+        "label": "Heavy Rain",
+        "description": "Customise settings for driving in heavy rain",
+        "ui_type": "group",
+        "is_parent_toggle": true,
+        "parent_key": "WeatherPresets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IncreaseFollowingRainStorm",
+        "label": "Increase Following Distance by:",
+        "description": "Add extra space behind lead vehicles in a rainstorm. Increase for more space; decrease for tighter gaps.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "RainStormOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IncreasedStoppedDistanceRainStorm",
+        "label": "Increase Stopped Distance by:",
+        "description": "Add extra buffer when stopped behind vehicles in a rainstorm. Increase for more room; decrease for shorter gaps.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 10.0,
+        "parent_key": "RainStormOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ReduceAccelerationRainStorm",
+        "label": "Reduce Acceleration by:",
+        "description": "Lower the maximum acceleration in a rainstorm. Increase for softer takeoffs; decrease for quicker but less stable takeoffs.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "parent_key": "RainStormOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ReduceLateralAccelerationRainStorm",
+        "label": "Reduce Speed in Curves by:",
+        "description": "Lower the desired speed while driving through curves in a rainstorm. Increase for safer, gentler turns; decrease for more aggressive driving in curves.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "parent_key": "RainStormOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SnowOffsets",
+        "label": "Snow",
+        "description": "Customise settings for driving in snow",
+        "ui_type": "group",
+        "is_parent_toggle": true,
+        "parent_key": "WeatherPresets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IncreaseFollowingSnow",
+        "label": "Increase Following Distance by:",
+        "description": "Add extra space behind lead vehicles in snow. Increase for more space; decrease for tighter gaps.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 3.0,
+        "step": 0.01,
+        "parent_key": "SnowOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IncreasedStoppedDistanceSnow",
+        "label": "Increase Stopped Distance by:",
+        "description": "Add extra buffer when stopped behind vehicles in snow. Increase for more room; decrease for shorter gaps.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 10.0,
+        "parent_key": "SnowOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ReduceAccelerationSnow",
+        "label": "Reduce Acceleration by:",
+        "description": "Lower the maximum acceleration in snow. Increase for softer takeoffs; decrease for quicker but less stable takeoffs.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "parent_key": "SnowOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ReduceLateralAccelerationSnow",
+        "label": "Reduce Speed in Curves by:",
+        "description": "Lower the desired speed while driving through curves in snow. Increase for safer, gentler turns; decrease for more aggressive driving in curves.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "parent_key": "SnowOffsets",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SpeedLimitController",
+        "label": "Speed Limit Controller",
+        "description": "Limit openpilot's maximum driving speed using configured map, dashboard, and optional vision sources. Press + above a limit for a persistent override; hold the gas pedal for a temporary override.",
+        "picker_description": "Press + above a limit for a persistent override; hold the gas pedal for a temporary override.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCConfirmation",
+        "label": "Confirm New Speed Limits",
+        "description": "Ask before changing to a new speed limit. To accept, tap the flashing on-screen widget or press the Cruise Increase button. To deny, press the Cruise Decrease button or ignore the prompt for 30 seconds.",
+        "picker_description": "Asks before applying a new speed limit.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCConfirmationLower",
+        "label": "Confirm Lower Limits",
+        "description": "Require confirmation before applying a newly detected lower speed limit.",
+        "picker_description": "Asks before applying a lower speed limit.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "SLCConfirmation",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCConfirmationHigher",
+        "label": "Confirm Higher Limits",
+        "description": "Require confirmation before applying a newly detected higher speed limit.",
+        "picker_description": "Asks before applying a higher speed limit.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "SLCConfirmation",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCLookaheadHigher",
+        "label": "Higher Limit Lookahead Time",
+        "description": "How far ahead openpilot anticipates upcoming higher speed limits from downloaded map data.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 30.0,
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCLookaheadLower",
+        "label": "Lower Limit Lookahead Time",
+        "description": "How far ahead openpilot anticipates upcoming lower speed limits from downloaded map data.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 30.0,
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SetSpeedLimit",
+        "label": "Match Speed Limit on Engage",
+        "description": "When openpilot is first enabled, automatically set the max speed to the current posted limit.",
+        "picker_description": "Matches the speed limit when openpilot engages.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCFallback",
+        "label": "Fallback Speed",
+        "description": "Choose the speed to use when no speed limit source is currently available.",
+        "picker_description": "Chooses the speed when no limit source is available.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Set Speed"
+          },
+          {
+            "value": 1,
+            "label": "Experimental Mode"
+          },
+          {
+            "value": 2,
+            "label": "Previous Limit"
+          }
+        ],
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCMapboxFiller",
+        "label": "Use Mapbox as Fallback",
+        "description": "Use Mapbox speed-limit data when no other source is available.",
+        "picker_description": "Uses Mapbox speed limits as a fallback.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCPriority1",
+        "label": "Primary Speed Limit Source",
+        "description": "Choose the first speed-limit source to trust when more than one is available.",
+        "data_type": "string",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": "Dashboard",
+            "label": "Dashboard"
+          },
+          {
+            "value": "Map Data",
+            "label": "Map Data"
+          },
+          {
+            "value": "Vision",
+            "label": "Vision"
+          },
+          {
+            "value": "Highest",
+            "label": "Highest"
+          },
+          {
+            "value": "Lowest",
+            "label": "Lowest"
+          }
+        ],
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCPriority2",
+        "label": "Secondary Speed Limit Source",
+        "description": "Choose the backup speed-limit source when the primary one is unavailable.",
+        "picker_description": "Chooses the backup speed-limit source.",
+        "data_type": "string",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": "None",
+            "label": "None"
+          },
+          {
+            "value": "Dashboard",
+            "label": "Dashboard"
+          },
+          {
+            "value": "Map Data",
+            "label": "Map Data"
+          },
+          {
+            "value": "Vision",
+            "label": "Vision"
+          }
+        ],
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "Offset1",
+        "label": "Speed Offset (0–24 mph)",
+        "description": "How much to offset posted speed-limits between 0 and 24 mph.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -99.0,
+        "max": 99.0,
+        "step": 1.0,
+        "precision": 0,
+        "unit_type": "vehicle_speed",
+        "metric_min": -150.0,
+        "metric_max": 150.0,
+        "unit_range_index": 0,
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "Offset2",
+        "label": "Speed Offset (25–34 mph)",
+        "description": "How much to offset posted speed-limits between 25 and 34 mph.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -99.0,
+        "max": 99.0,
+        "step": 1.0,
+        "precision": 0,
+        "unit_type": "vehicle_speed",
+        "metric_min": -150.0,
+        "metric_max": 150.0,
+        "unit_range_index": 1,
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "Offset3",
+        "label": "Speed Offset (35–44 mph)",
+        "description": "How much to offset posted speed-limits between 35 and 44 mph.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -99.0,
+        "max": 99.0,
+        "step": 1.0,
+        "precision": 0,
+        "unit_type": "vehicle_speed",
+        "metric_min": -150.0,
+        "metric_max": 150.0,
+        "unit_range_index": 2,
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "Offset4",
+        "label": "Speed Offset (45–54 mph)",
+        "description": "How much to offset posted speed-limits between 45 and 54 mph.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -99.0,
+        "max": 99.0,
+        "step": 1.0,
+        "precision": 0,
+        "unit_type": "vehicle_speed",
+        "metric_min": -150.0,
+        "metric_max": 150.0,
+        "unit_range_index": 3,
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "Offset5",
+        "label": "Speed Offset (55–64 mph)",
+        "description": "How much to offset posted speed-limits between 55 and 64 mph.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -99.0,
+        "max": 99.0,
+        "step": 1.0,
+        "precision": 0,
+        "unit_type": "vehicle_speed",
+        "metric_min": -150.0,
+        "metric_max": 150.0,
+        "unit_range_index": 4,
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "Offset6",
+        "label": "Speed Offset (65–74 mph)",
+        "description": "How much to offset posted speed-limits between 65 and 74 mph.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -99.0,
+        "max": 99.0,
+        "step": 1.0,
+        "precision": 0,
+        "unit_type": "vehicle_speed",
+        "metric_min": -150.0,
+        "metric_max": 150.0,
+        "unit_range_index": 5,
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "Offset7",
+        "label": "Speed Offset (75–99 mph)",
+        "description": "How much to offset posted speed-limits between 75 and 99 mph.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -99.0,
+        "max": 99.0,
+        "step": 1.0,
+        "precision": 0,
+        "unit_type": "vehicle_speed",
+        "metric_min": -150.0,
+        "metric_max": 150.0,
+        "unit_range_index": 6,
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ShowSLCOffset",
+        "label": "Show Speed Limit Offset",
+        "description": "Show the current offset on the compact driving display. The unified Max Set / Speed Limit card always shows nonzero offsets.",
+        "picker_description": "Shows the offset on the compact display; the unified card always shows nonzero offsets.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SpeedLimitSources",
+        "label": "Show Speed Limit Sources",
+        "description": "Display the speed-limit sources and their current values on the driving screen.",
+        "picker_description": "Shows speed-limit sources and their current values.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ConditionalChill",
+        "label": "Conditional Chill Mode",
+        "description": "Keep \"Experimental Mode\" on by default, but temporarily switch to \"Chill Mode\" in simple cruising scenes where speed holding is usually better.",
+        "picker_description": "Temporarily uses Chill Mode during simple cruising.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "PersistChillState",
+        "label": "Persist Chill State",
+        "description": "Keep your manual Conditional Chill override through reboots until you manually clear it.",
+        "picker_description": "Keeps a manual Chill Mode override after reboot.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ConditionalChill",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CCMSpeed",
+        "label": "Above",
+        "description": "Switch to \"Chill Mode\" on open roads above this speed when no lead is detected and the car is still below the set speed.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 150.0,
+        "parent_key": "ConditionalChill",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CCMSpeedLead",
+        "label": "Above (With Lead)",
+        "description": "Switch to \"Chill Mode\" when following a stable lead above this speed.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 150.0,
+        "parent_key": "ConditionalChill",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CCMLead",
+        "label": "Stable Lead Ahead",
+        "description": "Switch to \"Chill Mode\" when following a steady, well-tracked lead vehicle at cruising speeds.",
+        "picker_description": "Uses Chill Mode when following a steady lead.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ConditionalChill",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CCMLaunchAssist",
+        "label": "Launch Assist",
+        "description": "Temporarily switch to \"Chill Mode\" when starting from a stop if planner is already allowing throttle. Useful if your car launches too slowly from lights or stop signs.",
+        "picker_description": "Uses Chill Mode for smoother launches from a stop.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ConditionalChill",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CCMSetSpeedMargin",
+        "label": "Set Speed Margin",
+        "description": "How far below the set speed the car must be before open-road Conditional Chill can engage.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 15.0,
+        "step": 1.0,
+        "unit_type": "vehicle_speed",
+        "metric_max": 30.0,
+        "parent_key": "ConditionalChill",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ShowCCMStatus",
+        "label": "Status Widget",
+        "description": "Show which condition triggered \"Chill Mode\" on the driving screen.",
+        "picker_description": "Shows which condition triggered Chill Mode.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ConditionalChill",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCAbbreviatedSources",
+        "label": "Show Abbreviated Icon Sources",
+        "description": "Render the speed-limit sources as compact text labels (e.g. \"Dash-45\", \"MapD-30\") without icons.",
+        "picker_description": "Shows speed-limit sources as compact text labels.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SLCActiveSourcesOnly",
+        "label": "Only Show Sources With Speed Limits",
+        "description": "Hide source rows that have no current speed limit reading. Works with both abbreviated and full display.",
+        "picker_description": "Hides speed-limit sources with no current reading.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "SpeedLimitController",
+        "settings_tier": "advanced"
+      }
+    ]
+  },
+  {
+    "name": "Vision Speed Limits",
+    "icon": "bi-camera",
+    "params": [
+      {
+        "key": "VisionSpeedLimitDetection",
+        "label": "Vision Speed Limit Detection",
+        "description": "Use the road camera to detect and display speed-limit signs, with optional use by Speed Limit Controller.",
+        "picker_description": "Detects and displays speed-limit signs with the road camera.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VisionSpeedLimitLowLimitFilter",
+        "label": "Ignore Low Vision Speed Limits",
+        "description": "When SLC is enabled, prevent it from acting on vision-detected speed limits at or below the configured threshold. Detection, display, debugging, and training collection remain active.",
+        "picker_description": "Ignores vision speed limits below the configured threshold.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "parent_key": "VisionSpeedLimitDetection",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VisionSpeedLimitLowLimitThreshold",
+        "label": "Ignore At or Below",
+        "description": "Vision-detected limits at or below this value will not control speed. The value uses your selected mph or km/h unit.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 5,
+        "max": 80,
+        "step": 5,
+        "unit_type": "vehicle_speed",
+        "parent_key": "VisionSpeedLimitLowLimitFilter",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VisionSpeedLimitAutoBookmark",
+        "label": "Auto-Bookmark Vision Signs",
+        "description": "Automatically save confirmed vision-detected speed limit signs into the speed-limit debug session so they can be imported into the training set later.",
+        "picker_description": "Saves confirmed vision speed-limit signs for training.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "parent_key": "VisionSpeedLimitDetection",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VisionSpeedLimitTrainingCollector",
+        "label": "Collect Extra Vision Training Samples",
+        "description": "Save lower-threshold vision sign candidates into the debug session for later training import without showing or applying them live. Leave this on if you want to help improve the model.",
+        "picker_description": "Saves extra vision sign samples for training.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "VisionSpeedLimitDetection",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VisionSpeedLimitAutoPreserveSegment",
+        "label": "Preserve Auto-Bookmarked Segments",
+        "description": "Also send a real bookmark for confirmed auto-bookmarks so loggerd preserves the route segment. Leave this off unless you specifically want the extra storage usage.",
+        "picker_description": "Preserves route segments containing auto-bookmarks.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "VisionSpeedLimitAutoBookmark",
+        "settings_tier": "advanced"
+      }
+    ]
+  },
+  {
+    "name": "Visual (Display & UI)",
+    "icon": "bi-eye",
+    "params": [
+      {
+        "key": "AdvancedCustomUI",
+        "label": "Advanced UI Controls",
+        "description": "Advanced visual changes to fine-tune how the driving screen looks.",
+        "picker_description": "Additional settings for fine-tuning the driving screen.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HideSpeed",
+        "label": "Hide Current Speed",
+        "description": "Hide the current speed from the driving screen.",
+        "picker_description": "Hides current speed from the driving screen.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedCustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LeadIndicator",
+        "label": "Lead Indicator",
+        "description": "Show the lead-vehicle marker on the driving screen.",
+        "picker_description": "Shows the detected lead vehicle.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HideMaxSpeed",
+        "label": "Hide Max Speed",
+        "description": "Hide the max speed from the driving screen.",
+        "picker_description": "Hides the max-speed indicator from the driving screen.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedCustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HideAlerts",
+        "label": "Hide Non-Critical Alerts",
+        "description": "Hide non-critical alerts from the driving screen.",
+        "picker_description": "Hides non-critical alerts from the driving screen.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedCustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HideSteeringWheel",
+        "label": "Hide Steering Wheel",
+        "description": "Hide the steering-wheel button from the top-right of the driving screen.",
+        "picker_description": "Hides the steering-wheel button on the driving screen.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedCustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "WheelSpeed",
+        "label": "Use Wheel Speed",
+        "description": "Use the vehicle's wheel speed instead of the cluster speed. This is purely a visual change and doesn't impact how openpilot drives!",
+        "picker_description": "Uses wheel speed instead of cluster speed for display.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedCustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HolidayThemes",
+        "label": "Holiday Themes",
+        "description": "Automatically apply seasonal theme assets during holiday windows. Turn this off to keep your normal theme year-round.",
+        "picker_description": "Applies seasonal themes automatically.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CustomUI",
+        "label": "Driving Screen Widgets",
+        "description": "Custom StarPilot widgets for the driving screen.",
+        "picker_description": "Enables StarPilot widgets on the driving screen.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "AccelerationPath",
+        "label": "Acceleration Path",
+        "description": "Color the driving path by planned acceleration and braking.",
+        "picker_description": "Colors the path by planned acceleration and braking.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RainbowPath",
+        "label": "Rainbow Road",
+        "description": "Color the driving path like a rainbow road.\n\nOn the Python UIs this overrides acceleration and braking path coloring.",
+        "picker_description": "Colors the driving path like a rainbow.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ShowModeStatusBanner",
+        "label": "Show Mode Status Banner",
+        "description": "Show a popup banner when the Python driving UIs switch into chill, experimental, switchback, or override mode.",
+        "picker_description": "Shows a banner when driving mode changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "AdjacentPath",
+        "label": "Adjacent Lanes",
+        "description": "Show the driving paths for the left and right lanes.",
+        "picker_description": "Shows driving paths for adjacent lanes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "BlindSpotPath",
+        "label": "Blind Spot Path",
+        "description": "Show a red path when a vehicle is in that lane's blind spot.",
+        "picker_description": "Marks adjacent paths when a blind spot is detected.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PIPPreviewEnabled",
+        "label": "Enable PiP Side Preview",
+        "description": "Show a temporary Picture-in-Picture bubble of the side window while the turn signal is on or a blind spot is detected.",
+        "picker_description": "Shows a side-camera preview on a turn signal or blind spot.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomUI",
+        "is_parent_toggle": true,
+        "requires_nonempty_key": "PIPPreviewMask",
+        "disabled_reason": "Configure the PiP window mask first in Galaxy > PiP Side Camera",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "PIPPreviewShowOnBlinker",
+        "label": "Show on Turn Signal",
+        "description": "Display the side preview while the corresponding turn signal is engaged.",
+        "picker_description": "Shows the side preview while a turn signal is on.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "PIPPreviewEnabled",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "PIPPreviewShowOnBSM",
+        "label": "Show on Blind Spot Detection",
+        "description": "Display the side preview when a vehicle is detected in the blind spot, whether from factory BSM, V-ASM, or both.",
+        "picker_description": "Shows the side preview when a blind spot is detected.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "PIPPreviewEnabled",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "PIPPreviewInvert",
+        "label": "Invert Side View Orientation",
+        "description": "Flips the camera horizontally to switch whether your car's body appears on the inner/left or outer/right edge of the preview.",
+        "picker_description": "Keep off for the default view with the car body along the inside edge.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "PIPPreviewEnabled",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "Compass",
+        "label": "Compass",
+        "description": "Show the current driving direction with a simple on-screen compass.",
+        "picker_description": "Shows driving direction with an on-screen compass.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "OnroadDistanceButton",
+        "label": "Driving Personality Button",
+        "description": "Control and view the current driving personality via a driving screen widget.",
+        "picker_description": "Controls and shows driving personality from a widget.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PedalsOnUI",
+        "label": "Pedal-Responsive Wheel",
+        "description": "Tint the on-screen steering-wheel icon green while accelerating and red while braking. Also show gas and brake indicators.\n\nDynamic: Opacity changes according to how much openpilot is accelerating or braking\nStatic: Full when active, dim when not",
+        "picker_description": "Colors the driving-screen wheel by acceleration and braking, with optional pedal indicators.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "DynamicPedalsOnUI",
+        "label": "Dynamic",
+        "description": "Fade the gas and brake indicators based on how much openpilot is accelerating or braking.",
+        "picker_description": "Fades pedal indicators with acceleration and braking.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "PedalsOnUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "StaticPedalsOnUI",
+        "label": "Static",
+        "description": "Show full-strength gas and brake indicators when active, and dim them when inactive.",
+        "picker_description": "Shows full pedal indicators when active; dims otherwise.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "PedalsOnUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RotatingWheel",
+        "label": "Rotating Steering Wheel",
+        "description": "Rotate the driving screen wheel with the physical steering wheel.",
+        "picker_description": "Rotates the driving-screen wheel with the physical wheel.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ModelUI",
+        "label": "Model UI",
+        "description": "Model visualizations for the driving path, lane lines, path edges, and road edges.",
+        "picker_description": "Shows model paths, lane lines, and road edges.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "DynamicPathWidth",
+        "label": "Dynamic Path Width",
+        "description": "Change the path width based on engagement.\n\nFully Engaged: 100%\nAlways On Lateral: 75%\nDisengaged: 50%",
+        "picker_description": "Changes path width with engagement state.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ModelUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LaneLinesWidth",
+        "label": "Lane Lines Width",
+        "description": "Set the lane-line thickness.\n\nDefault matches the MUTCD lane-line width standard of 4 inches.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 24.0,
+        "parent_key": "ModelUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LaneLinesColor",
+        "label": "Lane Line Color",
+        "description": "Set a custom lane-line color for the Python UIs.\n\nUse Stock to follow the default line color behavior.",
+        "data_type": "string",
+        "ui_type": "color",
+        "default_color": "#00FF00",
+        "parent_key": "ModelUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "BorderWidth",
+        "label": "Border Width",
+        "description": "Scale the driving-screen border thickness.\n\n100% matches the stock border width.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 25.0,
+        "max": 250.0,
+        "step": 5.0,
+        "parent_key": "ModelUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PathEdgeWidth",
+        "label": "Path Edges Width",
+        "description": "Set the driving-path edge width that represents different driving modes and statuses.\n\nDefault is 20% of the total path width.\n\nColor Guide:\n\n- Light Blue: Always On Lateral\n- Green: Default\n- Orange: Experimental Mode\n- Red: Traffic Mode\n- Yellow: Conditional Experimental Mode overridden",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 100.0,
+        "parent_key": "ModelUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PathEdgesColor",
+        "label": "Path Edge Color",
+        "description": "Set a custom path-edge color for the Python UIs.\n\nUse Stock to follow the default line color behavior.",
+        "data_type": "string",
+        "ui_type": "color",
+        "default_color": "#00FF00",
+        "parent_key": "ModelUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PathWidth",
+        "label": "Path Width",
+        "description": "Set the driving-path width.\n\nDefault (6.1 feet) matches the width of a 2019 Lexus ES 350.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 10.0,
+        "step": 0.1,
+        "parent_key": "ModelUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PathColor",
+        "label": "Path Color",
+        "description": "Set a custom filled-path color for the Python UIs.\n\nUse Stock to follow the default path color behavior.",
+        "data_type": "string",
+        "ui_type": "color",
+        "default_color": "#30FF9C",
+        "parent_key": "ModelUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RoadEdgesWidth",
+        "label": "Road Edges Width",
+        "description": "Set the road-edge thickness.\n\nDefault matches half of the MUTCD lane-line width standard of 4 inches.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 24.0,
+        "parent_key": "ModelUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NavigationUI",
+        "label": "Navigation Widgets",
+        "description": "Speed limits, and other navigation widgets.",
+        "picker_description": "Shows navigation and speed-limit widgets.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ClearNavOnOffroad",
+        "label": "Clear Route When Offroad",
+        "description": "Clear the active navigation destination when the device goes offroad.",
+        "picker_description": "Clears the active route when the device goes offroad.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ClearNavOnOffroadTimeoutMinutes",
+        "label": "Clear Route Delay",
+        "description": "How long the device can stay offroad before clearing the active route. Set to 0 for immediate clearing.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0,
+        "max": 180,
+        "step": 1,
+        "parent_key": "ClearNavOnOffroad",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RoadNameUI",
+        "label": "Road Name",
+        "description": "Display the road name at the bottom of the driving screen using data from \"OpenStreetMap (OSM)\".",
+        "picker_description": "Shows the current road name on the driving screen.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "NavigationUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ShowSpeedLimits",
+        "label": "Show Speed Limits",
+        "description": "Show the current speed limit on the driving screen. The position depends on the device UI. Uses data from the car's dashboard (if supported) and \"OpenStreetMap (OSM)\".",
+        "picker_description": "Shows the current speed limit on the driving screen.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "NavigationUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SLCMapboxFiller",
+        "label": "Show Speed Limits from Mapbox",
+        "description": "Use Mapbox speed-limit data when no other source is available.",
+        "picker_description": "Uses Mapbox speed limits as a fallback.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "NavigationUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "UseVienna",
+        "label": "Use Vienna-Style Speed Signs",
+        "description": "Use Vienna-style (EU) speed-limit signs on the compact driving display. The unified Max Set / Speed Limit card uses its own layout.",
+        "picker_description": "Uses Vienna-style signs on the compact display.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "NavigationUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "QOLVisuals",
+        "label": "Quality of Life",
+        "description": "Miscellaneous visual changes to fine-tune how the driving screen looks.",
+        "picker_description": "Additional settings for fine-tuning the driving screen.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CameraView",
+        "label": "Camera View",
+        "description": "Choose which camera feed the driving screen uses: Auto, Driver, Standard, or Wide.",
+        "picker_description": "Chooses the camera feed used by the driving screen.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Auto"
+          },
+          {
+            "value": 1,
+            "label": "Driver"
+          },
+          {
+            "value": 2,
+            "label": "Standard"
+          },
+          {
+            "value": 3,
+            "label": "Wide"
+          }
+        ],
+        "parent_key": "QOLVisuals",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "DriverCamera",
+        "label": "Show Driver Camera When In Reverse",
+        "description": "Show the driver camera feed when the vehicle is in reverse.",
+        "picker_description": "Shows the driver camera feed in reverse.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "QOLVisuals",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "StoppedTimer",
+        "label": "Stopped Timer",
+        "description": "Show a timer when stopped in place of the current speed to indicate how long the vehicle has been stopped.",
+        "picker_description": "Shows how long the vehicle has been stopped.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "QOLVisuals",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "StockConfidenceBallWidget",
+        "label": "Stock Confidence Ball Widget",
+        "description": "Use the original moving confidence ball on the small comma 4 UI instead of the fixed confidence, CEM/CCM, and personality sidebar.",
+        "picker_description": "Uses the stock moving confidence ball on comma 4.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "QOLVisuals",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SimpleMode",
+        "label": "Simple Mode",
+        "description": "Use a more stock-like presentation by hiding most branch-specific UI, theme, sound, and alert styling. This only changes presentation and does not change driving behavior.",
+        "picker_description": "Uses a stock-like UI without changing driving behavior.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "QOLVisuals",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HideChangingLanesBanner",
+        "label": "Hide Changing Lanes Banner",
+        "description": "Hide the 'Changing Lanes' banner from the driving screen.",
+        "picker_description": "Hides the Changing Lanes banner.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedCustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HideDistanceProfileBanner",
+        "label": "Hide Distance Profile Banner",
+        "description": "Hide the driving personality banner when changing distance profiles.",
+        "picker_description": "Hides the personality banner when distance changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedCustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HideDMIcon",
+        "label": "Hide Driver Monitoring Icon",
+        "description": "Hide the driver monitoring icon from the driving screen.",
+        "picker_description": "Hides the driver-monitoring icon.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedCustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HideTurningBanner",
+        "label": "Hide Turning Banner",
+        "description": "Hide the 'Turning Left/Right' banner from the driving screen.",
+        "picker_description": "Hides the Turning Left/Right banner.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedCustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "DisableWideRoad",
+        "label": "Disable Wide Road Camera",
+        "description": "Only enable this if the wide camera is broken or for development!\n\nDisabling the wide camera may degrade driving performance and cause instability.\n\nRequires a reboot to take effect.",
+        "picker_description": "Disables the wide camera; may reduce driving performance.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "advanced"
+      }
+    ]
+  },
+  {
+    "name": "Sounds & Alerts",
+    "icon": "bi-volume-up",
+    "params": [
+      {
+        "key": "AlertVolumeControl",
+        "label": "Alert Volume Controller",
+        "description": "Set how loud each type of openpilot alert is to keep routine prompts from becoming distracting.",
+        "picker_description": "Sets the volume for each alert type.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SwitchbackModeCooldown",
+        "label": "Switchback Mode Cooldown",
+        "description": "Set the minimum time between repeated steering-limit and minimum-steer-speed alerts while \"Switchback Mode\" is active. Useful on winding roads where \"Turn Exceeds Steering Limit\" and \"Steer Unavailable Under\" can repeat frequently. Set to Off to disable the cooldown even when the mode is on.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 30.0,
+        "step": 1.0,
+        "parent_key": "AlertVolumeControl",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "BelowSteerSpeedVolume",
+        "label": "Min Steer Speed Alert Volume",
+        "description": "Set the volume for the \"Steer Unavailable Under\" alert shown below the car's minimum steering speed.\n\nSet to Muted to silence only this alert.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 101.0,
+        "step": 1.0,
+        "parent_key": "AlertVolumeControl",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "DisengageVolume",
+        "label": "Disengage Volume",
+        "description": "Set the volume for alerts when openpilot disengages.\n\nExamples include: \"Cruise Fault: Restart the Car\", \"Parking Brake Engaged\", \"Pedal Pressed\".",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 101.0,
+        "step": 1.0,
+        "parent_key": "AlertVolumeControl",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "EngageVolume",
+        "label": "Engage Volume",
+        "description": "Set the volume for the chime when openpilot engages, such as after pressing the \"RESUME\" or \"SET\" steering wheel buttons.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 101.0,
+        "step": 1.0,
+        "parent_key": "AlertVolumeControl",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PromptVolume",
+        "label": "Prompt Volume",
+        "description": "Set the volume for prompts that need attention.\n\nExamples include: \"Car Detected in Blindspot\", \"Steering Temporarily Unavailable\", \"Turn Exceeds Steering Limit\".",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 101.0,
+        "step": 1.0,
+        "parent_key": "AlertVolumeControl",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "PromptDistractedVolume",
+        "label": "Prompt Distracted Volume",
+        "description": "Set the volume for prompts when openpilot detects driver distraction or unresponsiveness.\n\nExamples include: \"Pay Attention\", \"Touch Steering Wheel\".",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 101.0,
+        "step": 1.0,
+        "parent_key": "AlertVolumeControl",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RefuseVolume",
+        "label": "Refuse Volume",
+        "description": "Set the volume for alerts when openpilot refuses to engage.\n\nExamples include: \"Brake Hold Active\", \"Door Open\", \"Seatbelt Unlatched\".",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 101.0,
+        "step": 1.0,
+        "parent_key": "AlertVolumeControl",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "WarningSoftVolume",
+        "label": "Warning Soft Volume",
+        "description": "Set the volume for softer warnings about potential risks.\n\nExamples include: \"BRAKE! Risk of Collision\", \"Steering Temporarily Unavailable\".",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 25.0,
+        "max": 101.0,
+        "step": 1.0,
+        "parent_key": "AlertVolumeControl",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "WarningImmediateVolume",
+        "label": "Warning Immediate Volume",
+        "description": "Set the volume for the loudest warnings that require urgent attention.\n\nExamples include: \"DISENGAGE IMMEDIATELY — Driver Distracted\", \"DISENGAGE IMMEDIATELY — Driver Unresponsive\".",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 25.0,
+        "max": 101.0,
+        "step": 1.0,
+        "parent_key": "AlertVolumeControl",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "GoatScream",
+        "label": "Goat Scream",
+        "description": "Play the infamous \"Goat Scream\" when the steering controller reaches its limit. Based on the \"Turn Exceeds Steering Limit\" event.",
+        "picker_description": "Plays Goat Scream at the steering limit.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "GoatScreamCriticalAlerts",
+        "label": "Goat Scream Critical Alerts",
+        "description": "Play the infamous \"Goat Scream\" for full-screen critical alerts that require immediate takeover.\n\nExamples include: \"TAKE CONTROL IMMEDIATELY\" and \"Stock AEB: Risk of Collision\".",
+        "picker_description": "Plays Goat Scream for critical takeover alerts.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "GreenLightAlert",
+        "label": "Green Light Alert",
+        "description": "Play an alert when the model predicts a red light has turned green.\n\nDisclaimer: openpilot does not explicitly detect traffic lights. This alert is based on end-to-end model predictions from camera input and may trigger even when the light has not changed.",
+        "picker_description": "Alerts when the model predicts a light turned green.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LeadDepartingAlert",
+        "label": "Lead Departing Alert",
+        "description": "Play an alert when the lead vehicle departs from a stop.",
+        "picker_description": "Alerts when a stopped lead vehicle departs.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LoudBlindspotAlert",
+        "label": "Loud \\\"Car Detected in Blindspot\\\" Alert",
+        "description": "Play a louder alert if a vehicle is in the blind spot when attempting to change lanes. Based on the \"Car Detected in Blindspot\" event.",
+        "picker_description": "Plays a louder alert for blind-spot lane changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LoudBlindspotAlertWhenDisengaged",
+        "label": "Blind Spot Alert When Disengaged",
+        "description": "Play the loud blind spot alert while lateral control is off or paused. Useful when steering pauses on turn signal, since the lane-change state machine is inactive then.",
+        "picker_description": "Plays the blind-spot alert when steering is paused.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SpeedLimitChangedAlert",
+        "label": "Speed Limit Changed Alert",
+        "description": "Play an alert when the posted speed limit changes.",
+        "picker_description": "Alerts when the posted speed limit changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "GpuModelReadySound",
+        "label": "GPU Model Ready Sound",
+        "description": "Play a short chime when the external GPU model finishes loading. Driving alerts take priority.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      }
+    ]
+  },
+  {
+    "name": "Vehicle",
+    "icon": "bi-car-front",
+    "params": [
+      {
+        "key": "CarMake",
+        "label": "Car Make",
+        "description": "Select your car make.",
+        "data_type": "string",
+        "ui_type": "dropdown",
+        "options_endpoint": "/api/fingerprints/makes",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CarModel",
+        "label": "Car Model (Fingerprint)",
+        "description": "Choose the fingerprint platform to use when automatic detection is disabled.",
+        "data_type": "string",
+        "ui_type": "dropdown",
+        "options_endpoint": "/api/fingerprints/models?make={CarMake}",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RivianAngleControl",
+        "label": "Rivian Angle Steering",
+        "description": "Use the Extreme harness angle channel with cooperative torque fallback.",
+        "picker_description": "Uses the Extreme harness angle channel with torque fallback.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "requires_capability": "HasRivianAngleHarness",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ForceFingerprint",
+        "label": "Disable Automatic Fingerprint Detection",
+        "description": "Force the selected fingerprint and prevent it from changing automatically.",
+        "picker_description": "Locks the selected fingerprint; disables auto-detection.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IsRHD",
+        "label": "Right Hand Driving",
+        "description": "Use right-hand-drive driver monitoring. This follows the auto-detected side until changed manually.",
+        "picker_description": "Uses right-hand-drive driver monitoring.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "DisableOpenpilotLongitudinal",
+        "label": "Disable openpilot Longitudinal",
+        "description": "Use the vehicle's stock longitudinal control instead of openpilot longitudinal control. This can stop openpilot from sending cruise-control acceleration and braking commands on supported vehicles.",
+        "picker_description": "Uses stock longitudinal control instead of openpilot.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "TeslaCoopSteering",
+        "label": "Tesla Model 3 Cooperative Steering",
+        "description": "For Tesla Model 3 only. Converts light driver steering input into bounded steering-wheel rotation while lateral control remains active. Change while parked.",
+        "picker_description": "Adds cooperative steering for Tesla Model 3.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NAPRadarEnabled",
+        "label": "Tesla Pre-AP Bosch Radar",
+        "description": "Use the stock Bosch radar path on pre-Autopilot Teslas.",
+        "picker_description": "Uses stock Bosch radar on pre-Autopilot Teslas.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NAPRadarBehindNosecone",
+        "label": "Radar Behind Nosecone",
+        "description": "Enable this if the Bosch radar is mounted behind the nosecone instead of being exposed.",
+        "picker_description": "Enables radar mounted behind the nosecone.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "NAPRadarEnabled",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NAPRadarOffset",
+        "label": "Radar Offset",
+        "description": "Adjust the radar position offset in meters if the radar alignment needs a small correction.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -2.0,
+        "max": 2.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "NAPRadarEnabled",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NAPPedalEnabled",
+        "label": "Tesla Pre-AP comma Pedal Longitudinal",
+        "description": "Use a comma pedal interceptor for acceleration and regenerative braking on pre-Autopilot Teslas.",
+        "picker_description": "Uses a comma pedal for acceleration on pre-Autopilot Teslas.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NAPPedalCanBus",
+        "label": "Pedal CAN Bus",
+        "description": "Select the CAN bus used by the Tesla pedal interceptor.",
+        "picker_description": "Chooses the CAN bus for the Tesla pedal interceptor.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "parent_key": "NAPPedalEnabled",
+        "options": [
+          {
+            "value": 0,
+            "label": "CAN 0"
+          },
+          {
+            "value": 2,
+            "label": "CAN 2"
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NAPAdaptiveAccel",
+        "label": "Adaptive Acceleration Limit",
+        "description": "Reduce maximum acceleration as you close in on a lead vehicle when Tesla pedal-long is active.",
+        "picker_description": "Limits acceleration near a lead on Tesla pedal-long.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "NAPPedalEnabled",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NAPPedalCalibDone",
+        "label": "Pedal Calibration Complete",
+        "description": "Enable only after entering valid Tesla pedal calibration values. Pedal-long stays inactive until this is on.",
+        "picker_description": "Enables Tesla pedal-long after calibration.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "NAPPedalEnabled",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NAPPedalCalibFactor",
+        "label": "Pedal Calibration Factor",
+        "description": "Scaling factor used to convert Tesla pedal interceptor output into the internal DI range.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.01,
+        "max": 10.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "NAPPedalEnabled",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NAPPedalCalibZero",
+        "label": "Pedal Calibration Zero",
+        "description": "Zero point used to convert Tesla pedal interceptor output into the internal DI range.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -50.0,
+        "max": 50.0,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "NAPPedalEnabled",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "GMPedalLongitudinal",
+        "label": "Use Pedal For Longitudinal",
+        "description": "Use the pedal interceptor for full longitudinal control on supported GM vehicles.",
+        "picker_description": "Uses the pedal interceptor for GM longitudinal control.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "GMDashSpoofOffsets",
+        "label": "Apply Offsets To Dash Spoof",
+        "description": "On GM pedal-long cars, add the configured set-speed offset to the spoofed dash set speed so it matches the on-screen set speed.",
+        "picker_description": "Applies GM pedal-long set-speed offsets to the dash.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IgnoreIgnitionLine",
+        "label": "Use CAN Ignition Only",
+        "description": "Use Panda firmware that ignores the physical ignition line and starts from CAN ignition only.\n\nRequires a Panda flash. Use this only on vehicles with reliable CAN ignition when the harness box reports false ignition.",
+        "picker_description": "Uses CAN ignition only; requires a Panda flash.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LongPitch",
+        "label": "Smooth Pedal Response on Hills",
+        "description": "Smoothen acceleration and braking when driving downhill/uphill.",
+        "picker_description": "Smooths pedal response on hills.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RemoteStartBootsComma",
+        "label": "Remote Start Boots Comma (GM)",
+        "description": "Use the remote-start GM panda firmware at boot.\n\nRequired for GM remote-start startup signal behavior.",
+        "picker_description": "Uses GM remote-start firmware at boot.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "TeslaWakeOnCAN",
+        "label": "Wake Comma with Tesla",
+        "description": "When enabled, your comma can wake up when your Tesla wakes up. When disabled, it normally powers on when you press the brake.",
+        "picker_description": "Allow your comma to wake up with your Tesla.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple",
+        "vehicle_makes": [
+          "Tesla"
+        ],
+        "requires_capability": "TeslaCANWakeAvailable",
+        "requires_offroad": true
+      },
+      {
+        "key": "HKGRemoteStartBootsComma",
+        "label": "Remote Start Boots Comma (HKG)",
+        "description": "Use the remote-climate Hyundai/Kia/Genesis CAN-FD panda firmware at boot.\n\nRequired for EV remote-climate startup signal behavior.",
+        "picker_description": "Uses Hyundai/Kia/Genesis remote-climate firmware at boot.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "VoltSNG",
+        "label": "Stop-and-Go Hack",
+        "description": "Force stop-and-go on the 2017 Chevy Volt.",
+        "picker_description": "Adds stop-and-go to the 2017 Chevy Volt.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "GMAutoHold",
+        "label": "GM Auto Hold",
+        "description": "Hold supported GM vehicles at a stop until the gas pedal is pressed.",
+        "picker_description": "Holds supported GM vehicle brakes until the gas pedal is pressed.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "VoltOnePedalMode",
+        "label": "Volt One Pedal Mode",
+        "description": "On supported Chevy Volts in L / single-pedal mode, blend friction braking so the car can slow to a stop and hold without using the brake pedal.",
+        "picker_description": "Adds blended braking for one-pedal Chevy Volt driving.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "JeepBrakeHold",
+        "label": "Jeep Brake Hold",
+        "description": "Hold the brakes after Jeep ACC times out at a stop, then send resume when traffic moves again.",
+        "picker_description": "Holds Jeep brakes after ACC stops, then resumes in traffic.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SubaruSNG",
+        "label": "Stop and Go",
+        "description": "Stop and go for supported Subaru vehicles.",
+        "picker_description": "Enables stop-and-go on supported Subarus.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SubaruSNGManualParkingBrake",
+        "label": "Stop and Go for Manual Parking Brake",
+        "description": "Use the manual-parking-brake Subaru stop-and-go strategy. Enable this for supported Subaru Global models with a manual handbrake. Keep it off on models with an electric parking brake.",
+        "picker_description": "Enables manual-handbrake stop-and-go on supported Subarus.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SubaruAvhStartup",
+        "label": "AVH On at Startup (Experimental)",
+        "description": "For the 2025 Subaru Legacy, request Auto Vehicle Hold once at startup while stopped in Park with the engine running. Manual choices are preserved. Enable before the next drive.",
+        "picker_description": "Requests AVH ON at startup on the 2025 Legacy.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SubaruStopStartOff",
+        "label": "Stop/Start Off at Startup",
+        "description": "For supported Subaru Outback 2023-24 and Legacy 2025 vehicles, send one momentary Stop/Start request after ignition while stationary and in Park or Neutral.",
+        "picker_description": "Requests Stop/Start OFF once after ignition on supported Subarus.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "SNGHack",
+        "label": "Stop-and-Go Hack",
+        "description": "Force stop-and-go on Lexus/Toyota vehicles without stock stop-and-go functionality.",
+        "picker_description": "Adds stop-and-go to Lexus/Toyota vehicles without it.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ToyotaAutoHold",
+        "label": "Toyota Auto Hold",
+        "description": "Hold the brake pedal for over one second at a complete stop with cruise main on and cruise disengaged to hold until you press the gas pedal. Normal cruise stop-and-go is unchanged.",
+        "picker_description": "Holds supported Toyota/Lexus brakes after a manual stop with cruise disengaged.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "RemapCancelToDistance",
+        "label": "Remap Cancel Button",
+        "description": "On pedal-interceptor Bolts, treat the steering-wheel CANCEL button as an extra mappable button.",
+        "picker_description": "Makes the Bolt CANCEL button available for remapping.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      }
+    ]
+  },
+  {
+    "name": "Wheel Controls",
+    "icon": "bi-controller",
+    "params": [
+      {
+        "key": "RemapCancelToDistance",
+        "label": "Remap Cancel Button",
+        "description": "On pedal-interceptor Bolts, treat the steering-wheel CANCEL button as an extra mappable button.",
+        "picker_description": "Makes the Bolt CANCEL button available for remapping.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NostalgiaMode",
+        "label": "Nostalgia Mode",
+        "description": "Use the left paddle to pause openpilot acceleration and braking while Always On Lateral stays active on supported Hyundai CAN-FD cars.",
+        "picker_description": "Adds Hyundai CAN-FD left-paddle acceleration/braking pause.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CancelButtonControl",
+        "label": "Cancel Button (Short Press)",
+        "description": "Action performed when the remapped \"Cancel\" button is pressed.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "DistanceButtonControl",
+        "label": "Distance Button (Short Press)",
+        "description": "Action performed when the \"Distance\" button is pressed.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LongCancelButtonControl",
+        "label": "Cancel Button (Long Press)",
+        "description": "Action performed when the remapped \"Cancel\" button is pressed for more than 0.5 seconds.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LongDistanceButtonControl",
+        "label": "Distance Button (Long Press)",
+        "description": "Action performed when the \"Distance\" button is pressed for more than 0.5 seconds.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "VeryLongCancelButtonControl",
+        "label": "Cancel Button (Extra Long Press)",
+        "description": "Action performed when the remapped \"Cancel\" button is pressed for more than 2.5 seconds.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "VeryLongDistanceButtonControl",
+        "label": "Distance Button (Extra Long Press)",
+        "description": "Action performed when the \"Distance\" button is pressed for more than 2.5 seconds.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LKASButtonControl",
+        "label": "LKAS Button",
+        "description": "Action performed when the \"LKAS\" button is pressed.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 9,
+            "label": "Toggle Always On Lateral"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "MainCruiseButtonControl",
+        "label": "CC Main Button",
+        "description": "Action performed when the cruise control main button is pressed.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 9,
+            "label": "Toggle Always On Lateral"
+          },
+          {
+            "value": 10,
+            "label": "Adopt Current Speed Limit"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ModeButtonControl",
+        "label": "Mode Button (Short Press)",
+        "description": "Action performed when the \"Mode\" button is pressed. Hyundai CAN-FD only.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LongModeButtonControl",
+        "label": "Mode Button (Long Press)",
+        "description": "Action performed when the \"Mode\" button is pressed for more than 0.5 seconds. Hyundai CAN-FD only.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "VeryLongModeButtonControl",
+        "label": "Mode Button (Extra Long Press)",
+        "description": "Action performed when the \"Mode\" button is pressed for more than 2.5 seconds. Hyundai CAN-FD only.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "StarButtonControl",
+        "label": "Star Button (Short Press)",
+        "description": "Action performed when the \"Star\" button is pressed. Hyundai CAN-FD only.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LongStarButtonControl",
+        "label": "Star Button (Long Press)",
+        "description": "Action performed when the \"Star\" button is pressed for more than 0.5 seconds. Hyundai CAN-FD only.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "VeryLongStarButtonControl",
+        "label": "Star Button (Extra Long Press)",
+        "description": "Action performed when the \"Star\" button is pressed for more than 2.5 seconds. Hyundai CAN-FD only.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 1,
+            "label": "Change Personality"
+          },
+          {
+            "value": 2,
+            "label": "Force Coast"
+          },
+          {
+            "value": 3,
+            "label": "Pause Steering"
+          },
+          {
+            "value": 4,
+            "label": "Pause Accel/Brake"
+          },
+          {
+            "value": 5,
+            "label": "Toggle Experimental"
+          },
+          {
+            "value": 6,
+            "label": "Toggle Traffic"
+          },
+          {
+            "value": 7,
+            "label": "Toggle Switchback"
+          },
+          {
+            "value": 8,
+            "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
+          },
+          {
+            "value": 14,
+            "label": "Pulse and Glide",
+            "developer_only": true
+          }
+        ],
+        "settings_tier": "simple"
+      }
+    ]
+  },
+  {
+    "name": "Device & Data",
+    "icon": "bi-hdd",
+    "params": [
+      {
+        "key": "DeviceManagement",
+        "label": "Device Settings",
+        "description": "Settings that control how the device runs, powers off, and manages driving data.",
+        "picker_description": "Controls device power, data, and recording.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "DeviceShutdown",
+        "label": "Device Shutdown Timer (Hours)",
+        "description": "How many hours the device stays on after a drive before it shuts down automatically.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 1.0,
+        "max": 30.0,
+        "step": 1.0,
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NoLogging",
+        "label": "Disable Logging",
+        "description": "WARNING: This will prevent your drives from being recorded and all data will be unobtainable!\n\nPrevent the device from saving driving data.",
+        "picker_description": "Prevents drive logging; leave off unless testing.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "NoUploads",
+        "label": "Disable Uploads",
+        "description": "WARNING: This will prevent your drives from being uploaded to comma connect which will impact debugging and official support from comma!\n\nPrevent the device from uploading driving data.",
+        "picker_description": "Prevents drives from uploading to comma connect.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "DisableOnroadUploads",
+        "label": "Disable Onroad Uploads",
+        "description": "When \"Disable Uploads\" is enabled, allow uploads only while parked (offroad).",
+        "picker_description": "Disables uploads while driving; allows them while parked.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "NoUploads",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "AlwaysAllowUploads",
+        "label": "Always Allow Uploads",
+        "description": "Override upload blocks and always keep uploader enabled. Advanced use only.",
+        "picker_description": "Keeps uploads enabled despite upload blocks.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "NoUploads",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "HigherBitrate",
+        "label": "High-Quality Recording",
+        "description": "Save drive footage in higher video quality.",
+        "picker_description": "Saves drive footage at higher quality.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "GsmMetered",
+        "label": "Cellular Metered",
+        "description": "Prevent large uploads on cellular. Turn this off to allow full/unfiltered uploads over mobile data.",
+        "picker_description": "Limits uploads over cellular data.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LowVoltageShutdown",
+        "label": "Low-Voltage Cutoff",
+        "description": "While parked, if the battery voltage falls below the set level, the device shuts down to prevent excessive battery drain.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 11.8,
+        "max": 12.5,
+        "step": 0.1,
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "IncreaseThermalLimits",
+        "label": "Raise Temperature Limits",
+        "description": "WARNING: Running at higher temperatures may damage your device!\n\nAllow the device to run at higher temperatures before throttling or shutting down. Use only if you understand the risks!",
+        "picker_description": "Allows higher temperatures; may damage the device.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "AggressiveCoolingEnabled",
+        "label": "C3/C3X Aggressive Cooling",
+        "description": "Runs the fan on a lower, more aggressive temperature curve: the fan ramps up sooner and reacts faster to rising temperature, keeping the device meaningfully cooler on hot days at the cost of more fan noise.",
+        "picker_description": "Cooler-running, louder fan curve for comma 3/3X.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple",
+        "requires_capability": "IsTiciOrTizi"
+      },
+      {
+        "key": "UseKonikServer",
+        "label": "Use Konik Server",
+        "description": "Upload driving data to \"stable.konik.ai\" instead of \"connect.comma.ai\".",
+        "picker_description": "Uploads driving data to the Konik server.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ScreenManagement",
+        "label": "Screen Settings",
+        "description": "Settings that control screen brightness, screen recording, and timeout duration.",
+        "picker_description": "Controls screen brightness, recording, and timeout.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ScreenBrightness",
+        "label": "Screen Brightness (Offroad)",
+        "description": "Use automatic brightness with an adjustable offset, or Manual to set a fixed brightness while parked.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "galaxy_ui_type": "brightness",
+        "step": 1,
+        "parent_key": "ScreenManagement",
+        "settings_tier": "advanced",
+        "default": 101,
+        "min": 0,
+        "max": 101
+      },
+      {
+        "key": "ScreenBrightnessOnroad",
+        "label": "Screen Brightness (Onroad)",
+        "description": "Choose Auto to follow ambient light with an adjustable offset, or Manual to set a fixed brightness while driving.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "galaxy_ui_type": "brightness",
+        "step": 1,
+        "parent_key": "ScreenManagement",
+        "settings_tier": "advanced",
+        "default": 101,
+        "min": 0,
+        "max": 101
+      },
+      {
+        "key": "ScreenRecorder",
+        "label": "Screen Recorder",
+        "description": "Add a button to the driving screen to record the display.",
+        "picker_description": "Adds a driving-screen button to record the display.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ScreenManagement",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ScreenTimeout",
+        "label": "Screen Timeout (Offroad)",
+        "description": "How long the parked screen stays awake after a touch.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 5.0,
+        "max": 60.0,
+        "step": 5.0,
+        "parent_key": "ScreenManagement",
+        "settings_tier": "simple",
+        "unit": " seconds"
+      },
+      {
+        "key": "ScreenTimeoutOnroad",
+        "label": "Screen Timeout (Onroad)",
+        "description": "How long the driving screen stays awake before Standby Mode turns it off.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 5.0,
+        "max": 60.0,
+        "step": 5.0,
+        "parent_key": "StandbyMode",
+        "settings_tier": "simple",
+        "unit": " seconds",
+        "visible_when_all_true": [
+          "ScreenManagement",
+          "StandbyMode"
+        ]
+      },
+      {
+        "key": "StandbyMode",
+        "label": "Standby Mode",
+        "description": "Turn off the screen after the onroad timeout. Touch and ignition changes always wake it. Choose additional wake events below.",
+        "picker_description": "Turn off the driving screen after inactivity and choose additional wake events.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "ScreenManagement",
+        "settings_tier": "simple",
+        "is_parent_toggle": true
+      },
+      {
+        "key": "StandbyWakeEngage",
+        "label": "Engagement",
+        "description": "Wake the screen from Standby when driving assistance engages.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "default": true,
+        "parent_key": "StandbyMode",
+        "visible_when_all_true": [
+          "ScreenManagement",
+          "StandbyMode"
+        ],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandbyWakeDisengage",
+        "label": "Disengagement",
+        "description": "Wake the screen from Standby when driving assistance disengages.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "default": true,
+        "parent_key": "StandbyMode",
+        "visible_when_all_true": [
+          "ScreenManagement",
+          "StandbyMode"
+        ],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandbyWakeInfoAlert",
+        "label": "Informational alerts",
+        "description": "Wake the screen from Standby and keep it awake while an informational alert is displayed.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "default": true,
+        "parent_key": "StandbyMode",
+        "visible_when_all_true": [
+          "ScreenManagement",
+          "StandbyMode"
+        ],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandbyWakeWarningAlert",
+        "label": "Warning alerts",
+        "description": "Wake the screen from Standby and keep it awake while a warning alert is displayed.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "default": true,
+        "parent_key": "StandbyMode",
+        "visible_when_all_true": [
+          "ScreenManagement",
+          "StandbyMode"
+        ],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandbyWakeCriticalAlert",
+        "label": "Critical / takeover alerts",
+        "description": "Wake the screen from Standby and keep it awake while a critical or takeover alert is displayed.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "default": true,
+        "parent_key": "StandbyMode",
+        "visible_when_all_true": [
+          "ScreenManagement",
+          "StandbyMode"
+        ],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandbyWakeTurnSignal",
+        "label": "Turn signals",
+        "description": "Wake the screen from Standby when a turn signal is activated.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "default": false,
+        "parent_key": "StandbyMode",
+        "visible_when_all_true": [
+          "ScreenManagement",
+          "StandbyMode"
+        ],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "StandbyWakeButton",
+        "label": "Bluetooth or steering wheel button",
+        "description": "Wake the screen from Standby when a recognised Bluetooth, controller or steering wheel button is pressed, including buttons without an assigned action.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "default": false,
+        "parent_key": "StandbyMode",
+        "visible_when_all_true": [
+          "ScreenManagement",
+          "StandbyMode"
+        ],
+        "settings_tier": "advanced"
+      }
+    ]
+  },
+  {
+    "name": "Developer",
+    "icon": "bi-exclamation-triangle",
+    "params": [
+      {
+        "key": "DeveloperUI",
+        "label": "Developer UI",
+        "description": "Detailed information about openpilot's internal operations.",
+        "picker_description": "Enables developer controls and diagnostics.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "LatSmoothSeconds",
+        "label": "Model Lateral Smoothing (s)",
+        "description": "Developer-only model lateral action smoothing. Default is 0.10 seconds.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.005,
+        "max": 2.0,
+        "step": 0.01,
+        "precision": 3,
+        "parent_key": "DeveloperUI",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "LongSmoothSeconds",
+        "label": "Model Longitudinal Smoothing (s)",
+        "description": "Developer-only model longitudinal action smoothing. Default is 0.30 seconds.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.005,
+        "max": 2.0,
+        "step": 0.01,
+        "precision": 3,
+        "parent_key": "DeveloperUI",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "DeveloperMetrics",
+        "label": "Developer Metrics",
+        "description": "Performance data, sensor readings, and system metrics for debugging and optimizing openpilot.",
+        "picker_description": "Shows performance and sensor metrics for debugging.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "parent_key": "DeveloperUI",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "FPSCounter",
+        "label": "FPS Display",
+        "description": "Show the frames per second at the bottom of the driving screen.",
+        "picker_description": "Shows frames per second on the driving screen.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeveloperMetrics",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ShowCPU",
+        "label": "CPU Metrics",
+        "description": "Show CPU usage in the driving screen developer metrics.",
+        "picker_description": "Shows CPU usage in developer metrics.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeveloperMetrics",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ShowGPU",
+        "label": "GPU Metrics",
+        "description": "Show GPU usage in the driving screen developer metrics.",
+        "picker_description": "Shows GPU usage in developer metrics.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeveloperMetrics",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "NumericalTemp",
+        "label": "Temperature Metrics",
+        "description": "Show numerical device temperature in the driving screen developer metrics.",
+        "picker_description": "Shows device temperature in developer metrics.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeveloperMetrics",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ShowMemoryUsage",
+        "label": "RAM Metrics",
+        "description": "Show memory usage in the driving screen developer metrics.",
+        "picker_description": "Shows memory usage in developer metrics.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeveloperMetrics",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "GalaxyDeveloperMode",
+        "label": "Enable Developer Mode",
+        "description": "Show advanced settings in Galaxy.",
+        "picker_description": "Shows advanced settings in Galaxy.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "StingerObjectShadow",
+        "label": "Stinger Object Logging Beta",
+        "description": "Collect candidate object data on the 2022-2023 Kia Stinger for validation. Logging only: this does not enable radar-based braking or change steering. Default off. Keep driving normally, stay attentive, and upload full rlogs with bookmarked observations.",
+        "picker_description": "Read-only Stinger object validation; no braking or steering changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
+        "vehicle_makes": ["Kia"],
+        "parent_key": "GalaxyDeveloperMode",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ClusterOffset",
+        "label": "Dashboard Speed Offset",
+        "description": "Multiplier for dashboard speed. 1x = no offset; 1.05x = 5% faster.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "unit": "x",
+        "min": 1.0,
+        "max": 1.05,
+        "step": 0.001,
+        "parent_key": "GalaxyDeveloperMode",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "GalaxyMobileDefault",
+        "label": "Use Galaxy (new) by Default",
+        "description": "Open Galaxy (new) at the top-level Galaxy link. Turn this off to use Galaxy (old) instead. Galaxy (old) remains available at /classic and Galaxy (new) at /mobile.",
+        "picker_description": "Serve Galaxy (new) as the default landing page.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "AlphaLongitudinalEnabled",
+        "label": "openpilot Longitudinal Control (Alpha)",
+        "description": "Enable openpilot longitudinal control for vehicles that support it. This replaces the vehicle's stock ACC and may disable automatic emergency braking. Changing this setting restarts the driving stack.",
+        "picker_description": "Uses openpilot longitudinal control; may disable stock AEB.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "GalaxyDeveloperMode",
+        "requires_offroad": true,
+        "confirm_message": "Enable openpilot Longitudinal Control? This is an alpha feature, replaces the vehicle's stock ACC, and may disable automatic emergency braking.",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "ForceOffroad",
+        "label": "Force Offroad",
+        "description": "Temporarily switch the device to the offroad state for remote updates when the vehicle is parked. This control is only available while the vehicle reports Park.",
+        "picker_description": "Forces offroad state while parked for remote updates.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "GalaxyDeveloperMode",
+        "requires_parked": true,
+        "confirm_message": "Force the device offroad? Only use this while the vehicle is in Park.",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "RedneckCruise",
+        "label": "Redneck Cruise",
+        "description": "On supported Hyundai stock-cruise cars, use RES/SET button presses to match the cluster set speed to StarPilot's target.",
+        "picker_description": "Matches StarPilot's target speed with Hyundai RES/SET.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "GalaxyDeveloperMode",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "SubaruRedneckCruise",
+        "label": "Subaru Redneck Cruise",
+        "description": "On supported Subaru Impreza-family cars, use stock Resume/Set button presses to match the cluster set speed to StarPilot's target.",
+        "picker_description": "Matches StarPilot's target speed with Subaru Resume/Set.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
+        "vehicle_makes": ["Subaru"],
+        "parent_key": "GalaxyDeveloperMode",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TurnSteeringLimitMuteSpeed",
+        "label": "Mute Turn Limit Alert Below",
+        "description": "Mute only the sound for \"Turn Exceeds Steering Limit\" below this speed. The visual alert is always kept visible. Set to 0 to disable. The value uses your selected mph or km/h unit.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 99.0,
+        "step": 1.0,
+        "unit_type": "vehicle_speed",
+        "parent_key": "GalaxyDeveloperMode",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "CameraOffset",
+        "label": "Camera Offset",
+        "description": "Virtually shift the camera perspective used by the driving model. Positive values bias the model center left; negative values bias it right. Use only for development.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -0.35,
+        "max": 0.35,
+        "step": 0.01,
+        "precision": 2,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "LaneCentering",
+        "label": "Lane Centering",
+        "description": "Experimentally bias the model command toward the detected lane center. Requires two confident lane lines and remains subject to normal curvature and jerk limits.",
+        "picker_description": "Biases steering toward the detected lane center.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "LaneCenterOffset",
+        "label": "Lane Center Offset",
+        "description": "Shift the lane target left or right in meters. The controller reduces this offset automatically when the detected lane is narrow.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -0.3,
+        "max": 0.3,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "LaneCentering",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "LaneCenteringPauseOnSignal",
+        "label": "Pause Lane Centering On Turn Signal",
+        "description": "Fade lane-centering correction out when a turn signal is active so it does not fight a lane change or turn.",
+        "picker_description": "Fades lane-centering correction during turn signals.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LaneCentering",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "LaneCenteringE2EAuthority",
+        "label": "E2E Override Strength",
+        "description": "Choose how strongly the vision model may override lane centering when it sees a hazard.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "control": "slider",
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.05,
+        "precision": 2,
+        "parent_key": "LaneCentering",
+        "settings_tier": "advanced",
+        "description_steps": [
+          {
+            "max": 0.2,
+            "description": "Vehicle rigidly tries to center itself rather than avoiding hazards, potholes, or road debris."
+          },
+          {
+            "max": 0.4,
+            "description": "Vehicle tries to center itself and slowly adjusts away from hazards, but may react too slowly."
+          },
+          {
+            "max": 0.6,
+            "description": "Vehicle provides additional space around hazards like cyclists and vehicles crossing into the lane."
+          },
+          {
+            "max": 0.8,
+            "description": "Vehicle smooths out hazard avoidance, making less rapid adjustments."
+          },
+          {
+            "max": 1.0,
+            "description": "Vehicle reacts to hazards recognized by the vision model as quickly as possible."
+          }
+        ]
+      },
+      {
+        "key": "HondaLateralPidKpScale",
+        "label": "Honda PID Kp Scale",
+        "description": "Scale the active Honda lateralTuning.pid.kpV values from openDBC. Applies live to Honda PID lateral only.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.1,
+        "max": 4.0,
+        "step": 0.01,
+        "precision": 2,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "HondaLateralPidKiScale",
+        "label": "Honda PID Ki Scale",
+        "description": "Scale the active Honda lateralTuning.pid.kiV values from openDBC. Applies live to Honda PID lateral only.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.1,
+        "max": 4.0,
+        "step": 0.01,
+        "precision": 2,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "AllowImpossibleAcceleration",
+        "label": "Allow Impossible Acceleration",
+        "description": "WARNING: This suppresses openpilot's excessive longitudinal actuation diagnostic when measured acceleration looks impossible for the requested gas/brake command.\n\nLeave this OFF unless you are intentionally testing edge cases like shifting to neutral and understand that it can hide a real actuation problem.",
+        "picker_description": "Hides an acceleration diagnostic; leave off unless testing.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "advanced"
+      }
+    ]
+  }
+]

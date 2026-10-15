@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" id="htmlElement" data-theme="dark">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/favicon-16x16.png">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="shortcut icon" href="/assets/images/favicon.ico">
+
+  <meta name="theme-color" content="#8b6cc5" />
+
+  <link rel="stylesheet" href="/assets/vendor/bootstrap-icons/bootstrap-icons.min.css" />
+  <link rel="stylesheet" href="/assets/vendor/font-awesome/css/font-awesome.min.css">
+  <link rel="stylesheet" href="/assets/vendor/fonts/fonts.css">
+
+  <link rel="stylesheet" href="/assets/components/home/home.css">
+  <link rel="stylesheet" href="/assets/components/main.css?v=sidebar-pin-2">
+  <link rel="stylesheet" href="/assets/components/modal.css">
+  <link rel="stylesheet" href="/assets/components/navigation/navigation_destination.css?v=sidebar-pin-2">
+  <link rel="stylesheet" href="/assets/components/navigation/navigation_keys.css?v=app-keys-session-1">
+  <link rel="stylesheet" href="/assets/components/recordings/dashcam_routes.css">
+  <link rel="stylesheet" href="/assets/components/recordings/screen_recordings.css">
+  <link rel="stylesheet" href="/assets/components/settings.css">
+  <link rel="stylesheet" href="/assets/components/sidebar.css?v=sidebar-pin-2">
+  <link rel="stylesheet" href="/assets/components/tailscale/tailscale.css">
+  <link rel="stylesheet" href="/assets/components/tools/doors.css">
+  <link rel="stylesheet" href="/assets/components/tools/error_logs.css">
+  <link rel="stylesheet" href="/assets/components/tools/maps.css">
+  <link rel="stylesheet" href="/assets/components/tools/model_manager.css">
+  <link rel="stylesheet" href="/assets/components/tools/model_laboratory.css?v=model-lab-5">
+  <link rel="stylesheet" href="/assets/components/tools/plots.css">
+  <link rel="stylesheet" href="/assets/components/tools/speed_limits.css">
+  <link rel="stylesheet" href="/assets/components/tools/theme_maker.css">
+  <link rel="stylesheet" href="/assets/components/tools/testing_ground.css">
+  <link rel="stylesheet" href="/assets/components/tools/tuning.css?v=flm-saved-tunes-1">
+  <link rel="stylesheet" href="/assets/components/tools/troubleshoot.css">
+  <link rel="stylesheet" href="/assets/components/tools/tmux.css">
+  <link rel="stylesheet" href="/assets/components/tools/toggles.css">
+  <link rel="stylesheet" href="/assets/components/tools/update_manager.css">
+  <link rel="stylesheet" href="/assets/components/tools/device_settings.css?v=favorite-actions-1">
+  <link rel="stylesheet" href="/assets/components/tools/bluetooth.css?v=bluetooth-6">
+  <link rel="stylesheet" href="/assets/components/tools/wheel_controls.css?v=controllers-3">
+  <link rel="stylesheet" href="/assets/components/tools/galaxy.css">
+  <link rel="stylesheet" href="/assets/components/tools/sentry.css">
+  <link rel="stylesheet" href="/assets/components/tools/longitudinal_maneuvers.css">
+  <link rel="stylesheet" href="/assets/components/tools/v_asm.css">
+  <link rel="stylesheet" href="/assets/components/tools/pip_sidecam.css">
+  <link rel="stylesheet" href="/assets/components/tools/tsk_manager.css">
+
+  <script type="module">
+    import("/assets/components/router.js?v=router-cycle-fix-8").catch((err) => {
+      console.error("[the_galaxy] bootstrap failed", err);
+      const target = document.getElementById("app") || document.body;
+      const pre = document.createElement("pre");
+      pre.style.whiteSpace = "pre-wrap";
+      pre.style.color = "#ff8080";
+      pre.style.background = "#200";
+      pre.style.padding = "12px";
+      pre.style.margin = "12px";
+      pre.textContent = `[the_galaxy] failed to load router:\n${err?.stack || err}`;
+      target.appendChild(pre);
+    });
+  </script>
+  <script src="/assets/js/snackbar.js"></script>
+
+  <title>Galaxy</title>
+
+  <script>
+    const _inEmbed =
+      new URLSearchParams(window.location.search).has("embedded") ||
+      (window.self !== window.top);
+    if (_inEmbed) {
+      document.documentElement.classList.add("embedded");
+    }
+  </script>
+</head>
+
+<body>
+  <div id="app"></div>
+  <!-- Menu button for phone -->
+  <button id="menu_button" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
+    <i class="bi bi-list"></i>
+  </button>
+  <!-- Snackbar for messages -->
+  <div id="snackbar_wrapper"></div>
+</body>
+
+</html>

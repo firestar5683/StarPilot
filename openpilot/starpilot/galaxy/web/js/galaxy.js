@@ -2,11 +2,12 @@ import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { requestJson } from "./startup.js"
 import { InstallApp } from "./install-app.js"
+import { GalaxyCompanion } from "./companion.js"
 import { GalaxyHotspot } from "./hotspot.js"
 
 export const GalaxyPage = {
   name: "GalaxyPage",
-  components: { GxState, GxNotice, InstallApp, GalaxyHotspot },
+  components: { GxState, GxNotice, InstallApp, GalaxyHotspot, GalaxyCompanion },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ loading: true, paired: false, url: "", tunnelClientAvailable: false, legacyPassword: false,
     legacyPairingAvailable: false, password: "", busy: false, error: "" }),
@@ -88,6 +89,7 @@ export const GalaxyPage = {
         <p class="gx-note">The public Galaxy link requires Internet and an active tunnel. Installing the app does not provide an offline connection to your comma. For local access without Internet, bookmark the hotspot address or a local address from Home.</p>
       </section>
       <GalaxyHotspot :mode="mode" :unauthorized="unauthorized" />
+      <GalaxyCompanion :mode="mode" :unauthorized="unauthorized" />
     </div>
   `,
 }

@@ -1,0 +1,406 @@
+.flmTwoColumn {
+  display: grid;
+  gap: var(--gap-base);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: var(--margin-base);
+}
+
+.flmCard {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius-md);
+  margin-top: var(--margin-base);
+  padding: var(--padding-base);
+}
+
+.flmCardHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--gap-sm);
+  justify-content: space-between;
+}
+
+.flmCardHeader h3,
+.flmCardHeader h4,
+.flmCardHeader h5 {
+  margin: 0;
+}
+
+.flmCardSubsection {
+  margin-top: var(--margin-base);
+}
+
+.flmRouteList,
+.flmWorkspaceList,
+.flmFindings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin-top: var(--margin-base);
+}
+
+.flmWorkspaceRow {
+  display: flex;
+  gap: var(--gap-sm);
+}
+
+.flmRouteList {
+  max-height: 28rem;
+  overflow: auto;
+  padding-right: var(--padding-xs);
+}
+
+.flmRouteRow {
+  align-items: stretch;
+  display: flex;
+  gap: var(--gap-sm);
+}
+
+.flmRouteSelection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+
+.flmSegmentRange {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-size-xs);
+  gap: var(--gap-xs);
+  padding: 0 var(--padding-sm) var(--padding-xs);
+}
+
+.flmSegmentRange input {
+  background: var(--input-bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-color);
+  max-width: 5.5rem;
+  padding: var(--padding-xs);
+}
+
+.flmSegmentRange small {
+  color: var(--text-muted);
+  flex: 1 1 10rem;
+}
+
+.flmRouteItem,
+.flmWorkspaceItem {
+  align-items: flex-start;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-color);
+  display: flex;
+  gap: var(--gap-sm);
+  padding: var(--padding-sm);
+  text-align: left;
+}
+
+.flmRouteItem input {
+  margin-top: 0.2rem;
+}
+
+.flmRouteItem {
+  cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.flmConnectLink {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius-sm);
+  color: var(--main-fg);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  padding: 0 var(--padding-sm);
+  text-decoration: none;
+}
+
+.flmConnectLink:hover {
+  border-color: var(--main-fg);
+}
+
+.flmRouteItem span,
+.flmWorkspaceItem {
+  display: flex;
+  flex-direction: column;
+}
+
+.flmWorkspaceItem {
+  flex: 1 1 auto;
+}
+
+.flmWorkspaceDelete {
+  align-self: stretch;
+  flex: 0 0 auto;
+}
+
+.flmSavedTuneActions {
+  align-items: stretch;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+
+.flmRouteItem small,
+.flmWorkspaceItem small,
+.flmWorkspaceItem span {
+  color: var(--text-muted);
+}
+
+.flmRouteItem:hover,
+.flmCard button.selected {
+  border-color: var(--main-fg);
+}
+
+.flmProfileGrid {
+  display: grid;
+  gap: var(--gap-base);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.flmFeedbackButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+}
+
+.flmFeedbackButtons .longManeuverButton.selected {
+  box-shadow: 0 0 0 3px var(--text-color);
+  filter: brightness(1.2);
+}
+
+.flmTuneComparison {
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: var(--border-radius-sm);
+  padding: var(--padding-base);
+}
+
+.flmTuneComparisonTable {
+  align-items: center;
+  display: grid;
+  gap: var(--gap-xs) var(--gap-sm);
+  grid-template-columns: minmax(11rem, 1.5fr) minmax(7rem, 1fr) auto minmax(7rem, 1fr);
+  margin-top: var(--margin-sm);
+}
+
+.flmTuneComparisonTable > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: var(--padding-xs) 0;
+}
+
+.flmTuneComparisonHeader {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-demi-bold);
+}
+
+.flmTuneComparisonLabel {
+  font-weight: var(--font-weight-demi-bold);
+}
+
+.flmTuneComparisonArrow {
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.flmTuneComparisonChanged {
+  color: var(--main-fg);
+  font-weight: var(--font-weight-demi-bold);
+}
+
+.flmDeltaBox {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--border-radius-sm);
+  margin-top: var(--margin-sm);
+  padding: var(--padding-sm);
+}
+
+.flmNotes {
+  background: var(--secondary-bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-color);
+  margin-top: var(--margin-base);
+  min-height: 5.5rem;
+  padding: var(--padding-sm);
+  resize: vertical;
+  width: 100%;
+}
+
+.flmTrackingOverview {
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: var(--border-radius-sm);
+  padding: var(--padding-base);
+}
+
+.flmTrackingLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+
+.flmTrackingLegend span {
+  align-items: center;
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: var(--font-size-sm);
+  gap: var(--gap-xs);
+}
+
+.flmTrackingLegend i {
+  border-radius: 999px;
+  display: inline-block;
+  height: 0.2rem;
+  width: 1.4rem;
+}
+
+.flmTrackingLegend i.desired {
+  background: #ef4444;
+}
+
+.flmTrackingLegend i.actual {
+  background: #38bdf8;
+}
+
+.flmTrackingNotice {
+  border-left: 2px solid var(--main-fg);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  margin-top: var(--margin-sm);
+  padding: var(--padding-xs) var(--padding-sm);
+}
+
+.flmTrackingGrid {
+  display: grid;
+  gap: var(--gap-sm);
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  margin-top: var(--margin-base);
+}
+
+.flmTrackingCard {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius-sm);
+  min-width: 0;
+  padding: var(--padding-sm);
+}
+
+.flmTrackingCardHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--gap-sm);
+  justify-content: space-between;
+}
+
+.flmTrackingCardHeader > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.flmTrackingCardHeader span,
+.flmTrackingCard small {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.flmTrackingCard small {
+  display: block;
+  margin-top: var(--margin-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flmTrackingPlot {
+  display: block;
+  height: auto;
+  margin-top: var(--margin-xs);
+  width: 100%;
+}
+
+.flmTrackingPlotBackground {
+  fill: var(--input-bg);
+}
+
+.flmTrackingEventRegion {
+  fill: rgba(139, 108, 197, 0.14);
+}
+
+.flmTrackingAxis,
+.flmTrackingZero {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.18);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.flmTrackingZero {
+  stroke-dasharray: 3 4;
+}
+
+.flmTrackingDesired,
+.flmTrackingActual {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.flmTrackingDesired {
+  stroke: #ef4444;
+}
+
+.flmTrackingActual {
+  stroke: #38bdf8;
+}
+
+.flmTrackingAxisLabel {
+  fill: var(--text-muted);
+  font-size: 9px;
+}
+
+.flmTrackingMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  margin-top: var(--margin-xs);
+}
+
+.flmTrackingMeta span {
+  background: var(--input-bg);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  padding: 0.15rem 0.45rem;
+}
+
+@media only screen and (max-width: 900px) {
+  .flmTwoColumn,
+  .flmProfileGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .flmTuneComparisonTable {
+    font-size: var(--font-size-sm);
+    grid-template-columns: minmax(8rem, 1.3fr) minmax(5rem, 1fr) auto minmax(5rem, 1fr);
+  }
+
+  .flmWorkspaceRow {
+    flex-direction: column;
+  }
+
+  .flmSavedTuneActions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}

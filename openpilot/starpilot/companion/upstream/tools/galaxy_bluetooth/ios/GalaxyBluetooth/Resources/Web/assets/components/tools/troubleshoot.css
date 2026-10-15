@@ -1,0 +1,240 @@
+.troubleshootPage {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.troubleshootCard {
+  background: var(--sidebar-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-lg);
+  padding: 16px;
+}
+
+.troubleshootIntro {
+  margin: 0 0 12px;
+  opacity: 0.9;
+}
+
+.troubleshootActionRow {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.troubleshootToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-md);
+  padding: 10px 14px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.troubleshootToggle input {
+  margin: 0;
+}
+
+.troubleshootButton {
+  background: linear-gradient(135deg, #7a62b8, #8b6cc5);
+  color: #fff;
+  border: none;
+  border-radius: var(--border-radius-md);
+  padding: 10px 14px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.troubleshootButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.troubleshootDanger {
+  background: linear-gradient(135deg, #b14a6b, #d95a7b);
+}
+
+.troubleshootError {
+  color: #ff6b6b;
+}
+
+.troubleshootStatusLine {
+  margin: 6px 0 0;
+}
+
+.troubleshootFaultSummary {
+  margin: 0 0 12px;
+  opacity: 0.92;
+}
+
+.troubleshootFaultGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.troubleshootFaultItem {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-md);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.troubleshootFaultLabel {
+  font-weight: 700;
+}
+
+.troubleshootStatusBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.troubleshootStatusBadgeOk {
+  background: rgba(64, 201, 124, 0.18);
+  color: #b8ffd4;
+}
+
+.troubleshootStatusBadgeWarn {
+  background: rgba(245, 188, 87, 0.18);
+  color: #ffe2a3;
+}
+
+.troubleshootStatusBadgeFault {
+  background: rgba(217, 90, 123, 0.2);
+  color: #ffd7e2;
+}
+
+.troubleshootStatusBadgeNeutral {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.troubleshootSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.troubleshootSectionHeader h3,
+.troubleshootCard h3 {
+  margin: 0;
+}
+
+.troubleshootHeaderRow,
+.troubleshootItemRow,
+.troubleshootSnapshotRow {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  border-top: 1px solid var(--sidebar-border-color);
+  padding: 8px 0;
+}
+
+.troubleshootHeaderRow {
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.troubleshootHeaderRow {
+  grid-template-columns: 2fr 1fr 1fr;
+}
+
+.troubleshootHeaderRowLearned {
+  grid-template-columns: 2fr 1fr 1fr 1.3fr;
+}
+
+.troubleshootHeaderRowSnapshot {
+  grid-template-columns: 2fr 2fr;
+}
+
+.troubleshootSnapshotRow {
+  grid-template-columns: 2fr 2fr;
+}
+
+.troubleshootItemRow {
+  grid-template-columns: 2fr 1fr 1fr;
+}
+
+.troubleshootItemRowLearned {
+  grid-template-columns: 2fr 1fr 1fr 1.3fr;
+}
+
+.troubleshootItemRowChanged {
+  background: linear-gradient(90deg, rgba(217, 90, 123, 0.12), rgba(122, 98, 184, 0.05));
+  border-left: 3px solid #d95a7b;
+  padding-left: 12px;
+}
+
+.troubleshootItemLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 600;
+}
+
+.troubleshootItemValue,
+.troubleshootItemDefault,
+.troubleshootItemLearned {
+  font-family: "Open Sans", sans-serif;
+  word-break: break-word;
+}
+
+.troubleshootItemValueChanged {
+  color: #ffd1dd;
+  font-weight: 700;
+}
+
+.troubleshootChangedBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: rgba(217, 90, 123, 0.2);
+  color: #ffd7e2;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 3px 8px;
+  text-transform: uppercase;
+}
+
+@media (max-width: 720px) {
+  .troubleshootHeaderRow,
+  .troubleshootItemRow {
+    grid-template-columns: 1.3fr 1fr 1fr;
+    font-size: 0.9rem;
+  }
+
+  .troubleshootHeaderRowLearned,
+  .troubleshootItemRowLearned {
+    grid-template-columns: 1.3fr 0.95fr 0.95fr 1.2fr;
+  }
+
+  .troubleshootSnapshotRow {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .troubleshootSectionHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

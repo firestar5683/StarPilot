@@ -1,0 +1,333 @@
+.maps-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-lg);
+  max-width: 1400px;
+  padding: var(--padding-base) var(--padding-lg) var(--padding-xxl);
+}
+
+.maps-card {
+  background: var(--card-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-color);
+  padding: var(--padding-lg);
+}
+
+.maps-hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-lg);
+}
+
+.maps-hero-copy h1,
+.maps-selected-summary h2,
+.maps-section-header h2,
+.maps-group-header h3 {
+  margin: 0;
+}
+
+.maps-hero-copy p,
+.maps-section-header p,
+.maps-group-header p,
+.maps-muted,
+.maps-error,
+.maps-warning {
+  margin: 0;
+}
+
+.maps-status-grid {
+  display: grid;
+  gap: var(--gap-sm);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.maps-stat {
+  background: var(--secondary-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-base);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-height: 5.25rem;
+  padding: 0.8rem;
+}
+
+.maps-stat-label {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+
+.maps-stat-value {
+  font-size: 1rem;
+  font-weight: var(--font-weight-bold);
+}
+
+.maps-progress-card {
+  background: var(--secondary-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-base);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.85rem;
+}
+
+.maps-progress-header,
+.maps-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  justify-content: space-between;
+}
+
+.maps-progress-meta,
+.maps-progress-note,
+.maps-progress-location {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  margin: 0;
+}
+
+.maps-progress-track {
+  background: var(--input-bg);
+  border-radius: 999px;
+  height: 0.65rem;
+  overflow: hidden;
+}
+
+.maps-progress-fill {
+  background: var(--success-bg);
+  border-radius: inherit;
+  height: 100%;
+  min-width: 0;
+  transition: width 0.35s ease;
+}
+
+.maps-error {
+  color: var(--danger-fg);
+}
+
+.maps-warning {
+  color: var(--warning-bg);
+}
+
+.maps-action-row,
+.maps-toolbar-row,
+.maps-toolbar-meta,
+.maps-group-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+
+.maps-btn {
+  border: none;
+  border-radius: var(--border-radius-base);
+  color: var(--text-color);
+  min-height: 2.35rem;
+  padding: 0.5rem 0.9rem;
+}
+
+.maps-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.maps-btn-primary {
+  background: var(--success-bg);
+  color: var(--color-black);
+}
+
+.maps-btn-primary:hover:not(:disabled) {
+  background: var(--success-hover-bg);
+}
+
+.maps-btn-secondary {
+  background: var(--sidebar-active-bg);
+}
+
+.maps-btn-secondary:hover:not(:disabled) {
+  background: var(--accent-hover-bg);
+}
+
+.maps-btn-danger {
+  background: var(--danger-bg);
+}
+
+.maps-btn-danger:hover:not(:disabled) {
+  background: var(--danger-hover-bg);
+}
+
+.maps-btn-small {
+  min-height: 1.9rem;
+  padding: 0.3rem 0.65rem;
+}
+
+.maps-toolbar-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+}
+
+.maps-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.maps-field span {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.maps-search-field {
+  flex: 1 1 24rem;
+}
+
+.maps-schedule-field {
+  min-width: 13rem;
+}
+
+.maps-input,
+.maps-select {
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-base);
+  color: var(--text-color);
+  font-size: var(--font-size-base);
+  min-height: 2.3rem;
+  padding: 0.45rem 0.6rem;
+}
+
+.maps-schedule-button {
+  align-self: flex-end;
+}
+
+.maps-selected-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.maps-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.maps-chip {
+  background: var(--secondary-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: 999px;
+  color: var(--text-color);
+  font-size: 0.82rem;
+  padding: 0.2rem 0.6rem;
+}
+
+.maps-section-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+}
+
+.maps-section-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.maps-section-header p,
+.maps-group-header p {
+  color: var(--text-muted);
+}
+
+.maps-group-grid {
+  display: grid;
+  gap: var(--gap-md);
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+}
+
+.maps-group-card {
+  background: var(--secondary-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-base);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: 0.85rem;
+}
+
+.maps-group-header {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--gap-sm);
+  justify-content: space-between;
+}
+
+.maps-region-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 21rem;
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.maps-region-row {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  border-radius: var(--border-radius-sm);
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: auto 1fr auto;
+  padding: 0.4rem 0.5rem;
+}
+
+.maps-region-row:hover {
+  border-color: var(--sidebar-border-color);
+}
+
+.maps-region-label {
+  min-width: 0;
+}
+
+.maps-region-code {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 900px) {
+  .maps-page {
+    padding: var(--padding-sm) var(--padding-base) var(--padding-xl);
+  }
+
+  .maps-action-row,
+  .maps-toolbar-row {
+    flex-direction: column;
+  }
+
+  .maps-btn,
+  .maps-schedule-field,
+  .maps-search-field {
+    width: 100%;
+  }
+
+  .maps-schedule-button {
+    align-self: stretch;
+  }
+
+  .maps-section-header,
+  .maps-group-header {
+    flex-direction: column;
+  }
+
+  .maps-progress-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+}

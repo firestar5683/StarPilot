@@ -1,0 +1,290 @@
+.wheelControlsPage {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wheelHeader,
+.wheelHeaderActions,
+.wheelCardHeader,
+.wheelMapping,
+.wheelDeviceSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wheelHeader h2,
+.wheelHeader p,
+.wheelSectionHeading h3,
+.wheelSectionHeading p,
+.wheelCard h3,
+.wheelCard p {
+  margin: 0;
+}
+
+.wheelHeader p {
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
+.wheelHeaderActions {
+  justify-content: flex-end;
+}
+
+.wheelCard,
+.wheelNotice,
+.wheelError,
+.wheelDeviceSummary,
+.wheelPolicy {
+  background: var(--sidebar-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-lg);
+  padding: 16px;
+}
+
+.wheelPolicy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  cursor: pointer;
+}
+
+.wheelPolicy span,
+.wheelPolicy small {
+  display: block;
+}
+
+.wheelPolicy small {
+  margin-top: 5px;
+  opacity: 0.68;
+}
+
+.wheelPolicy input {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  accent-color: #8b6cc5;
+}
+
+.wheelPolicy:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.wheelSlotGrid,
+.wheelControllerGrid,
+.wheelMappings {
+  display: grid;
+  gap: 12px;
+}
+
+.wheelSection {
+  display: grid;
+  gap: 12px;
+}
+
+.wheelSectionHeading p {
+  margin-top: 5px;
+  opacity: 0.68;
+}
+
+.wheelControllerGrid {
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+}
+
+.wheelSlotLabel,
+.wheelMapping span,
+.wheelMuted,
+.wheelEmpty,
+.wheelHint {
+  opacity: 0.68;
+}
+
+.wheelCard h3 {
+  margin-top: 4px;
+}
+
+.wheelHint {
+  margin-top: 10px !important;
+}
+
+.wheelHint a {
+  color: #cbb8ff;
+}
+
+.wheelActionPicker {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.wheelActionPicker span {
+  opacity: 0.68;
+}
+
+.wheelActionPicker select,
+.wheelActionPicker input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-md);
+  padding: 8px 10px;
+  color: inherit;
+  background: var(--main-bg);
+}
+
+.wheelSpeedPicker {
+  max-width: 220px;
+}
+
+.wheelMapping {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--sidebar-border-color);
+}
+
+.wheelMapping span {
+  display: block;
+  margin-top: 3px;
+}
+
+.wheelDeviceSummary {
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.wheelDeviceHeading span,
+.wheelDeviceRow span {
+  display: block;
+  margin-top: 4px;
+  opacity: 0.68;
+}
+
+.wheelDeviceList {
+  display: grid;
+  gap: 10px;
+}
+
+.wheelDeviceRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--sidebar-border-color);
+}
+
+.wheelControlsPage button.joystickEnabled {
+  background: linear-gradient(135deg, #258b58, #40c97c);
+}
+
+.wheelLearnPrompt {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 13px;
+  padding: 10px 12px;
+  border-radius: var(--border-radius-md);
+  color: #dfffea;
+  background: rgba(64, 201, 124, 0.14);
+}
+
+.wheelLearnPrompt span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #40c97c;
+  animation: wheelPulse 1s infinite alternate;
+}
+
+.wheelTestPanel {
+  border: 1px solid rgba(139, 108, 197, 0.58);
+  border-radius: var(--border-radius-lg);
+  padding: 18px;
+  background: rgba(139, 108, 197, 0.13);
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.wheelTestPanel.success {
+  border-color: rgba(64, 201, 124, 0.72);
+  background: rgba(64, 201, 124, 0.15);
+}
+
+.wheelTestPanel.failure {
+  border-color: rgba(217, 90, 123, 0.72);
+  background: rgba(217, 90, 123, 0.14);
+}
+
+.wheelTestPanel p {
+  margin: 8px 0 0;
+  opacity: 0.82;
+}
+
+.wheelTestIndicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wheelTestIndicator span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #8b6cc5;
+  box-shadow: 0 0 14px rgba(139, 108, 197, 0.75);
+}
+
+.wheelTestPanel.success .wheelTestIndicator span {
+  background: #40c97c;
+  box-shadow: 0 0 16px rgba(64, 201, 124, 0.82);
+}
+
+.wheelTestPanel.failure .wheelTestIndicator span {
+  background: #d95a7b;
+  box-shadow: 0 0 16px rgba(217, 90, 123, 0.82);
+}
+
+.wheelControlsPage button {
+  border: 0;
+  border-radius: var(--border-radius-md);
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #7a62b8, #8b6cc5);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wheelControlsPage button.learning {
+  background: linear-gradient(135deg, #258b58, #40c97c);
+}
+
+.wheelControlsPage button.testing {
+  background: linear-gradient(135deg, #258b58, #40c97c);
+}
+
+.wheelControlsPage button.danger {
+  background: linear-gradient(135deg, #b14a6b, #d95a7b);
+}
+
+.wheelControlsPage button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.wheelNotice {
+  color: #ffe2a3;
+}
+
+.wheelError {
+  color: #ff9ab3;
+}
+
+@keyframes wheelPulse {
+  from { opacity: 0.35; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1.15); }
+}

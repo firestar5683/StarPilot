@@ -1,0 +1,117 @@
+.longManeuverPage {
+  max-width: var(--width-xxl);
+}
+
+.longManeuverCard {
+  background-color: var(--secondary-bg);
+  border-radius: var(--border-radius-md);
+  color: var(--text-color);
+  max-width: 90%;
+  padding: var(--border-radius-xl);
+}
+
+.longManeuverIntro {
+  margin-top: 0;
+}
+
+.longManeuverActions {
+  display: flex;
+  gap: var(--gap-sm);
+  margin-top: var(--margin-base);
+}
+
+.longManeuverButton {
+  background: var(--main-fg);
+  border: none;
+  border-radius: var(--border-radius-sm);
+  color: var(--text-color);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-demi-bold);
+  padding: var(--padding-sm) var(--padding-base);
+}
+
+.longManeuverButton:hover {
+  transform: var(--hover-scale-sm);
+  transition: transform var(--transition-fast), background-color var(--transition-fast);
+}
+
+.longManeuverButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
+.longManeuverButton.danger {
+  background: var(--danger-bg);
+}
+
+.longManeuverButton.danger:hover {
+  background: var(--danger-hover-bg);
+}
+
+.longManeuverError {
+  color: var(--danger-fg);
+  margin-top: var(--margin-base);
+}
+
+.longManeuverMuted {
+  color: var(--text-muted);
+}
+
+.longManeuverStatusGrid {
+  display: grid;
+  gap: 0.5em 1em;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: var(--margin-base);
+}
+
+.longManeuverStatusGrid p {
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.longManeuverCurrent {
+  margin-top: var(--margin-base);
+}
+
+.longManeuverCurrent p {
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--margin-xs);
+}
+
+.longManeuverInstructions,
+.longManeuverHistory {
+  margin-top: var(--margin-base);
+}
+
+.longManeuverInstructions h3,
+.longManeuverHistory h3 {
+  margin-bottom: var(--margin-xs);
+}
+
+.longManeuverInstructions ol,
+.longManeuverHistory ol {
+  margin: var(--margin-xs) 0 0;
+  padding-left: 1.4rem;
+}
+
+.longManeuverInstructions li,
+.longManeuverHistory li {
+  font-size: var(--font-size-sm);
+  margin-bottom: 0.25rem;
+}
+
+@media only screen and (max-width: 768px) and (orientation: portrait) {
+  .longManeuverCard {
+    max-width: 100%;
+  }
+
+  .longManeuverActions {
+    flex-direction: column;
+  }
+
+  .longManeuverStatusGrid {
+    grid-template-columns: 1fr;
+  }
+}
+

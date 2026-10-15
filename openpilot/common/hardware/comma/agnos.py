@@ -10,6 +10,8 @@ from collections.abc import Generator
 
 import requests
 
+from openpilot.starpilot.galaxy.companion import phone_uplink_active
+
 SPARSE_CHUNK_FMT = struct.Struct('H2xI4x')
 
 AGNOS_MANIFEST_FILE = "openpilot/common/hardware/comma/agnos.json"
@@ -17,6 +19,8 @@ AGNOS_MANIFEST_FILE = "openpilot/common/hardware/comma/agnos.json"
 
 class StreamingDecompressor:
   def __init__(self, url: str) -> None:
+    if phone_uplink_active():
+      raise requests.ConnectionError("AGNOS downloads are disabled on the phone uplink")
     self.buf = b""
 
     self.req = requests.get(url, stream=True, headers={'Accept-Encoding': 'identity'}, timeout=60)
@@ -26,6 +30,9 @@ class StreamingDecompressor:
     self.sha256 = hashlib.sha256()
 
   def read(self, length: int) -> bytes:
+    if phone_uplink_active():
+      self.req.close()
+      raise requests.ConnectionError("Phone uplink activated; AGNOS download stopped")
     while len(self.buf) < length and not self.eof:
       if self.decompressor.needs_input:
         self.req.raise_for_status()

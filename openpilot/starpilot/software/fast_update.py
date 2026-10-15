@@ -6,6 +6,8 @@ import time
 import selectors
 import signal
 
+from openpilot.starpilot.galaxy.companion import phone_uplink_active
+
 from openpilot.common.vendor_manifest import validate_revision
 from openpilot.common.prebuilt_manifest import revision_digest, valid_receipt
 
@@ -47,6 +49,9 @@ def _stop_process(process):
 
 
 def run(command, cwd, progress=None, *, timeout=None):
+  downloading = 'fetch' in command or 'pull' in command or 'clone' in command
+  if downloading and phone_uplink_active():
+    raise FastUpdateError('Software downloads are disabled on the phone uplink')
   environment = dict(os.environ, GIT_LFS_SKIP_SMUDGE='1', GIT_TERMINAL_PROMPT='0', GIT_ASKPASS='/bin/false', SSH_ASKPASS='/bin/false')
   if timeout is None:
     timeout = 120 if "fetch" in command or "reset" in command or "checkout" in command else 30
@@ -59,6 +64,8 @@ def run(command, cwd, progress=None, *, timeout=None):
       pending = b""
       try:
         while selector.get_map():
+          if downloading and phone_uplink_active():
+            raise FastUpdateError('Phone uplink activated; software download stopped')
           if time.monotonic() >= deadline:
             raise subprocess.TimeoutExpired(command, timeout, output=bytes(output))
           for key, _ in selector.select(min(0.1, max(0.0, deadline - time.monotonic()))):

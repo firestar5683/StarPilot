@@ -13,6 +13,8 @@ Every request counts toward the month's Mapbox usage shown in Galaxy.
 
 from __future__ import annotations
 
+from openpilot.starpilot.galaxy.companion import phone_uplink_active
+
 import math
 import os
 import time
@@ -462,6 +464,8 @@ def _environment(sm, owner, map_enabled: bool, now_ns: int) -> Environment:
     kind = str(device.networkType)
     env.network = ("offline" if kind == "none" else
                    "wifi" if kind in ("wifi", "ethernet") and not device.networkMetered else "cellular")
+    if phone_uplink_active():
+      env.network = "cellular"
     env.onroad = bool(device.started)
   fix = location(sm, now_ns)
   if fix is not None:

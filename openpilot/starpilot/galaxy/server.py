@@ -5,6 +5,7 @@ import hashlib
 from contextlib import nullcontext
 from http.cookies import SimpleCookie
 import json
+import os
 import re
 import secrets
 import select
@@ -65,7 +66,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
                 android_auto_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
-                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None, toyota_tools=None, replay_client=None, replay_root=None):
+                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None, toyota_tools=None, replay_client=None, replay_root=None,
+                companion=None):
+  from openpilot.starpilot.galaxy.companion import CompanionRegistry, APK_PATH
+  companion_source = companion if companion is not None else CompanionRegistry()
   cloud = cloud_provider
   hotspot_source = hotspot
   hotspot_source_lock = threading.Lock()
@@ -635,6 +639,33 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         else:
           if self.require_session():
             self.json(200, result)
+      elif path in ('/app.apk', '/api/companion/app.apk'):
+        if getattr(self.server, 'remote_transport', False):
+          self.json(403, {'error': 'Download the app over local Wi-Fi'})
+          return
+        if not self.direct_local() and not self.require_session():
+          return
+        try:
+          handle = APK_PATH.open('rb')
+        except OSError:
+          self.json(404, {'error': 'Companion APK is not installed'})
+          return
+        with handle:
+          self.send_response(200)
+          self.send_header('Content-Type', 'application/vnd.android.package-archive')
+          self.send_header('Content-Length', str(os.fstat(handle.fileno()).st_size))
+          self.send_header('Content-Disposition', 'attachment; filename="starpilot-companion.apk"')
+          self.send_header('Cache-Control', 'no-store')
+          self.end_headers()
+          if self.command != 'HEAD':
+            while chunk := handle.read(65536):
+              self.wfile.write(chunk)
+      elif path == '/api/companion/status':
+        if self.require_session():
+          try:
+            self.json(200, companion_source.snapshot())
+          except (OSError, ValueError):
+            self.json(503, {'error': 'Companion settings unavailable'})
       elif path == '/api/galaxy/hotspot':
         if not self.require_session():
           return
@@ -657,15 +688,15 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                         'tunnelClientAvailable': frpc_binary() is not None,
                         'legacyPassword': access.status().status == AccessStatus.LEGACY_IMPORT_AVAILABLE,
                         'legacyPairingAvailable': legacy_available is True})
-      elif path == '/api/galaxy/qr.svg':
+      elif path in ('/api/galaxy/qr.svg', '/api/companion/qr.svg'):
         if not self.require_session():
           return
         record = pairing.read()
-        if record is None:
+        if record is None and path == '/api/galaxy/qr.svg':
           self.json(404, {'error': 'Galaxy is not paired'})
           return
         from openpilot.common.qrcode import _Qr, _capacity
-        raw = pairing.url(record['slug']).encode()
+        raw = ("http://172.31.254.1:8082/app.apk" if path == '/api/companion/qr.svg' else pairing.url(record['slug'])).encode()
         version = next(version for version in range(1, 21)
                        if 4 + 8 + len(raw) * 8 <= _capacity(version) * 8)
         matrix = _Qr(version, raw).modules
@@ -675,7 +706,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" shape-rendering="crispEdges">' +
                f'<rect width="100%" height="100%" fill="white"/><g fill="black">{cells}</g></svg>')
         self.respond(200, svg.encode(), 'image/svg+xml')
-      elif path == '/data/runtime.json':
+      elif path in ('/data/runtime.json', '/api/companion/runtime'):
         self.json(200, {'schemaVersion': 1, 'monitor': 'local', 'instance': INSTANCE})
       elif path in ('/api/local-access', '/api/tmux/live', '/api/troubleshoot'):
         if not self.require_session():
@@ -1358,7 +1389,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         finally:
           self.connection.settimeout(old_timeout)
         return
-      if path not in ('/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
+      if path not in ('/api/companion/bluetooth', '/api/companion/uplink', '/api/companion/settings', '/api/connect/provider',
+                      '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
                       '/api/replay/start', '/api/replay/control', '/api/replay/stop',
@@ -1378,8 +1410,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/toyota-tools/action', '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
         return
-      if (path.startswith(('/api/replay/', '/api/recordings/', '/api/connect/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/flm/', '/api/bluetooth/',
-                           '/api/android-auto/', '/api/controllers/', '/api/vehicle-selection/', '/api/toyota-tools/',
+      if (path.startswith(('/api/companion/', '/api/replay/', '/api/recordings/', '/api/connect/', '/api/cameras/', '/api/settings/',
+                           '/api/maps/', '/api/flm/', '/api/bluetooth/', '/api/android-auto/', '/api/controllers/', '/api/vehicle-selection/',
+                           '/api/toyota-tools/',
                            '/api/models/', '/api/ui/', '/api/favorites/', '/api/sounds/', '/api/software/',
                            '/api/drives/', '/api/navigation/', '/api/drive-state/', '/api/sentry/', '/api/crash-reports/')) and
           not self.require_session()):
@@ -1411,6 +1444,41 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         return
       if path.startswith('/api/replay/'):
         replay_api.post(self, path, payload)
+        return
+      if path == '/api/companion/bluetooth':
+        if not self.direct_local() or getattr(self.server, 'remote_transport', False):
+          self.json(403, {'error': 'Pair over Galaxy Wi-Fi or a trusted LAN'})
+          return
+        if not isinstance(payload, dict) or set(payload) != {'rotate'} or type(payload['rotate']) is not bool:
+          self.json(400, {'error': 'Expected rotate boolean'})
+          return
+        with effect_lock:
+          if not parked():
+            self.json(409, {'error': 'Park before pairing or forgetting phones'})
+            return
+          try:
+            from openpilot.starpilot.companion.bluetooth import pairing_payload
+            self.json(200, pairing_payload(payload['rotate']))
+          except (OSError, ValueError):
+            self.json(503, {'error': 'Bluetooth pairing unavailable'})
+        return
+      if path in ('/api/companion/uplink', '/api/companion/settings'):
+        if getattr(self.server, 'remote_transport', False) or not self.direct_local():
+          self.json(403, {'error': 'Companion controls require a direct local connection'})
+          return
+        try:
+          result = (companion_source.heartbeat(payload, self.client_address[0]) if path.endswith('/uplink')
+                    else companion_source.save(payload))
+        except PermissionError as error:
+          self.json(403, {'error': str(error)})
+        except FileExistsError as error:
+          self.json(409, {'error': str(error)})
+        except ValueError as error:
+          self.json(400, {'error': str(error)})
+        except OSError:
+          self.json(503, {'error': 'Companion settings unavailable'})
+        else:
+          self.json(200, result)
         return
       if path == '/api/galaxy/hotspot':
         identity = self.settings_session()

@@ -1,0 +1,204 @@
+import { html, reactive } from "/assets/vendor/arrow-core.js"
+import { createBrowserHistory, createRouter } from "/assets/vendor/remix-router-1.3.1.js"
+import { hideSidebar } from "/assets/js/utils.js"
+import { DeviceSettings } from "/assets/components/tools/device_settings.js?v=favorite-c4-hint-1"
+import { Bluetooth } from "/assets/components/tools/bluetooth.js?v=bluetooth-live-15"
+import { WheelControls } from "/assets/components/tools/wheel_controls.js?v=controllers-3"
+import { DoorControl } from "/assets/components/tools/doors.js"
+import { ErrorLogs } from "/assets/components/tools/error_logs.js"
+import { VehicleFeatures } from "/assets/components/tools/vehicle_features.js"
+import { TSKManager } from "/assets/components/tools/tsk_manager.js"
+import { GalaxyPairing } from "/assets/components/tools/galaxy.js"
+import { Home } from "/assets/components/home/home.js"
+import { MapsManager } from "/assets/components/tools/maps.js"
+import { NavDestination } from "/assets/components/navigation/navigation_destination.js?v=nav-search-context-2"
+import { NavKeys } from "/assets/components/navigation/navigation_keys.js?v=app-keys-session-1"
+import { RouteRecordings } from "/assets/components/recordings/dashcam_routes.js"
+import { SettingsView } from "/assets/components/settings.js?v=router-cycle-fix-5"
+import { ScreenRecordings } from "/assets/components/recordings/screen_recordings.js"
+import { Sidebar } from "/assets/components/sidebar.js?v=sidebar-pin-2"
+import { SentryMode } from "/assets/components/tools/sentry.js"
+import { SpeedLimits } from "/assets/components/tools/speed_limits.js"
+import { ModelManager } from "/assets/components/tools/model_manager.js?v=20260906a"
+import { ModelLaboratory } from "/assets/components/tools/model_laboratory.js?v=model-lab-6"
+import { LivePlots } from "/assets/components/tools/plots.js"
+import { ThemeMaker } from "/assets/components/tools/theme_maker.js"
+import { TestingGround } from "/assets/components/tools/testing_ground.js"
+import { Tuning } from "/assets/components/tools/tuning.js?v=flm-route-length-1"
+import { Troubleshoot } from "/assets/components/tools/troubleshoot.js"
+import { TmuxLog } from "/assets/components/tools/tmux.js"
+import { ToggleControl } from "/assets/components/tools/toggles.js"
+import { VASMAnnotations } from "/assets/components/tools/v_asm.js"
+import { PipSideCamera } from "/assets/components/tools/pip_sidecam.js"
+import { UpdateManager } from "/assets/components/tools/update_manager.js"
+import { startSentryNotifications } from "/assets/components/sentry_notifications.js"
+
+let router, routerState
+
+function toRouterHref(href) {
+  try {
+    const url = new URL(href, window.location.origin)
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return href
+  }
+}
+
+function createRoute(id, path, component) {
+  return {
+    id,
+    path,
+    loader: () => { },
+    element: component,
+  }
+}
+
+function SafeHome() {
+  return html`
+    <div>
+      <h1>Galaxy</h1>
+      <p>Safe mode is active while UI rendering is being repaired.</p>
+      <p>
+        <a href="/galaxy">Galaxy Pairing</a> |
+        <a href="/sentry">Sentry Mode</a> |
+        <a href="/device_settings">Toggles</a> |
+        <a href="/manage_updates">Software</a>
+      </p>
+    </div>
+  `
+}
+
+function Root() {
+  let routes = [
+    createRoute("bluetooth", "/bluetooth", Bluetooth),
+    createRoute("wheel_controls", "/wheel-controls", WheelControls),
+    createRoute("doors", "/manage_doors", DoorControl),
+    createRoute("tsk", "/manage_tsk", TSKManager),
+    createRoute("device_settings", "/device_settings/:section?", DeviceSettings),
+    createRoute("errorLogs", "/manage_error_logs", ErrorLogs),
+    createRoute("galaxy", "/galaxy", GalaxyPairing),
+    createRoute("navdestination", "/set_navigation_destination", NavDestination),
+    createRoute("navkeys", "/manage_navigation_keys", NavKeys),
+    createRoute("root", "/", Home),
+    createRoute("classicRoot", "/classic", Home),
+    createRoute("routes", "/dashcam_routes", RouteRecordings),
+    createRoute("screen_recordings", "/screen_recordings", ScreenRecordings),
+    createRoute("sentry", "/sentry", SentryMode),
+    createRoute("settings", "/settings/:section/:subsection?", SettingsView),
+    createRoute("speed_limits", "/download_speed_limits", SpeedLimits),
+    createRoute("model_manager", "/manage_models", ModelManager),
+    createRoute("model_laboratory", "/model_laboratory", ModelLaboratory),
+    createRoute("tuning", "/tuning", Tuning),
+    createRoute("lateral_maneuvers", "/lateral_maneuvers", Tuning),
+    createRoute("maps", "/manage_maps", MapsManager),
+    createRoute("plots", "/plots", LivePlots),
+    createRoute("thememaker", "/theme_maker", ThemeMaker),
+    createRoute("testing_ground", "/testing_ground", TestingGround),
+    createRoute("troubleshoot", "/troubleshoot", Troubleshoot),
+    createRoute("tmux", "/manage_tmux", TmuxLog),
+    createRoute("toggles", "/manage_toggles", ToggleControl),
+    createRoute("updates", "/manage_updates", UpdateManager),
+    createRoute("vehicle_features", "/vehicle_features", VehicleFeatures),
+    createRoute("v_asm", "/manage_v_asm", VASMAnnotations),
+    createRoute("pip_sidecam", "/manage_pip_sidecam", PipSideCamera),
+  ]
+
+  router = createRouter({
+    routes,
+    history: createBrowserHistory(),
+  }).initialize()
+
+  window.__theGalaxyNavigate = (href) => {
+    router.navigate(toRouterHref(href))
+    window.scrollTo(0, 0)
+  }
+
+  routerState = reactive({
+    activePath: "/",
+    activePathFull: "/",
+    initialized: false,
+    navigation: { state: "loading" },
+    errors: [],
+    params: {},
+    activeMatch: null,
+  })
+
+  router.subscribe(({ initialized, navigation, matches, errors }) => {
+    const match = Array.isArray(matches) && matches.length > 0
+      ? matches[matches.length - 1]
+      : null
+    Object.assign(routerState, {
+      initialized,
+      activePath: match?.route?.path || "",
+      activePathFull: match?.pathname || "",
+      navigation,
+      params: match?.params || {},
+      errors,
+      activeMatch: match,
+    })
+  })
+
+  return html`
+    ${() => Sidebar(routerState.activePathFull)}
+    <div class="content">
+      ${() => {
+      if (!routerState.initialized) {
+        return Home({ params: routerState.params })
+      }
+
+      if (routerState.errors?.root?.status === 404) {
+        return html`<h1>Not Found</h1>`
+      }
+
+      const routeElement = routerState.activeMatch?.route?.element
+      if (typeof routeElement !== "function") {
+        console.warn("[router] no route element for path:", routerState.activePathFull)
+        return Home({ params: routerState.params })
+      }
+      return routeElement({ params: routerState.params })
+    }}
+    </div>
+  `
+}
+
+export function Link(href, children, onClick, classes = "") {
+  return html`<a
+    class="${classes}"
+    href="${() => href}"
+    @click="${(e) => {
+      e.preventDefault()
+      router.navigate(toRouterHref(e.currentTarget.href))
+      hideSidebar()
+      onClick?.()
+    }}"
+  >${children}</a>`
+}
+
+export function Navigate(href) {
+  router.navigate(toRouterHref(href))
+  window.scrollTo(0, 0)
+}
+
+function mountRouterWhenReady() {
+  const mountNode = document.getElementById("app")
+  if (!mountNode) {
+    // Some embedded browsers execute module scripts before <body> is fully available.
+    setTimeout(mountRouterWhenReady, 0)
+    return
+  }
+
+  if (!window.__theGalaxyRouterMounted) {
+    window.__theGalaxyRouterMounted = true
+    Root()(mountNode)
+  } else {
+    console.warn("[router] duplicate mount prevented")
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", mountRouterWhenReady, { once: true })
+} else {
+  mountRouterWhenReady()
+}
+
+startSentryNotifications()

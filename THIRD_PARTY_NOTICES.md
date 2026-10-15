@@ -112,3 +112,28 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Galaxy Android companion tunnel
+
+`openpilot/starpilot/galaxy/bin/hev-socks5-tunnel_linux_arm64` is the upstream
+[hev-socks5-tunnel 2.18.0](https://github.com/heiher/hev-socks5-tunnel/releases/tag/2.18.0)
+static Linux ARM64 release, under the MIT license. Its notice is retained in
+`openpilot/starpilot/galaxy/bin/LICENSE.hev-socks5-tunnel`; the adjacent SHA-256
+file pins the downloaded artifact. The Android companion uses the Kotlin
+standard library (Apache-2.0) and the Gradle wrapper (Apache-2.0); no third-party
+UI framework is bundled.
+
+## Galaxy Bluetooth companion source snapshot
+
+The Galaxy Bluetooth/iOS implementation from
+https://github.com/firestar5683/StarPilot (galaxybt) is included under
+`openpilot/starpilot/companion/upstream/tools/galaxy_bluetooth/`.
+The exact source commit and original blob hashes are in the adjacent `SOURCE.json`.
+User-requested StarPilot branding replacements and the updated asset manifest
+are recorded separately under `branding_overrides`; implementation code is unchanged.
+Original license and attribution files (`UPSTREAM-LICENSE`,
+`UPSTREAM-NOTICES.md`, `UPSTREAM.json`) are retained. This branch's adapter is
+separate. Its isolated comma environment uses the pinned upstream requirements:
+dbus-next 0.2.3 (MIT), PyCryptodome 3.23.0 (BSD/public-domain components), and
+Zeroconf 0.151.3 (LGPL-2.1-or-later); those packages retain their distribution
+licenses in the installed environment.

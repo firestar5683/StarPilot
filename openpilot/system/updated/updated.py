@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from openpilot.starpilot.galaxy.companion import phone_uplink_active
+
 import os
 import re
 import datetime
@@ -510,6 +512,8 @@ class Updater:
     return "reboot-requested"
 
   def fetch_update(self) -> bool:
+    if phone_uplink_active():
+      return False
     if not self._branches_checked:
       self.check_for_update()
     if self.target_branch not in self.branches:
@@ -647,7 +651,9 @@ def main() -> None:
           last_fetch = params.get("UpdaterLastFetchTime")
           timed_out = last_fetch is None or (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - last_fetch > datetime.timedelta(days=3))
           user_requested_fetch = requested == UserRequest.FETCH
-          if params.get_bool("NetworkMetered") and not timed_out and not user_requested_fetch:
+          if phone_uplink_active():
+            cloudlog.info("skipping fetch, phone uplink forbids updates")
+          elif params.get_bool("NetworkMetered") and not timed_out and not user_requested_fetch:
             cloudlog.info("skipping fetch, connection metered")
           elif not download_permitted(params, manual=user_requested_fetch, check_only=requested == UserRequest.CHECK):
             cloudlog.info("skipping fetch, check-only request or automatic downloads disabled")

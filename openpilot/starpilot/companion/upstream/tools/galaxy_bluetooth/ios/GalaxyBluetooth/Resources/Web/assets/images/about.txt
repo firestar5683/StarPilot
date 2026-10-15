@@ -1,0 +1,1 @@
+StarPilot branding. Reuses the existing assets from openpilot/starpilot/galaxy/web/assets and openpilot/selfdrive/assets/images/starpilot_logo.png. Small favicons are scaled from the existing StarPilot Galaxy icon. No frog/Twemoji artwork is used.

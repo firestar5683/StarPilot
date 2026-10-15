@@ -1,5 +1,6 @@
 export async function requestJson(url, { fetcher = (...args) => fetch(...args), timeout = 8000,
   later = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id), request = {}, withResponse = false } = {}) {
+  if (globalThis.StarPilotApp?.bluetooth?.()) timeout = Math.max(timeout, 120000)
   const controller = new AbortController()
   let timer
   let rejectCanceled

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { installHelp, InstallApp, rememberInstallPrompt } from '../web/js/install-app.js'
 assert.match(installHelp({ secure: true, agent: 'iPhone' }), /Share.*Add to Home Screen/)
-assert.match(installHelp({ secure: false, agent: 'Android' }), /https:\/\/galaxy.firestar.link/)
+assert.match(installHelp({ secure: false, agent: 'Android' }), /Android companion.*locally/)
 assert.match(installHelp({ secure: true, agent: 'Chrome' }), /Install app/)
 const events = new Map()
 let modeListener
@@ -38,3 +38,15 @@ assert.equal(late.prompt, early)
 await InstallApp.methods.install.call(late)
 assert.equal(prompted, 2)
 InstallApp.beforeUnmount.call(late)
+
+// Android offers the local APK; tunnel pages explain how to connect locally.
+navigator.userAgent = 'Android'
+let apk
+globalThis.location = { protocol: 'http:', assign: value => { apk = value } }
+const android = { ...InstallApp.data() }
+await InstallApp.methods.install.call(android)
+assert.equal(apk, './app.apk')
+location.protocol = 'https:'
+await InstallApp.methods.install.call(android)
+assert.equal(android.help, true)
+assert.match(android.message, /Android companion.*locally/)

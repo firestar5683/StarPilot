@@ -1,0 +1,124 @@
+package link.firestar.companion
+
+import android.annotation.SuppressLint
+import android.bluetooth.*
+import android.bluetooth.le.*
+import android.content.Context
+import android.os.Build
+import android.os.ParcelUuid
+import org.json.JSONObject
+import java.io.Closeable
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.util.UUID
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+
+/** Serialized GATT operations; a failed mutation is never replayed. Call from a worker thread. */
+@SuppressLint("MissingPermission")
+class BleTransport(private val context: Context, private val key: ByteArray) : Closeable {
+    companion object {
+        fun uuid(part: String): UUID = UUID.fromString("bd49000$part-6dc1-4de7-a7d0-6cdb441f7650")
+    }
+    private data class Event(val kind: String, val status: Int, val data: ByteArray = byteArrayOf())
+    private val events = LinkedBlockingQueue<Event>()
+    @Volatile private var gatt: BluetoothGatt? = null
+    @Volatile private var closed = false
+    private var session = ""
+    private var counter = 0L
+    private var packetSize = 20
+    private val callback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, state: Int) {
+            events.offer(Event(if (state == BluetoothProfile.STATE_CONNECTED) "connect" else "disconnect", status))
+        }
+        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) { events.offer(Event("mtu", status, ByteBuffer.allocate(4).putInt(mtu).array())) }
+        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) { events.offer(Event("services", status)) }
+        @Deprecated("Pre Android 13 callback") override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
+            if (Build.VERSION.SDK_INT < 33) events.offer(Event("read", status, c.value ?: byteArrayOf()))
+        }
+        override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+            events.offer(Event("read", status, value.copyOf()))
+        }
+        override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) { events.offer(Event("write", status)) }
+    }
+    private fun await(kind: String, seconds: Long = 12): ByteArray {
+        val event = events.poll(seconds, TimeUnit.SECONDS) ?: throw IOException("Bluetooth timed out. Reconnect before retrying; a change may already have applied.")
+        if (closed || event.kind != kind || event.status != BluetoothGatt.GATT_SUCCESS) throw IOException("Bluetooth disconnected. Check the result before retrying a change.")
+        return event.data
+    }
+    private fun characteristic(part: String) = gatt?.getService(uuid("1"))?.getCharacteristic(uuid(part)) ?: throw IOException("Galaxy Bluetooth service unavailable")
+    private fun read(part: String): ByteArray {
+        if (gatt?.readCharacteristic(characteristic(part)) != true) throw IOException("Bluetooth read unavailable")
+        return await("read")
+    }
+    private fun write(value: ByteArray) {
+        val g = gatt ?: throw IOException("Bluetooth disconnected")
+        val c = characteristic("2")
+        val sent = if (Build.VERSION.SDK_INT >= 33) g.writeCharacteristic(c, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothStatusCodes.SUCCESS
+            else { c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT; c.value = value; g.writeCharacteristic(c) }
+        if (!sent) throw IOException("Bluetooth write unavailable")
+        await("write")
+    }
+    @Synchronized fun connect() {
+        check(!closed)
+        val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: throw IOException("Bluetooth is unavailable")
+        if (!adapter.isEnabled) throw IOException("Enable Bluetooth on your phone and comma")
+        val scanner = adapter.bluetoothLeScanner ?: throw IOException("Bluetooth scanner unavailable")
+        val found = LinkedBlockingQueue<BluetoothDevice>()
+        val scan = object : ScanCallback() {
+            override fun onScanResult(type: Int, result: ScanResult) { found.offer(result.device) }
+            override fun onScanFailed(code: Int) { events.offer(Event("scan-failed", code)) }
+        }
+        scanner.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(uuid("1"))).build()),
+            ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scan)
+        val device = try { found.poll(12, TimeUnit.SECONDS) } finally { scanner.stopScan(scan) }
+            ?: throw IOException("No Galaxy Bluetooth bridge found. Enable Bluetooth and install the bridge on comma.")
+        if (closed) throw IOException("Connection canceled")
+        events.clear()
+        gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+        try {
+            await("connect")
+            if (gatt?.discoverServices() != true) throw IOException("Bluetooth discovery failed")
+            await("services")
+            if (gatt?.requestMtu(517) == true) packetSize = (ByteBuffer.wrap(await("mtu")).int - 3).coerceIn(20, 512)
+            val info = read("4")
+            require(info.size == 17 && info[0].toInt() == 1)
+            session = info.drop(1).joinToString("") { "%02x".format(it.toInt() and 255) }
+            // Authenticate before exposing cached controls. Do not trust the advertised device name.
+            val response = request(JSONObject().put("method", "GET").put("path", "/_bridge/health"))
+            if (response.getInt("status") != 200) throw IOException("Galaxy Bluetooth authentication failed")
+        } catch (e: Exception) { close(); throw e }
+    }
+    @Synchronized fun request(value: JSONObject): JSONObject {
+        check(!closed && session.isNotEmpty())
+        val id = UUID.randomUUID().toString()
+        val count = ++counter
+        val request = JSONObject(value.toString()).put("id", id).put("session", session).put("counter", count).put("responseCodec", 2).put("responseFlow", "read-stream")
+        // Upstream read-stream flow acknowledges once after authenticated reassembly.
+        try {
+            for (packet in BleWire.packets(BleWire.seal(request.toString().toByteArray(), key), packetSize)) write(packet)
+            val assembler = BleWire.Assembler()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(90)
+            while (System.nanoTime() < deadline) {
+                val packet = read("3")
+                if (packet.contentEquals(byteArrayOf(0))) { Thread.sleep(30); continue }
+                val result = assembler.add(packet)
+                if (result != null) {
+                    val decoded = BleWire.decode(result, key)
+                    val response = JSONObject(String(decoded.json, Charsets.UTF_8))
+                    decoded.body?.let { require(!response.has("body")); response.put("body", java.util.Base64.getEncoder().encodeToString(it)) }
+                    require(response.getString("id") == id && response.getString("session") == session && response.getLong("counter") == count)
+                    write(ByteBuffer.allocate(5).put(2).put(packet, 1, 4).array())
+                    return response
+                }
+            }
+            throw IOException("Bluetooth response timed out. Check the result before retrying a change.")
+        } catch (e: Exception) { close(); throw e }
+    }
+    override fun close() {
+        closed = true
+        val old = gatt; gatt = null
+        old?.disconnect(); old?.close()
+        events.offer(Event("disconnect", -1))
+    }
+}
