@@ -68,7 +68,7 @@ from openpilot.starpilot.ui.bluetooth_status import BluetoothStatusSource
 from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message, display_message
 from openpilot.starpilot.ui.network_panel import NetworkPanelBridge
 from openpilot.starpilot.ui.slc_action_dispatch import SlcActionDispatcher
-from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, SlcUiRequest, is_personality_notice, is_lane_change_notice
+from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadRequest, OnroadState, SlcUiRequest, is_personality_notice, is_lane_change_notice
 from openpilot.starpilot.ui.onroad_favorites import OnroadFavorites
 from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
 from openpilot.starpilot.favorites.owner import FavoritesOwner
@@ -494,9 +494,21 @@ class StarShellSession:
       return
     # Always drain; a request is only published if the same live-state checks as a comma-screen tap pass.
     for request in receiver.drain():
-      if self.slc_actions is None or not ui_state.started or getattr(ui_state, "replay_clock", None) is not None:
+      if not ui_state.started or getattr(ui_state, "replay_clock", None) is not None:
         continue
-      self.slc_actions.dispatch(request)
+      if isinstance(request, OnroadRequest):
+        self._projection_experimental(request.value)
+      elif self.slc_actions is not None:
+        self.slc_actions.dispatch(request)
+
+  def _projection_experimental(self, requested: bool) -> None:
+    """A car-screen wheel tap: the native experimental binding acts only if it is
+    available and still in the state the car screen showed (the opposite of requested)."""
+    binding = self._native_favorite_actions().get(EXPERIMENTAL)
+    current = self.snapshot(ShellMode.ONROAD).onroad.experimental_enabled
+    if not (binding is not None and binding.available and binding.invoke is not None and
+            current != requested and binding.invoke()):
+      self._unavailable("experimental shortcut in this context")
 
   def _poll_wheel(self, now_ns):
     if getattr(ui_state, "replay_clock", None) is not None:

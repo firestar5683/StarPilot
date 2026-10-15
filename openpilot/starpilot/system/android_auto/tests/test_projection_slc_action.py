@@ -19,3 +19,80 @@ def test_request_round_trips_and_malformed_input_is_dropped():
   finally:
     sender.close()
     receiver.close()
+
+
+def test_experimental_request_round_trips_and_rejects_malformed_values():
+  from openpilot.starpilot.ui.onroad_state import OnroadRequest
+  path = Path(tempfile.mkdtemp(dir='/tmp')) / 's.sock'
+  receiver, sender = SlcActionReceiver(path), SlcActionSender(path)
+  try:
+    # The native token is not visible to the projection and is not sent.
+    assert sender.send(OnroadRequest('set_experimental', True, 'projection-token'))
+    assert not sender.send(OnroadRequest('set_experimental', None))
+    assert not sender.send(OnroadRequest('open_settings', True))
+    sender.sock.sendto(b'{"kind": "set_experimental", "value": "yes"}', str(path))
+    sender.sock.sendto(b'{"kind": "set_experimental"}', str(path))
+    sender.sock.sendto(b'[1]', str(path))
+    assert receiver.drain() == [OnroadRequest('set_experimental', True)]
+  finally:
+    sender.close()
+    receiver.close()
+
+
+def _native_session(experimental_enabled, binding):
+  from types import SimpleNamespace as NS
+  from unittest.mock import Mock
+  from openpilot.starpilot.favorites.actions import EXPERIMENTAL
+  from openpilot.starpilot.ui import runtime_app
+  session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+  session.snapshot = Mock(return_value=NS(onroad=NS(experimental_enabled=experimental_enabled)))
+  session._native_favorite_actions = lambda: {EXPERIMENTAL: binding} if binding is not None else {}
+  session._unavailable = Mock()
+  session.slc_actions = Mock()
+  return session
+
+
+def _binding(available=True, result=True):
+  from types import SimpleNamespace as NS
+  from unittest.mock import Mock
+  return NS(available=available, invoke=Mock(return_value=result), token='native')
+
+
+def test_native_applies_projection_experimental_tap_only_against_live_state():
+  binding = _binding()
+  session = _native_session(False, binding)
+  session._projection_experimental(True)
+  binding.invoke.assert_called_once_with()
+  session._unavailable.assert_not_called()
+
+  # Already in the requested state (a stale or duplicate tap): no second toggle.
+  binding = _binding()
+  session = _native_session(True, binding)
+  session._projection_experimental(True)
+  binding.invoke.assert_not_called()
+  session._unavailable.assert_called_once()
+
+  for binding in (None, _binding(available=False), _binding(result=False)):
+    session = _native_session(False, binding)
+    session._projection_experimental(True)
+    session._unavailable.assert_called_once()
+
+
+def test_native_poll_routes_experimental_and_speed_limit_requests(monkeypatch):
+  from types import SimpleNamespace as NS
+  from unittest.mock import Mock
+  from openpilot.starpilot.ui import runtime_app
+  from openpilot.starpilot.ui.onroad_state import OnroadRequest
+  slc = SlcUiRequest(SlcActionKind.ACCEPT, 'drive-1', 7, 9, 22.0)
+  session = _native_session(False, _binding())
+  session._projection_slc = NS(drain=lambda: [OnroadRequest('set_experimental', True), slc])
+  session._projection_experimental = Mock()
+  monkeypatch.setattr(runtime_app, 'ui_state', NS(started=True, replay_clock=None))
+  session._poll_projection_slc(0)
+  session._projection_experimental.assert_called_once_with(True)
+  session.slc_actions.dispatch.assert_called_once_with(slc)
+
+  session._projection_experimental.reset_mock()
+  monkeypatch.setattr(runtime_app, 'ui_state', NS(started=False, replay_clock=None))
+  session._poll_projection_slc(0)
+  session._projection_experimental.assert_not_called()
