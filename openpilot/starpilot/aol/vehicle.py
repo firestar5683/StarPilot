@@ -1,5 +1,10 @@
 """Fail-closed dispatch to vehicle-owned AOL capabilities."""
 
+from functools import lru_cache
+
+from capnp.lib.capnp import _DynamicStructBuilder, _DynamicStructReader
+from opendbc.car.structs import CarParams
+
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
 from openpilot.starpilot.aol.intent import AolCardIntent
 from openpilot.starpilot.car.honda import aol as honda
@@ -11,14 +16,54 @@ from openpilot.starpilot.car.tesla import aol as tesla
 from openpilot.starpilot.car.toyota import aol as toyota
 
 _PORTS = {'honda': honda, 'hyundai': hyundai, 'gm': gm, 'ford': ford, 'mazda': mazda, 'tesla': tesla, 'toyota': toyota}
+_POLICY_CACHE_SIZE = 8
+_POLICY_CACHE_MAX_BYTES = 64 * 1024
 
 
-def policy_for(CP) -> AolVehiclePolicy:
+def _policy_for_uncached(CP) -> AolVehiclePolicy:
   try:
     port = _PORTS.get(CP.brand)
     return port.policy_for(CP) if port is not None else AolVehiclePolicy()
   except (AttributeError, TypeError, ValueError, OverflowError, IndexError):
     return AolVehiclePolicy()
+
+
+def _car_params_bytes(CP) -> bytes | None:
+  # Unknown ducktypes keep the original dispatch behavior without serialization.
+  cp_type = type(CP)
+  if cp_type is not _DynamicStructBuilder and cp_type is not _DynamicStructReader:
+    return None
+  try:
+    if CP.schema != CarParams.schema:
+      return None
+    # Never serialize the original builder: to_bytes changes its write state.
+    snapshot = CP.copy() if cp_type is _DynamicStructBuilder else CP.as_builder()
+    if type(snapshot) is not _DynamicStructBuilder:
+      return None
+    key = snapshot.to_bytes()
+    return key if len(key) <= _POLICY_CACHE_MAX_BYTES else None
+  except Exception:
+    return None
+
+
+@lru_cache(maxsize=_POLICY_CACHE_SIZE)
+def _policy_for_bytes(key: bytes) -> AolVehiclePolicy:
+  # Evaluate the same immutable bytes as the key, never a mutable caller alias.
+  with CarParams.from_bytes(key) as CP:
+    if type(CP) is not _DynamicStructReader or CP.schema != CarParams.schema:
+      raise TypeError('Unsupported CarParams snapshot')
+    return _policy_for_uncached(CP)
+
+
+def policy_for(CP) -> AolVehiclePolicy:
+  key = _car_params_bytes(CP)
+  if key is not None:
+    try:
+      # Only the frozen static policy is reused. Live authority stays uncached.
+      return _policy_for_bytes(key)
+    except Exception:
+      pass
+  return _policy_for_uncached(CP)
 
 
 def native_profile_supported(model: int, param: int) -> bool:
