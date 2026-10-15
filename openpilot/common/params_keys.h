@@ -43,6 +43,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"StarPilotFavoriteSlots", {PERSISTENT, JSON, R"([{"enabled":false,"show_onroad":false,"key":null,"label":""},{"enabled":false,"show_onroad":false,"key":null,"label":""},{"enabled":false,"show_onroad":false,"key":null,"label":""}])"}},
     {"StarPilotControllerBindings", {PERSISTENT | DONT_LOG, JSON}},
     {"UseStarPilotLongitudinalPlanner", {PERSISTENT, BOOL, "1"}},
+    {"UseVOACC", {PERSISTENT, BOOL, "0"}},
     {"CustomPersonalities", {PERSISTENT, BOOL, "0"}},
     {"SettingsRetirementState", {PERSISTENT | DONT_LOG, JSON}},
     {"RetiredSettingsEvidence", {PERSISTENT | DONT_LOG, JSON}},

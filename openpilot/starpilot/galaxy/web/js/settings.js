@@ -16,7 +16,7 @@ const post = (fetcher, path, body, signal) => fetcher(path, {
 
 export const SETTINGS_SECTIONS = Object.freeze([
   { id: "lateral", label: "Lateral (Steering)", icon: "bi-arrows-move", pages: ["aol", "lane_change", "torque", "lane"] },
-  { id: "longitudinal", label: "Longitudinal (Speed & Following)", icon: "bi-speedometer2", pages: ["conditional", "curve", "profiles", "slc", "traffic", "aggressive", "standard", "relaxed"] },
+  { id: "longitudinal", label: "Longitudinal (Speed & Following)", icon: "bi-speedometer2", pages: ["profiles", "conditional", "curve", "slc", "aggressive", "standard", "relaxed", "traffic"] },
   { id: "wheel", label: "Wheel Controls", icon: "bi-controller", pages: ["wheel"] },
   { id: "visual", label: "Visual (Display & UI)", icon: "bi-eye", pages: ["appearance", "ui_layout", "favorites", "pip"] },
   { id: "sounds", label: "Sounds & Alerts", icon: "bi-volume-up", pages: ["sounds"] },
@@ -281,6 +281,9 @@ export const SettingsPage = {
       const entries = inHub && SECTION_LINKS[section.id]
         ? SECTION_LINKS[section.id].map((row, index) => ({ row: { ...row, available: true, action: false, value: row.value || "Customize " + row.label.toLocaleLowerCase() }, index }))
         : rows.map((row, index) => ({ row, index })).filter(({ row }) => !inHub || section.pages.includes(row.page))
+      if (inHub && section.id === "longitudinal") {
+        entries.sort((a, b) => section.pages.indexOf(a.row.page) - section.pages.indexOf(b.row.page))
+      }
       return entries.filter(({ row }) => !isPipCropRow(row)).filter(({ row, index }) => {
         const previous = rows[index - 1]
         return !(["sounds", "display"].includes(this.state.data?.page) && row.repairValue === "Auto" &&
@@ -309,7 +312,7 @@ export const SettingsPage = {
       else this.flushSoundChoices()
     },
   },
-  mounted() { if (this.mode === "local" && !this.state.developerOpen) this.feed.start(this.initialPage) },
+  mounted() { if (this.mode === "local") this.feed.start(this.state.developerOpen ? "developer" : this.initialPage) },
   beforeUnmount() { this.feed.stop(); clearTimeout(this._saveStatusTimer) },
   methods: {
     open(page) {
@@ -349,7 +352,6 @@ export const SettingsPage = {
       this.state.parents = []
       this.state.section = section.id
       this.state.developerOpen = section.id === "developer"
-      if (this.state.developerOpen) { this.feed.stop(); return }
       if (!this.feed.active) { this.feed.start(section.pages.length === 1 ? section.pages[0] : "hub"); return }
       this.state.query = ""
       const page = section.pages.length === 1 ? section.pages[0] : "hub"
@@ -402,7 +404,7 @@ export const SettingsPage = {
         <div v-if="mode === 'local' && initialPage === 'hub' && atSectionRoot" class="gx-settings-tabs" aria-label="Settings sections">
           <button v-for="section in sections" :key="section.id" type="button" class="gx-chip" :aria-pressed="section.id === activeSection.id" @click="selectSection(section)">{{ section.label }}</button>
         </div>
-      <p class="gx-page-description" v-if="state.developerOpen">Choose where cloud accounts and uploads go.</p>
+      <p class="gx-page-description" v-if="state.developerOpen">Choose developer driving options and cloud services.</p>
       <p class="gx-page-description" v-else-if="initialPage === 'pip'">Choose when to show the camera and adjust its saved crop. Use the crop editor for a live preview.</p>
       <p class="gx-page-description" v-else-if="(state.data?.page || initialPage) === 'sounds'">Adjust alert and chime volumes. Immediate warnings keep their safety volume ramp.</p>
       <p class="gx-page-description" v-else-if="(state.data?.page || initialPage) === 'display'">Adjust brightness and screen timing when custom display settings are on.</p>
@@ -431,7 +433,7 @@ export const SettingsPage = {
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read these preferences. Reconnecting automatically…</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
           </GxNotice>
-        <div v-if="!state.developerOpen" class="gx-panel-stage" :style="{'--panel-direction': state.panelDirection}">
+        <div v-if="!state.developerOpen || state.data?.page === 'developer'" class="gx-panel-stage" :style="{'--panel-direction': state.panelDirection}">
           <Transition name="gx-panel">
           <div v-if="state.data" :key="state.data.page + activeSection.id" class="gx-settings__body">
             <div v-if="state.data.page === 'pip'" class="gx-settings__actions gx-actions">

@@ -61,6 +61,8 @@ DESCRIPTIONS = {
   'slc_adopt': 'Keeps the current speed-limit offset schedule fixed when display units change.',
   'slc_reset': 'Resets saved speed-limit offsets while retaining valid configured speed ranges.',
   'AlwaysAllowUploads': 'Allows queued full logs and videos to upload over metered networks. This uses mobile data.',
+  'UseVOACC': ('Use vision-only adaptive cruise control instead of radar-assisted lead detection. ' +
+               'Requires StarPilot longitudinal control. Applies next drive; radar faults and safety checks remain active.'),
   'ToyotaRadarMode': 'Chooses the supported Toyota front radar configuration, including the optional ARS510 retrofit.',
   'ToyotaAutoHold': ('Holds the brakes after you press the brake for over one second at a complete stop ' +
     'with cruise main on and cruise disengaged. Press the accelerator to release.'),

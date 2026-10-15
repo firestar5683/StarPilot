@@ -265,7 +265,7 @@ def cb(sm, item, tid, end_event: threading.Event, sz: int, cur: int) -> None:
   if not item.allow_cellular:
     if (time.monotonic() - sm.recv_time['deviceState']) > DEVICE_STATE_UPDATE_INTERVAL:
       sm.update(0)
-      if sm['deviceState'].networkMetered:
+      if sm['deviceState'].networkMetered and not Params().get_bool("AlwaysAllowUploads"):
         raise AbortTransferException
 
   if end_event.is_set():
@@ -298,7 +298,7 @@ def upload_handler(end_event: threading.Event) -> None:
       sm.update(0)
       metered = sm['deviceState'].networkMetered
       network_type = sm['deviceState'].networkType.raw
-      if metered and (not item.allow_cellular):
+      if metered and not item.allow_cellular and not Params().get_bool("AlwaysAllowUploads"):
         retry_upload(tid, end_event, False)
         continue
 

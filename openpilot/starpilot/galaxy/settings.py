@@ -28,6 +28,7 @@ from openpilot.starpilot.ui.feature_settings_state import (
   FeatureRow, FeatureSettingsRequest, FEATURE_CONFIRM_ACTIONS, is_long_confirm_action, row_change, row_default,
 )
 from openpilot.starpilot.saved_source import read_saved
+from openpilot.starpilot.galaxy.developer_settings import DeveloperSettingsOwner
 from openpilot.starpilot.speed_limits.vision_gate import diagnostic_choice_enabled
 from openpilot.starpilot.parked_evidence import ParkedEvidence, RESUME_SKEW_NS, fresh_offroad, host_parked
 from openpilot.starpilot.ui.pip_owner import EDITOR as PIP_EDITOR, FORMAT_PREFIX as PIP_FORMAT_PREFIX, RESET as PIP_RESET, PiPOwner, validated_editor_draft
@@ -36,7 +37,7 @@ from openpilot.starpilot.ui.sentry_owner import RESET as SENTRY_RESET, SentryOwn
 from openpilot.starpilot.ui.vasm_owner import ANNOTATION as VASM_ANNOTATION, RESET as VASM_RESET, VASMOwner, validated_annotation
 
 
-PAGES = frozenset(("hub", "vehicle", "slc", "lane", "lane_change", "profiles", "traffic", "aggressive", "standard", "relaxed",
+PAGES = frozenset(("hub", "developer", "vehicle", "slc", "lane", "lane_change", "profiles", "traffic", "aggressive", "standard", "relaxed",
                    "curve", "torque", "aol", "wheel", "appearance", "display", "data", "sounds", "pip", "sentry", "vasm",
                    "conditional", "conditional/cem", "conditional/ccm",
                    *(f"{name}/{category}" for name in ("traffic", "aggressive", "standard", "relaxed")
@@ -122,7 +123,7 @@ def _onroad_preference(page: str, key: str) -> bool:
   # Regular saved choices are consumed by their runtime owners. Only explicit
   # multi-key reset/repair operations need the offroad transaction boundary;
   # their owners independently recheck that requirement at commit time.
-  return bool(key and key != SETUP_ACTION and key not in (
+  return bool(page != "developer" and key and key != SETUP_ACTION and key not in (
     "reset_profiles", "curve_reset", "slc_adopt", "slc_reset",
     "conditional:reset", "conditional:manual_reset",
   ) and not is_long_confirm_action(key) and not key.startswith("torque_repair:"))
@@ -539,7 +540,18 @@ class SettingsGateway:
       return fresh.cp_raw == ctx.cp_raw
     return VASMOwner(self.params, parked)
 
+  def _developer_owner(self, ctx: AuthorityContext, *, live: bool = False,
+                       session_valid: Callable[[], bool] = lambda: True) -> DeveloperSettingsOwner:
+    def authorized() -> bool:
+      if not session_valid():
+        return False
+      fresh = self.context.sample() if live else ctx
+      return bool(fresh.parked and not fresh.editing_saved_vehicle and fresh.cp_raw == ctx.cp_raw)
+    return DeveloperSettingsOwner(self.params, authorized)
+
   def _state(self, page: str, ctx: AuthorityContext):
+    if page == "developer":
+      return self._developer_owner(ctx).snapshot()
     if page == "appearance":
       return self._appearance_owner(ctx).snapshot(Profile.COMPACT)
     if page == "sounds":
@@ -729,5 +741,7 @@ class SettingsGateway:
       return self._sentry_owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
     if intent.page == "vasm":
       return self._vasm_owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
+    if intent.page == "developer":
+      return self._developer_owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
     owner = self._owner(ctx, live=True, session_valid=session_valid)
     return owner.apply(intent.request, reset_default=True) if intent.recovery_default else owner.apply(intent.request)

@@ -20,6 +20,7 @@ from openpilot.starpilot.conditional_mode.adjacent import (
   AdjacentFrame, AdjacentObservation, AdjacentTrack, MonoSource, UNKNOWN, evaluate,
 )
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
+from openpilot.starpilot.longitudinal.voacc import selected as voacc_selected
 
 
 # Default lead acceleration decay set to 50% at 1s
@@ -200,7 +201,8 @@ def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capn
 
 class RadarD:
   def __init__(self, delay: float = 0.0, *, adjacent_enabled: bool = False, radar_available: bool = False,
-               clock_pair_fn=None, honda_bosch_a_radar: bool = False):
+               clock_pair_fn=None, honda_bosch_a_radar: bool = False, use_voacc: bool = False):
+    self.use_voacc = use_voacc
     self.tracks: dict[int, Track] = {}
     self.honda_bosch_a = None
     if honda_bosch_a_radar:
@@ -345,7 +347,12 @@ class RadarD:
         else:
           self.lead_prob_filters[i].update(lead_prob)
 
-      if self.honda_bosch_a is not None:
+      if self.use_voacc:
+        self.radar_state.leadOne = get_lead(self.v_ego, self.ready, {}, leads_v3[0], model_v_ego,
+                                          self.lead_prob_filters[0].x, low_speed_override=False)
+        self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, {}, leads_v3[1], model_v_ego,
+                                          self.lead_prob_filters[1].x, low_speed_override=False)
+      elif self.honda_bosch_a is not None:
         self.radar_state.leadOne, self.radar_state.leadTwo = self.honda_bosch_a.leads(sm, self, model_v_ego)
       else:
         self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True)
@@ -408,7 +415,7 @@ def main() -> None:
   from opendbc.car.honda.bosch_a_radar import VERIFIED_BOSCH_A_CARS
   honda_bosch_a = CP.brand == "honda" and CP.carFingerprint in VERIFIED_BOSCH_A_CARS and not CP.radarUnavailable
   RD = RadarD(CP.radarDelay, adjacent_enabled=adjacent_enabled, radar_available=not CP.radarUnavailable,
-              honda_bosch_a_radar=honda_bosch_a)
+              honda_bosch_a_radar=honda_bosch_a, use_voacc=voacc_selected(params, CP))
   set_core_affinity([4, 5])
 
   while 1:
