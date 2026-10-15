@@ -291,7 +291,9 @@ def test_registered_controls_computed_profile_is_used_and_revoked(vehicle, mode,
       frame(candidate, now, tick)
     assert candidate.params.check_key('AutomaticSteeringProfiles')
     assert candidate.params.get_type('AutomaticSteeringProfiles') == ParamKeyType.BYTES
-    assert len(candidate.params.all_keys()) == 345
+    assert candidate.params.check_key('UseVOACC')
+    assert candidate.params.check_key('DeveloperSidebar')
+    assert len(candidate.params.all_keys()) == 347
     runtime = candidate.global_learning
     assert runtime.identity and runtime.eligible
     assert candidate.sm['selfdriveState'].active and candidate.sm['selfdriveState'].enabled

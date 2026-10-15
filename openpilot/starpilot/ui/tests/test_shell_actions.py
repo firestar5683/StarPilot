@@ -306,7 +306,7 @@ class ShellActionTests(unittest.TestCase):
     touch = ShellInput(Profile.LARGE, requests.append)
     snapshot = ShellSnapshot(ShellMode.ONROAD, reference_state(), SettingsState(),
                              OnroadState(True, False, 0.0, None, SpeedLimitObservation(),
-                                         experimental_available=True, experimental_enabled=False))
+                                         experimental_available=True, experimental_enabled=False, viewport_width=1860))
     touch.press(1670, 170, 0.0, snapshot)
     touch.release(1670, 170, 0.1, replace(snapshot, onroad=replace(snapshot.onroad, experimental_enabled=True)))
     self.assertEqual(requests, [])

@@ -3,11 +3,12 @@
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 import tempfile
 import unittest
 
 from openpilot.starpilot.galaxy.developer_settings import DeveloperSettingsOwner
-from openpilot.starpilot.galaxy.settings import AuthorityContext, SettingsChanged, SettingsGateway
+from openpilot.starpilot.galaxy.settings import AuthorityContext, ContextSource, SettingsChanged, SettingsGateway
 from openpilot.starpilot.longitudinal.voacc import KEY, selected
 from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsRequest
 
@@ -80,7 +81,7 @@ class DeveloperSettingsTest(unittest.TestCase):
   def test_real_gateway_preview_save_default_and_authority_recheck(self):
     context = SimpleNamespace(value=AuthorityContext(True, None, None))
     context.sample = lambda: context.value
-    gateway = SettingsGateway(self.params, context, clock=lambda: 10.)
+    gateway = SettingsGateway(self.params, cast(ContextSource, context), clock=lambda: 10.)
     token, generation = "session", b"generation"
 
     def preview(value):

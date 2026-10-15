@@ -1,6 +1,7 @@
 """Actual RadarD lead selection without changing radar health or input data."""
 
 from types import SimpleNamespace
+from typing import cast
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ from openpilot.selfdrive.controls import radard
 from openpilot.selfdrive.controls.radard import RadarD
 from openpilot.selfdrive.controls.tests.test_adjacent_radar_transport import Captured, MONO, Sources
 from openpilot.starpilot.longitudinal.voacc import selected
+from openpilot.starpilot.car.honda.radar import BoschALeadPolicy
 
 
 class VoaccTest(unittest.TestCase):
@@ -64,7 +66,7 @@ class VoaccTest(unittest.TestCase):
     source = self.source()
     radar = RadarD(honda_bosch_a_radar=True, use_voacc=True)
     policy = SimpleNamespace(update_tracks=Mock(), leads=Mock(side_effect=AssertionError("radar lead path")))
-    radar.honda_bosch_a = policy
+    radar.honda_bosch_a = cast(BoschALeadPolicy, policy)
     radar.update(source, source['radarTracks'])
     policy.update_tracks.assert_called_once_with(source, source['radarTracks'], radar)
     policy.leads.assert_not_called()

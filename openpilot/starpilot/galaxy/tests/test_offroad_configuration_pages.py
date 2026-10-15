@@ -48,11 +48,20 @@ class TestOffroadConfigurationPages(unittest.TestCase):
       with self.subTest(alpha=alpha):
         self.params.put_bool('AlphaLongitudinalEnabled', alpha, block=True)
         self.params.put('VehicleSelection', json.loads(encode(None)), block=True)
+        self.assertTrue(self.context.sample().editing_saved_vehicle)
         saved = {name: self.editable_inventory(self.page(name)) for name in sorted(PAGES)}
         self.params.put('VehicleSelection', json.loads(encode('HYUNDAI_IONIQ_6')), block=True)
+        self.assertFalse(self.context.sample().editing_saved_vehicle)
         for name in sorted(PAGES):
           with self.subTest(page=name):
-            self.assertEqual(saved[name], self.editable_inventory(self.page(name)))
+            current = self.editable_inventory(self.page(name))
+            expected = saved[name]
+            if name == 'developer':
+              self.assertEqual([row[0] for row in expected], ['Use VOACC'])
+              self.assertFalse(expected[0][1])
+              self.assertTrue(current[0][1])
+              expected = [(row[0], True, *row[2:]) for row in expected]
+            self.assertEqual(expected, current)
         self.assert_no_car_cache()
 
   def test_stock_ioniq_configuration_can_save_slc_without_enabling_longitudinal(self):

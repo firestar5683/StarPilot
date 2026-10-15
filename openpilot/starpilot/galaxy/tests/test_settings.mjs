@@ -385,12 +385,14 @@ assert.equal(sections.at(-1).id, 'developer')
 const catalog = JSON.parse((await import('node:fs')).readFileSync(new URL('../web/data/catalog.json', import.meta.url), 'utf8'))
 assert(!catalog.tools.some(tool => tool.path.startsWith('/developer')))
 const category = {state:{section:'lateral',developerOpen:false,cloudOpen:false,data:{page:'hub'}},busy:false,
-  feed:{active:true,stop(){this.active=false},start(page){this.active=true;category.started=page}}}
+  feed:{active:true,stop(){this.active=false},start(page){this.active=true;category.started=page},
+    load(page, options){category.loaded={page,options};category.state.data={page}}}}
 SettingsPage.methods.selectSection.call(category, sections.at(-1))
 assert.equal(category.state.developerOpen, true)
-assert.equal(category.feed.active, false)
+assert.equal(category.feed.active, true)
+assert.deepEqual(category.loaded, {page: 'developer', options: {keepData: false, quiet: false}})
 SettingsPage.methods.back.call(category)
 assert.equal(category.state.developerOpen, true) // Developer is a direct section, with no cloud submenu.
 SettingsPage.methods.selectSection.call(category, sections[0])
 assert.equal(category.state.developerOpen, false)
-assert.equal(category.started, 'hub')
+assert.deepEqual(category.loaded, {page: 'hub', options: {keepData: false, quiet: false}})

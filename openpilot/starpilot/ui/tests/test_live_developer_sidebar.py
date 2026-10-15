@@ -1,6 +1,7 @@
 import unittest
 from dataclasses import replace
 from types import SimpleNamespace as NS
+from typing import cast
 from unittest.mock import Mock, patch
 
 import pyray as rl
@@ -136,7 +137,7 @@ class TestLiveDeveloperSidebar(unittest.TestCase):
     session.compact_y = session.compact_scroll_x = 0
     session.sidebar_expanded = True
     state = OnroadState(False, False, None, None, SpeedLimitObservation())
-    session.adapter = NS(ui_state=NS(sm=NS(frame=1)), build=Mock())
+    session.adapter = cast(runtime_app.RuntimeSnapshotAdapter, NS(ui_state=NS(sm=NS(frame=1)), build=Mock()))
     for page_width, shown, expected in ((2160, True, 1860), (2160, False, 2160),
                                         (1860, False, 1860), (1860, True, 1560), (2160, True, 1860)):
       session._onroad_page_width = page_width

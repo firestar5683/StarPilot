@@ -81,19 +81,24 @@ class AppearanceSettingsTests(unittest.TestCase):
     row = self.row("DeveloperSidebar")
     self.assertEqual((row.label, row.value, row.default_value), ("Developer Sidebar", "Off", "Off"))
     request = row_change(row)
+    assert request is not None
     self.parked = False
     self.assertFalse(self.owner.apply(request))
     self.parked = True
     self.assertTrue(self.owner.apply(request))
     self.assertTrue(onroad_appearance(self.params).show_developer_sidebar)
     self.assertFalse(self.owner.apply(request), "a stale toggle must not overwrite another edit")
-    self.assertTrue(self.owner.apply(row_change(self.row("DeveloperSidebar"))))
+    request = row_change(self.row("DeveloperSidebar"))
+    assert request is not None
+    self.assertTrue(self.owner.apply(request))
     self.assertFalse(onroad_appearance(self.params).show_developer_sidebar)
     source = Path(self.params.get_param_path("DeveloperSidebar"))
     source.write_bytes(b"bad")
     self.assertFalse(onroad_appearance(self.params).show_developer_sidebar)
     self.assertEqual(source.read_bytes(), b"bad")
-    self.assertTrue(self.owner.apply(row_change(self.row("DeveloperSidebar"))))
+    request = row_change(self.row("DeveloperSidebar"))
+    assert request is not None
+    self.assertTrue(self.owner.apply(request))
     self.assertEqual(source.read_bytes(), b"0")
 
   def test_personality_alert_visibility_is_default_off_and_widget_independent(self):

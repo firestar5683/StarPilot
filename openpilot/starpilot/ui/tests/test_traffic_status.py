@@ -1,5 +1,6 @@
 """Fresh Traffic receipts affect only the read-only C3/C4 status display."""
 
+from dataclasses import replace
 import tempfile
 import unittest
 from types import SimpleNamespace as NS
@@ -136,8 +137,9 @@ class TestTrafficStatus(unittest.TestCase):
       large.fonts = fonts
       large.projection_viewport = None
       fonts.reset_mock()
-      large._traffic_badge(shown, 101)
-      self.assertEqual(fonts.draw.call_args.args[:5], ('TRAFFIC', FontRole.SEMI_BOLD, 25, 1390, 101))
+      for width, expected_x in ((1860, 1390), (2160, 1690)):
+        large._traffic_badge(replace(shown, viewport_width=width), 101)
+        self.assertEqual(fonts.draw.call_args.args[:5], ('TRAFFIC', FontRole.SEMI_BOLD, 25, expected_x, 101))
       self.assertFalse(adapter.build(ShellMode.ONROAD, now_ns=NOW + 101_000_000).onroad.traffic_mode)
       self.assertIsNone(adapter.build(ShellMode.ONROAD, now_ns=NOW + 101_000_000).onroad.traffic_display)
 
