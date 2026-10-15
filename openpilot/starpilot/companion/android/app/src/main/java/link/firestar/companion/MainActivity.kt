@@ -29,6 +29,8 @@ class MainActivity : Activity() {
     private val jobs = ConcurrentHashMap<String, FutureTask<Unit>>()
     private val worker = ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, ArrayBlockingQueue(16))
     private val cachedOrigin = "https://galaxy-app.invalid"
+    private var connectionStatus: TextView? = null
+    private val recovery = ConnectionRecovery({ discoverLan(it) }, { connect() }, { stopDiscovery() })
 
     private var origin = Networks.ORIGIN
     private var share: String? = null
@@ -41,6 +43,7 @@ class MainActivity : Activity() {
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); share = intent.getStringExtra("share")?.take(8192); connect() }
     private fun connect(host: String? = null) {
+        stopDiscovery()
         connectionGeneration.incrementAndGet()
         jobs.values.forEach { it.cancel(false) }; jobs.clear(); worker.purge()
         ble?.close(); ble = null
@@ -51,6 +54,10 @@ class MainActivity : Activity() {
         if (wifi == null) {
             if (mode == "auto" && pairing.load() != null) connectBluetooth() else disconnected()
             return
+        }
+        val saved = Networks.localOrigin(prefs.getString("host", "") ?: "")
+        if (host == null && Networks.wifi(this) == null && (saved == null || saved == Networks.ORIGIN)) {
+            disconnected(); discoverLan(automatic = true); return
         }
         origin = host?.let { Networks.localOrigin(it) } ?: if (Networks.wifi(this) != null) Networks.ORIGIN else
             Networks.localOrigin(prefs.getString("host", Networks.ORIGIN)!!) ?: Networks.ORIGIN
@@ -77,7 +84,11 @@ class MainActivity : Activity() {
             }
             override fun onReceivedError(v: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (web === v && request.isForMainFrame) runOnUiThread {
-                    if (prefs.getString("transport", "auto") == "auto" && pairing.load() != null) connectBluetooth() else disconnected()
+                    if (web !== v) return@runOnUiThread
+                    disconnected()
+                    if (host == null && Networks.wifi(this@MainActivity) == null && Networks.wifi(this@MainActivity, false) != null)
+                        discoverLan(automatic = true)
+                    else if (prefs.getString("transport", "auto") == "auto" && pairing.load() != null) connectBluetooth()
                 }
             }
             override fun onPageFinished(v: WebView, url: String) {
@@ -95,13 +106,17 @@ class MainActivity : Activity() {
         if (prefs.getBoolean("enabled", false)) startForegroundService(Intent(this, UplinkService::class.java))
     }
     private fun disconnected() {
+        stopDiscovery()
+        Networks.manager(this).bindProcessToNetwork(null)
         connectionGeneration.incrementAndGet(); ble?.close(); ble = null
         val previous = web; web = null
         previous?.removeJavascriptInterface("StarPilotApp"); previous?.stopLoading(); previous?.destroy()
         val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 100, 40, 40); setBackgroundColor(Color.rgb(7, 7, 18)) }
-        panel.addView(TextView(this).apply { text = "Connect to Galaxy\n\nUse comma Wi-Fi, a local LAN address, or pair Bluetooth while parked."; textSize = 22f; setTextColor(Color.WHITE) })
+        connectionStatus = TextView(this).apply { text = "Connect to Galaxy\n\nUse comma Wi-Fi, a local LAN address, or pair Bluetooth while parked."; textSize = 22f; setTextColor(Color.WHITE) }
+        panel.addView(connectionStatus)
         panel.addView(Button(this).apply { text = "Wi-Fi settings"; setOnClickListener { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } })
         panel.addView(Button(this).apply { text = "Try again"; setOnClickListener { connect() } })
+        panel.addView(Button(this).apply { text = "Find comma on LAN"; setOnClickListener { discoverLan() } })
         panel.addView(Button(this).apply { text = "Bluetooth and connection options"; setOnClickListener { connections() } })
         val address = EditText(this).apply { hint = "Direct LAN: http://192.168.1.10:8082"; setSingleLine() }
         panel.addView(address)
@@ -109,9 +124,10 @@ class MainActivity : Activity() {
             if (Networks.localOrigin(address.text.toString()) != null) connect(address.text.toString())
             else address.error = "Use a private IPv4 address on port 8082"
         } })
-        setContentView(panel)
+        setContentView(ScrollView(this).apply { addView(panel) })
     }
     private fun showWeb(view: WebView, transport: String) {
+        connectionStatus = null
         val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 32, 0, 0) }
         panel.addView(Button(this).apply { text = "$transport · Connections"; setOnClickListener { connections() } })
         panel.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -150,42 +166,56 @@ class MainActivity : Activity() {
             }
         }.show()
     }
-    private var discovery: android.net.nsd.NsdManager.DiscoveryListener? = null
-    private fun discoverLan() {
-        if (Networks.wifi(this, false) == null) { message("Join the same Wi-Fi network as comma first"); return }
-        val nsd = getSystemService(android.net.nsd.NsdManager::class.java)
-        discovery?.let { runCatching { nsd.stopServiceDiscovery(it) } }
-        val hosts = java.util.concurrent.CopyOnWriteArrayList<String>()
-        val listener = object : android.net.nsd.NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(type: String) {}
-            override fun onDiscoveryStopped(type: String) {}
-            override fun onStartDiscoveryFailed(type: String, code: Int) {}
-            override fun onStopDiscoveryFailed(type: String, code: Int) {}
-            override fun onServiceLost(info: android.net.nsd.NsdServiceInfo) {}
-            override fun onServiceFound(info: android.net.nsd.NsdServiceInfo) {
-                nsd.resolveService(info, object : android.net.nsd.NsdManager.ResolveListener {
-                    override fun onResolveFailed(service: android.net.nsd.NsdServiceInfo, code: Int) {}
-                    override fun onServiceResolved(service: android.net.nsd.NsdServiceInfo) {
-                        val host = Networks.localOrigin("http://${service.host?.hostAddress}:${service.port}") ?: return
-                        if (!hosts.contains(host)) hosts.add(host)
-                    }
-                })
-            }
+    private var discovery: LanDiscovery? = null
+    private var discoveryAutomatic = false
+    private var lanPicker: AlertDialog? = null
+    private fun stopDiscovery() {
+        discovery?.close(); discovery = null
+        lanPicker?.dismiss(); lanPicker = null
+    }
+    private fun connectionStatus(text: String) { connectionStatus?.text = "Connect to Galaxy\n\n$text" }
+    private fun bluetoothFallback(): Boolean {
+        if (prefs.getString("transport", "auto") != "auto" || pairing.load() == null) return false
+        connectBluetooth(); return true
+    }
+    private fun discoverLan(automatic: Boolean = false) {
+        val wifi = Networks.wifi(this, false)
+        if (wifi == null) {
+            if (automatic) { if (!bluetoothFallback()) connectionStatus("Join the same Wi-Fi network as comma first.") }
+            else message("Join the same Wi-Fi network as comma first")
+            return
         }
-        discovery = listener
-        nsd.discoverServices("_starpilot-galaxy._tcp.", android.net.nsd.NsdManager.PROTOCOL_DNS_SD, listener)
-        Toast.makeText(this, "Looking for Galaxy on LAN…", Toast.LENGTH_LONG).show()
-        android.os.Handler(mainLooper).postDelayed({
-            if (discovery === listener) {
-                runCatching { nsd.stopServiceDiscovery(listener) }; discovery = null
-                if (!isFinishing && !isDestroyed) {
-                    if (hosts.isEmpty()) message("No Galaxy found. Enter its LAN address manually, or check that LAN discovery is installed on comma.")
-                    else AlertDialog.Builder(this).setTitle("Choose your comma on this trusted LAN").setItems(hosts.toTypedArray()) { _, which ->
-                        prefs.edit().putString("host", hosts[which]).putString("transport", "wifi").apply(); connect(hosts[which])
-                    }.setNegativeButton("Cancel", null).show()
+        stopDiscovery()
+        discoveryAutomatic = automatic
+        val generation = connectionGeneration.get()
+        val search = LanDiscovery(this, wifi.first) { hosts, error ->
+            discovery = null
+            if (!isFinishing && !isDestroyed && generation == connectionGeneration.get()) {
+                fun select(host: String) {
+                    val edit = prefs.edit().putString("host", host)
+                    if (!automatic) edit.putString("transport", "wifi")
+                    edit.apply(); connect(host)
+                }
+                fun cancel() {
+                    if (generation == connectionGeneration.get() && web == null && ble == null) bluetoothFallback()
+                }
+                if (hosts.isEmpty()) {
+                    val text = error ?: "No comma found. Keep Galaxy enabled on comma and connect both devices to the same Wi-Fi. Comma prepares discovery automatically while parked with internet; the first setup may take a few minutes. Try again shortly, or enter its IP address if your router blocks multicast."
+                    if (automatic) { if (!bluetoothFallback()) connectionStatus(text) } else message(text)
+                } else if (automatic && hosts.size == 1) select(hosts.single())
+                else {
+                    val picker = AlertDialog.Builder(this).setTitle("Choose your comma on this trusted LAN")
+                        .setItems(hosts.toTypedArray()) { _, which -> if (generation == connectionGeneration.get()) select(hosts[which]) }
+                        .setNegativeButton("Cancel") { _, _ -> cancel() }.setOnCancelListener { cancel() }.create()
+                    picker.setOnDismissListener { if (lanPicker === picker) lanPicker = null }
+                    lanPicker = picker; picker.show()
                 }
             }
-        }, 12000)
+        }
+        discovery = search
+        if (automatic) connectionStatus("Looking for comma on LAN…")
+        else Toast.makeText(this, "Looking for comma on LAN…", Toast.LENGTH_LONG).show()
+        search.start()
     }
     private fun savePairing(value: JSONObject) {
         require(value.getString("type") == "galaxy-bluetooth" && value.getInt("version") == 1)
@@ -235,6 +265,8 @@ class MainActivity : Activity() {
         }.start()
     }
     private fun connectBluetooth() {
+        stopDiscovery()
+        connectionStatus = null
         val key = pairing.load()
         if (key == null) { disconnected(); message("Pair Bluetooth using Galaxy Wi-Fi or LAN first, or paste an existing pairing code."); return }
         val permissions = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
@@ -342,8 +374,13 @@ class MainActivity : Activity() {
         @JavascriptInterface fun openWifiSettings() { runOnUiThread { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } }
     }
     @Deprecated("Legacy back handling") override fun onBackPressed() { if (web?.canGoBack() == true) web?.goBack() else super.onBackPressed() }
+    override fun onResume() { super.onResume(); recovery.resumed() }
+    override fun onStop() {
+        recovery.stopped(if (discovery != null || lanPicker != null) discoveryAutomatic else null, web == null && ble == null)
+        super.onStop()
+    }
     override fun onDestroy() {
-        discovery?.let { runCatching { getSystemService(android.net.nsd.NsdManager::class.java).stopServiceDiscovery(it) } }; discovery = null
+        stopDiscovery()
         connectionGeneration.incrementAndGet(); ble?.close(); worker.shutdownNow()
         web?.destroy(); Networks.manager(this).bindProcessToNetwork(null); super.onDestroy()
     }

@@ -56,3 +56,55 @@ pair/connect/reconnect, settings changes across disconnects, key rotation, LAN
 discovery, concurrent cellular sharing, routing and DNS teardown/recovery,
 phone sleep/background behavior, and navigation/sharing. See README.md.
 The preserved iOS implementation was not rebuilt or validated against this API.
+
+## LAN discovery follow-up — 1.1.4
+
+Read-only inspection of the user's comma found Galaxy and the companion
+supervisor running, but the isolated companion Python environment was missing;
+no LAN advertiser was running. No device files, dependencies or settings were
+changed. The supervisor now automatically installs and verifies the isolated
+environment while parked with internet; no manual setup command is required.
+It retries failures, reuses a valid environment offline, and cancels installation
+when driving or phone internet sharing starts. No Bluetooth bonds, pairing keys,
+other fork environments or systemd units are changed by setup.
+
+The pinned Zeroconf library also reproduced `BadTypeInNameException` for the
+original 16-byte `starpilot-galaxy` service name. A branch adapter now publishes
+`_sp-galaxy._tcp.local.` with a separate address/hostname on each interface.
+The preserved upstream snapshot remains unchanged. Android now searches home
+Wi-Fi automatically when no usable address is saved, exposes a search button,
+holds a bounded multicast lock, serializes resolution and reports failures.
+Searches resume after returning from Wi-Fi settings or another app; a disconnected
+screen reconnects on resume. Automatic-search failures appear inline, a single
+result connects automatically, and canceling a multiple-result picker falls back
+to saved Bluetooth in automatic mode while disconnected. Interrupted pickers are
+dismissed before searching again, and healthy connections are preserved on resume.
+
+Broken environment verification backs off for 60 seconds while driving. Setup
+requires prebuilt wheels, preventing repeated source builds from exceeding the
+180-second installation deadline. All four resolved dependencies passed wheel-only
+resolution for Python 3.12 / aarch64-manylinux_2_39. PyPI publishes the matching
+[Zeroconf 0.151.3](https://pypi.org/project/zeroconf/0.151.3/#files) and
+[PyCryptodome 3.23.0](https://pypi.org/project/pycryptodome/3.23.0/#files) wheels.
+The adapter converts registration exceptions to the upstream loop's retryable
+error type and continues cleanup when a publisher's close operation fails.
+
+- Signed APK 1.1.4, versionCode 6; release build, lint and signature verification passed.
+- APK SHA-256: `a76141344a3491cf26fa8a752d47261b00bcc9d78d0bb4abffadab7bb742fd5f`.
+- Signing certificate SHA-256 (unchanged):
+  `d9e72cbb842e9530b4b686dec424cdeb8f2982109be6875fa73594c33332fc3a`.
+- All 9 Android JVM tests passed, including new lifecycle recovery cases. These
+  exercise the recovery controller, not an Android Activity on real hardware.
+  Python regressions cover real
+  Zeroconf name validation, per-interface records, registration cleanup, source
+  provenance, companion HTTP and automatic environment setup. Setup coverage
+  includes offline reuse, failure retries, partial installs, drive/data guards,
+  timeouts, descendant termination and supervisor startup without a pairing key.
+- All 31 targeted Python tests passed. A fresh temporary environment completed
+  actual wheel-only automatic installation, pinned import verification, offline reuse and
+  pairing preservation. Ruff, shell syntax and `git diff --check` passed.
+- Read-only device checks confirmed writable setup storage, Python 3.12.3 and
+  uv 0.12.19. System pip/ensurepip are absent, so the installer uses uv on AGNOS.
+- Lint has 0 errors and 27 warnings. Physical Android discovery remains unverified;
+  no phone was connected over ADB. Updated comma source, internet while parked
+  for automatic first setup, and installation of APK 1.1.4 are required for the fix.

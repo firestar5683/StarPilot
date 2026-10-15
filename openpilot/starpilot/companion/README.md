@@ -1,6 +1,6 @@
 # Galaxy Android companion
 
-Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.1 (versionCode 3).
+Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.4 (versionCode 6).
 Wi-Fi/LAN loads live Galaxy screens from comma. Bluetooth uses screens bundled
 in the APK, so Bluetooth screen changes require rebuilding/updating the APK. This directory and the Galaxy changes are source implementation plus a
 signed release artifact; physical phone/comma/in-car acceptance is still required.
@@ -33,13 +33,21 @@ never available to remote pages or cross-origin frames/resources.
 
 Use the **Connections** button at the top of the Android app:
 
-- **Automatic** tries Galaxy Wi-Fi or the saved LAN address first. If no Wi-Fi is
-  present or the initial page cannot load, it tries a saved Bluetooth pairing.
+- **Automatic** tries Galaxy Wi-Fi or the saved LAN address first. On home Wi-Fi,
+  a fresh install or failed saved address starts a 12-second LAN search. It
+  connects automatically when one comma is found and offers a picker when
+  several are found. If no Wi-Fi or LAN device is available, or you cancel the
+  picker while disconnected, it tries a saved Bluetooth pairing.
 - **Galaxy Wi-Fi / LAN only** loads live pages from comma over HTTP port 8082.
 - **Bluetooth only** loads bundled pages and sends bounded API requests over BLE.
-- **Find Galaxy on LAN** discovers `_starpilot-galaxy._tcp.` for 12 seconds and
-  lets you choose an address. Manual RFC1918 IPv4 entry remains available when
+- **Find Galaxy on LAN** discovers `_sp-galaxy._tcp.` for 12 seconds and
+  lets you choose an address. The disconnected screen also has a **Find comma
+  on LAN** button. Manual RFC1918 IPv4 entry remains available when
   multicast is blocked. Use a trusted LAN; HTTP/mDNS is not TLS.
+
+Interrupted searches resume after returning from Wi-Fi settings or another app.
+A disconnected screen reconnects on return. Automatic-search failures appear
+inline; explicit manual searches retain their result dialogs.
 
 This selects a connection without replaying in-flight requests. Switch modes
 using Connections if an established connection drops. A failed settings change
@@ -54,22 +62,45 @@ unavailable on a slow BLE link. Bluetooth does **not** provide phone internet;
 that feature still requires the Galaxy hotspot. Internet-dependent navigation
 searches need an internet connection on comma.
 
-### One-time comma setup
+### Automatic comma setup
 
-After deploying this branch, run on comma with internet available:
+After the comma updates to this branch, the manager's `companion_bluetooth`
+supervisor automatically prepares `/data/galaxy-ble/stardust-venv` with the pinned
+`dbus-next`, PyCryptodome and Zeroconf dependencies, then starts LAN discovery.
+No SSH command or Bluetooth pairing is required for LAN discovery. Keep Galaxy
+enabled, leave comma parked with internet for its first setup, and install the
+updated APK on Android. Both devices must be on the same trusted LAN.
 
-```sh
-cd /data/openpilot
-openpilot/starpilot/companion/install_bluetooth.sh
-```
+The first setup may take a few minutes. Failed setup retries automatically after
+60 seconds. Installation pauses if driving or phone internet sharing starts;
+already installed dependencies work offline and while driving. The supervisor
+checks actual imports and pinned versions before starting either bridge, and
+repairs partial installations automatically. Setup logs are private and rotated
+at `/data/galaxy-ble/stardust-setup.log`.
+Failed environment verification also backs off for 60 seconds while driving,
+so a partial installation does not repeatedly launch Python onroad.
 
-This prepares `/data/galaxy-ble/stardust-venv` with the pinned upstream
-`dbus-next`, PyCryptodome and Zeroconf dependencies. The manager's
-`companion_bluetooth` supervisor starts LAN discovery and, once paired, the BLE
-adapter. It retries if Bluetooth is off or BlueZ is not ready. It does not install
-packages during driving, change Bluetooth power/bonds, or change the other
-fork's venv or systemd units. Do not run two Galaxy GATT bridge services at once.
-The installer is for comma, not the laptop; it has not been run on hardware here.
+Once paired, the supervisor also starts the BLE adapter and retries if Bluetooth
+is off or BlueZ is not ready. It does not change Bluetooth power/bonds, pairing
+keys, or the other fork's venv or systemd units. Do not run two Galaxy GATT bridge
+services at once. `install_bluetooth.sh` remains an internal setup helper; users
+do not need to run it. Automatic setup has been tested on the host, not deployed
+to the physical comma here.
+
+AGNOS setup uses its existing `uv` binary and installed Python; it does not
+require system `pip` or `ensurepip`, or download another Python installation.
+Installation requires prebuilt wheels and never starts a source build. The
+pinned Zeroconf 0.151.3 and PyCryptodome 3.23.0 releases publish compatible ARM64
+wheels for the comma's Python 3.12 and glibc 2.39. Registration failures,
+including Zeroconf-specific exceptions, are cleaned up and retried by the
+advertiser without a process restart.
+
+The branch LAN adapter corrects upstream's invalid 16-character DNS-SD service
+name and advertises each interface's address separately, so home Wi-Fi clients
+are not given the comma hotspot address. Imported upstream implementation files
+and their provenance hashes remain unchanged. Android keeps multicast enabled
+during the bounded foreground search, resolves services in sequence, and displays
+discovery errors. Android 13+ searches the selected Wi-Fi network explicitly.
 
 1. Enable Bluetooth in comma settings. Park and join Galaxy Wi-Fi, or connect to
    comma over a trusted LAN.
