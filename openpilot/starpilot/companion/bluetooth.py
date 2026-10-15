@@ -44,7 +44,7 @@ def proxy_class():
       if target.startswith(('/api/companion/bluetooth', '/api/recordings/', '/api/replay/', '/api/cameras/',
                             '/api/android-auto/upload', '/api/navigation/map/tiles/')) or target in (
           '/api/companion/uplink', '/api/companion/app.apk', '/api/auth/login', '/api/auth/logout'):
-        return proxy.error_response(request.get('id', ''), 501, 'This action requires Galaxy Wi-Fi or LAN.')
+        return proxy.error_response(request.get('id', ''), 501, 'This action is not available over Bluetooth. Connect using Galaxy Wi-Fi or LAN.')
       # Keep preview/confirm identity stable within an authenticated BLE session; never trust phone cookies.
       session = request.get('session', '')
       with self.lock:

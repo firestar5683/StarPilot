@@ -961,6 +961,7 @@ button.gx-crash-row:hover { background: var(--glass-bg-hover); transform: transl
 .gx-alert--warn { --notice-accent: var(--warning); }
 .gx-alert--danger { --notice-accent: var(--error); }
 .gx-alert--success { --notice-accent: var(--success); }
+.gx-alert--bluetooth { --notice-accent: #3b82f6; }
 .gx-alert__icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; font-size: 1.25rem; line-height: 1; color: var(--notice-accent); }
 .gx-alert__body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .gx-alert__body > strong { display: block; font-weight: var(--fw-bold); margin-bottom: var(--sp-1); }

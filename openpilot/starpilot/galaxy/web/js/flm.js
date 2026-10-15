@@ -1,5 +1,6 @@
 import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { LocalHistoryFeed, validLocalHistory } from './record-history.js'
 
 const SEGMENT = /^(?:[a-f0-9]{8}--[a-f0-9]{10}|[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}|[a-f0-9]{16}[|_](?:[a-f0-9]{8}--[a-f0-9]{10}|[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}))--[0-9]{1,6}$/
@@ -372,9 +373,9 @@ export function gmEventSeries(plot) {
 
 export const FlmPage = {
   name: 'FlmPage',
-  components: { GxState, GxNotice, FlmChart, FlmLiveEditor },
+  components: { GxState, GxNotice, BluetoothNotice, FlmChart, FlmLiveEditor },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true }, go: { type: Function, required: true } },
-  data: () => ({ inventoryStatus: 'idle', inventory: null, inventoryError: '', operation: null, report: null,
+  data: () => ({ bluetooth: bluetoothConnection(), inventoryStatus: 'idle', inventory: null, inventoryError: '', operation: null, report: null,
     operationError: '', busy: false, requesting: false, selected: [], gmSource: null, accepted: [], ignored: [] }),
   created() {
     this.inventoryFeed = new LocalHistoryFeed({ publish: ({ status, data, error }) => {
@@ -389,15 +390,15 @@ export const FlmPage = {
   mounted() {
     this.visibility = () => {
       if (document.hidden) { this.inventoryFeed.stop(); this.operationFeed.stop() }
-      else if (this.mode === 'local') { this.inventoryFeed.start(); this.operationFeed.start() }
+      else if (this.mode === 'local' && !this.bluetooth) { this.inventoryFeed.start(); this.operationFeed.start() }
     }
     document.addEventListener('visibilitychange', this.visibility)
-    if (this.mode === 'local' && !document.hidden) { this.inventoryFeed.start(); this.operationFeed.start() }
+    if (this.mode === 'local' && !this.bluetooth && !document.hidden) { this.inventoryFeed.start(); this.operationFeed.start() }
   },
   beforeUnmount() { document.removeEventListener('visibilitychange', this.visibility); this.inventoryFeed.stop(); this.operationFeed.stop() },
   computed: {
     available() { return selectableSegments(this.inventory) },
-    analysisAvailable() { return this.selected.length >= 1 && this.selected.length <= 5 && this.operation?.state !== 'running' },
+    analysisAvailable() { return !this.bluetooth && this.selected.length >= 1 && this.selected.length <= 5 && this.operation?.state !== 'running' },
     canAnalyze() { return this.analysisAvailable && !this.busy && !this.requesting },
   },
   methods: {
@@ -427,7 +428,8 @@ export const FlmPage = {
     <GxState v-if="mode !== 'local'">Offline analysis requires authenticated local Galaxy access.</GxState>
     <template v-else>
       <FlmLiveEditor ref="liveEditor" :unauthorized="unauthorized" @source="gmSource = $event"/>
-
+      <BluetoothNotice v-if="bluetooth" feature="Recorded-drive analysis">Saved surface settings remain available.</BluetoothNotice>
+      <template v-else>
       <GxState v-if="inventoryStatus === 'loading'" loading>Reading local recordings…</GxState><GxNotice tone="danger" v-if="inventoryStatus === 'unavailable'">{{ inventoryError }}</GxNotice>
       <GxNotice v-if="inventory?.scanIncomplete" tone="warn">This recording scan was incomplete. More local segments may exist.</GxNotice>
       <section class="gx-card gx-flm__panel"><h3>Choose Full Logs</h3><p class="gx-note">Select 1–5 closed local segments. Quick logs alone cannot provide this report.</p>
@@ -477,6 +479,7 @@ export const FlmPage = {
             <flm-chart :series="entry.analysis.series" /></template>
           <p v-else class="gx-note">No eligible tracking series for this segment.</p>
         </section>
+      </template>
       </template>
     </template>
   </div>`,

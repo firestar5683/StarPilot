@@ -119,3 +119,30 @@ error type and continues cleanup when a publisher's close operation fails.
 - `apksigner verify --print-certs` passed. Signing certificate SHA-256 is unchanged:
   `d9e72cbb842e9530b4b686dec424cdeb8f2982109be6875fa73594c33332fc3a`.
 - No commit, push, device installation or hardware verification was performed for this build.
+
+## Bluetooth limitation notices — 1.1.6
+
+Expected Bluetooth limitations use a shared blue information notice with a
+Bluetooth icon and a connection-options action. Covered surfaces include local
+recordings and replay, recorded-drive analysis, snapshots and cabin previews,
+motion-event images, map previews, Android Auto package transfers, app updates,
+Galaxy QR codes, Android Auto log downloads and phone internet. Unsupported
+controls are hidden or disabled. Recording inventories and camera previews do
+not issue blocked requests or retry them. Supported settings, event/log summaries
+and destination controls remain available; genuine failures keep error styling.
+
+This release also bundles the install-page version display and update banner,
+including dismissal remembered for each available release.
+
+- Signed APK 1.1.6, versionCode 8; release build, lint and signature verification passed.
+- APK SHA-256: `31fa277f5602fcd843c954d17d8a4409f7be253cf441eb8228aa036d3937b211`.
+- Signing certificate SHA-256 remains
+  `d9e72cbb842e9530b4b686dec424cdeb8f2982109be6875fa73594c33332fc3a`.
+- All 110 bundled Galaxy assets and `bluetooth-fetch.js` match the current source.
+- 21 targeted Node checks and 9 Bluetooth/companion HTTP Python regressions passed.
+  Vue rendering checks cover blue informational styling, connection actions,
+  suppression of blocked reads, supported settings and unchanged genuine errors.
+  All 63 component templates compiled. Ruff and `git diff --check` passed.
+- Lint has 0 errors and 16 warnings. No push, deployment, phone installation or
+  physical Bluetooth verification was performed. Install 1.1.6 to update bundled
+  Bluetooth screens; Wi-Fi/LAN pages use the updated source served by comma.

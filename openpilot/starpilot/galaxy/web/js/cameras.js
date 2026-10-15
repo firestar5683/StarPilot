@@ -1,6 +1,7 @@
 import { MenuTile } from "./menu-tile.js"
 import { GxNotice } from "./notice.js"
 import { GalaxySelect } from "./galaxy-select.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 
 export class CameraSnapshotFeed {
   constructor({ publish, unauthorized, fetcher = (...args) => fetch(...args),
@@ -24,6 +25,7 @@ export class CameraSnapshotFeed {
   }
   async capture(camera) {
     this.stop()
+    if (bluetoothConnection()) return
     const request = new AbortController()
     this.request = request
     this.publish({ image: "", capturing: true, error: "" })
@@ -63,10 +65,10 @@ export class CameraSnapshotFeed {
 
 export const CamerasPage = {
   name: "CamerasPage",
-  components: { GxNotice, GalaxySelect, MenuTile },
+  components: { GxNotice, BluetoothNotice, GalaxySelect, MenuTile },
   props: { mode: { type: String, required: true }, go: { type: Function, required: true },
     unauthorized: { type: Function, required: true } },
-  data: () => ({ camera: "cabin", image: "", capturing: false, error: "" }),
+  data: () => ({ bluetooth: bluetoothConnection(), camera: "cabin", image: "", capturing: false, error: "" }),
   created() { this.snapshots = new CameraSnapshotFeed({ publish: (state) => Object.assign(this.$data, state), unauthorized: this.unauthorized }) },
   methods: {
     chooseCamera(event) { this.camera = event.target.value; this.snapshots.stop() },
@@ -87,7 +89,8 @@ export const CamerasPage = {
       </div>
       <section class="gx-card gx-panel gx-stack"><h2>Camera Snapshot</h2>
         <p>Turn off the vehicle, choose a camera, then take a snapshot.</p>
-        <template v-if="mode === 'local'">
+        <BluetoothNotice v-if="bluetooth" feature="Camera snapshots" />
+        <template v-else-if="mode === 'local'">
           <label>Camera
             <GalaxySelect class="gx-field gx-field--full" aria-label="Camera" :value="camera" :disabled="capturing" @change="chooseCamera">
               <option value="cabin">Cabin</option><option value="wide">Wide road</option><option value="narrow">Road</option>
@@ -154,11 +157,13 @@ export class LiveCameraPreview {
     image.src = update.image
   }
   start() {
+    if (bluetoothConnection()) return
     this.stopped = false
     document.addEventListener("visibilitychange", this.visibility)
     this.refresh()
   }
   refresh() {
+    if (bluetoothConnection()) return
     this.cancelTimer(this.warmupTimer)
     this.cancelTimer(this.timer)
     this.warming = true

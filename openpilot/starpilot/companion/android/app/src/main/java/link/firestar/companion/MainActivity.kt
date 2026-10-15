@@ -472,7 +472,7 @@ class MainActivity : Activity() {
                 fun response(type: String, data: ByteArray, status: Int = 200) = WebResourceResponse(type, "UTF-8", status, if (status == 200) "OK" else "Unavailable", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(data))
                 if (r.url.scheme != "https" || r.url.host != "galaxy-app.invalid" || r.url.port != -1) return response("text/plain", byteArrayOf(), 403)
                 val path = r.url.path ?: "/"
-                if (path.startsWith("/api/")) return response("application/json", "{\"error\":\"Media and direct downloads require Wi-Fi or LAN\"}".toByteArray(), 501)
+                if (path.startsWith("/api/")) return response("application/json", "{\"error\":\"Media and direct downloads are not available over Bluetooth. Connect using Galaxy Wi-Fi or LAN.\",\"code\":\"bluetooth_unavailable\"}".toByteArray(), 501)
                 if (path.contains("..") || path.contains('\\') || path.contains("//")) return response("text/plain", byteArrayOf(), 403)
                 return try {
                     var data = when (path) {

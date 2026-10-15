@@ -7,7 +7,7 @@ const value = { protocol: 1, enabled: false, connected: false, active: false, ap
 assert.equal(validCompanion(value), true)
 assert.equal(validCompanion({ ...value, bytes: -1 }), false)
 compile(GalaxyCompanion.template, { decodeEntities: v => v })
-const vm = { ...GalaxyCompanion.data(), mode: 'sample', unauthorized() {} }
+const vm = { ...GalaxyCompanion.data(), mode: 'sample', unauthorized() {}, $emit() {} }
 for (const [key, fn] of Object.entries(GalaxyCompanion.methods)) vm[key] = fn.bind(vm)
 let requests = 0, resolve
 globalThis.fetch = () => { requests++; return new Promise(done => { resolve = done }) }

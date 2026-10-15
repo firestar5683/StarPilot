@@ -1,6 +1,7 @@
 import { requestJson } from "./startup.js"
 import { GxDialog } from "./dialog.js"
 import { GxNotice } from "./notice.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { GxState } from "./state.js"
 import { GxIconButton } from "./icon-button.js"
 import { markRaw } from "../vendor/vue/vue.esm-browser.js"
@@ -364,10 +365,10 @@ export class ReplayClient {
 }
 
 export const ReplayViewer = {
-  components: { GxDialog, GxNotice, GxState, GxIconButton },
+  components: { GxDialog, GxNotice, BluetoothNotice, GxState, GxIconButton },
   props: { routeId: { type: String, required: true }, startSegment: { type: Number, default: null }, unauthorized: { type: Function, required: true } },
   emits: ["close"],
-  data: () => ({ client: null, replay: null, replayBusy: false, replayError: "", replayDetail: null, replayVideoReady: false, replayBuffering: false, seekPosition: null }),
+  data: () => ({ bluetooth: bluetoothConnection(), client: null, replay: null, replayBusy: false, replayError: "", replayDetail: null, replayVideoReady: false, replayBuffering: false, seekPosition: null }),
   computed: {
     playing() { return this.client?.ownedSession === this.replay?.sessionId && !!this.replay?.sessionId && !TERMINAL.has(this.replay.state) },
     controlsBusy() { return this.replayBusy || !this.replay?.offroad || ["preparing", "seeking", "stopping"].includes(this.replay.state) },
@@ -375,15 +376,16 @@ export const ReplayViewer = {
     canStart() { return this.replay?.offroad && TERMINAL.has(this.replay.state) && !this.replayBusy && this.replayDetail?.playable === true },
   },
   mounted() {
+    if (this.bluetooth) return
     this.client = markRaw(new ReplayClient({ video: () => this.$refs.video, unauthorized: this.unauthorized, publish: update => Object.assign(this.$data, update) }))
     this.visibility = () => { if (document.hidden) { this.client.close(); this.$emit("close") } }
     document.addEventListener("visibilitychange", this.visibility)
     this.client.open(this.routeId, this.startSegment)
   },
-  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.client.close() },
+  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.client?.close() },
   methods: {
     replayTime,
-    close() { this.client.close(); this.$emit("close") },
+    close() { this.client?.close(); this.$emit("close") },
     seek(value) { this.seekPosition = null; this.client.control("seek", Number(value)) },
     cycleRate() {
       const rates = [.5, 1, 2]
@@ -393,6 +395,8 @@ export const ReplayViewer = {
   },
   template: `<GxDialog class="gx-replay" labelledby="gx-replay-title" @close="close">
     <div class="gx-recordings__player-head"><div><h3 id="gx-replay-title">Route replay</h3><p class="gx-note">{{ routeId }}<template v-if="startSegment !== null"> · from segment {{ startSegment }}</template> · Recorded driving view · Vehicle offroad only</p></div><GxIconButton label="Close replay" icon="bi-x-lg" @click="close" /></div>
+    <BluetoothNotice v-if="bluetooth" feature="Route replay and video" />
+    <template v-else>
     <div ref="player" class="gx-replay__player">
     <video ref="video" class="gx-replay__video" playsinline muted aria-label="Recorded route with driving interface" @waiting="client?.videoWaiting()" @error="client?.videoError()"></video>
     <GxState class="gx-replay__loading" v-if="!replayError && (!replay || replayBuffering || !replayVideoReady && (playing || replayBusy || !replayDetail) || ['preparing', 'seeking'].includes(replay.state))" loading>{{ replay?.state === 'seeking' ? 'Seeking recorded route…' : replayBuffering ? 'Buffering replay…' : 'Loading replay…' }}</GxState>
@@ -415,5 +419,6 @@ export const ReplayViewer = {
     <GxNotice v-if="replay?.sessionId && !playing && !canStart" tone="info">Another replay is active. Close it in its viewer before starting this route.</GxNotice>
     <p v-if="replayDetail?.reason" class="gx-note">{{ replayDetail.reason }}</p>
     <p v-if="playing && seekGaps.length" class="gx-note">Missing recordings: <span v-for="(gap, i) in seekGaps" :key="i">{{ i ? ", " : "" }}{{ replayTime(gap[0]-replay.start) }}–{{ replayTime(gap[1]-replay.start) }}</span>. Seeks move to the nearest recorded position.</p>
+    </template>
   </GxDialog>`,
 }

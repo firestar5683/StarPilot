@@ -5,6 +5,7 @@ import { requestJson } from "./startup.js"
 import { GxNotice } from "./notice.js"
 import { connectionError } from "./polling.js"
 import { BluetoothDeviceList } from "./bluetooth-devices.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
 export function uploadPackage(path, options, progress, makeRequest = () => new XMLHttpRequest()) {
@@ -413,12 +414,13 @@ export function installChecks(job, locale = undefined) {
 }
 
 export const AndroidAutoPage = {
-  components: { GxState, GxIconButton, GxNotice, GxDialog, GalaxySettingRow },
+  components: { GxState, GxIconButton, GxNotice, BluetoothNotice, GxDialog, GalaxySettingRow },
   props: {
     mode: { type: String, required: true }, localAccess: { type: Boolean, required: true },
     unauthorized: { type: Function, required: true }
   },
   data: () => ({
+    bluetooth: bluetoothConnection(),
     setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
     pairValue: "", packageFile: null, uploadProgress: null, installOpen: false, removeOpen: false, installAttempted: false, installBaseline: null,
     downloadStarted: false, packageMagicError: "", packageChecking: false, packageSelection: 0,
@@ -474,6 +476,7 @@ export const AndroidAutoPage = {
       return this.packageMagicError
     },
     uploadReason() {
+      if (this.bluetooth) return "Package uploads are not available over Bluetooth. Connect using Galaxy Wi-Fi or LAN."
       if (!this.packageFile) return "Choose your Android Auto package."
       if (this.packageError) return this.packageError
       if (this.packageChecking) return "Checking downloaded file…"
@@ -942,7 +945,9 @@ export const AndroidAutoPage = {
           <button type="button" class="gx-icon-btn" aria-label="Close" @click="closeInstall"><i class="bi bi-x-lg"></i></button>
         </div>
         <div class="gx-aa-sheet__body">
-          <div v-if="installState === 'done'" class="gx-message gx-aa-sheet__done">
+          <div v-if="bluetooth"><h3 id="gx-aa-install-title">Android Auto package installation</h3>
+            <BluetoothNotice feature="Android Auto package downloads and uploads" /></div>
+          <div v-else-if="installState === 'done'" class="gx-message gx-aa-sheet__done">
             <div class="gx-aa-done-badge"><i class="bi bi-check-lg" aria-hidden="true"></i></div>
             <h3 id="gx-aa-install-title">You’re all set</h3>
             <p class="gx-note">{{ expiry.label }}</p>

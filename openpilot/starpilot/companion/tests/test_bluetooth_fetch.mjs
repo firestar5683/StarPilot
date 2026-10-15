@@ -47,8 +47,13 @@ test('BLE reads live restart identity and refuses replay before sending a reques
   assert.equal(sent[0][1].path, '/api/companion/runtime')
   scope.__galaxyBleReply(sent[0][0], {status: 200, headers: {}, body: btoa('{"schemaVersion":1,"monitor":"local","instance":"boot-2"}')})
   assert.equal((await (await pending).json()).instance, 'boot-2')
-  for (const path of ['/api/replay/start', '/api/replay/media?sequence=1']) {
-    assert.equal((await scope.fetch('https://galaxy-app.invalid' + path)).status, 501)
+  for (const path of ['/api/replay/start', '/api/replay/media?sequence=1', '/api/recordings/local', '/api/cameras/snapshot',
+    '/api/android-auto/upload', '/api/navigation/map/tiles/1/0/0.png', '/api/companion/app.apk', '/api/companion/uplink']) {
+    const blocked = await scope.fetch('https://galaxy-app.invalid' + path)
+    assert.equal(blocked.status, 501)
+    const body = await blocked.json()
+    assert.equal(body.code, 'bluetooth_unavailable')
+    assert.match(body.error, /not available over Bluetooth.*Wi-Fi or LAN/)
   }
   assert.equal(sent.length, 1)
 })

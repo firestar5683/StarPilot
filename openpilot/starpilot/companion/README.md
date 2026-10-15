@@ -1,6 +1,6 @@
 # Galaxy Android companion
 
-Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.5 (versionCode 7).
+Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.6 (versionCode 8).
 Wi-Fi/LAN loads live Galaxy screens from comma. Bluetooth uses screens bundled
 in the APK, so Bluetooth screen changes require rebuilding/updating the APK. This directory and the Galaxy changes are source implementation plus a
 signed release artifact; physical phone/comma/in-car acceptance is still required.
@@ -61,6 +61,14 @@ Wi-Fi/LAN. The system monitor retains its short freshness limit and may show
 unavailable on a slow BLE link. Bluetooth does **not** provide phone internet;
 that feature still requires the Galaxy hotspot. Internet-dependent navigation
 searches need an internet connection on comma.
+
+Bluetooth-only limitations appear in blue information boxes with a Bluetooth
+icon and a **Connection options** button. Recordings/replay, recorded-drive
+analysis, camera previews, motion-event images, map previews, package transfers,
+log downloads and phone internet explain that they require Wi-Fi/LAN. Supported
+settings and destination controls remain available, and genuine failures keep
+their normal error styling. Blocked recording and camera requests do not poll
+or repeatedly retry. These screens require APK 1.1.6 or newer over Bluetooth.
 
 ### Automatic comma setup
 

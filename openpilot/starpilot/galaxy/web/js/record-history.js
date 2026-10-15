@@ -3,6 +3,7 @@ import { GxDialog } from "./dialog.js"
 import { requestJson } from "./startup.js"
 import { GxIconButton } from "./icon-button.js"
 import { GxNotice } from "./notice.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { SnapshotFeed } from "./snapshot-feed.js"
 import { RecordingActions } from "./recording-actions.js"
 import { GalaxySelect } from "./galaxy-select.js"
@@ -106,13 +107,14 @@ export class LocalHistoryFeed extends SnapshotFeed {
   static subject = "local recordings"
   static unavailable = "Local recordings are unavailable."
   static invalid = "Local recording inventory is unavailable."
+  start() { if (bluetoothConnection()) return this.stop(); return super.start() }
 }
 
 export const LocalRecordingsPage = {
   name: "LocalRecordingsPage",
-  components: { GxState, GxIconButton, GxNotice, RecordingActions, GalaxySelect, GxDialog, ReplayViewer },
+  components: { GxState, GxIconButton, GxNotice, BluetoothNotice, RecordingActions, GalaxySelect, GxDialog, ReplayViewer },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
-  data: () => ({ sortOrder: "newest", replayRoute: null, logsRoute: null, query: "", preservedOnly: false, status: "idle", data: null, error: "", playing: null, playerError: "", playerGeneration: 0,
+  data: () => ({ bluetooth: bluetoothConnection(), sortOrder: "newest", replayRoute: null, logsRoute: null, query: "", preservedOnly: false, status: "idle", data: null, error: "", playing: null, playerError: "", playerGeneration: 0,
     details: null, detailsName: null, detailsStatus: "idle", detailsError: "", detailsGeneration: 0,
     deleting: null, deleteSelection: null, deleteError: "" }),
   computed: {
@@ -314,7 +316,8 @@ export const LocalRecordingsPage = {
   template: `
     <div class="gx-view gx-recordings">
       <h2>Routes</h2>
-      <GxState v-if="mode !== 'local'">Local recordings are unavailable in the offline preview.</GxState>
+      <BluetoothNotice v-if="bluetooth" feature="Local recordings and replay" />
+      <GxState v-else-if="mode !== 'local'">Local recordings are unavailable in the offline preview.</GxState>
       <template v-else>
         <section class="gx-card gx-recordings__library">
           <header class="gx-section__header"><i class="bi bi-camera-reels" aria-hidden="true"></i><span class="gx-section__title">Dashcam drives</span>
