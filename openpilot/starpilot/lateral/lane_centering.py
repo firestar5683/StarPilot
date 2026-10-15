@@ -92,6 +92,8 @@ class LaneCenteringResult:
 
 
 def _finite_number(value: Any) -> float | None:
+  if type(value) is float:
+    return value if math.isfinite(value) else None
   if isinstance(value, bool) or not isinstance(value, Real):
     return None
   try:
