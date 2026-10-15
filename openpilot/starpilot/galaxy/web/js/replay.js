@@ -13,7 +13,7 @@ const integer = value => Number.isSafeInteger(value) && value >= 0
 const token = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("")
 const mediaSources = () => [globalThis.MediaSource, globalThis.ManagedMediaSource].filter(Source => typeof Source === "function")
 const STREAMING_UNAVAILABLE = "Replay video streaming is unavailable in this browser. Update your browser or try another browser."
-const PLAY_BUFFER = .5, MAX_BUFFER_AHEAD = 1, MEDIA_INTERVAL = 200
+const PLAY_BUFFER = .5, MAX_BUFFER_AHEAD = 1, MEDIA_INTERVAL = 50
 export const replayableSegment = segment => !!((segment.files.rlog || segment.files.qlog) && (segment.files.fcamera || segment.files.qcamera))
 export function validReplayStatus(value) {
   const ranges = value?.seekRanges

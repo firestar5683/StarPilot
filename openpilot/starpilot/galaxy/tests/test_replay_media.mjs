@@ -222,7 +222,7 @@ try {
   await bounded.client.loadMedia(bounded.client.mediaGeneration, status.sessionId, status.epoch)
   await bounded.client.loadMedia(bounded.client.mediaGeneration, status.sessionId, status.epoch)
   const nextLoad = [...bounded.timers.values()].find(({ ms }) => ms !== 4000)
-  assert.equal(nextLoad.ms, 200, 'pending fragments use the paced retry rather than a 50ms poll')
+  assert.equal(nextLoad.ms, 50, 'pending fragments retry after 50ms during playback')
   bounded.client.buffer.buffered = ranges(0, 1.4)
   bounded.video.currentTime = .1
   const beforeFull = bounded.requests.length
