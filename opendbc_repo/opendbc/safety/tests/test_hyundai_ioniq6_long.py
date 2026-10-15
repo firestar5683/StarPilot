@@ -823,6 +823,104 @@ class TestHyundaiIoniq6Long(unittest.TestCase):
           self.safety.aol_set_host_request(1)
           self.assertEqual(self.safety.aol_get_permission_mask(), 0)  # no stale latch after cancel
 
+  def test_full_engagement_without_lkas_retains_only_lateral_after_brake(self):
+    if self.release:
+      self.skipTest("RELEASE denies the Ioniq 6 AOL profiles")
+    for topology, raw in RAW_AOL.items():
+      with self.subTest(topology=topology):
+        _, cp = params(topology)
+        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        self.mode(raw)
+        self.refresh_required_rx(packer, 1, 1_000_000)
+        self.safety.set_aol_test_heartbeat(True)
+        self.safety.set_timer(1_005_000)
+        self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
+          "CRUISE_BUTTONS", 1, {"COUNTER": 2, "CRUISE_BUTTONS": 2}))))
+        self.safety.set_timer(1_010_000)
+        self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
+          "CRUISE_BUTTONS", 1, {"COUNTER": 3, "CRUISE_BUTTONS": 0}))))
+        self.assertTrue(self.safety.get_controls_allowed())
+        self.safety.aol_set_host_request(3)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 3)
+        self.safety.set_timer(1_020_000)
+        self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
+          "TCS", 1, {"DriverBraking": 1, "COUNTER": 2}))))
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.safety.aol_set_host_request(1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        for frame in create_steering_messages(packer, cp, CanBus(cp), True, True, 2):
+          self.assertTrue(self.safety.safety_tx_hook(self.packet(frame)))
+        _, state, controller = controller_fixture(topology == "lkas_alt", aol=True)
+        command = structs.CarControl(enabled=True, longActive=True)
+        command.actuators.accel = .1
+        command.actuators.longControlState = LongState.starting
+        _, frames = controller.update(command.as_reader(), state, 1_020_000_000)
+        active_scc = next(frame for frame in frames if frame[0] == 0x1A0)
+        self.assertFalse(self.safety.safety_tx_hook(self.packet(active_scc)))
+        for counter in range(4, 35):
+          self.refresh_required_rx(packer, counter, 1_020_000 + counter * 10_000)
+          self.safety.aol_set_host_request(0)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.safety.aol_set_host_request(1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+
+  def test_full_engagement_release_credit_cannot_survive_native_revocation(self):
+    if self.release:
+      self.skipTest("RELEASE denies the Ioniq 6 AOL profiles")
+    for topology, raw in RAW_AOL.items():
+      for reset in ("heartbeat", "timeout", "unclaimed", "long_only", "zero_only"):
+        with self.subTest(topology=topology, reset=reset):
+          _, cp = params(topology)
+          packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+          self.mode(raw)
+          self.refresh_required_rx(packer, 1, 1_000_000)
+          self.safety.set_aol_test_heartbeat(True)
+          for counter, button in ((2, 2), (3, 0)):
+            self.safety.set_timer(1_000_000 + counter * 5_000)
+            self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
+              "CRUISE_BUTTONS", 1, {"COUNTER": counter, "CRUISE_BUTTONS": button}))))
+          self.safety.aol_set_host_request(0 if reset in ("zero_only", "unclaimed") else 2 if reset == "long_only" else 3)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0 if reset in ("zero_only", "unclaimed") else 2 if reset == "long_only" else 3)
+          if reset == "heartbeat":
+            self.safety.set_aol_test_heartbeat(False)
+            self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+            self.safety.set_aol_test_heartbeat(True)
+          elif reset in ("timeout", "unclaimed"):
+            self.safety.set_timer(1_400_000)
+            self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+          stamp = 1_410_000 if reset in ("timeout", "unclaimed") else 1_020_000
+          self.refresh_required_rx(packer, 4, stamp)
+          if reset in ("heartbeat", "timeout", "unclaimed"):
+            self.safety.aol_set_host_request(3)
+            self.assertEqual(self.safety.aol_get_permission_mask(), 3)
+          self.safety.set_timer(stamp + 5_000)
+          self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
+            "TCS", 1, {"DriverBraking": 1, "COUNTER": 5}))))
+          self.safety.aol_set_host_request(1)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+  def test_new_physical_set_release_restarts_engaged_heartbeat_grace(self):
+    if self.release:
+      self.skipTest("RELEASE denies the Ioniq 6 AOL profiles")
+    for topology, raw in RAW_AOL.items():
+      with self.subTest(topology=topology):
+        _, cp = params(topology)
+        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        self.mode(raw)
+        self.refresh_required_rx(packer, 1, 1_000_000)
+        self.safety.set_controls_allowed(True)
+        self.safety.set_aol_test_heartbeat(False)
+        self.safety.set_heartbeat_engaged_mismatches(2)
+        self.safety.set_timer(1_005_000)
+        self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
+          "CRUISE_BUTTONS", 1, {"COUNTER": 2, "CRUISE_BUTTONS": 2}))))
+        self.assertEqual(self.safety.get_heartbeat_engaged_mismatches(), 2)
+        self.safety.set_timer(1_010_000)
+        self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg(
+          "CRUISE_BUTTONS", 1, {"COUNTER": 3, "CRUISE_BUTTONS": 0}))))
+        self.assertTrue(self.safety.get_controls_allowed())
+        self.assertEqual(self.safety.get_heartbeat_engaged_mismatches(), 0)
+
   def test_aol_long_permission_requires_explicit_host_long_request(self):
     if self.release:
       self.skipTest("RELEASE denies the Ioniq 6 AOL profiles")

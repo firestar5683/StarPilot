@@ -42,7 +42,7 @@ from openpilot.starpilot.aol.source_availability import (
   ordinary_source_availability, fresh_ordinary_lag_continuation, stock_lateral_role, stock_lateral_fault_proof,
 )
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, SAFETY_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
-                                            ordinary_lateral_requested, decide_ordinary_axis)
+                                            ordinary_lateral_requested, decide_ordinary_axis, known_reverse_pause)
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed
 from openpilot.starpilot.conditional_mode.consumer import ConsumerResult, ModeConsumer
 from openpilot.starpilot.conditional_mode.effective_status import publish_ack
@@ -1539,6 +1539,9 @@ class SelfdriveD:
     from openpilot.starpilot.car.gm.aol import physical_cancel_lateral_allowed
     from openpilot.starpilot.aol.dm import lateral_event_context
     retained_dm_lateral, lateral_events = lateral_event_context(self, CS, intent, native, now_ns, ordinary_lag)
+    reverse_pause = known_reverse_pause(CS, getattr(self, 'car_state_samples', ()))
+    if reverse_pause:
+      lateral_events = [event for event in lateral_events if event not in (EventName.wrongGear, EventName.reverseGear)]
     return decide_axes(
       standard_lateral=self.active, standard_longitudinal=bool(self.enabled and self.CP.openpilotLongitudinalControl and
         not any(sample.seatbeltUnlatched for sample, _ in getattr(self, 'car_state_samples', ()))),
@@ -1559,6 +1562,7 @@ class SelfdriveD:
                         self.sm['driverMonitoringState'].alwaysOnLockout or
                         self.sm['driverMonitoringState'].alertLevel == AlertLevel.three)),
       pause_brake_mps=self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0,
+      gear_pause=reverse_pause,
       lateral_inhibit=self.aol_dm_lateral_inhibit or any(
         sample.steerFaultTemporary or sample.brakePressed and not sample.standstill and
         sample.vEgo < (self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0)
@@ -1765,7 +1769,9 @@ class SelfdriveD:
       # Temporary EPS withdraws steering commands without revoking the armed
       # latch. Keep the event and ordinary soft-disable behavior unchanged.
       from openpilot.starpilot.aol.seatbelt import seatbelt_lateral_soft_event_allowed
+      reverse_pause = known_reverse_pause(CS, getattr(self, 'car_state_samples', ()))
       aol_hard_soft_fault = any(event.softDisable and not (
+        event.name == EventName.wrongGear and reverse_pause or
         event.name == EventName.steerTempUnavailable and CS.steerFaultTemporary and not CS.steerFaultPermanent or
         seatbelt_lateral_soft_event_allowed(self.CP, CS, intent, native, event,
           source_ns=self.aol_car_state_log_ns, now_ns=now_ns, axis_session_id=self.aol_session_id,

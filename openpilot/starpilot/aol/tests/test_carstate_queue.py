@@ -117,3 +117,34 @@ def test_queue_reorder_bound_and_pair_loss_still_withdraw(failure):
       assert str(axis.faultReason) == 'critical' and sd.aol_authority_lost
       if failure != 'missing_latest_pair':
         assert axis.sourceCarStateMonoTime == 0 and not sd.conditional_car_state_valid
+
+
+@pytest.mark.parametrize('first_gear,valid,retained', [('reverse', True, True), ('unknown', True, False),
+                                                    ('reverse', False, False), ('eco', True, False)])
+def test_reverse_queue_pause_requires_known_valid_gears(first_gear, valid, retained):
+  from openpilot.starpilot.aol.runtime import known_reverse_pause
+  first, last = fixture.car_state(), fixture.car_state()
+  first.gearShifter = first_gear
+  last.gearShifter = 'reverse' if first_gear != 'reverse' else 'drive'
+  assert known_reverse_pause(last, ((first, valid), (last, True))) == retained
+
+
+def test_reverse_then_drive_in_one_batch_preserves_latch_without_commanding_either_axis():
+  case = fixture.IoniqAvailabilityTests(methodName='runTest')
+  with ExitStack() as cleanup:
+    cleanup.callback(case.doCleanups)
+    with OpenpilotPrefix():
+      sd, _, step, card, receive = case._ioniq_availability_callers()
+      reverse = fixture.car_state(brake=True)
+      reverse.gearShifter = 'reverse'
+      with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=10_024_292_276):
+        sd.publish_axis_proof(sd.CS_prev)
+      receive(10_024_292_276, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      axis, _, command = queued_step(sd, step, [message(10_040_000_000, reverse), message(10_051_448_441)])
+      assert not axis.desiredLateral and not axis.desiredLongitudinal
+      assert not axis.lateralActive and not axis.longitudinalActive and not command.latActive and not command.longActive
+      assert axis.nativeAcknowledged and str(axis.faultReason) == 'none'
+      assert not sd.enabled and not sd.active
+      assert log.OnroadEvent.EventName.reverseGear in sd.events.names
+      assert receive(10_054_292_276, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      assert card.aol_card_intent.allowed_latch

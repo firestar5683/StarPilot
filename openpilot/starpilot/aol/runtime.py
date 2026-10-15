@@ -160,14 +160,23 @@ def current_native(sm, CP, *, now_ns: int, axis_session_id: str | None = None):
   return state
 
 
+def known_reverse_pause(car_state, samples=()) -> bool:
+  states = [car_state, *(state for state, _ in samples)]
+  gears = car.CarState.GearShifter
+  return bool(all(valid for _, valid in samples) and
+              any(state.gearShifter == gears.reverse for state in states) and
+              all(state.canValid and not state.canTimeout and state.gearShifter in
+                  (gears.drive, gears.low, gears.sport, gears.brake, gears.reverse) for state in states))
+
+
 def decide_axes(*, standard_lateral: bool, standard_longitudinal: bool, intent,
                 native, car_state, initialized: bool, model_ready: bool,
                 no_entry: bool, immediate_disable: bool, dm_lockout: bool,
-                pause_brake_mps: float, lateral_inhibit: bool = False) -> AxisDecision:
+                pause_brake_mps: float, lateral_inhibit: bool = False, gear_pause: bool = False) -> AxisDecision:
   if intent is None or not initialized or not car_state.canValid or immediate_disable or no_entry or dm_lockout:
     return AxisDecision()
   gear = car_state.gearShifter
-  driving = gear not in (car.CarState.GearShifter.neutral, car.CarState.GearShifter.park,
+  driving = not gear_pause and gear not in (car.CarState.GearShifter.neutral, car.CarState.GearShifter.park,
                          car.CarState.GearShifter.reverse, car.CarState.GearShifter.unknown)
   lateral_safe = (driving and model_ready and not lateral_inhibit and not car_state.steerFaultPermanent and
                   not car_state.steerFaultTemporary and

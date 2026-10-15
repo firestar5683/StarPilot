@@ -90,6 +90,14 @@ void set_controls_allowed(bool c){
   controls_allowed = c;
 }
 
+void set_heartbeat_engaged_mismatches(uint32_t count) {
+  heartbeat_engaged_mismatches = count;
+}
+
+uint32_t get_heartbeat_engaged_mismatches(void) {
+  return heartbeat_engaged_mismatches;
+}
+
 void set_aol_test_heartbeat(bool engaged) {
   heartbeat_engaged = engaged;
 }

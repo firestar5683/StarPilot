@@ -404,6 +404,45 @@ class IoniqAvailabilityTests(unittest.TestCase):
                                 axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
       self.assertFalse(any(e.type == car.CarState.ButtonEvent.Type.lkas for e in card.CI.CS.out.buttonEvents))
 
+  def test_reverse_keeps_actual_card_armed_without_output_and_drive_requires_ack(self):
+    from openpilot.starpilot.aol.wire import decode_intent
+
+    with OpenpilotPrefix():
+      sd, _, step, card, receive = self._ioniq_availability_callers(full_op=False)
+      card.pm = type(sd.pm)()
+      card.aol_sequence = 2
+      for tick in range(2, 45):
+        reverse = tick < 42
+        cs = car_state(brake=reverse)
+        cs.gearShifter = car.CarState.GearShifter.reverse if reverse else car.CarState.GearShifter.drive
+        now = 10_000_000_000 + tick * 10_000_000
+        original_message = messaging.new_message
+        def current_message(*args, _original=original_message, _now=now, **kwargs):
+          message = _original(*args, **kwargs)
+          message.logMonoTime = _now
+          return message
+        with mock.patch('openpilot.selfdrive.car.card.messaging.new_message', side_effect=current_message):
+          card.state_publish(cs, None)
+        intent_message = card.pm.messages['aolIntentWire'].as_builder()
+        intent = decode_intent(bytes(intent_message.aolIntentWire))
+        self.assertTrue(intent.lateralArmed)
+        self.assertEqual(intent.allowedLatch, not reverse)
+        requested = tick == 2 or tick >= 43
+        axis, state, command = step(tick, observed_state=cs, intent_message=intent_message,
+                                    native_request_lat=requested, allowed=requested, native_request_long=False)
+        self.assertEqual(bool(axis.lateralActive), tick >= 43)
+        self.assertEqual(bool(command.latActive), tick >= 43)
+        self.assertFalse(axis.longitudinalActive or command.longActive or sd.enabled or sd.active)
+        self.assertTrue(axis.nativeAcknowledged, (tick, sd.events.names,
+          [(str(sample.gearShifter), sample.canValid, sample.canTimeout) for sample, _ in sd.car_state_samples], axis.to_dict()))
+        self.assertEqual(str(axis.faultReason), 'none')
+        if reverse:
+          self.assertIn(log.OnroadEvent.EventName.reverseGear, sd.events.names)
+          self.assertIn(log.OnroadEvent.EventName.wrongGear, sd.events.names)
+          self.assertFalse(axis.desiredLateral or axis.desiredLongitudinal)
+        self.assertTrue(receive(now, state=cs, axis=sd.pm.messages['aolAxisState'],
+                                event=sd.pm.messages['onroadEvents']))
+
   def test_ioniq_caroutput_communication_fault_joined_delivery_and_recovery(self):
     for order in ('axis_first', 'event_first', 'together'):
       with self.subTest(order=order), OpenpilotPrefix():

@@ -194,6 +194,13 @@ static bool aol_ioniq6_session_started = false;
 static bool aol_ioniq6_request_seen = false;
 static bool aol_ioniq6_lateral_token_claimed = false;
 static uint32_t aol_ioniq6_gesture_ts = 0U;
+static bool aol_ioniq6_enable_counter_seen = false;
+static uint8_t aol_ioniq6_enable_counter = 0U;
+static uint32_t aol_ioniq6_enable_ts = 0U;
+static bool aol_ioniq6_enable_pending = false;
+static bool aol_ioniq6_enable_neutral = false;
+static bool aol_ioniq6_enable_release = false;
+static uint32_t aol_ioniq6_enable_release_ts = 0U;
 static bool hyundai_canfd_ioniq6_lfa_unpaired = false;
 static uint32_t hyundai_canfd_ioniq6_lfa_ts = 0U;
 static bool hyundai_canfd_ioniq6_heartbeat_seen = false;
@@ -218,8 +225,16 @@ static uint8_t hyundai_canfd_angle_model = 0U;
 static uint8_t hyundai_canfd_carnival_consumed_counter = 0U;
 static uint8_t hyundai_canfd_carnival_source[16] = {0};
 
+static void aol_ioniq6_enable_reset(void) {
+  aol_ioniq6_enable_counter_seen = false;
+  aol_ioniq6_enable_neutral = false;
+  aol_ioniq6_enable_pending = false;
+  aol_ioniq6_enable_release = false;
+}
+
 static void aol_ioniq6_reset(void) {
   aol_ioniq6_long = false;
+  aol_ioniq6_enable_reset();
   aol_optional_release_capable = false;
   aol_optional_release_policy = false;
   aol_optional_release_neutral = false;
@@ -276,6 +291,7 @@ static uint8_t aol_ioniq6_request_mask(void) {
   if (relay_malfunction || safety_rx_checks_invalid ||
       (aol_ioniq6_session_started && !heartbeat_engaged) || pre_session_expired || request_expired) {
     aol_ioniq6_lateral_latch = false;
+    aol_ioniq6_enable_reset();
     aol_optional_release_policy = false;
     aol_optional_release_neutral = false;
     aol_optional_release_counter_seen = false;
@@ -290,6 +306,12 @@ static uint8_t aol_ioniq6_request_mask(void) {
     aol_host_axis_mask = 0U;
   } else if (heartbeat_engaged) {
     aol_ioniq6_session_started = true;
+    if (hyundai_canfd_ioniq6_long && controls_allowed && aol_ioniq6_enable_release &&
+        ((aol_host_axis_mask & 0x3U) == 0x3U) &&
+        (safety_get_ts_elapsed(now, aol_ioniq6_enable_release_ts) <= AOL_HOST_REQUEST_TIMEOUT_US)) {
+      aol_ioniq6_lateral_latch = true;
+      aol_ioniq6_enable_release = false;
+    }
     if (((aol_host_axis_mask & 0x1U) != 0U) && aol_ioniq6_lateral_latch) {
       aol_ioniq6_lateral_token_claimed = true;
     }
@@ -304,6 +326,7 @@ static uint8_t aol_ioniq6_permission_mask(void) {
   uint8_t permission = 0U;
   if (!aol_rx_healthy()) {
     aol_ioniq6_lateral_latch = false;
+    aol_ioniq6_enable_reset();
     aol_optional_release_policy = false;
     aol_optional_release_neutral = false;
     aol_optional_release_counter_seen = false;
@@ -337,6 +360,7 @@ static uint8_t hyundai_angle_aol_permission_mask(void) {
 }
 
 static void aol_ioniq6_rx_invalid(void) {
+  aol_ioniq6_enable_reset();
   aol_optional_release_policy = false;
   aol_optional_release_neutral = false;
   aol_optional_release_counter_seen = false;
@@ -515,7 +539,38 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
       main_button = GET_BIT(msg, 34U);
     }
     const bool previous_controls_allowed = controls_allowed;
+    const int previous_cruise_button = cruise_button_prev;
     hyundai_common_cruise_buttons_check(cruise_button, main_button);
+    if (hyundai_canfd_ioniq6_long && aol_ioniq6_long) {
+      const uint8_t counter = hyundai_canfd_get_counter(msg);
+      const uint32_t now = microsecond_timer_get();
+      const uint32_t elapsed = safety_get_ts_elapsed(now, aol_ioniq6_enable_ts);
+      const bool fresh = aol_ioniq6_enable_counter_seen &&
+        (counter == ((aol_ioniq6_enable_counter + 1U) & 0xFU)) && (elapsed > 0U) && (elapsed <= 100000U);
+      if (!fresh || main_button || GET_BIT(msg, 23U)) {
+        aol_ioniq6_enable_pending = false;
+        aol_ioniq6_enable_release = false;
+      } else if (aol_ioniq6_enable_neutral && (previous_cruise_button == HYUNDAI_BTN_NONE) &&
+                 ((cruise_button == HYUNDAI_BTN_SET) || (cruise_button == HYUNDAI_BTN_RESUME))) {
+        aol_ioniq6_enable_pending = true;
+      } else if (aol_ioniq6_enable_pending && (cruise_button == HYUNDAI_BTN_NONE) &&
+                 ((previous_cruise_button == HYUNDAI_BTN_SET) || (previous_cruise_button == HYUNDAI_BTN_RESUME))) {
+        if (controls_allowed && aol_rx_healthy()) {
+          heartbeat_engaged_mismatches = 0U;
+          aol_ioniq6_enable_release = true;
+          aol_ioniq6_enable_release_ts = now;
+        }
+        aol_ioniq6_enable_pending = false;
+      } else if ((cruise_button != HYUNDAI_BTN_SET) && (cruise_button != HYUNDAI_BTN_RESUME)) {
+        aol_ioniq6_enable_pending = false;
+      } else {
+        // A held enable button does not renew the heartbeat grace.
+      }
+      aol_ioniq6_enable_neutral = !main_button && !GET_BIT(msg, 23U) && (cruise_button == HYUNDAI_BTN_NONE);
+      aol_ioniq6_enable_counter_seen = true;
+      aol_ioniq6_enable_counter = counter;
+      aol_ioniq6_enable_ts = now;
+    }
     if (hyundai_canfd_ev9_long && !previous_controls_allowed && controls_allowed) {
       hyundai_ev9_inactive_accel_count = 0U;
     }
@@ -554,6 +609,7 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
       }
       const bool gesture = main_button || (hyundai_canfd_alt_buttons ? GET_BIT(msg, 39U) : GET_BIT(msg, 23U)); // LDA/LKAS button
       if (cruise_button == HYUNDAI_BTN_CANCEL) {
+        aol_ioniq6_enable_reset();
         // Exact DEBUG torque LONG AOL keeps only previously authorized lateral.
         // Common cruise handling above still withdraws ordinary LONG; CANCEL
         // cannot create a gesture, refresh a lease, or claim a lateral token.
@@ -1082,6 +1138,7 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
 static void hyundai_canfd_reset_ioniq6_state(void) {
   hyundai_canfd_ioniq6_long = false;
   aol_ioniq6_long = false;
+  aol_ioniq6_enable_reset();
   aol_optional_release_capable = false;
   aol_optional_release_policy = false;
   aol_optional_release_neutral = false;
