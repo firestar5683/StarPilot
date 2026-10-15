@@ -9,6 +9,7 @@ import numpy as np
 from opendbc.car import structs
 from opendbc.car.hyundai.values import CAR
 from openpilot.common.constants import CV
+from openpilot.common.scalar_clip import clip_scalar
 from openpilot.starpilot.lateral.torque_shaping import (
   KP_INTERP,
   KI,
@@ -554,7 +555,7 @@ def get_ioniq_6_2025_low_speed_output_limit(desired_lateral_accel: float,
   limit = (IONIQ_6_2025_LOW_SPEED_OUTPUT_LIMIT_BASE +
            IONIQ_6_2025_LOW_SPEED_OUTPUT_LIMIT_TURN_RELIEF * (1.0 - center_weight) +
            IONIQ_6_2025_LOW_SPEED_OUTPUT_LIMIT_SPEED_RELIEF * (1.0 - speed_weight))
-  return float(np.clip(limit, IONIQ_6_2025_LOW_SPEED_OUTPUT_LIMIT_BASE, 1.0))
+  return clip_scalar(limit, IONIQ_6_2025_LOW_SPEED_OUTPUT_LIMIT_BASE, 1.0)
 
 def _ioniq_6_2025_low_speed_center_envelope(desired_lateral_accel: float,
                                              desired_lateral_jerk: float, v_ego: float) -> float:
@@ -706,9 +707,9 @@ def get_ioniq_6_low_speed_angle_assist_torque(desired_angle_deg: float, actual_a
       add_scale = float(np.interp(abs(current_output_torque),
                                   IONIQ_6_LOW_SPEED_ANGLE_ASSIST_ADD_BP,
                                   IONIQ_6_LOW_SPEED_ANGLE_ASSIST_ADD_V))
-      return float(np.clip(current_output_torque + (assist_torque * add_scale), -1.0, 1.0))
+      return clip_scalar(current_output_torque + (assist_torque * add_scale), -1.0, 1.0)
 
-    return float(np.clip(current_output_torque + assist_torque, -1.0, 1.0))
+    return clip_scalar(current_output_torque + assist_torque, -1.0, 1.0)
 
   speed_weight = _ioniq_6_sigmoid((IONIQ_6_LOW_SPEED_UNWIND_ASSIST_SPEED - max(v_ego, 0.0)) /
                                   IONIQ_6_LOW_SPEED_UNWIND_ASSIST_SPEED_WIDTH)
@@ -724,7 +725,7 @@ def get_ioniq_6_low_speed_angle_assist_torque(desired_angle_deg: float, actual_a
   if current_output_torque * assist_torque >= 0.0:
     assist_torque *= IONIQ_6_LOW_SPEED_UNWIND_ASSIST_BLEND
 
-  return float(np.clip(current_output_torque + assist_torque, -1.0, 1.0))
+  return clip_scalar(current_output_torque + assist_torque, -1.0, 1.0)
 
 
 # Buffer curvature and scale at the current speed to avoid pull-away unwind
@@ -810,15 +811,15 @@ class Ioniq6TorquePolicy:
     expected_lateral_accel = self.curvature_request_buffer[-delay_frames] * CS.vEgo ** 2
     self.curvature_request_buffer.append(desired_curvature)
     raw_lateral_jerk = (future_desired_lateral_accel - expected_lateral_accel) / max(lat_delay, self.dt)
-    raw_lateral_jerk = float(np.clip(raw_lateral_jerk, -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP))
-    desired_lateral_jerk = float(np.clip(self.jerk_filter.update(raw_lateral_jerk), -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP))
+    raw_lateral_jerk = clip_scalar(raw_lateral_jerk, -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP)
+    desired_lateral_jerk = clip_scalar(self.jerk_filter.update(raw_lateral_jerk), -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP)
     gravity_adjusted_future_lateral_accel = future_desired_lateral_accel - roll_compensation
     setpoint = expected_lateral_accel + desired_lateral_jerk * lat_delay
     desired_lateral_accel_magnitude_rate = (abs(setpoint) - abs(self.prev_desired_lateral_accel)) / self.dt
     unwind_detected = desired_lateral_accel_magnitude_rate < UNWIND_D_DES_THRESHOLD and abs(setpoint) < UNWIND_LAT_ACCEL_NEAR_ZERO
     self.prev_desired_lateral_accel = setpoint
     measurement_rate = self.measurement_rate_filter.update((measurement - self.previous_measurement) / self.dt)
-    measurement_rate = float(np.clip(measurement_rate, -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP))
+    measurement_rate = clip_scalar(measurement_rate, -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP)
     self.previous_measurement = measurement
     low_speed_factor = (np.interp(CS.vEgo, LOW_SPEED_X, LOW_SPEED_Y) / max(CS.vEgo, MIN_SPEED)) ** 2
     current_kp = np.interp(CS.vEgo, parent.pid._k_p[0], parent.pid._k_p[1])
@@ -882,7 +883,7 @@ class Ioniq6TorquePolicy:
     if self.is_2025:
       output_torque *= get_ioniq_6_2025_center_output_scale(setpoint, CS.vEgo)
       output_limit = get_ioniq_6_2025_low_speed_output_limit(setpoint, desired_lateral_jerk, CS.vEgo)
-      output_torque = float(np.clip(output_torque, -output_limit, output_limit))
+      output_torque = clip_scalar(output_torque, -output_limit, output_limit)
     pid_log.active = True
     pid_log.p = float(parent.pid.p)
     pid_log.i = float(parent.pid.i)

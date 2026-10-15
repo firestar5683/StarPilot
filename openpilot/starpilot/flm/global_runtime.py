@@ -121,7 +121,9 @@ class GlobalRuntime:
     self.torque_result = (0.0, 0.0)
     self.stage_effect = False
     self.centre_ack = None
-    self.live_manual = bool(manual_current)
+    policy = getattr(getattr(self.controller, 'starpilot_extension', None), 'policy', None)
+    self.live_manual = bool(manual_current or getattr(self.controller, 'flm_surface', None) is not None or
+                            getattr(policy, 'surface', None) is not None)
     self.native_required = bool(native_required)
     self.native_witness = native_witness
     key = native_identity_key(native_witness)

@@ -1532,7 +1532,7 @@ class IpcAxisContractTests(unittest.TestCase):
         sm = SM(aolSafetyWire=b'', pandaStates=[],
                 driverMonitoringState=SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False),
                 extrinsicsCalibration=SimpleNamespace(calStatus=log.ExtrinsicsCalibration.Status.calibrated))
-        sm.ignore_alive, sm.ignore_valid = [], []
+        sm.ignore_alive, sm.ignore_valid = set(), set()
         sm.seen = dict(SM.seen)
         self.enterContext(mock.patch.object(sd, 'sm', sm, create=True))
         sd.car_state_sock = object()
@@ -1780,7 +1780,7 @@ class IpcAxisContractTests(unittest.TestCase):
         sm = SM(aolSafetyWire=b'', pandaStates=[],
                 driverMonitoringState=SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False),
                 extrinsicsCalibration=SimpleNamespace(calStatus=log.ExtrinsicsCalibration.Status.calibrated))
-        sm.ignore_alive, sm.ignore_valid = [], []
+        sm.ignore_alive, sm.ignore_valid = set(), set()
         sm.seen = dict(SM.seen)
         self.enterContext(mock.patch.object(sd, 'sm', sm, create=True))
         sd.car_state_sock = object()

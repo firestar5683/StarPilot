@@ -8,9 +8,12 @@ controller selection is inferred here. Domain adapters qualify response inverse.
 from collections import OrderedDict, deque
 from dataclasses import dataclass, replace
 import math
+import re
 import uuid
 
 from openpilot.starpilot.flm.adaptive_profile import Block, Sample, Result, evaluate, replay_accepts, readmit_profile
+
+_IDENTITY_HEX64 = re.compile(r'[0-9a-f]{64}')
 
 MAX_PENDING = 128
 MAX_DRAIN = 32
@@ -39,7 +42,7 @@ def replay_values(value, bound):
 
 
 def identity(value):
-  return type(value) is str and len(value) == 64 and all(c in '0123456789abcdef' for c in value)
+  return type(value) is str and len(value) == 64 and _IDENTITY_HEX64.fullmatch(value) is not None
 
 
 @dataclass(frozen=True)

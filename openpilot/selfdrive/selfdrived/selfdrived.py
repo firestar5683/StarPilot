@@ -180,6 +180,7 @@ class SelfdriveD:
     from openpilot.starpilot.car.gm.radar_recovery import capability as radar_recovery_capability
     radar_notifications = ['radarTracks'] if radar_recovery_capability(self.CP) is not None else []
     ignore += radar_notifications
+    ignore = set(ignore)
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'extrinsicsCalibration',
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'deviceMotion', 'lateralDelay',
                                    'managerState', 'vehicleParameters', 'radarState', 'lateralTorqueParameters',
@@ -756,11 +757,11 @@ class SelfdriveD:
       if all_valid or timed_out or (SIMULATION and not REPLAY):
         available_streams = VisionIpcClient.available_streams("camerad", block=False)
         if VisionStreamType.VISION_STREAM_NARROW_ROAD not in available_streams:
-          self.sm.ignore_alive.append('narrowRoadCameraState')
-          self.sm.ignore_valid.append('narrowRoadCameraState')
+          self.sm.ignore_alive.add('narrowRoadCameraState')
+          self.sm.ignore_valid.add('narrowRoadCameraState')
         if VisionStreamType.VISION_STREAM_WIDE_ROAD not in available_streams:
-          self.sm.ignore_alive.append('wideRoadCameraState')
-          self.sm.ignore_valid.append('wideRoadCameraState')
+          self.sm.ignore_alive.add('wideRoadCameraState')
+          self.sm.ignore_valid.add('wideRoadCameraState')
 
         if REPLAY and any(ps.controlsAllowed for ps in self.sm['pandaStates']):
           self.state_machine.state = State.enabled

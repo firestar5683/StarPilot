@@ -64,7 +64,7 @@ def refresh_registered_sources(ci, cs, stamp, tick):
   ci.CS.out = cs.as_reader()
 
 
-def computed_registered_fit(cp, runtime, observed_ns, *, mode="standard"):
+def computed_registered_fit(cp, runtime, observed_ns, *, mode="standard", baseline_snapshot=None):
   """Fit independent plant, actual stage sensitivities, then exact heldout replay."""
   objective = Objective('feedforward', 'high', 'steady')
   # Predeclared independent plant goal: a bounded 2.5% FF reduction.
@@ -112,6 +112,9 @@ def computed_registered_fit(cp, runtime, observed_ns, *, mode="standard"):
   for block in range(8):
     sign = 1 if block % 2 == 0 else -1
     controller, vm = factory.create()
+    if baseline_snapshot is not None:
+      from openpilot.starpilot.flm.controller_replay import restore_snapshot
+      restore_snapshot(controller, vm, baseline_snapshot)
     params = SimpleNamespace(angleOffsetDeg=0.0, roll=0.0)
     # Parameters are independent left/right coordinates. Repeat the same
     # per-sign maneuver in each independent cohort so heldout improvement

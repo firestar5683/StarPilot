@@ -44,9 +44,11 @@ def run(
   cached_reports = {}
   prior_attached = {}
   previous_publish = publication_sequence = 0
+  unavailable_reason = 'no_current_controller_evidence'
 
   def clear(reason):
-    nonlocal collector, raw_context, active_key, pending_key, pending_token
+    nonlocal collector, raw_context, active_key, pending_key, pending_token, unavailable_reason
+    unavailable_reason = reason
     if collector is not None:
       collector.split(reason, reset=True)
     collector = None
@@ -73,10 +75,12 @@ def run(
       now = clock()
       source = source_reader(now)
       if not source.enabled or source.manual or not source.observed_ns <= now <= source.expires_ns:
-        clear('current_settings_receipt_unavailable')
+        clear('learning_disabled' if not source.enabled else 'manual_profile_override' if source.manual else 'settings_receipt_expired')
+      elif collector is None:
+        unavailable_reason = 'no_current_controller_evidence'
 
       def control(event, current, stamp, *, source=source, now=now):
-        nonlocal collector, raw_context, active_key
+        nonlocal collector, raw_context, active_key, unavailable_reason
         if event.which() == 'starpilotLateralState' and event.starpilotLateralState.learningEvidence.version == 0:
           if collector is not None:
             collector.split('no_current_learning_evidence')
@@ -88,7 +92,7 @@ def run(
           or evidence.source_epoch != source.source_epoch
           or not 0 < evidence.source_receipt_ns <= evidence.control_ns <= now <= source.expires_ns
         ):
-          clear('current_settings_receipt_unavailable')
+          clear('learning_disabled' if not source.enabled else 'manual_profile_override' if source.manual else 'controller_source_receipt_mismatch')
           return
         incoming = (
           evidence.identity,
@@ -117,6 +121,7 @@ def run(
         if collector is None:
           adapter = adapter_for_evidence(CP, evidence, active_key)
           if adapter is None:
+            unavailable_reason = 'actual_adapter_unavailable'
             return
           collector = FullrateCollector(adapter)
         collector.adapter.select_objective(active_key)
@@ -193,7 +198,7 @@ def run(
         else:
           message = messaging.new_message('autoSteeringLearning')
           value = message.autoSteeringLearning.learning
-          value.version, value.status, value.reason, value.family = 1, 'unavailable', 'actual_adapter_unavailable', 'runtimeProfile'
+          value.version, value.status, value.reason, value.family = 1, 'unavailable', unavailable_reason, 'runtimeProfile'
           value.observedMonoTime, value.validUntilMonoTime = now, now + 500_000_000
           message.valid = True
         write_source_receipt(message, source)

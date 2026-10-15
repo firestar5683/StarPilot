@@ -267,27 +267,21 @@ def read_source(cp, params, *, now_ns, cp_sha256=None, calibration=(), vehicle_s
           tune = cp.lateralTuning.torque
           if profile.basis != (float(tune.latAccelFactor), float(tune.latAccelOffset), float(tune.friction)):
             raise ValueError('incompatible saved tuning basis')
-        manual = (
-          profile.factor.mode == 'custom'
-          or profile.friction.mode == 'custom'
-          or profile.proportional_gain.mode == 'custom'
-          or profile.flm is not None
-          or profile.geometry is not None
-          and (profile.geometry.ratio.mode == 'custom' or profile.geometry.full_delay.mode == 'custom')
-        )
+        # Scalar and geometry choices are immutable baseline inputs. Automatic
+        # FF residuals never write them; a manually owned FLM surface stays fixed.
+        manual = profile.flm is not None
         if profile.geometry is not None and profile.geometry.learning == 'force_off':
           preference = type(preference)(False, preference.valid, preference.source, preference.raw)
     else:
-      # Legacy numeric manual intent preempts optional learning. False legacy
-      # switches themselves remain source-bound, but are not numeric overrides.
+      # Validate legacy scalar choices and bind their exact bytes to the source
+      # epoch. They stay fixed baseline inputs, not automatic profile ownership.
       if cp.lateralTuning.which() == 'torque':
         tune = cp.lateralTuning.torque
-        choice = interpret_legacy(
+        interpret_legacy(
           {key: raw_by_key[key] for key in LEGACY_KEYS},
           (float(tune.latAccelFactor), float(tune.latAccelOffset), float(tune.friction)),
           fingerprint=str(cp.carFingerprint),
         )
-        manual = choice.factor is not None or choice.friction is not None
     calibration = tuple(calibration)
     if len(calibration) != 3 or not all(math.isfinite(v) for v in calibration):
       raise ValueError("uncertain calibration")

@@ -198,7 +198,7 @@ class ConditionalSettingsOwner:
       current.document_state in (DocumentState.ABSENT, DocumentState.VALID) and
       current.safe_mode_state in (SafeModeState.ABSENT_FALSE, SafeModeState.FALSE) and
       snapshot.verified_mono_ns <= current.verified_mono_ns and
-      replace(snapshot, verified_mono_ns=current.verified_mono_ns) == current and
+      (snapshot is current or replace(snapshot, verified_mono_ns=current.verified_mono_ns) == current) and
       type(now_mono_ns) is int and verified <= now_mono_ns <= verified + REFRESH_NS
     )
 

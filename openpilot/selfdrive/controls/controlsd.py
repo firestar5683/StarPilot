@@ -75,8 +75,9 @@ class Controls:
                 (['aolAxisState', 'aolSafetyWire'] if self.aol_replay or self.ordinary_axis_ack_required else []))
     optional = list(dict.fromkeys(self.longitudinal_inputs.optional_services + ['deviceState', 'autoSteeringLearning']))
     if optional:
+      ignore = set(optional)
       self.sm = messaging.SubMaster(services + optional, poll='selfdriveState',
-                                    ignore_alive=optional, ignore_valid=optional, ignore_avg_freq=optional)
+                                    ignore_alive=ignore, ignore_valid=ignore, ignore_avg_freq=ignore)
     else:
       self.sm = messaging.SubMaster(services, poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState', 'starpilotLateralState'])
@@ -341,10 +342,7 @@ class Controls:
                        not any(event.softDisable or event.immediateDisable for event in self.sm['onroadEvents']) and
                        not self.sm['driverMonitoringState'].noResponseForceDecel), controller=self.LaC,
           native_required=bool(self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False)),
-          native_witness=getattr(self, 'flm_native_witness', None),
-          manual_current=bool(self.torque_host is not None and
-            (self.torque_host.settings.user_factor is not None or self.torque_host.settings.user_friction is not None) or
-            self.lateral_gain_owner is not None and self.lateral_gain_owner.current_table != self.lateral_gain_owner.basis.source_table))
+          native_witness=getattr(self, 'flm_native_witness', None))
         automatic.begin_frame(CS, self.VM, lp, active=bool(CC.latActive),
           safety_limited=self.steer_limited_by_safety, desired_curvature=self.desired_curvature,
           curvature_limited=curvature_limited, lat_delay=lat_delay,

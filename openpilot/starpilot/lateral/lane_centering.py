@@ -14,6 +14,7 @@ import capnp
 import numpy as np
 
 from openpilot.cereal import log
+from openpilot.common.scalar_clip import clip_scalar
 
 
 STRENGTH_BASELINE = 1.5
@@ -151,7 +152,7 @@ def raw_correction(model: Any, speed_mps: float, offset_m: float, e2e_authority:
     left_path, right_path, model_path = (_path(lines[1]), _path(lines[2]), _path(model.position)) if _paths is None else _paths[:3]
     if left_path is None or right_path is None or model_path is None:
       return None
-    lookahead = float(np.clip(speed, 8.0, 35.0))
+    lookahead = clip_scalar(speed, 8.0, 35.0)
     left, right, model_y = _at(left_path, lookahead), _at(right_path, lookahead), _at(model_path, lookahead)
     if left is None or right is None or model_y is None:
       return None
@@ -159,7 +160,7 @@ def raw_correction(model: Any, speed_mps: float, offset_m: float, e2e_authority:
     if not MIN_LANE_WIDTH <= width <= MAX_LANE_WIDTH:
       return None
     safe_offset = min(MAX_OFFSET, max(0.0, width * 0.5 - MIN_CENTER_TO_LINE))
-    target_y = (left + right) * 0.5 + float(np.clip(offset, -safe_offset, safe_offset))
+    target_y = (left + right) * 0.5 + clip_scalar(offset, -safe_offset, safe_offset)
     error = target_y - model_y
     error_abs = abs(error)
     error = math.copysign(max(0.0, error_abs - CENTER_ERROR_DEADBAND), error)
@@ -172,9 +173,9 @@ def raw_correction(model: Any, speed_mps: float, offset_m: float, e2e_authority:
     if std_path is not None:
       path_std = _at(std_path, lookahead)
       if path_std is not None and 0.0 <= path_std <= E2E_MAX_PATH_STD:
-        break_in = float(np.clip((error_abs - E2E_BREAK_IN_START) /
-                                 (E2E_BREAK_IN_FULL - E2E_BREAK_IN_START), 0.0, 1.0))
-        error *= 1.0 - float(np.clip(authority, 0.0, 1.0)) * break_in
+        break_in = clip_scalar((error_abs - E2E_BREAK_IN_START) /
+                                 (E2E_BREAK_IN_FULL - E2E_BREAK_IN_START), 0.0, 1.0)
+        error *= 1.0 - clip_scalar(authority, 0.0, 1.0) * break_in
     correction = 2.0 * error / lookahead ** 2
     return correction if math.isfinite(correction) else None
   except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
@@ -267,9 +268,9 @@ class LaneCenteringController:
     raw = raw_correction(observation.model, speed, offset, authority, _paths=paths)
     if raw is None or not math.isfinite(raw):
       return self._fade(base, dt, "unqualified_model")
-    target = float(np.clip(raw, -0.004, 0.004)) * 0.30
+    target = clip_scalar(raw, -0.004, 0.004) * 0.30
     if strength != 1.0:
-      target = float(np.clip(target * strength, -MAX_CORRECTION, MAX_CORRECTION))
+      target = clip_scalar(target * strength, -MAX_CORRECTION, MAX_CORRECTION)
     self._correction += (target - self._correction) * (1.0 - math.exp(-dt / ACQUIRE_TAU))
-    self._correction = float(np.clip(self._correction, -MAX_CORRECTION, MAX_CORRECTION))
+    self._correction = clip_scalar(self._correction, -MAX_CORRECTION, MAX_CORRECTION)
     return self._result(base, "qualified")
