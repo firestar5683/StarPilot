@@ -76,7 +76,7 @@ def _bounded_id(value: str) -> str:
   return value
 
 
-def _payload(raw_value, schema, kind: int, versions=(WIRE_VERSION,)):
+def _payload(raw_value, schema, kind: int, materialize, versions=(WIRE_VERSION,)):
   if not isinstance(raw_value, (bytes, bytearray, memoryview)):
     return None
   byte_count = raw_value.nbytes if isinstance(raw_value, memoryview) else len(raw_value)
@@ -92,7 +92,7 @@ def _payload(raw_value, schema, kind: int, versions=(WIRE_VERSION,)):
     with schema.from_bytes(raw, traversal_limit_in_words=MAX_WIRE_WORDS, nesting_limit=4) as decoded:
       if int(decoded.kind) != kind or int(decoded.version) not in versions:
         return None
-      return decoded.to_dict()
+      return materialize(decoded)
   except (ValueError, OverflowError, RuntimeError, UnicodeDecodeError, capnp.KjException):
     return None
 
@@ -112,49 +112,52 @@ def _memoized(decode):
   return wrapper
 
 
-@_memoized
-def decode_safety(raw: bytes) -> SafetyState | None:
-  value = _payload(raw, custom.AolAxisState.SafetyWire, SAFETY_KIND, (WIRE_VERSION, SAFETY_INVENTORY_VERSION))
-  if value is None:
-    return None
+def _read_safety(value) -> SafetyState | None:
   try:
-    source_ns = int(value.get('sourcePandaStatesMonoTime', 0))
-    inventory = tuple(PandaSlot(int(slot['slotIndex']), _bounded_id(str(slot.get('hardwareSerial', ''))),
-                               int(slot['safetyModel']), int(slot['safetyParam']), int(slot['alternativeExperience']),
-                               bool(slot['controlsAllowed']), bool(slot['safetyRxChecksInvalid']),
-                               bool(slot['heartbeatLost']), int(slot['faults']))
-                      for slot in value.get('pandaInventory', ()))
-    if (int(value['version']) == WIRE_VERSION and (source_ns or inventory) or
-        int(value['version']) == SAFETY_INVENTORY_VERSION and
+    source_ns = int(value.sourcePandaStatesMonoTime)
+    inventory = tuple(PandaSlot(int(slot.slotIndex), _bounded_id(str(slot.hardwareSerial)),
+                               int(slot.safetyModel), int(slot.safetyParam), int(slot.alternativeExperience),
+                               bool(slot.controlsAllowed), bool(slot.safetyRxChecksInvalid),
+                               bool(slot.heartbeatLost), int(slot.faults))
+                      for slot in value.pandaInventory)
+    if (int(value.version) == WIRE_VERSION and (source_ns or inventory) or
+        int(value.version) == SAFETY_INVENTORY_VERSION and
         (source_ns <= 0 or not 1 <= len(inventory) <= MAX_PANDA_SLOTS)):
       return None
-    result = SafetyState(int(value['protocolVersion']), bool(value['compatible']), int(value['observedMonoTime']),
-                         int(value['validUntilMonoTime']), int(value['safetyModel']), int(value['safetyParam']),
-                         bool(value['lateralAllowed']), bool(value['longitudinalAllowed']), bool(value['requestedLateral']),
-                         bool(value['requestedLongitudinal']), _bounded_id(str(value.get('pandaSerial', ''))),
-                         _bounded_id(str(value.get('axisSessionId', ''))), source_ns, inventory)
+    result = SafetyState(int(value.protocolVersion), bool(value.compatible), int(value.observedMonoTime),
+                         int(value.validUntilMonoTime), int(value.safetyModel), int(value.safetyParam),
+                         bool(value.lateralAllowed), bool(value.longitudinalAllowed), bool(value.requestedLateral),
+                         bool(value.requestedLongitudinal), _bounded_id(str(value.pandaSerial)),
+                         _bounded_id(str(value.axisSessionId)), source_ns, inventory)
     if result.validUntilMonoTime < result.observedMonoTime:
       return None
     return result
   except (KeyError, ValueError, OverflowError, RuntimeError, capnp.KjException):
     return None
+
+
+def _read_intent(value) -> IntentState | None:
+  try:
+    result = IntentState(_bounded_id(str(value.producerSessionId)), int(value.sequence),
+                         int(value.carStateLogMonoTime), int(value.observedMonoTime), int(value.validUntilMonoTime),
+                         bool(value.allowedLatch), bool(value.pauseLateral), bool(value.pauseLongitudinal),
+                         bool(value.settingsQualified), bool(value.lateralArmed), bool(value.optionalSetRelease))
+    if result.validUntilMonoTime < result.observedMonoTime:
+      return None
+    return result
+  except (KeyError, ValueError, OverflowError, RuntimeError, capnp.KjException):
+    return None
+
+
+@_memoized
+def decode_safety(raw: bytes) -> SafetyState | None:
+  return _payload(raw, custom.AolAxisState.SafetyWire, SAFETY_KIND, _read_safety,
+                  (WIRE_VERSION, SAFETY_INVENTORY_VERSION))
 
 
 @_memoized
 def decode_intent(raw: bytes) -> IntentState | None:
-  value = _payload(raw, custom.AolAxisState.IntentWire, INTENT_KIND)
-  if value is None:
-    return None
-  try:
-    result = IntentState(_bounded_id(str(value.get('producerSessionId', ''))), int(value['sequence']),
-                         int(value['carStateLogMonoTime']), int(value['observedMonoTime']), int(value['validUntilMonoTime']),
-                         bool(value['allowedLatch']), bool(value['pauseLateral']), bool(value['pauseLongitudinal']),
-                         bool(value['settingsQualified']), bool(value.get('lateralArmed', False)), bool(value.get('optionalSetRelease', False)))
-    if result.validUntilMonoTime < result.observedMonoTime:
-      return None
-    return result
-  except (KeyError, ValueError, OverflowError, RuntimeError, capnp.KjException):
-    return None
+  return _payload(raw, custom.AolAxisState.IntentWire, INTENT_KIND, _read_intent)
 
 
 def encode_intent(value: IntentState) -> bytes:
