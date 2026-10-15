@@ -206,7 +206,7 @@ class IoniqAvailabilityTests(unittest.TestCase):
     def step(tick, *, timeout=False, old_intent=False, allowed=True, pause=False, latched=True,
              brake=False, steering=False, gas=False, user_disable=False, observed_state=None, authority_unavailable=False, companion=True,
              long_allowed=True, pause_long=False, state_stamp=None, intent_message=None, offset_ns=0,
-             native_request_lat=True, native_request_long=None, native_valid=True, panda_fault=False,
+             native_request_lat=True, native_request_long=None, native_valid=True, panda_fault=False, panda_controls_allowed=None,
              critical_event=None, calibrated=True, car_output_valid=True, relay_fault=False):
       now = base + tick * 10_000_000 + offset_ns
       clock.return_value = now
@@ -215,6 +215,8 @@ class IoniqAvailabilityTests(unittest.TestCase):
       state = car_state(brake=brake) if observed_state is None else observed_state
       state.cruiseState.available = True
       state.steeringPressed, state.gasPressed = steering, gas
+      if panda_controls_allowed is None:
+        panda_controls_allowed = full_op if native_request_long is None else native_request_long
       state_event = messaging.new_message('carState', valid=True, logMonoTime=now if state_stamp is None else state_stamp)
       state_event.carState = state
       recv.return_value = None if timeout else state_event.as_reader()
@@ -234,7 +236,7 @@ class IoniqAvailabilityTests(unittest.TestCase):
       for panda, config in zip(pandas.pandaStates, cp.safetyConfigs, strict=True):
         panda.safetyModel, panda.safetyParam = config.safetyModel, config.safetyParam
         panda.alternativeExperience = cp.alternativeExperience
-        panda.controlsAllowed = full_op if native_request_long is None else native_request_long
+        panda.controlsAllowed = panda_controls_allowed
         panda.safetyRxChecksInvalid = panda_fault
         if relay_fault:
           panda.faults = ['relayMalfunction']
@@ -253,7 +255,7 @@ class IoniqAvailabilityTests(unittest.TestCase):
         now if genuine_events else 0, tuple(
           PandaSlot(index, 'authority-panda' if index == len(cp.safetyConfigs) - 1 else f'silent-panda-{index}',
                     int(config.safetyModel.raw), config.safetyParam,
-                    cp.alternativeExperience, full_op if native_request_long is None else native_request_long, panda_fault, False,
+                    cp.alternativeExperience, panda_controls_allowed, panda_fault, False,
                     1 if relay_fault else 0)
           for index, config in enumerate(cp.safetyConfigs)) if genuine_events else ()))
       if companion:

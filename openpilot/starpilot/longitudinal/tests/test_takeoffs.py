@@ -1,6 +1,5 @@
 """One opt-in, shared launch admission and unchanged vehicle-owned limits."""
 from dataclasses import replace
-from types import SimpleNamespace as NS
 from unittest.mock import patch
 
 import pytest
@@ -141,7 +140,10 @@ def test_actual_native_planner_uses_same_toggle_for_launch_budget():
 def test_galaxy_single_toggle_roundtrip_global_and_both_runtime_readers(tmp_path):
   params = Params(str(tmp_path))
   cp = Honda.get_non_essential_params(H.HONDA_CIVIC)
-  gateway = SettingsGateway(params, NS(sample=lambda: AuthorityContext(True, cp, b'cp')), clock=lambda: 10.)
+  class ParkedContext:
+    def sample(self) -> AuthorityContext:
+      return AuthorityContext(True, cp, b'cp')
+  gateway = SettingsGateway(params, ParkedContext(), clock=lambda: 10.)
   page = gateway.page('profiles', 'session', b'generation')
   rows = [(i, row) for i, row in enumerate(page['rows']) if row['label'] == 'Faster Takeoffs']
   assert len(rows) == 1

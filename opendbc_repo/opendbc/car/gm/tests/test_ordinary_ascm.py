@@ -124,13 +124,14 @@ class TestOrdinaryAscm(unittest.TestCase):
     from opendbc.car.gm.longitudinal import AscmStopEvidence
     controls, now, offset = controls_fixture()
     cp = params(CAR.CHEVROLET_MALIBU_ASCM, sascm=True, alpha=True).as_reader()
-    owner = LongitudinalInputs(cp, None, lambda: controls.sm)
+    owner = LongitudinalInputs(cp, controls.params, lambda: controls.sm)
     owner.gm_ascm_boot_offset_ns = offset
     self.assertEqual(owner.optional_services, ['radarState', 'deviceState'])
     controls.sm['radarState'].leadOne.present = controls.sm['longitudinalPlan'].hasLead = True
     with patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(now, now + offset)), \
          patch.dict('os.environ', {'REPLAY': '0'}):
       self.assertIsInstance(owner.context(True).vehicle_stop_evidence, AscmStopEvidence)
+      self.assertFalse(owner.faster_takeoffs)
       controls.sm['longitudinalPlan'].hasLead = False
       self.assertIsNone(owner.context(True).vehicle_stop_evidence)
       controls.sm['longitudinalPlan'].hasLead = True

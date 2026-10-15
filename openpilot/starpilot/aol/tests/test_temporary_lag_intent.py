@@ -6,6 +6,7 @@ import pytest
 from openpilot.cereal import log
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.starpilot.aol.tests import test_ioniq_availability as fixture
+from openpilot.starpilot.aol.wire import decode_safety
 
 
 @pytest.mark.parametrize(('full_op', 'gas'), [(False, True), (True, False)],
@@ -133,7 +134,13 @@ def test_persistent_lag_keeps_latch_but_ordinary_countdown_still_disables():
     sd, _, drive, card, receive = case._ioniq_availability_callers(full_op=True)
     with mock.patch.object(type(sd.rk), 'lagging', new_callable=mock.PropertyMock, return_value=True):
       for tick in range(2, 304):
-        axis, state, command = drive(tick, native_request_long=False)
+        axis, state, command = drive(tick, native_request_long=False, panda_controls_allowed=True)
+        native = decode_safety(sd.sm['aolSafetyWire'])
+        assert not native.requestedLongitudinal
+        assert all(p.controlsAllowed for p in native.pandaInventory)
+        assert all(p.controlsAllowed for p in sd.sm['pandaStates'])
+        assert sd.mismatch_counter == 0
+        assert log.OnroadEvent.EventName.controlsMismatch not in sd.events.names
         ordinary_active = tick < 302
         assert state.enabled == state.active == ordinary_active
         assert sd.state_machine.soft_disable_timer == max(0, 302 - tick)
@@ -150,10 +157,41 @@ def test_persistent_lag_keeps_latch_but_ordinary_countdown_still_disables():
           axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
     assert not state.enabled and not state.active and sd.state_machine.soft_disable_timer == 0
     assert card.aol_card_intent.allowed_latch
-    axis, state, command = drive(304, native_request_long=False)
+    axis, state, command = drive(304, native_request_long=False, panda_controls_allowed=True)
     assert not state.enabled and not command.longActive and not axis.longitudinalActive
     # A newly current lateral native ACK alone can restore lateral output.
     assert axis.lateralActive and command.latActive
+
+
+def test_persistent_lag_does_not_mask_native_controls_mismatch():
+  case = fixture.IoniqAvailabilityTests(methodName='runTest')
+  with ExitStack() as cleanup:
+    cleanup.callback(case.doCleanups)
+    cleanup.enter_context(OpenpilotPrefix())
+    sd, _, drive, card, receive = case._ioniq_availability_callers(full_op=True)
+    with mock.patch.object(type(sd.rk), 'lagging', new_callable=mock.PropertyMock, return_value=True):
+      for tick in range(2, 210):
+        axis, state, command = drive(tick, native_request_long=False, panda_controls_allowed=False)
+        native = decode_safety(sd.sm['aolSafetyWire'])
+        assert not native.requestedLongitudinal
+        assert not any(p.controlsAllowed for p in native.pandaInventory)
+        # The real 10 Hz Panda publication first reports denial at tick 10.
+        assert sd.mismatch_counter == max(0, tick - 9)
+        assert sd.state_machine.soft_disable_timer == 302 - tick
+        assert state.enabled == state.active == (tick < 209)
+        assert not axis.longitudinalActive and not command.longActive
+        if tick < 209:
+          assert not sd.events.contains(fixture.ET.IMMEDIATE_DISABLE)
+          assert receive(10_000_000_000 + tick*10_000_000,
+            axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+        else:
+          assert sd.mismatch_counter == 200 and sd.state_machine.soft_disable_timer == 93
+          assert log.OnroadEvent.EventName.controlsMismatch in sd.events.names
+          assert sd.events.contains(fixture.ET.IMMEDIATE_DISABLE)
+          assert not axis.lateralActive and not command.latActive
+          assert not receive(10_000_000_000 + tick*10_000_000,
+            axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+    assert not card.aol_card_intent.allowed_latch
 
 
 @pytest.mark.parametrize('failure', ['missing_event', 'hard_event', 'wrong_event', 'session', 'inventory'])

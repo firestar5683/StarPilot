@@ -11,6 +11,7 @@ from openpilot.starpilot.longitudinal.output_max import final_output
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from openpilot.starpilot.longitudinal.inputs import LongitudinalInputs
+from openpilot.starpilot.longitudinal.tests.extension_helpers import empty_params
 
 State = car.CarControl.Actuators.LongControlState
 
@@ -78,15 +79,60 @@ class TestBlendedOutput(unittest.TestCase):
 
     messages = Messages(longitudinalPlan=SimpleNamespace(hasLead=True),
                         selfdriveState=SimpleNamespace(experimentalMode=True))
-    owner = LongitudinalInputs(self.cp, SimpleNamespace(), lambda: messages)
-    self.assertEqual(owner.optional_services, [])
+    owner = LongitudinalInputs(self.cp, empty_params(self), lambda: messages)
+    self.assertEqual(owner.optional_services, ['radarState', 'deviceState'])
     context = owner.context(True)
     self.assertTrue(context.has_lead)
     self.assertTrue(context.experimental_mode)
+    self.assertFalse(context.faster_takeoffs)
+    self.assertIsNone(context.start_evidence)
     messages.fresh = False
     context = owner.context(True)
     self.assertIsNone(context.has_lead)
     self.assertIsNone(context.experimental_mode)
+
+  def test_unseen_optional_takeoff_sources_keep_native_context_but_cannot_start(self):
+    from openpilot.cereal import messaging
+
+    optional = ['radarState', 'deviceState']
+    required = ['carState', 'longitudinalPlan', 'selfdriveState']
+    messages = messaging.SubMaster(required + optional, ignore_alive=optional,
+                                  ignore_valid=optional, ignore_avg_freq=optional)
+    plan = messaging.new_message('longitudinalPlan', valid=True, logMonoTime=5_020_000_000)
+    plan.longitudinalPlan.hasLead = True
+    state = messaging.new_message('selfdriveState', valid=True, logMonoTime=5_020_000_000)
+    state.selfdriveState.experimentalMode = True
+    car_state = messaging.new_message('carState', valid=True, logMonoTime=5_020_000_000)
+    messages.update_msgs(5.02, [plan.as_reader(), state.as_reader(), car_state.as_reader()])
+    for name in required:
+      messages.alive[name] = messages.valid[name] = messages.freq_ok[name] = True
+    params = empty_params(self)
+    owner = LongitudinalInputs(self.cp, params, lambda: messages)
+    self.assertEqual(owner.optional_services, optional)
+    self.assertFalse(any(messages.seen[name] for name in optional))
+    self.assertTrue(messages.all_checks())
+    baseline = owner.context(True)
+    self.assertTrue(baseline.has_lead and baseline.experimental_mode)
+    self.assertFalse(baseline.faster_takeoffs)
+    self.assertIsNone(baseline.start_evidence)
+    params.put_bool('FasterLeadTakeoff', True, block=True)
+    assert owner.takeoff_preferences is not None
+    owner.takeoff_preferences.next_ns = 0
+    with patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', side_effect=[
+      (5_000_000_000, 5_500_000_000), (5_050_000_000, 5_550_000_000)]):
+      for _ in range(2):
+        context = owner.context(True)
+        self.assertTrue(messages.all_checks())
+        self.assertTrue(context.has_lead and context.experimental_mode and context.faster_takeoffs)
+        self.assertFalse(context.start_evidence.car_fresh or context.start_evidence.plan_fresh)
+        self.assertIsNone(context.start_evidence.lead_clear)
+        control = LongControl(self.cp)
+        self.cs.vEgo = 0.
+        control.update(True, self.cs, 1.8, False, (-3.5, 2.), context=context)
+        self.assertFalse(control.takeoff_starting)
+    messages.valid['longitudinalPlan'] = False
+    self.assertFalse(messages.all_checks())
+    self.assertIsNone(owner.context(True).has_lead)
 
   def test_cp_selected_alpha_limits_and_shared_default_output_ceiling(self):
     for topology in ('hdai', 'hdaii'):
