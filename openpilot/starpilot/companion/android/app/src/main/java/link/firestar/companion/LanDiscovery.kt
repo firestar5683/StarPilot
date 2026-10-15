@@ -13,7 +13,7 @@ import java.net.Inet4Address
 import java.util.concurrent.Executor
 
 /** One bounded foreground search. All callbacks and state changes run on the main thread. */
-class LanDiscovery(context: Context, private val network: Network,
+class LanDiscovery(context: Context, private val network: Network, private val timeoutMs: Long = 12000L,
                    private val complete: (List<String>, String?) -> Unit) {
     companion object {
         const val SERVICE = "_sp-galaxy._tcp."
@@ -60,7 +60,7 @@ class LanDiscovery(context: Context, private val network: Network,
             if (Build.VERSION.SDK_INT >= 33) nsd.discoverServices(SERVICE, NsdManager.PROTOCOL_DNS_SD, network, executor, listener)
             else nsd.discoverServices(SERVICE, NsdManager.PROTOCOL_DNS_SD, listener)
             discoveryRequested = true
-            handler.postDelayed(timeout, 12000)
+            handler.postDelayed(timeout, timeoutMs)
         } catch (error: RuntimeException) {
             Log.w("GalaxyLAN", "Discovery failed", error)
             finish("LAN discovery could not start. Check Wi-Fi and local network access.")

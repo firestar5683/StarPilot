@@ -34,6 +34,10 @@ export const InstallApp = {
   },
   methods: {
     async install() {
+      if (this.updateAvailable && typeof window.StarPilotApp?.installUpdate === 'function') {
+        window.StarPilotApp.installUpdate()
+        return
+      }
       if (/Android/.test(navigator.userAgent)) {
         if (location.protocol === 'http:') location.assign('./app.apk')
         else { this.message = installHelp(); this.help = true }

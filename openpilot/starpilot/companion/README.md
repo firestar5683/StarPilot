@@ -1,6 +1,6 @@
 # Galaxy Android companion
 
-Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.9 (versionCode 11).
+Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.11 (versionCode 13).
 
 Update notifications work on Android 12 and newer. Android 12 does not require a
 runtime notification permission; its **App updates** channel works by default unless
@@ -12,7 +12,11 @@ when opened and after connecting, plus about every
 Wi-Fi or the last connected comma address on the same LAN, independently of phone
 internet sharing. Bluetooth-only connections cannot download or check for APKs.
 Each available version alerts once; tapping opens Galaxy's update page, where
-**Update app** downloads the APK for Android's normal installation confirmation.
+**Update app** downloads directly inside StarPilot and opens Android's normal
+installation confirmation without launching a browser. The first in-app update may
+open Android's **Install unknown apps** setting once; allow StarPilot and return to
+resume automatically. Apps older than 1.1.10 use the previous browser handoff once
+to install a current release; later updates stay in StarPilot.
 The same option opens Android settings if permission was previously denied, or lets
 you change the App updates channel's sound and pop-up behavior.
 Wi-Fi/LAN loads live Galaxy screens from comma. Bluetooth uses screens bundled
@@ -49,11 +53,12 @@ never available to remote pages or cross-origin frames/resources.
 
 Use the **Connections** button at the top of the Android app:
 
-- **Automatic** tries Galaxy Wi-Fi or the saved LAN address first. A resolved LAN
-  service opens after a brief 500 ms window for other commas instead of waiting for
-  the 12-second search timeout. With a saved Bluetooth pairing, a missing or failed
-  LAN address falls back directly to Bluetooth. Without a pairing, the app
-  continues searching for up to 12 seconds. It
+- **Automatic** always checks Wi-Fi before Bluetooth. It asks the saved Galaxy Wi-Fi
+  or LAN address for a short authenticated acknowledgement before opening the page.
+  If a saved LAN address does not answer, it searches the current network. With a
+  saved Bluetooth pairing, that automatic discovery gets a 2.5-second head start
+  before Bluetooth; without a pairing, it continues searching for up to 12 seconds.
+  A resolved LAN service opens after a brief 500 ms window for other commas. It
   connects automatically when one comma is found and offers a picker when
   several are found. If no Wi-Fi or LAN device is available, or you cancel the
   picker while disconnected, it tries a saved Bluetooth pairing.
@@ -66,7 +71,9 @@ Use the **Connections** button at the top of the Android app:
 
 Interrupted searches resume after returning from Wi-Fi settings or another app.
 A disconnected screen reconnects on return. Automatic-search failures appear
-inline; explicit manual searches retain their result dialogs.
+inline; explicit manual searches retain their result dialogs. Tapping any route
+on the connection screen cancels the previous Wi-Fi, discovery, or Bluetooth
+attempt before starting the selected one.
 
 This selects a connection without replaying in-flight requests. Switch modes
 using Connections if an established connection drops. A failed settings change

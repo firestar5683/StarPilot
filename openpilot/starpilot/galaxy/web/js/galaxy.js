@@ -22,12 +22,14 @@ export const GalaxyPage = {
     appUpdateAvailable() {
       return this.mode === 'local' && newerCompanionVersion(this.availableAppVersion, this.installedAppVersion)
     },
+    nativeInstallerAvailable() { return typeof window.StarPilotApp?.installUpdate === 'function' },
     showAppUpdate() {
       return this.appUpdateAvailable && this.availableAppVersion !== this.dismissedUpdateVersion
     },
   },
   mounted() { this.load() },
   methods: {
+    installAppUpdate() { window.StarPilotApp?.installUpdate?.() },
     dismissAppUpdate() {
       this.dismissedUpdateVersion = this.availableAppVersion
       try { localStorage.setItem(DISMISSED_UPDATE, this.dismissedUpdateVersion) } catch {}
@@ -86,7 +88,8 @@ export const GalaxyPage = {
       </BluetoothNotice>
       <GxNotice v-else-if="showAppUpdate" tone="warn" title="Android app update available">
         Version {{ availableAppVersion }} is available. Installed: {{ installedAppVersion }}.
-        <div class="gx-actions"><a class="gx-btn" href="./app.apk">Update app</a>
+        <div class="gx-actions"><button v-if="nativeInstallerAvailable" type="button" class="gx-btn" @click="installAppUpdate">Update app</button>
+          <a v-else class="gx-btn" href="./app.apk">Update app</a>
           <button type="button" class="gx-btn gx-btn--tonal" aria-label="Dismiss app update notice" @click="dismissAppUpdate">Dismiss</button></div>
       </GxNotice>
       <GxState v-if="mode !== 'local'">Connect to your comma to set up remote access.</GxState>

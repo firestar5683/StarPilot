@@ -34,14 +34,17 @@ class MainActivity : Activity() {
     private var ble: BleTransport? = null
     private val connectionGeneration = AtomicInteger()
     @Volatile private var bluetoothMode = false
+    private var bluetoothAttemptAutomatic = false
     private val pairing by lazy { PairingStore(this) }
     private val jobs = ConcurrentHashMap<String, FutureTask<Unit>>()
+    private val probes = ConcurrentHashMap<Int, HttpURLConnection>()
     private val worker = ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, ArrayBlockingQueue(16))
     private val cachedOrigin = "https://galaxy-app.invalid"
     private var screen: ConnectScreen? = null
     private val recovery = ConnectionRecovery({ discoverLan(it) }, { connect() }, { stopDiscovery() })
     private val handler = Handler(Looper.getMainLooper())
     private var pageWatchdog: Runnable? = null
+    private var pendingInstallOrigin: String? = null
     private var resumed = false
     private val knownWifi = mutableSetOf<Network>()
     private val wifiWatcher = object : ConnectivityManager.NetworkCallback() {
@@ -49,7 +52,10 @@ class MainActivity : Activity() {
             if (network in knownWifi || properties.linkAddresses.none { it.address is Inet4Address && it.address.isSiteLocalAddress }) return
             knownWifi.add(network)
             // Open Galaxy as soon as the phone joins a Wi-Fi network, without waiting for "Try again".
-            handler.post { if (idle()) connect() }
+            handler.post {
+                val mayPreemptBluetooth = bluetoothAttemptAutomatic && screen?.state(Route.BLUETOOTH) == RouteState.TRYING
+                if (idle() || mayPreemptBluetooth) connect()
+            }
         }
         override fun onLost(network: Network) { knownWifi.remove(network) }
     }
@@ -74,31 +80,45 @@ class MainActivity : Activity() {
         share = intent.getStringExtra("share")?.take(8192)
         connect(Networks.localOrigin(intent.getStringExtra(AppUpdates.ORIGIN_EXTRA) ?: ""))
     }
-    private fun connect(host: String? = null) {
+    /** Invalidates every older async result before a new route is allowed to win. */
+    private fun supersedeConnection(): Int {
         stopDiscovery()
-        connectionGeneration.incrementAndGet()
+        val generation = connectionGeneration.incrementAndGet()
         jobs.values.forEach { it.cancel(false) }; jobs.clear(); worker.purge()
         ble?.close(); ble = null
         bluetoothMode = false
+        bluetoothAttemptAutomatic = false
+        clearWatchdog()
+        val previous = web; web = null
+        previous?.removeJavascriptInterface("StarPilotApp"); previous?.stopLoading(); previous?.destroy()
+        Networks.manager(this).bindProcessToNetwork(null)
+        return generation
+    }
+    private fun connect(host: String? = null) {
+        val generation = supersedeConnection()
         val mode = prefs.getString("transport", "auto")
         if (host == null && mode == "bluetooth") { connectBluetooth(); return }
-        val wifi = Networks.wifi(this) ?: Networks.wifi(this, false)
+        val hotspot = Networks.wifi(this)
+        val wifi = hotspot ?: Networks.wifi(this, false)
         if (wifi == null) {
             if (!bluetoothFallback()) disconnected()
             return
         }
         val saved = Networks.localOrigin(prefs.getString("host", "") ?: "")
-        if (host == null && Networks.wifi(this) == null && (saved == null || saved == Networks.ORIGIN)) {
-            disconnected()
-            // A saved pairing is immediately useful; a new LAN can still be selected by tapping Home network.
-            if (!bluetoothFallback()) discoverLan(automatic = true)
+        if (host == null) {
+            val candidate = if (hotspot != null) Networks.ORIGIN else saved?.takeIf { it != Networks.ORIGIN }
+            if (candidate != null) probeWifi(wifi.first, candidate, generation)
+            else {
+                disconnected()
+                // Give LAN discovery a short, bounded head start before Automatic falls back to Bluetooth.
+                discoverLan(automatic = true)
+            }
             return
         }
-        origin = host?.let { Networks.localOrigin(it) } ?: if (Networks.wifi(this) != null) Networks.ORIGIN else
-            Networks.localOrigin(prefs.getString("host", Networks.ORIGIN)!!) ?: Networks.ORIGIN
+        val localOrigin = Networks.localOrigin(host)
+        if (localOrigin == null) { disconnected(); return }
+        origin = localOrigin
         Networks.manager(this).bindProcessToNetwork(wifi.first)
-        web?.destroy(); web = null
-        clearWatchdog()
         val route = if (origin == Networks.ORIGIN) Route.GALAXY_WIFI else Route.HOME_NETWORK
         connectScreen().apply {
             refreshRoutes(this)
@@ -126,7 +146,7 @@ class MainActivity : Activity() {
                 return WebResourceResponse("text/plain", "UTF-8", 403, "Local Galaxy only", emptyMap(), ByteArrayInputStream(byteArrayOf()))
             }
             override fun onReceivedError(v: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (web === v && request.isForMainFrame) runOnUiThread { pageFailed(v, host) }
+                if (web === v && request.isForMainFrame) runOnUiThread { pageFailed(v) }
             }
             // Reveal as soon as Galaxy starts drawing, so a slow asset never trips the watchdog.
             override fun onPageCommitVisible(v: WebView, url: String) { if (web === v && Networks.localOrigin(url) == origin) revealWeb() }
@@ -138,18 +158,50 @@ class MainActivity : Activity() {
             }
         }
         view.setDownloadListener { url, _, _, _, _ ->
-            if (Networks.localOrigin(url) == origin) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            val uri = Uri.parse(url)
+            if (Networks.localOrigin(url) == origin && uri.path in setOf("/app.apk", "/api/companion/app.apk")) {
+                runOnUiThread { requestAppUpdate() }
+            } else if (Networks.localOrigin(url) == origin) startActivity(Intent(Intent.ACTION_VIEW, uri))
         }
         showWeb(view, route, if (route == Route.GALAXY_WIFI) "Galaxy Wi-Fi" else "Home network, ${address(origin)}", waitForPage = true)
         // A comma that vanished mid-load can leave the page pending for a long time.
         val watchdogMs = if (route == Route.HOME_NETWORK && mode == "auto" && pairing.load() != null) 4000L else 10000L
-        pageWatchdog = Runnable { if (web === view && screen != null) pageFailed(view, host) }.also { handler.postDelayed(it, watchdogMs) }
+        pageWatchdog = Runnable { if (web === view && screen != null) pageFailed(view) }.also { handler.postDelayed(it, watchdogMs) }
         view.loadUrl(if (share != null) "$origin/?share=${Uri.encode(share)}#/navigation" else "$origin/#/galaxy")
         if (prefs.getBoolean("enabled", false)) startForegroundService(Intent(this, UplinkService::class.java))
     }
+    private fun probeWifi(network: Network, candidate: String, generation: Int) {
+        val route = if (candidate == Networks.ORIGIN) Route.GALAXY_WIFI else Route.HOME_NETWORK
+        connectScreen().apply {
+            refreshRoutes(this)
+            headline("Checking Wi-Fi")
+            route(route, RouteState.TRYING, "Checking…")
+            detail(if (route == Route.GALAXY_WIFI) "Waiting for Galaxy to answer on comma Wi-Fi."
+                else "Checking the last comma address before searching this network.")
+        }
+        val cookie = CookieManager.getInstance().getCookie(candidate)
+        Thread({
+            var connection: HttpURLConnection? = null
+            val reachable = GalaxyProbe.reachable(network, candidate, cookie) {
+                connection = it
+                probes[generation] = it
+                if (generation != connectionGeneration.get()) it.disconnect()
+            }
+            connection?.let { probes.remove(generation, it) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed || generation != connectionGeneration.get()) return@runOnUiThread
+                if (reachable) connect(candidate)
+                else if (route == Route.HOME_NETWORK) discoverLan(automatic = true)
+                else if (!bluetoothFallback()) disconnected().apply {
+                    route(Route.GALAXY_WIFI, RouteState.FAILED, "Galaxy didn't answer")
+                    detail("This phone is on the comma's Wi-Fi, but Galaxy didn't answer.")
+                }
+            }
+        }, "GalaxyProbe").start()
+    }
     private fun address(origin: String) = origin.removePrefix("http://").removeSuffix(":8082")
     private fun clearWatchdog() { pageWatchdog?.let { handler.removeCallbacks(it) }; pageWatchdog = null }
-    private fun pageFailed(v: WebView, host: String?) {
+    private fun pageFailed(v: WebView) {
         if (web !== v) return
         val failed = origin
         disconnected().apply {
@@ -161,17 +213,10 @@ class MainActivity : Activity() {
                 detail("comma didn't answer at ${address(failed)}. Its address may have changed, or comma is off this network.")
             }
         }
-        if (host == null && Networks.wifi(this) == null && Networks.wifi(this, false) != null) {
-            // An existing pairing is a faster fallback than waiting for another full LAN search.
-            if (!bluetoothFallback()) discoverLan(automatic = true)
-        } else bluetoothFallback()
+        bluetoothFallback()
     }
     private fun disconnected(): ConnectScreen {
-        stopDiscovery(); clearWatchdog()
-        Networks.manager(this).bindProcessToNetwork(null)
-        connectionGeneration.incrementAndGet(); ble?.close(); ble = null
-        val previous = web; web = null
-        previous?.removeJavascriptInterface("StarPilotApp"); previous?.stopLoading(); previous?.destroy()
+        supersedeConnection()
         screen = null
         return connectScreen().apply {
             headline("Connect to comma")
@@ -209,9 +254,16 @@ class MainActivity : Activity() {
     }
     private fun tryRoute(route: Route) {
         when (route) {
-            Route.GALAXY_WIFI -> if (Networks.wifi(this) != null) connect(Networks.ORIGIN) else joinWifi("Join the comma's Galaxy Wi-Fi, then come back")
-            Route.HOME_NETWORK -> if (Networks.wifi(this, false) != null) discoverLan() else joinWifi("Join the same Wi-Fi as comma, then come back")
-            Route.BLUETOOTH -> if (pairing.load() != null) connectBluetooth() else pairOverWifi(false)
+            Route.GALAXY_WIFI -> if (Networks.wifi(this) != null) connect(Networks.ORIGIN) else {
+                supersedeConnection(); refreshRoutes(connectScreen()); joinWifi("Join the comma's Galaxy Wi-Fi, then come back")
+            }
+            Route.HOME_NETWORK -> {
+                supersedeConnection(); refreshRoutes(connectScreen())
+                if (Networks.wifi(this, false) != null) discoverLan() else joinWifi("Join the same Wi-Fi as comma, then come back")
+            }
+            Route.BLUETOOTH -> if (pairing.load() != null) connectBluetooth() else {
+                supersedeConnection(); refreshRoutes(connectScreen()); pairOverWifi(false)
+            }
         }
     }
     private fun joinWifi(hint: String) {
@@ -285,16 +337,37 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         } else startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
     }
+    private fun requestAppUpdate(requestedOrigin: String = origin) {
+        val localOrigin = Networks.localOrigin(requestedOrigin)
+        if (bluetoothMode || localOrigin == null) {
+            message("Connect using Galaxy Wi-Fi or LAN to download the app update.")
+            return
+        }
+        if (!packageManager.canRequestPackageInstalls()) {
+            pendingInstallOrigin = localOrigin
+            Toast.makeText(this, "Allow StarPilot to install its downloaded update, then return.", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
+        pendingInstallOrigin = null
+        val network = (if (localOrigin == Networks.ORIGIN) Networks.wifi(this) else Networks.wifi(this, false))?.first
+        if (network == null) {
+            message("Reconnect to the same Wi-Fi as comma, then try the update again.")
+            return
+        }
+        if (!AppInstaller.start(this, network, localOrigin)) Toast.makeText(this, "An app update is already in progress.", Toast.LENGTH_LONG).show()
+    }
     private var discovery: LanDiscovery? = null
     private var discoveryAutomatic = false
     private var lanPicker: AlertDialog? = null
     private fun stopDiscovery() {
+        probes.values.forEach { it.disconnect() }; probes.clear()
         discovery?.close(); discovery = null
         lanPicker?.dismiss(); lanPicker = null
     }
     private fun bluetoothFallback(): Boolean {
         if (prefs.getString("transport", "auto") != "auto" || pairing.load() == null) return false
-        connectBluetooth(); return true
+        connectBluetooth(automatic = true); return true
     }
     /** [fromMenu] keeps the old menu behaviour: always confirm the address, then stay on Wi-Fi/LAN. */
     private fun discoverLan(automatic: Boolean = false, fromMenu: Boolean = false) {
@@ -309,7 +382,8 @@ class MainActivity : Activity() {
         stopDiscovery()
         discoveryAutomatic = automatic
         val generation = connectionGeneration.get()
-        val search = LanDiscovery(this, wifi.first) { hosts, error ->
+        val quickBluetoothFallback = automatic && prefs.getString("transport", "auto") == "auto" && pairing.load() != null
+        val search = LanDiscovery(this, wifi.first, if (quickBluetoothFallback) GalaxyProbe.AUTOMATIC_DISCOVERY_MS else 12000L) { hosts, error ->
             discovery = null
             if (!isFinishing && !isDestroyed && generation == connectionGeneration.get()) {
                 fun select(host: String) {
@@ -348,7 +422,8 @@ class MainActivity : Activity() {
         if (s != null) {
             s.headline("Finding your comma")
             s.route(Route.HOME_NETWORK, RouteState.TRYING, "Searching…")
-            s.detail("Looking for comma on this Wi-Fi network. This takes up to 12 seconds.")
+            s.detail(if (quickBluetoothFallback) "Checking this Wi-Fi for comma before trying Bluetooth."
+                else "Looking for comma on this Wi-Fi network. This takes up to 12 seconds.")
         } else Toast.makeText(this, "Looking for comma on LAN…", Toast.LENGTH_LONG).show()
         search.start()
     }
@@ -359,6 +434,7 @@ class MainActivity : Activity() {
         pairing.save(hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray())
     }
     private fun pairOverWifi(rotate: Boolean) {
+        val generation = connectionGeneration.get()
         val wifi = Networks.wifi(this) ?: Networks.wifi(this, false)
         if (wifi == null) { pairingNotice("To pair Bluetooth, join the comma's Galaxy Wi-Fi or the same Wi-Fi as comma first.", false); return }
         val host = if (Networks.wifi(this) != null) Networks.ORIGIN else Networks.localOrigin(prefs.getString("host", "") ?: "")
@@ -395,13 +471,17 @@ class MainActivity : Activity() {
                     val value = JSONObject(String(body))
                     check(status == 200) { value.optString("error", "Pairing failed") }; value
                 } finally { call.disconnect() }
+                if (!rotate && generation != connectionGeneration.get()) return@Thread
                 if (rotate) { pairing.forget(); ble?.close() } else savePairing(result)
                 runOnUiThread {
+                    if (generation != connectionGeneration.get()) return@runOnUiThread
                     if (rotate) pairingNotice("All Bluetooth phones revoked. Pair again to reconnect.", false)
                     else if (screen != null) pairingNotice("Bluetooth is paired. When Wi-Fi isn't available, Automatic uses Bluetooth for Galaxy controls.", true)
                     else message("Pairing saved. Enable Bluetooth on comma and choose Bluetooth in Connections to connect.")
                 }
-            } catch (e: Exception) { runOnUiThread { pairingNotice("Couldn't pair Bluetooth: ${e.message ?: "comma didn't answer"}. Open Galaxy over Wi-Fi, then try again.", pairing.load() != null) } }
+            } catch (e: Exception) { runOnUiThread {
+                if (generation == connectionGeneration.get()) pairingNotice("Couldn't pair Bluetooth: ${e.message ?: "comma didn't answer"}. Open Galaxy over Wi-Fi, then try again.", pairing.load() != null)
+            } }
         }.start()
     }
     /** Pairing results appear on the connect screen when it is showing, otherwise in a dialog over Galaxy. */
@@ -410,8 +490,9 @@ class MainActivity : Activity() {
         s.detail(text)
         s.route(Route.BLUETOOTH, if (paired) RouteState.IDLE else RouteState.UNAVAILABLE, if (paired) "Paired, controls only" else "Not paired")
     }
-    private fun connectBluetooth() {
-        stopDiscovery()
+    private fun connectBluetooth(automatic: Boolean = false) {
+        val generation = supersedeConnection()
+        bluetoothAttemptAutomatic = automatic
         val key = pairing.load()
         if (key == null) {
             disconnected().apply {
@@ -423,11 +504,6 @@ class MainActivity : Activity() {
         val permissions = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
             else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         if (permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) { requestPermissions(permissions, 2); return }
-        val generation = connectionGeneration.incrementAndGet()
-        ble?.close()
-        web?.destroy(); web = null
-        Networks.manager(this).bindProcessToNetwork(null)
-        clearWatchdog()
         connectScreen().apply {
             refreshRoutes(this)
             headline("Connecting over Bluetooth")
@@ -463,7 +539,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, permissions, results)
         if (code == 1 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) AppUpdates.checkAsync(this)
-        if (code == 2) { if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) connectBluetooth()
+        if (code == 2) { if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) connectBluetooth(bluetoothAttemptAutomatic)
             else disconnected().apply {
                 route(Route.BLUETOOTH, RouteState.FAILED, "Needs permission")
                 detail("Allow Nearby devices to connect over Bluetooth. Wi-Fi and LAN still work without it.")
@@ -534,6 +610,7 @@ class MainActivity : Activity() {
         @JavascriptInterface fun bluetooth() = bluetoothMode
         @JavascriptInterface fun connectionOptions() { runOnUiThread { connections() } }
         @JavascriptInterface fun version() = BuildConfig.VERSION_NAME
+        @JavascriptInterface fun installUpdate() { runOnUiThread { requestAppUpdate() } }
         @JavascriptInterface fun uplinkState() = JSONObject().put("enabled", prefs.getBoolean("enabled", false)).put("autoStart", prefs.getBoolean("autoStart", false))
             .put("bytes", if (prefs.getString("day", "") == java.time.LocalDate.now().toString()) prefs.getLong("bytes", 0) else 0).toString()
         @JavascriptInterface fun setUplinkEnabled(enabled: Boolean) { runOnUiThread {
@@ -545,7 +622,10 @@ class MainActivity : Activity() {
         @JavascriptInterface fun openWifiSettings() { runOnUiThread { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } }
     }
     @Deprecated("Legacy back handling") override fun onBackPressed() { if (web?.canGoBack() == true) web?.goBack() else super.onBackPressed() }
-    override fun onResume() { super.onResume(); resumed = true; recovery.resumed(); AppUpdates.checkAsync(this) }
+    override fun onResume() {
+        super.onResume(); resumed = true; recovery.resumed(); AppUpdates.checkAsync(this)
+        pendingInstallOrigin?.let { if (packageManager.canRequestPackageInstalls()) requestAppUpdate(it) }
+    }
     override fun onPause() { resumed = false; super.onPause() }
     override fun onStop() {
         recovery.stopped(if (discovery != null || lanPicker != null) discoveryAutomatic else null, web == null && ble == null)

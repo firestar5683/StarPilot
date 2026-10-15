@@ -43,6 +43,13 @@ InstallApp.beforeUnmount.call(late)
 navigator.userAgent = 'Android'
 let apk
 globalThis.location = { protocol: 'http:', assign: value => { apk = value } }
+let nativeUpdates = 0
+window.StarPilotApp = { installUpdate: () => nativeUpdates++ }
+const nativeUpdate = { ...InstallApp.data(), updateAvailable: true }
+await InstallApp.methods.install.call(nativeUpdate)
+assert.equal(nativeUpdates, 1)
+assert.equal(apk, undefined, 'Native updates never hand the APK to a browser')
+delete window.StarPilotApp
 const android = { ...InstallApp.data() }
 await InstallApp.methods.install.call(android)
 assert.equal(apk, './app.apk')

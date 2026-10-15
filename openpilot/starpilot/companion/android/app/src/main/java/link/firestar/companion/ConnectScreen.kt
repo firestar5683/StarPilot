@@ -285,7 +285,7 @@ class ConnectScreen(private val activity: Activity, private val onRoute: (Route)
         footer.text = when (transport) {
             "wifi" -> "Set to Wi-Fi and LAN only. Change this in More options."
             "bluetooth" -> "Set to Bluetooth only. Change this in More options."
-            else -> "Automatic tries Galaxy Wi-Fi first, then your home network, then Bluetooth."
+            else -> "Automatic always checks Galaxy Wi-Fi and your home network before Bluetooth."
         }
     }
     fun route(route: Route, state: RouteState, text: String) {

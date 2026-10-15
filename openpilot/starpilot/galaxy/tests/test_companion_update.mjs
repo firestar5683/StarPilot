@@ -73,12 +73,19 @@ try {
   assert.equal(banner(host), undefined, 'Polling does not undo dismissal')
 } finally { mounted.app.unmount() }
 
+let nativeInstalls = 0
+window.StarPilotApp.installUpdate = () => nativeInstalls++
 mounted = await mount()
 try {
   assert.equal(banner(mounted.host), undefined, 'Dismissal survives leaving and returning to the page')
   mounted.vm.companionStatus = { ...status, shippedVersion: '1.1.6' }
   await nextTick()
-  assert.ok(banner(mounted.host), 'A later available release gets a new notice')
+  const nativeNotice = banner(mounted.host)
+  assert.ok(nativeNotice, 'A later available release gets a new notice')
+  const nativeUpdate = all(nativeNotice).find(item => item.type === 'button' && text(item).includes('Update app'))
+  assert.ok(nativeUpdate, 'A current native app uses the in-app installer')
+  nativeUpdate.props.onClick()
+  assert.equal(nativeInstalls, 1)
   mounted.vm.companionStatus = { ...status, shippedVersion: '1.1.3', updateAvailable: true }
   await nextTick()
   assert.equal(banner(mounted.host), undefined, 'A server mismatch flag cannot suggest downgrading this phone')
@@ -102,4 +109,4 @@ try {
   assert.doesNotMatch(text(install), /Installed:/)
 } finally { mounted.app.unmount() }
 
-console.log('Companion install version, top-of-page update link, version ordering and persistent dismissal passed')
+console.log('Companion install version, in-app update, browser fallback, version ordering and persistent dismissal passed')

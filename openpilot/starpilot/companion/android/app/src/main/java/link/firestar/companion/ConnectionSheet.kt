@@ -16,7 +16,7 @@ import kotlin.math.roundToInt
 
 /** How the app reaches comma, as stored in the "transport" preference. */
 enum class Transport(val key: String, val title: String, val icon: Int, val summary: String) {
-    AUTO("auto", "Automatic", R.drawable.ic_route_auto, "Tries Galaxy Wi-Fi, then your home network, then Bluetooth."),
+    AUTO("auto", "Automatic", R.drawable.ic_route_auto, "Always checks Galaxy Wi-Fi and your home network before Bluetooth."),
     WIFI("wifi", "Wi-Fi & LAN", R.drawable.ic_route_wifi, "Galaxy Wi-Fi or your home network. Never Bluetooth."),
     BLUETOOTH("bluetooth", "Bluetooth", R.drawable.ic_route_bluetooth, "Bluetooth only, for when there's no Wi-Fi in reach.");
     companion object { fun of(key: String?) = entries.firstOrNull { it.key == key } ?: AUTO }
