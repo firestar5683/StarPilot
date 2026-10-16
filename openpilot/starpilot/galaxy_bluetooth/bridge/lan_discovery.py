@@ -49,40 +49,51 @@ def galaxy_listening():
 
 
 class Advertisement:
+  """Publish only the reachable address on each interface, including for older Android clients."""
+
   def __init__(self, factory=None, info_factory=None):
     if factory is None or info_factory is None:
       from zeroconf import Zeroconf, ServiceInfo, IPVersion
-      factory = lambda addresses: Zeroconf(interfaces=addresses, ip_version=IPVersion.V4Only)
+      def factory(addresses):
+        return Zeroconf(interfaces=addresses, ip_version=IPVersion.V4Only)
       info_factory = ServiceInfo
     self.factory, self.info_factory = factory, info_factory
-    self.publisher = None
+    self.publishers = []
     self.addresses = []
 
   def update(self, addresses):
     if addresses == self.addresses:
       return
     self.close()
-    if not addresses:
-      return
-    hostname = re.sub(r'[^A-Za-z0-9-]', '-', socket.gethostname()).strip('-')[:50] or 'comma'
-    publisher = self.factory(addresses)
+    hostname = re.sub(r'[^A-Za-z0-9-]', '-', socket.gethostname()).strip('-')[:46] or 'comma'
     try:
-      info = self.info_factory(SERVICE, f'{hostname}.{SERVICE}', port=PORT,
-                               addresses=[socket.inet_aton(address) for address in addresses],
-                               properties={'protocol': 'galaxy-lan-1'}, server=f'{hostname}.local.')
-      publisher.register_service(info, allow_name_change=True)
-    except Exception:
-      publisher.close()
-      raise
-    self.publisher, self.addresses = publisher, list(addresses)
-    LOG.info('Galaxy Wi-Fi discovery available on %s local interface(s)', len(addresses))
+      for address in addresses:
+        publisher = self.factory([address])
+        self.publishers.append(publisher)
+        # Do not hand home-LAN clients the hotspot address (or vice versa).
+        # Distinct hostnames also prevent cached A records crossing interfaces.
+        name = f'{hostname}-{address.replace(".", "-")}'
+        info = self.info_factory(SERVICE, f'{name}.{SERVICE}', port=PORT,
+                                 addresses=[socket.inet_aton(address)],
+                                 properties={'protocol': 'galaxy-lan-1'}, server=f'{name}.local.')
+        publisher.register_service(info, allow_name_change=True)
+    except Exception as error:
+      self.close()
+      # main() retries OSError, but Zeroconf's own exceptions do not inherit from it.
+      raise OSError(f'LAN registration failed: {type(error).__name__}') from error
+    self.addresses = list(addresses)
+    if addresses:
+      LOG.info('Galaxy Wi-Fi discovery available on %s local interface(s)', len(addresses))
 
   def close(self):
-    if self.publisher is not None:
-      # Zeroconf sends goodbye records and stops its own background threads.
-      self.publisher.close()
-    self.publisher = None
+    publishers, self.publishers = self.publishers, []
     self.addresses = []
+    for publisher in publishers:
+      try:
+        # Zeroconf sends goodbye records and stops its own background threads.
+        publisher.close()
+      except Exception:
+        LOG.exception('LAN publisher cleanup failed')
 
 
 def main():

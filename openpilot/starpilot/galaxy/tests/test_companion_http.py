@@ -1,5 +1,7 @@
 import http.client
 import json
+from pathlib import Path
+import sys
 import threading
 from unittest.mock import Mock, patch
 
@@ -89,9 +91,9 @@ def test_apk_direct_download_without_cookie_and_head(companion_http, tmp_path):
 
 def test_bluetooth_pairing_requires_session_origin_local_and_parked(companion_http, tmp_path):
   request, _, server = companion_http
-  from openpilot.starpilot.companion.bluetooth import pairing_payload
+  from openpilot.starpilot.galaxy.companion import bluetooth_pairing
   key_file = tmp_path / 'pairing.json'
-  with patch('openpilot.starpilot.companion.bluetooth.pairing_payload', side_effect=lambda rotate: pairing_payload(rotate, path=key_file)):
+  with patch('openpilot.starpilot.galaxy.companion.bluetooth_pairing', side_effect=lambda rotate: bluetooth_pairing(rotate, path=key_file)):
     assert request('/api/companion/bluetooth', {'rotate': False})[0] == 401
     cookie = request('/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
     assert request('/api/companion/bluetooth', {'rotate': False}, cookie, 'https://evil.test')[0] == 403
@@ -111,36 +113,40 @@ def test_bluetooth_pairing_requires_session_origin_local_and_parked(companion_ht
     assert key_file.read_bytes() == first
 
 
-def test_bluetooth_adapter_against_current_galaxy(companion_http):
-  pytest.importorskip('Crypto')
-  from openpilot.starpilot.companion.bluetooth import proxy_class
+def phone_bridge_proxy(port):
+  # The phone bridge imports its siblings directly, exactly as it runs on comma.
+  bridge = str(Path(__file__).resolve().parents[2] / 'galaxy_bluetooth/bridge')
+  if bridge not in sys.path:
+    sys.path.insert(0, bridge)
+  from proxy import GalaxyProxy
+  return GalaxyProxy(port)
+
+
+def test_phone_bridge_against_current_galaxy(companion_http):
   _, registry, server = companion_http
-  proxy = proxy_class()(server.server_port)
-  session = '01' * 16
-  request = {'id': 'test', 'session': session, 'method': 'GET', 'path': '/api/companion/status'}
+  proxy = phone_bridge_proxy(server.server_port)
+  request = {'id': 'test', 'method': 'GET', 'path': '/api/companion/status'}
   assert proxy.handle(request)['status'] == 200
-  import urllib.request
-  jar = next(handler.cookiejar for handler in proxy.clients[session].opener.handlers
-             if isinstance(handler, urllib.request.HTTPCookieProcessor))
-  token = next(iter(jar)).value
+  token = proxy.cookie
+  assert token.startswith('galaxy_session=')
   import base64
   request.update(method='POST', path='/api/companion/settings', headers={'Content-Type': 'application/json'},
                  body=base64.b64encode(b'{"enabled":true}').decode())
   assert proxy.handle(request)['status'] == 200
   assert registry.enabled()
-  assert next(iter(jar)).value == token
-  request['path'] = '/api/companion/bluetooth'
-  assert proxy.handle(request)['status'] == 501
+  assert proxy.cookie == token
+  for path in ('/api/companion/bluetooth', '/api/companion/uplink', '/api/companion/app.apk'):
+    request['path'] = path
+    assert proxy.handle(request)['status'] == 501
 
 
 def test_bluetooth_runtime_tracks_upstream_restart_and_blocks_replay(companion_http):
   import base64
-  from openpilot.starpilot.companion.bluetooth import proxy_class
   request, _, server = companion_http
-  proxy = proxy_class()(server.server_port)
+  proxy = phone_bridge_proxy(server.server_port)
   for instance in ('before-restart', 'after-restart'):
     with patch('openpilot.starpilot.galaxy.server.INSTANCE', instance):
-      result = proxy.handle({'id': 'runtime', 'session': 'runtime-session', 'method': 'GET', 'path': '/api/companion/runtime'})
+      result = proxy.handle({'id': 'runtime', 'method': 'GET', 'path': '/api/companion/runtime'})
       assert result['status'] == 200
       runtime = json.loads(base64.b64decode(result['body']))
       assert runtime == json.loads(request('/data/runtime.json')[1])

@@ -25,7 +25,8 @@ class BootstrapTest(unittest.TestCase):
     def run(args, **kwargs):
       self.calls.append(args)
       return SimpleNamespace(stdout='1', returncode=0)
-    self.worker = Bootstrap(self.params, self.data, self.bridge, run)
+    self.uplink = False
+    self.worker = Bootstrap(self.params, self.data, self.bridge, run, uplink_active=lambda: self.uplink)
 
   def installed(self):
     python = self.data / 'venv/bin/python'
@@ -39,6 +40,14 @@ class BootstrapTest(unittest.TestCase):
     self.worker.step()
     self.assertFalse(self.calls)
     self.assertEqual(json.loads((self.data / 'setup-status.json').read_text())['state'], 'waiting')
+
+  def test_missing_dependencies_wait_while_phone_shares_internet(self):
+    self.uplink = True
+    self.worker.step()
+    self.assertFalse(self.calls)
+    status = json.loads((self.data / 'setup-status.json').read_text())
+    self.assertEqual(status['state'], 'waiting')
+    self.assertIn('phone internet sharing', status['message'])
 
   def test_power_off_never_starts_bluetooth_or_bridge(self):
     self.installed()

@@ -139,8 +139,6 @@ procs = [
                 enabled=platform.system() == "Linux", restart_on_exit=True),
   PythonProcess("galaxy_hotspot", "openpilot.starpilot.galaxy.hotspot_daemon", galaxy_local,
                 enabled=COMMA_HARDWARE and not os.environ.get('OPENPILOT_PREFIX'), restart_on_exit=True),
-  PythonProcess("companion_bluetooth", "openpilot.starpilot.companion.bluetooth_daemon", galaxy_local,
-                enabled=COMMA_HARDWARE and not os.environ.get('OPENPILOT_PREFIX'), restart_on_exit=True),
   PythonProcess("companion_uplink", "openpilot.starpilot.galaxy.companion_uplink_daemon", galaxy_local,
                 enabled=COMMA_HARDWARE and not os.environ.get('OPENPILOT_PREFIX'), restart_on_exit=True),
   JetlinkProcess("jetlinkd", "openpilot.starpilot.system.jetlink.daemon", jetlink_enabled, enabled=COMMA_HARDWARE),

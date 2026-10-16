@@ -1,3 +1,0 @@
-dbus-next==0.2.3
-pycryptodome==3.23.0
-zeroconf==0.151.3

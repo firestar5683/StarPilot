@@ -65,7 +65,9 @@ sys.modules[native.__name__] = native
 import pytest
 
 defaults = [
-  'openpilot/starpilot/companion/tests/test_android_manifest.py',
+  'openpilot/starpilot/companion/android/tests/test_android_manifest.py',
+  'openpilot/starpilot/companion/android/tests/test_ble_wire_vectors.py',
+  'openpilot/starpilot/companion/android/tests/test_lan_discovery.py',
   'openpilot/starpilot/galaxy/tests/test_companion.py',
   'openpilot/starpilot/galaxy/tests/test_companion_http.py',
   'openpilot/starpilot/galaxy/tests/test_companion_data_guards.py',

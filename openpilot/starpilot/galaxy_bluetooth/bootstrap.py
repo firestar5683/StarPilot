@@ -47,9 +47,15 @@ def refresh_pairing(data=DATA):
   write_json(data / 'refresh-pairing.json', {'requested': time.time()})
 
 
+def phone_uplink_active():
+  from openpilot.starpilot.galaxy.companion import phone_uplink_active as active
+  return active()
+
+
 class Bootstrap:
-  def __init__(self, params, data=DATA, bridge=BRIDGE, run=subprocess.run):
+  def __init__(self, params, data=DATA, bridge=BRIDGE, run=subprocess.run, uplink_active=phone_uplink_active):
     self.params, self.data, self.bridge, self.run = params, data, bridge, run
+    self.uplink_active = uplink_active
     self.verified = None
     self.next_attempt = 0
     self.registered = False
@@ -89,6 +95,10 @@ class Bootstrap:
         if not valid:
           if not self.params.get_bool('IsOffroad'):
             self.status('waiting', 'Park to finish Bluetooth setup')
+            return
+          # Never download dependencies over a phone's shared cellular data.
+          if self.uplink_active():
+            self.status('waiting', 'Bluetooth setup will finish when phone internet sharing stops')
             return
           self.status('installing', 'Installing Bluetooth bridge. Comma needs internet.')
           self.run(['sudo', '-n', 'systemctl', 'stop', UNIT, LAN_UNIT], timeout=20, check=False,

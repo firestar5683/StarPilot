@@ -125,15 +125,10 @@ UI framework is bundled.
 
 ## Galaxy Bluetooth companion source snapshot
 
-The Galaxy Bluetooth/iOS implementation from
-https://github.com/firestar5683/StarPilot (galaxybt) is included under
-`openpilot/starpilot/companion/upstream/tools/galaxy_bluetooth/`.
-The exact source commit and original blob hashes are in the adjacent `SOURCE.json`.
-User-requested StarPilot branding replacements and the updated asset manifest
-are recorded separately under `branding_overrides`; implementation code is unchanged.
-Original license and attribution files (`UPSTREAM-LICENSE`,
-`UPSTREAM-NOTICES.md`, `UPSTREAM.json`) are retained. This branch's adapter is
-separate. Its isolated comma environment uses the pinned upstream requirements:
+The Galaxy Bluetooth phone bridge and iOS app from https://github.com/firestar5683/StarPilot
+(natehuby76, PRs #224/#225) are included under `openpilot/starpilot/galaxy_bluetooth/`
+and `ios/`, with their license files (`UPSTREAM-LICENSE`, `ios/UPSTREAM-GALAXY-LICENSE`).
+Its isolated comma environment uses the pinned upstream requirements:
 dbus-next 0.2.3 (MIT), PyCryptodome 3.23.0 (BSD/public-domain components), and
 Zeroconf 0.151.3 (LGPL-2.1-or-later); those packages retain their distribution
 licenses in the installed environment.

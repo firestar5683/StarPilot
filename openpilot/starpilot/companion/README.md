@@ -1,3 +1,24 @@
+# StarPilot companion apps
+
+## Where things live
+
+```
+ios/                                    iPhone app (natehuby76, PR #224/#225)
+openpilot/starpilot/galaxy_bluetooth/   comma-side phone bridge shared by both apps:
+                                        BLE GATT server, Galaxy proxy, pairing, LAN
+                                        discovery, setup supervisor, comma pairing UI
+openpilot/starpilot/galaxy/companion*.py  Galaxy endpoints for the phone uplink and
+                                        Wi-Fi pairing (`bluetooth_pairing`)
+openpilot/starpilot/companion/          this Android app
+├── android/                            Gradle project, build_apk.sh, host-side tests
+├── docs/                               validation records
+└── run_host_tests.py
+```
+
+Nate's `ios/` and `galaxy_bluetooth/` stay where his upstream PRs put them so his
+future changes apply cleanly. Both apps speak the same BLE wire protocol and use
+the same comma pairing key.
+
 # Galaxy Android companion
 
 Native Android shell and cellular SOCKS5 uplink, protocol 1, app 1.1.11 (versionCode 13).
@@ -98,44 +119,30 @@ or repeatedly retry. These screens require APK 1.1.6 or newer over Bluetooth.
 
 ### Automatic comma setup
 
-After the comma updates to this branch, the manager's `companion_bluetooth`
-supervisor automatically prepares `/data/galaxy-ble/stardust-venv` with the pinned
-`dbus-next`, PyCryptodome and Zeroconf dependencies, then starts LAN discovery.
-No SSH command or Bluetooth pairing is required for LAN discovery. Keep Galaxy
-enabled, leave comma parked with internet for its first setup, and install the
-updated APK on Android. Both devices must be on the same trusted LAN.
+The manager's `galaxy_phone` process (`openpilot.starpilot.galaxy_bluetooth.bootstrap`)
+owns the phone bridge for both Android and iPhone. While parked with internet it
+installs the pinned `dbus-next`, PyCryptodome and Zeroconf into
+`/data/galaxy-ble/venv` using AGNOS's `uv`, then starts the BLE bridge and LAN
+discovery as runtime systemd units. Setup never downloads over a phone's shared
+internet; it waits for sharing to stop. Status appears in comma Settings →
+Bluetooth, and the log is `/data/galaxy-ble/setup.log`. Bluetooth stays off unless
+it is enabled in comma settings; LAN discovery runs either way.
 
-The first setup may take a few minutes. Failed setup retries automatically after
-60 seconds. Installation pauses if driving or phone internet sharing starts;
-already installed dependencies work offline and while driving. The supervisor
-checks actual imports and pinned versions before starting either bridge, and
-repairs partial installations automatically. Setup logs are private and rotated
-at `/data/galaxy-ble/stardust-setup.log`.
-Failed environment verification also backs off for 60 seconds while driving,
-so a partial installation does not repeatedly launch Python onroad.
+The bridge proxies requests to the local Galaxy server with a per-BLE-session
+Galaxy cookie and loopback Origin, so Galaxy's normal authentication and
+parked-only checks still apply. Pairing credentials, the phone uplink, APK
+downloads, recordings, replay, cameras, map tiles and Android Auto uploads are
+refused over Bluetooth and require Wi-Fi/LAN.
+
+LAN discovery advertises `_sp-galaxy._tcp` and publishes each interface's own
+address separately, so home Wi-Fi clients are not given the comma hotspot
+address. Registration failures, including Zeroconf-specific exceptions, are
+cleaned up and retried. Android keeps multicast enabled during the bounded
+foreground search, resolves services in sequence, and displays discovery errors.
+Android 13+ searches the selected Wi-Fi network explicitly.
 
 Once paired, Android remembers the last authenticated BLE address and tries it for
-four seconds before falling back to a normal low-latency scan. The supervisor also starts the BLE adapter and retries if Bluetooth
-is off or BlueZ is not ready. It does not change Bluetooth power/bonds, pairing
-keys, or the other fork's venv or systemd units. Do not run two Galaxy GATT bridge
-services at once. `install_bluetooth.sh` remains an internal setup helper; users
-do not need to run it. Automatic setup has been tested on the host, not deployed
-to the physical comma here.
-
-AGNOS setup uses its existing `uv` binary and installed Python; it does not
-require system `pip` or `ensurepip`, or download another Python installation.
-Installation requires prebuilt wheels and never starts a source build. The
-pinned Zeroconf 0.151.3 and PyCryptodome 3.23.0 releases publish compatible ARM64
-wheels for the comma's Python 3.12 and glibc 2.39. Registration failures,
-including Zeroconf-specific exceptions, are cleaned up and retried by the
-advertiser without a process restart.
-
-The branch LAN adapter corrects upstream's invalid 16-character DNS-SD service
-name and advertises each interface's address separately, so home Wi-Fi clients
-are not given the comma hotspot address. Imported upstream implementation files
-and their provenance hashes remain unchanged. Android keeps multicast enabled
-during the bounded foreground search, resolves services in sequence, and displays
-discovery errors. Android 13+ searches the selected Wi-Fi network explicitly.
+four seconds before falling back to a normal low-latency scan.
 
 1. Enable Bluetooth in comma settings. Park and join Galaxy Wi-Fi, or connect to
    comma over a trusted LAN.
@@ -155,23 +162,15 @@ discovery errors. Android 13+ searches the selected Wi-Fi network explicitly.
 The pairing file remains `/data/galaxy-ble/pairing.json`, compatible with upstream.
 No pairing files, secrets or Bluetooth bonds are committed.
 
-### Preserve the other implementation
+### Shared phone bridge
 
-`upstream/tools/galaxy_bluetooth/` preserves implementation code from
-[`firestar5683/StarPilot`, branch `galaxybt`](https://github.com/firestar5683/StarPilot/commits/galaxybt/).
-`upstream/SOURCE.json` pins its exact commit and every source blob hash. It includes
-the original iOS project, bridge, docs, license and tests. At the user’s request,
-the imported web logos/favicons now use the existing StarPilot assets. These
-branding-only replacements and the refreshed asset manifest are explicitly
-recorded in `branding_overrides`; original upstream hashes remain available. Branch adaptations are
-outside it in `bluetooth.py` and the Android project. The other developer's branch
-was not modified or pushed.
-
-The iOS implementation code is preserved as supplied, not rebuilt or retrofitted to this
-branch's different Galaxy API/UI. Android and the branch adapter share its BLE
-wire protocol. The adapter supplies per-BLE-session Galaxy cookies and loopback
-Origin while retaining normal endpoint checks; upstream's old API auth
-assumptions are not copied into Galaxy.
+The comma-side bridge and the iPhone app are natehuby76's SecretGood port
+([PR #224](https://github.com/firestar5683/StarPilot/pull/224), docs as in
+[PR #225](https://github.com/firestar5683/StarPilot/pull/225)), imported as his
+commits. This branch adds the Android-specific Wi-Fi-only paths, per-interface LAN
+advertising and the phone-sharing install pause to it; keep those when taking
+his later updates. `android/tests/test_ble_wire_vectors.py` checks that the
+bridge decodes the same frames as the Android JVM test fixtures.
 
 ### Bluetooth verification and device acceptance
 
@@ -202,7 +201,7 @@ framework is used. JUnit is a test-only dependency.
 From the repository root:
 
 ```sh
-openpilot/starpilot/companion/build_apk.sh
+openpilot/starpilot/companion/android/build_apk.sh
 ```
 
 The script runs `assembleRelease lintRelease`, then copies the signed APK and
@@ -262,7 +261,7 @@ still need physical testing.
 
 ## Validation
 
-See [PORT_VALIDATION.md](PORT_VALIDATION.md) for the SecretGoodStarPilot port,
+See [docs/PORT_VALIDATION.md](docs/PORT_VALIDATION.md) for the SecretGoodStarPilot port,
 current APK provenance, regression results, and remaining device checks.
 
 Host Python tests deliberately stub unavailable native Params, msgq and the
@@ -285,9 +284,9 @@ unit tests use real loopback TCP/UDP sockets and an injected cellular transport;
 they verify authentication, domain resolution, bidirectional counting, denylist
 rejection and UDP association behavior.
 
-`tests/tunnel_dns_smoke.py` runs the pinned **real ARM64 binary** inside a disposable
+`android/tests/tunnel_dns_smoke.py` runs the pinned **real ARM64 binary** inside a disposable
 Linux ARM64 container with `/dev/net/tun`, NET_ADMIN, Python and `iproute2`.
-Mount `../galaxy/bin` at `/b` and the test script at `/test.py`; run
+Mount `openpilot/starpilot/galaxy/bin` at `/b` and the test script at `/test.py`; run
 `python /test.py`. It asserts A answers in the mapped pool and empty successful
 AAAA answers. Do not run that script in a device or host network namespace.
 

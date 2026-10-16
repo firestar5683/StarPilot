@@ -12,8 +12,11 @@ from protocol import MAX_BODY
 METHODS = {'GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'}
 REQUEST_HEADERS = {'content-type', 'accept'}
 RESPONSE_HEADERS = {'content-type'}
-WIFI_PATHS = ('/api/recordings', '/api/replay', '/api/cameras', '/api/maps/tiles',
+# Pairing credentials, the phone uplink and APK downloads are only offered over a
+# direct Wi-Fi/LAN session; Bluetooth is never an uplink or media transport.
+WIFI_PATHS = ('/api/recordings', '/api/replay', '/api/cameras', '/api/maps/tiles', '/api/navigation/map/tiles',
               '/api/android-auto/upload', '/api/android-auto/apk', '/api/phone-internet',
+              '/api/companion/bluetooth', '/api/companion/uplink', '/api/companion/app.apk',
               '/api/auth/login', '/api/auth/logout')
 
 
@@ -104,7 +107,7 @@ class GalaxyProxy:
             target = validate_target(request.get('path'))
             path = urllib.parse.unquote(urllib.parse.urlsplit(target).path)
             if any(path == prefix or path.startswith(prefix + '/') for prefix in WIFI_PATHS):
-                return error_response(request_id, 501, 'This feature requires local Wi-Fi. Connect your iPhone and comma to the same network.')
+                return error_response(request_id, 501, 'This feature requires local Wi-Fi. Connect your phone and comma to the same network.')
             method = request.get('method', 'GET')
             if method not in METHODS:
                 raise ValueError('Unsupported HTTP method')

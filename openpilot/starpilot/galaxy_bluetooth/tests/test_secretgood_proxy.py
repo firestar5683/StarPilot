@@ -93,7 +93,9 @@ class ProxyTest(unittest.TestCase):
 
   def test_wifi_features_never_reach_server(self):
     for path in ('/api/recordings', '/api/replay/status', '/api/cameras/status', '/api/maps/tiles/a',
-                 '/api/phone-internet/start', '/api/android-auto/upload', '/api/android-auto/apk/latest', '/api/auth/login', '/api/auth/logout'):
+                 '/api/phone-internet/start', '/api/android-auto/upload', '/api/android-auto/apk/latest', '/api/auth/login', '/api/auth/logout',
+                 '/api/navigation/map/tiles/1/2/3', '/api/companion/bluetooth', '/api/companion/bluetooth/rotate',
+                 '/api/companion/uplink', '/api/companion/app.apk'):
       self.assertEqual(self.request(path)['status'], 501, path)
     self.assertEqual(self.server.auths, 0)
 

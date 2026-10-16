@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import math
 from pathlib import Path
 import re
@@ -30,6 +31,14 @@ def phone_uplink_active(path=STATUS_PATH, clock=time.monotonic) -> bool:
     return state.get('active') is True and fresh(state, clock())
   except (OSError, ValueError, TypeError, AttributeError):
     return False
+
+
+def bluetooth_pairing(rotate=False, path=None):
+  # Shares the phone bridge's key file, so Android and iPhone pair with the same comma key.
+  from openpilot.starpilot.galaxy_bluetooth.bridge import pairing
+  path = pairing.DEFAULT_KEY_PATH if path is None else path
+  key = pairing.rotate_key(path) if rotate else pairing.ensure_key(path)
+  return json.loads(pairing.qr_payload(key))
 
 
 def validate_lease(value):

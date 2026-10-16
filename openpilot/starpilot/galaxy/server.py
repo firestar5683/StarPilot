@@ -1457,8 +1457,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(409, {'error': 'Park before pairing or forgetting phones'})
             return
           try:
-            from openpilot.starpilot.companion.bluetooth import pairing_payload
-            self.json(200, pairing_payload(payload['rotate']))
+            from openpilot.starpilot.galaxy.companion import bluetooth_pairing
+            self.json(200, bluetooth_pairing(payload['rotate']))
           except (OSError, ValueError):
             self.json(503, {'error': 'Bluetooth pairing unavailable'})
         return
