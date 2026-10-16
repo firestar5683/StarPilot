@@ -23,6 +23,19 @@ def test_confirmed_departure_releases_stopped_plan_in_normal_acc():
   assert policy.step(True, frame(7), 0., True) == (.35, False)
 
 
+def test_departing_lead_breakaway_holds_profile_ceiling_only_while_stationary():
+  departing = replace(frame().leads[0], distance=5., speed=1., acceleration=.5)
+  assert LeadTakeoff().step(True, frame(leads=(departing,), acceleration_max=2.), .2, False) == (2., False)
+  assert LeadTakeoff().step(True, frame(leads=(departing,), acceleration_max=1.2), .2, False) == (1.2, False)
+  rolling = LeadTakeoff().step(True, frame(leads=(departing,), acceleration_max=2., standstill=False, speed=.3), .2, False)
+  assert rolling[0] < 1. and rolling[1] is False
+  close = replace(departing, distance=3.6)
+  assert LeadTakeoff().step(True, frame(leads=(close,), acceleration_max=2., model_accel=.2), .2, False)[0] < 1.
+  braking = replace(departing, acceleration=-.5)
+  assert LeadTakeoff().step(True, frame(leads=(braking,), acceleration_max=2.), .2, False) == (.2, False)
+  assert LeadTakeoff().step(True, frame(leads=(departing,), acceleration_max=2., blocked=True), 0., True) == (0., True)
+
+
 def test_creep_confirmation_and_profile_cap_remain_effective():
   policy = LeadTakeoff()
   lead = replace(frame().leads[0], distance=6., speed=.3, acceleration=.1)
@@ -143,6 +156,24 @@ def test_force_stops_off_still_exposes_current_red_light_and_never_owns_control(
       assert owner.sample(sm, cp, now_ns=sm.stamp+1_000_000, now_boot_ns=sm.stamp+2_001_000_000,
                           drive_id=STOP_DRIVE, follow_seconds=1.45, traffic_mode=False) == StopPlan()
     detect.assert_not_called()
+
+
+def test_standstill_takeoff_light_uses_model_when_strict_geometry_fails():
+  from openpilot.starpilot.longitudinal.force_stop_runtime import standstill_takeoff_light
+
+  def model(end, *, stop=False, backstep=True):
+    xs = [end * index / 32 for index in range(33)]
+    if backstep:
+      xs[1:3] = [0.0005, 0.0002]
+    return NS(position=NS(x=xs), action=NS(shouldStop=stop))
+
+  stopped = NS(standstill=True, vEgo=0.)
+  assert standstill_takeoff_light(model(70.), stopped) is False
+  assert standstill_takeoff_light(model(70., stop=True), stopped) is True
+  assert standstill_takeoff_light(model(40.), stopped) is True
+  assert standstill_takeoff_light(model(0.), stopped) is None
+  assert standstill_takeoff_light(model(70.), NS(standstill=False, vEgo=0.)) is None
+  assert standstill_takeoff_light(model(70.), NS(standstill=True, vEgo=.5)) is None
 
 
 def test_projection_red_light_missing_observation_and_offcenter_conflict_veto():

@@ -4,8 +4,9 @@ from dataclasses import replace
 
 from openpilot.starpilot.conditional_mode.curve import frozen_raw_curve
 from openpilot.starpilot.conditional_mode.preferences import CEMOptions, decode_preferences, PreferenceError
-from openpilot.starpilot.conditional_mode.projection import _horizon
-from openpilot.starpilot.conditional_mode.stop import StopFrame as LightFrame, StopLead, StopLightDetector
+from openpilot.starpilot.conditional_mode.projection import STANDSTILL_SPEED_NOISE_MPS, _horizon, _standstill_clear_horizon
+from openpilot.starpilot.conditional_mode.stop import (FROZEN_RAW_STOP_DISTANCE_M, STOP_MODEL_RELEASE_MARGIN_M,
+                                                       StopFrame as LightFrame, StopLead, StopLightDetector)
 from openpilot.starpilot.lead_tracking import LeadDetector
 from openpilot.starpilot.longitudinal.force_stop import ForceStop, StopFrame, StopPlan, vehicle_tune
 from openpilot.starpilot.model_geometry import road_curvature
@@ -16,6 +17,16 @@ from openpilot.starpilot.longitudinal.stop_resume import StopResume
 KEY = 'ForceStops'
 OFFSET_KEY = 'ForceStopDistanceOffset'
 SOURCE_AGE_NS = 150_000_000
+
+
+def standstill_takeoff_light(model, car) -> bool | None:
+  """Takeoff-only; Force Stop's own policy keeps strict geometry."""
+  if car.standstill is not True or not 0.0 <= car.vEgo <= STANDSTILL_SPEED_NOISE_MPS:
+    return None
+  horizon = _standstill_clear_horizon(model)
+  if horizon is None:
+    return None
+  return bool(model.action.shouldStop) or horizon < FROZEN_RAW_STOP_DISTANCE_M + STOP_MODEL_RELEASE_MARGIN_M
 
 
 class ForceStopRuntime:
@@ -130,12 +141,16 @@ class ForceStopRuntime:
       else:
         self.light.reset()
         self.lead.reset()
+      takeoff_observed, takeoff_light = perception_available, bool(light_context)
+      if not perception_available:
+        fallback = standstill_takeoff_light(model, car)
+        if fallback is not None:
+          takeoff_observed, takeoff_light = True, fallback
       if takeoff_enabled and not self.enabled:
         # Perception may veto takeoff while Force Stop stays entirely inactive.
         self.resume.reset()
         self.policy.reset()
-        self.plan = StopPlan(model_ns=stamp, takeoff_light_observed=perception_available,
-                             takeoff_light=bool(light_context))
+        self.plan = StopPlan(model_ns=stamp, takeoff_light_observed=takeoff_observed, takeoff_light=takeoff_light)
         return self.plan
       # Model trajectories can oscillate around zero velocity at a predicted
       # stop. Invalid geometry cannot acquire a stop or prove that it is clear;
@@ -156,7 +171,7 @@ class ForceStopRuntime:
                         perception_available=perception_available)
       self.plan = self.policy.step(frame, vehicle_tune(str(cp.carFingerprint)), self.offset)
       if takeoff_enabled:
-        self.plan = replace(self.plan, takeoff_light_observed=perception_available, takeoff_light=bool(light_context))
+        self.plan = replace(self.plan, takeoff_light_observed=takeoff_observed, takeoff_light=takeoff_light)
       return self.plan
     except (AttributeError, KeyError, TypeError, ValueError, OverflowError, RuntimeError):
       self.reset()

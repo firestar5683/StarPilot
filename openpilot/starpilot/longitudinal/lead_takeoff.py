@@ -6,6 +6,9 @@ This does not modify MPC costs, obstacles, trajectories or ordinary following.
 from dataclasses import dataclass
 import math
 
+BREAKAWAY_MIN_DISTANCE = 3.75
+BREAKAWAY_MIN_LEAD_SPEED = .6
+
 
 @dataclass(frozen=True)
 class Lead:
@@ -146,6 +149,10 @@ class LeadTakeoff:
     result = max(target, bounded)
     # Modern stop threshold is .1 m/s²: a lower saved/physical cap cannot prove release.
     output_stop = False if bounded >= .1 else should_stop
+    if (f.standstill and not output_stop and lead.distance >= BREAKAWAY_MIN_DISTANCE and
+        lead.speed >= BREAKAWAY_MIN_LEAD_SPEED and lead.speed - f.speed >= .25 and lead.acceleration >= -.2):
+      # Breaking away from standstill needs more than the planner's lead-follow target.
+      result = max(result, f.acceleration_max)
     if self.previous_should_stop and not output_stop and release_ready:
       self.release_until = f.now_ns + 1_500_000_000
     self.previous_should_stop = output_stop
