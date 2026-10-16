@@ -2061,6 +2061,11 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(403, {'error': 'Park before changing automatic connection'})
             return
           command, arguments = 'set_auto_connect', {'enabled': payload['enabled']}
+        elif action == 'connection' and set(payload) == {'action', 'connection'} and payload['connection'] in ('wireless', 'wired'):
+          if not configuration_allowed():
+            self.json(403, {'error': 'Park before changing the connection type'})
+            return
+          command, arguments = 'set_connection', {'connection': payload['connection']}
         elif action == 'select_receiver' and set(payload) == {'action', 'address'} and isinstance(payload['address'], str):
           if not configuration_allowed():
             self.json(403, {'error': 'Park before changing the car'})
@@ -2078,9 +2083,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           runtime = aa_client().call('status')['status']
           if runtime.get('pairing_ready'):
             raise ValueError('Finish or cancel pairing first')
-          if command == 'start' and (not runtime.get('receiver_address') or
-                                     not aa_setup_owner().identity_status().get('installed')):
-            raise ValueError('Select a car and verify your Android Auto package first')
+          if command == 'start' and not runtime.get('receiver_address') and runtime.get('connection') != 'wired':
+            raise ValueError('Select a car first')
+          if command == 'start' and not aa_setup_owner().identity_status().get('installed'):
+            raise ValueError('Verify your Android Auto package first')
           self.aa_command(identity, command, **arguments)
           current = aa_client().call('status')['status']
         except ValueError as error:

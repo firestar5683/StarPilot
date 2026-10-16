@@ -66,6 +66,16 @@ class JetlinkSettings:
             "transport": status.transport if status is not None else "USB",
             "chargePhone": params.get_bool("JetlinkChargePhone")}
 
+  @staticmethod
+  def _wired_session_running():
+    """Wired Android Auto holds the comma's USB-C port while a session runs."""
+    try:
+      from openpilot.starpilot.system.android_auto.protocol import AndroidAutoClient
+      status = AndroidAutoClient().status()
+      return status.get("connection") == "wired" and bool(status.get("running"))
+    except Exception:
+      return False
+
   def configure(self, payload):
     if not payload or set(payload) - {"mode", "chargePhone"}:
       raise ValueError("Invalid Jetlink settings")
@@ -78,6 +88,8 @@ class JetlinkSettings:
       raise ValueError("Jetlink requires a comma 3X or comma 4")
     if payload.get("mode", "off") != "off" and view["chestnut"]:
       raise ValueError("Chestnut is connected; Jetlink cannot run alongside it")
+    if payload.get("mode", "off") != "off" and self._wired_session_running():
+      raise ValueError("Disconnect wired Android Auto before enabling Jetlink")
     params = self.params()
     if "chargePhone" in payload:
       params.put_bool("JetlinkChargePhone", payload["chargePhone"], block=True)

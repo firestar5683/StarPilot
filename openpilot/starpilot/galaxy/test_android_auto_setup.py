@@ -98,7 +98,7 @@ def test_status_explains_phone_role_and_hides_key(tmp_path):
   assert service.status(session)['identity'] == {'installed': True, 'app_version': '16.2.1-release'}
   assert result['bluetoothEnabled'] is True
   assert 'phone' in result['steps'][0] and 'Wi-Fi access point' in result['steps'][3]
-  assert result['wiredAvailable'] is False and result['maxUploadBytes'] == MAX_FILE_BYTES
+  assert result['wiredAvailable'] is True and result['maxUploadBytes'] == MAX_FILE_BYTES
 
 
 @pytest.mark.parametrize('parked', [True, False])

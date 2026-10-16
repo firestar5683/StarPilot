@@ -55,7 +55,8 @@ ENCODER_RECOVERIES = 3       # hardware encoder reopens allowed per window befor
 ENCODER_RECOVERY_WINDOW = 10.0
 CAR_LINK_HOLD = 10.0         # a hands-free connection from the car counts as "car present" this long
 HFP_FRESH = 3.0              # a hands-free link from the car this recent still means "the car is reaching out now"
-WIRED_USB_VERIFIED = False   # configfs gadget/vehicle CAN USB isolation has not been proven on target
+USB_HANDSHAKE_WAIT = 10.0    # the car connected but sent no AOA START this long -> present as an accessory directly
+USB_CONFIGURE_WAIT = 15.0    # slower receivers need time to enumerate after the AOA switch
 LINK_CHECK_INTERVAL = 1.0    # how often the link watcher asks whether the car's Wi-Fi is still up
 LINK_CHECK_SLOW = 1.0        # a link check slower than this is logged (NetworkManager answers over D-Bus)
 STREAM_STALL_LOG = 1.0       # a streaming loop pass slower than this is logged
@@ -82,6 +83,27 @@ def _is_onroad() -> bool:
     return readable and raw == b"0"
   except Exception:
     return False
+
+
+def wired_blocker() -> str:
+  """Why wired USB must not take the comma's USB-C port, or "" when it is free.
+
+  Chestnut and Jetlink's computer link both use that port.
+  """
+  try:
+    from openpilot.common.params import Params
+    mode = Params().get("JetlinkMode")
+    if type(mode) is int and mode in (1, 2, 3):
+      return "Turn off Jetlink to use wired Android Auto"
+  except Exception:
+    pass
+  try:
+    from openpilot.starpilot.models.jetlink_adapter import adapter
+    if adapter().chestnut_present():
+      return "Wired Android Auto is unavailable while Chestnut is connected"
+  except Exception:
+    pass
+  return ""
 
 
 class Cancelled(Exception):
@@ -315,6 +337,7 @@ class Supervisor:
     status["companion_name"] = self.config.get("companion_name", "")
     status["configured_view"] = self.config["view"]
     status["connection"] = self.config["connection"]
+    status["wired_blocked"] = wired_blocker()
     status["pairing_ready"] = self._pairing_active()
     status["auto_connect"] = bool(self.config["auto_connect"])
     status["auto_paused"] = self.auto.suppressed
@@ -342,8 +365,8 @@ class Supervisor:
     with self._lock:
       if not self._projection_enabled():
         raise RuntimeError("Android Auto is disabled")
-      if self.config["connection"] == "wired" and not WIRED_USB_VERIFIED:
-        raise RuntimeError("Wired Android Auto is unavailable until USB controller isolation is verified")
+      if self.config["connection"] == "wired" and (reason := wired_blocker()):
+        raise RuntimeError(reason)
       if self._thread is not None and self._thread.is_alive():
         if self._stop.is_set():
           raise RuntimeError("Android Auto is still stopping; try again in a moment")
@@ -435,8 +458,8 @@ class Supervisor:
     """Choose wireless (Bluetooth + car Wi-Fi) or wired (USB) projection."""
     if connection not in ("wireless", "wired"):
       raise RuntimeError(f"Unknown connection {connection!r}")
-    if connection == "wired" and not WIRED_USB_VERIFIED:
-      raise RuntimeError("Wired Android Auto is unavailable until USB controller isolation is verified")
+    if connection == "wired" and (reason := wired_blocker()):
+      raise RuntimeError(reason)
     with self._lock:
       if self._thread is not None and self._thread.is_alive():
         raise RuntimeError("Stop Android Auto before changing the connection")
@@ -571,6 +594,17 @@ class Supervisor:
     if self._pairing_active():
       return
     address = config["receiver_address"]
+    if config["connection"] == "wired" and self._projection_enabled() and config["auto_connect"]:
+      if wired_blocker():
+        return
+      if self._bluez is not None and not self._session_alive():
+        self._release_phone()  # wired needs no Bluetooth
+      # The drive is the only sign of the car: the session then waits for its USB handshake,
+      # whether the car was on before the comma booted or is switched on after.
+      onroad = self._onroad()
+      action = self.auto.decide(now, enabled=True, onroad=onroad, car_link=False, ready=True, running=self._session_alive())
+      self._apply_auto_action(now, action, onroad)
+      return
     if not (self._projection_enabled() and config["auto_connect"] and config["connection"] == "wireless" and address):
       if self._bluez is not None and not self._session_alive() and not self._pairing_active():
         self._release_phone()  # drop a standby gateway left from before auto-connect was turned off
@@ -602,6 +636,9 @@ class Supervisor:
     onroad = self._onroad()
     action = self.auto.decide(now, enabled=True, onroad=onroad, car_link=car_link,
                               ready=adapter_ready and bool(device and device["paired"]) and (not companion or car_link), running=running)
+    self._apply_auto_action(now, action, onroad)
+
+  def _apply_auto_action(self, now: float, action: str | None, onroad: bool) -> None:
     if action == "start":
       trigger = "onroad" if onroad else "car_connected"
       try:
@@ -969,35 +1006,115 @@ class Supervisor:
     raise RuntimeError(f"Could not find the car's Android Auto service: {last_error}")
 
   def _attempt_usb(self) -> None:
-    """Wired: wait for the car's accessory handshake on USB, then project over the cable."""
-    if not WIRED_USB_VERIFIED:
-      raise RuntimeError("Wired Android Auto is unavailable until USB controller isolation is verified")
+    """Wired: wait for the car's accessory handshake on USB (or skip it), then project over the cable."""
+    if reason := wired_blocker():
+      raise RuntimeError(reason)
     from openpilot.starpilot.system.android_auto import usb_accessory as usb
     ident = identity_store.load_identity()
+    mode = self.config["usb_mode"]
     gadget = usb.AccessoryGadget(self.log)
     listener = usb.UeventListener()
     bridge = None
+    failed = False
     try:
-      gadget.prepare()
+      direct = mode == "direct"
+      gadget.prepare(direct=direct)
       self._stage("waiting_for_usb")
-      while True:
-        self._check_cancel()
-        event = listener.next(0.5)
-        if event is None:
-          continue
-        if "USB_STATE" in event:
-          self.log("usb_state", state=event["USB_STATE"])
-        if event.get("ACCESSORY") == "START":
-          break
-      self._stage("usb_accessory")
-      gadget.switch_to_accessory()
+      if direct:
+        self._await_usb_configured(listener, None, gadget.connection_state)
+      else:
+        direct = self._await_accessory_start(listener, fallback=mode == "auto", state_reader=gadget.connection_state)
+        gadget.switch_to_accessory()
+        if not self._await_usb_configured(listener, USB_CONFIGURE_WAIT, gadget.connection_state):
+          raise RuntimeError("The car did not finish USB setup. Use its Android Auto data port and a data-capable cable")
+      method = "direct" if direct else "handshake"
+      self._stage("usb_accessory", method)
       bridge = usb.AccessoryBridge(log=self.log)
+      self.log("usb_accessory_ready", method=method, strings=getattr(bridge, "strings", {}))
       self._project(None, UsbLease(bridge), ident, connect=lambda: self._track(bridge.socket))
+    except BaseException:
+      failed = True
+      raise
     finally:
-      if bridge is not None:
-        bridge.close()
-      listener.close()
-      gadget.restore()
+      self._release_usb(gadget, bridge, listener, failed)
+
+  def _release_usb(self, gadget, bridge, listener, failed: bool) -> None:
+    """Undo a wired attempt, running every step even when one fails.
+
+    Closing an fd in another thread does not cancel a Linux blocking read, so the gadget
+    detaches first and the bridge workers are joined before the fd can be reused. A cleanup
+    error is logged, and raised only when the attempt itself ended cleanly: it must never
+    replace the real reason (a car-requested stop keeps its longer retry delay).
+    """
+    errors = []
+    steps = [("detach", gadget.detach), ("bridge", bridge.close if bridge is not None else None),
+             ("listener", listener.close), ("restore", gadget.restore)]
+    for name, step in steps:
+      if step is None:
+        continue
+      try:
+        step()
+      except Exception as error:
+        errors.append(error)
+        self.log("usb_cleanup_failed", step=name, error=str(error))
+    if errors and not failed:
+      raise errors[0]
+
+  def recover_usb(self) -> None:
+    """At startup: undo a wired session a crash interrupted, so the car stops seeing a dead accessory
+    and ADB comes back if it is on. Nothing happens unless our gadget was left holding the USB port."""
+    try:
+      from openpilot.starpilot.system.android_auto import usb_accessory as usb
+      usb.AccessoryGadget(self.log).recover()
+    except Exception as error:
+      self.log("usb_recover_failed", error=str(error))
+
+  def _usb_event(self, listener) -> dict | None:
+    self._check_cancel()
+    event = listener.next(0.5)
+    if event is not None and "USB_STATE" in event:
+      self.log("usb_state", state=event["USB_STATE"])
+    return event
+
+  def _await_accessory_start(self, listener, fallback: bool, state_reader=lambda: "") -> bool:
+    """Wait for the car's AOA START; True when it never came and the comma should present as an accessory itself.
+
+    The wait starts when the car first connects, not when it configures the comma: a head unit
+    that reads the descriptors of a device it does not recognise may never configure it at all.
+    """
+    connected_at = None
+    while True:
+      event = self._usb_event(listener)
+      if event is not None:
+        if event.get("ACCESSORY") == "START":
+          return False
+        state = event.get("USB_STATE")
+        if state in ("CONNECTED", "CONFIGURED"):
+          connected_at = connected_at or time.monotonic()
+        elif state == "DISCONNECTED":
+          connected_at = None
+      state = state_reader()
+      if state in ("CONNECTED", "CONFIGURED") and connected_at is None:
+        connected_at = time.monotonic()
+      elif state == "DISCONNECTED":
+        connected_at = None
+      if fallback and connected_at is not None and time.monotonic() - connected_at >= USB_HANDSHAKE_WAIT:
+        # Some head units only send the handshake to devices they recognise as phones.
+        self.log("usb_no_accessory_start", waited=USB_HANDSHAKE_WAIT)
+        return True
+
+  def _await_usb_configured(self, listener, timeout: float | None, state_reader=lambda: "") -> bool:
+    """Wait until the car has configured the accessory, so reads do not fail on a link that is not up yet."""
+    started = time.monotonic()
+    while timeout is None or time.monotonic() - started < timeout:
+      self._check_cancel()
+      if state_reader() == "CONFIGURED":
+        return True  # kernels may coalesce or omit the android_usb state uevent
+      event = self._usb_event(listener)
+      if event is not None and event.get("USB_STATE") == "CONFIGURED" and state_reader() in ("", "CONFIGURED"):
+        return True
+    self.log("usb_configure_timeout", waited=timeout)
+    return False
 
   def _bootstrap_log(self, name: str, **values) -> None:
     self.log(name, **values)

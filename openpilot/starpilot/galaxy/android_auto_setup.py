@@ -71,13 +71,13 @@ class AndroidAutoSetup:
       'download': apkpure.download_status(),
       'downloadPending': apkpure.lookup_pending(),
       'maxUploadBytes': apk_identity.MAX_FILE_BYTES,
-      'wiredAvailable': False,
+      'wiredAvailable': True,
       'steps': [
         'The comma acts as the Android Auto phone; the car is the receiver.',
         'Enable Android Auto and upload your own Android Auto APK, XAPK, or APKM on-road or off-road.',
         'Wait for on-device certificate/key verification; replace it before expiry.',
         'In offroad mode or Park, pair the car over Bluetooth. The car then gives the comma its Wi-Fi access point.',
-        'Start wireless projection after the car is selected; wired USB remains unavailable.',
+        'Start wireless projection after the car is selected, or turn on Wired USB Connection and plug the car data USB port into the comma.',
       ],
     }
 

@@ -186,6 +186,7 @@ def main() -> int:
     cleanup.callback(bluetooth_owner.close)
     bluetooth_owner.recover_phone_role()
     supervisor = Supervisor(shared_bluetooth_owner=bluetooth_owner, projection_enabled=_enabled)
+    supervisor.recover_usb()
     cleanup.callback(supervisor.close)
     exit_event = threading.Event()
     cleanup.callback(exit_event.set)

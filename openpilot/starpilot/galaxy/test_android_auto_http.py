@@ -72,6 +72,7 @@ def api(tmp_path):
       self.receiver = ''
       self.running = False
       self.auto_connect = False
+      self.connection = 'wireless'
       self.available = True
       self.stop_error = False
       self.stop_completes = True
@@ -80,13 +81,16 @@ def api(tmp_path):
       self.calls.append((command, dict(kwargs)))
       if command == 'status':
         return {'status': {'receiver_address': self.receiver, 'receiver_name': 'My car', 'state': 'streaming' if self.running else 'idle',
-                           'running': self.running, 'auto_connect': self.auto_connect, 'pairing_ready': False}}
+                           'running': self.running, 'auto_connect': self.auto_connect, 'pairing_ready': False,
+                           'connection': self.connection}}
       if command == 'devices':
         return {'devices': [{'address': 'AA:BB:CC:DD:EE:FF', 'name': 'Saved car', 'paired': True, 'android_auto': True}]}
       if command == 'select_receiver':
         self.receiver = kwargs['address']
       if command == 'set_auto_connect':
         self.auto_connect = kwargs['enabled']
+      if command == 'set_connection':
+        self.connection = kwargs['connection']
       if command == 'start':
         self.running = True
       if command == 'stop':
@@ -131,7 +135,7 @@ def test_galaxy_upload_requires_session_and_exact_binary_body(api):
   assert code == 200
   cookie = headers['Set-Cookie'].split(';', 1)[0]
   code, status, _ = request('GET', '/api/android-auto/setup', cookie=cookie)
-  assert code == 200 and status['wiredAvailable'] is False
+  assert code == 200 and status['wiredAvailable'] is True
   assert status['download'] is None
   assert request('POST', '/api/android-auto/upload', b'fake-apk', cookie=cookie,
                  content_type='application/json')[0] == 415
@@ -397,6 +401,29 @@ def test_existing_paired_car_controls_are_local_authenticated_and_source_bound(a
   assert request('POST', '/api/auth/logout', '{}', cookie=cookie, content_type='application/json')[0] == 200
   assert request('POST', '/api/android-auto/control', json.dumps({'action': 'start'}),
                  cookie=cookie, content_type='application/json')[0] == 401
+
+
+def test_wired_connection_requires_park_but_not_a_paired_receiver(api):
+  request, _, state, client = api
+  code, _, headers = request('POST', '/api/auth/login', json.dumps({'password': 'password123'}),
+                              content_type='application/json')
+  assert code == 200
+  cookie = headers['Set-Cookie'].split(';', 1)[0]
+  payload = json.dumps({'action': 'connection', 'connection': 'wired'})
+  state['parked'] = False
+  assert request('POST', '/api/android-auto/control', payload, cookie=cookie, content_type='application/json')[0] == 403
+  state['parked'] = True
+  code, result, _ = request('POST', '/api/android-auto/control', payload, cookie=cookie, content_type='application/json')
+  assert code == 200 and result['status']['connection'] == 'wired'
+  assert request('POST', '/api/android-auto/control', json.dumps({'action': 'start'}), cookie=cookie,
+                 content_type='application/json')[0] == 200
+  assert client.running
+
+  client.running = False
+  state['identity_installed'] = False
+  code, result, _ = request('POST', '/api/android-auto/control', json.dumps({'action': 'start'}), cookie=cookie,
+                            content_type='application/json')
+  assert code == 409 and result['error'] == 'Verify your Android Auto package first'
 
 
 def test_local_enable_then_upload_bundle_preserves_binary_bytes(api):
