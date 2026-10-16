@@ -150,3 +150,18 @@ def test_new_drive_rearms_max_without_an_intervening_render():
   assert renderer._set_speed_opacity(new_drive, 9_000_000_000) == 0
   assert renderer._set_speed_changed_ns == 9_000_000_000
   assert renderer._set_speed_opacity(new_drive, 9_020_000_000) > 0
+
+
+def test_sources_row_keeps_each_source_while_no_limit_is_known():
+  readings = [NS(source='dashboard', enabled=True, observationKind='unknown', speedLimit=0.0),
+              NS(source='map', enabled=True, observationKind='unknown', speedLimit=0.0)]
+  # Held sign and a session with nothing to hold both keep the per-source rows up.
+  for replacement in (unknown_slc(), unknown_slc(session='another')):
+    ui = display_ui()
+    adapter = RuntimeSnapshotAdapter(ui)
+    adapter.build(ShellMode.ONROAD, now_ns=NOW)
+    replacement.sourceReadings = readings
+    ui.sm.messages['slcState'] = replacement
+    ui.sm.logMonoTime['slcState'] = NOW + 50_000_000
+    shown = adapter.build(ShellMode.ONROAD, now_ns=NOW + 50_000_000).onroad.speed_limit
+    assert [(row.source, row.kind) for row in shown.source_readings] == [('dashboard', 'unknown'), ('map', 'unknown')]

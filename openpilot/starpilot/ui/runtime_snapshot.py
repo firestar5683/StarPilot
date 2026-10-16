@@ -585,7 +585,8 @@ class RuntimeSnapshotAdapter:
         observation = SpeedLimitObservation(kind=ObservationKind.VALID, source=source,
                                             speed_limit_mps=displayed_limit_mps(previous),
                                             offset_mps=previous.offset_mps, status='display_hold',
-                                            presentation_adjusted_limit_mps=displayed_adjusted_limit_mps(previous))
+                                            presentation_adjusted_limit_mps=displayed_adjusted_limit_mps(previous),
+                                            source_readings=observation.source_readings)
       else:
         self._slc_sign_cache = None
     else:
@@ -593,7 +594,8 @@ class RuntimeSnapshotAdapter:
     if (slc is not None and (slc.enabled or slc.displayOnly) and observation.kind != ObservationKind.VALID):
       # SLC is on but has no limit right now: keep the limit half of the card (as "–")
       # instead of letting it come and go with the source.
-      observation = SpeedLimitObservation(kind=ObservationKind.STALE, source=observation.source, status=observation.status)
+      observation = SpeedLimitObservation(kind=ObservationKind.STALE, source=observation.source, status=observation.status,
+                                          source_readings=observation.source_readings)
     # Temporary old StarPilot route replay shim. Retire by deleting this call
     # and its import; remaining cleanup is documented in
     # openpilot/starpilot/ui/old_starpilot_route_shim.py.
