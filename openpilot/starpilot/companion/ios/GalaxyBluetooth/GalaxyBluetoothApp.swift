@@ -125,12 +125,12 @@ final class AppModel: ObservableObject {
     private var lastAddressCheck = Date.distantPast
     private var identitySession = ""
     private var addressCheckSession = ""
-    func importPairingKey(_ key: String) {
+    func importPairingKey(_ code: PairingCode) {
         // Save imported keys only after the encrypted handshake.
         opened = false
         wantsConnection = false
         bluetooth.forgetSavedDevice()
-        PairingKeyStore.remove()
+        PairingKeyStore.stage(code)
         lan.clearEndpoint()
         lan.bind(to: nil)
         address = ""
@@ -138,7 +138,7 @@ final class AppModel: ObservableObject {
         addressCheckSession = ""
         UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
         UserDefaults.standard.removeObject(forKey: "galaxy.lan.address")
-        pairingKey = key
+        pairingKey = code.key
         if mode == .lan { mode = .automatic }
         connectionMessage = "Code scanned. Select your comma below to finish pairing."
         bluetooth.scan()
