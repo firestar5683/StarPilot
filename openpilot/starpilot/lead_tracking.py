@@ -158,10 +158,12 @@ class LeadDetector:
     lead_brake = _number(_get(radar_lead, 'aLeadK'), -20.0, 20.0)
     prob = _number(_get(radar_lead, 'modelProb'), 0.0, 1.0)
     y_rel = _number(_get(radar_lead, 'yRel'), -20.0, 20.0)
-    path = _path_at_distance(model, distance) if model_fresh and distance is not None else None
+    # A stopped model's path backsteps sub-millimetre near its origin.
+    moving = standstill is False
+    path = _path_at_distance(model, distance) if moving and model_fresh and distance is not None else None
     if (
       not radar_fresh
-      or not model_fresh
+      or (moving and not model_fresh)
       or not car_fresh
       or not headway_fresh
       or raw_present is None
@@ -172,13 +174,12 @@ class LeadDetector:
       or observed is None
       or now is None
       or not 0.0 <= now - observed <= SOURCE_MAX_AGE_S
-      or path is None
+      or (moving and path is None)
       or None in (distance, lead_speed, lead_brake, prob, y_rel)
     ):
       self.reset()
       return unknown
     assert distance is not None and lead_speed is not None and lead_brake is not None and prob is not None and y_rel is not None
-    model_length, path_y = path
     if self.last_observed_mono_s is not None:
       interval = observed - self.last_observed_mono_s
       if interval <= 0.0:
@@ -187,7 +188,9 @@ class LeadDetector:
         self.reset()
         return unknown
     self.last_observed_mono_s = observed
-    if not standstill:
+    if moving:
+      assert path is not None
+      model_length, path_y = path
       candidate = _should_track(raw_present, distance, model_length, speed, lead_speed, raw_radar)
       continuity = self.tracked or self.filter_value >= CONTINUITY_THRESHOLD
       if not candidate and continuity:

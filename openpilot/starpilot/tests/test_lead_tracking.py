@@ -192,6 +192,23 @@ class TestLeadDetector(unittest.TestCase):
     self.assertIsNone(stale.tracked)
     self.assertFalse(detector.tracked)
 
+  def test_standstill_retains_track_without_monotonic_model_path(self):
+    detector = LeadDetector()
+    for tick in range(15):
+      last = step(detector, tick, lead=wire_lead(distance=5, speed=0), speed=2.0)
+    self.assertTrue(last.tracked)
+    stopped = wire_model(horizon=70.0)
+    stub = list(stopped.position.x)
+    event = messaging.new_message('modelV2', valid=True)
+    event.modelV2.position.x = [0.0, 0.0005, 0.0002] + stub[3:]
+    event.modelV2.position.y = [0.0] * 33
+    backstep = messaging.log_from_bytes(event.to_bytes()).modelV2
+    for tick, kwargs in ((15, {'model': backstep}), (16, {'model_fresh': False})):
+      held = step(detector, tick, lead=wire_lead(distance=5, speed=0.8), speed=0.0, standstill=True, **kwargs)
+      self.assertTrue(held.tracked)
+    moving = step(detector, 17, lead=wire_lead(distance=6, speed=1.5), model=backstep, speed=0.5)
+    self.assertIsNone(moving.tracked)
+
   def test_serialized_model_origin_roundoff_only(self):
     detector = LeadDetector()
     roundoff = step(detector, 0, model=wire_model(origin=-6.64888977208733e-11))
