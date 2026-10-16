@@ -15,12 +15,18 @@ NOW = 1_000_000_000
 def publication(source, evidence=None, adapter=None, sources=None):
   sources = [source] if sources is None else sources
   sm = mock.Mock()
-  sm.update.side_effect = [*([None] * len(sources)), StopIteration()]
+  ticks = iter(NOW + index * 250_000_000 for index in range(len(sources)))
+  current_time = [NOW]
+
+  def update():
+    current_time[0] = next(ticks)
+
+  sm.update.side_effect = update
   pm, fitter = mock.Mock(), mock.Mock()
   control_socket, applied_socket = object(), object()
   factory = mock.Mock(return_value=adapter)
   source_reader = mock.Mock(side_effect=sources)
-  clock = mock.Mock(side_effect=[NOW + index * 250_000_000 for index in range(len(sources))])
+  clock = mock.Mock(side_effect=lambda: current_time[0])
 
   def drain(socket, callback, receive, sink, now):
     if socket is control_socket and evidence is not None:

@@ -9,8 +9,10 @@ import capnp
 
 from openpilot.cereal import custom, log, messaging
 from openpilot.starpilot.flm.learning_source import SERVICE
-from openpilot.starpilot.flm.tests import test_automatic_integration as integration
 from tools.ci.custom_schema_contract import describe, validate
+
+NOW = 400_000_000_000
+
 
 # Exact occupied prefix from c2109496a72e85ca702ecef7aff53ff45adcfb8c,
 # cereal/custom.capnp. No learner pointer existed in these recordings.
@@ -134,7 +136,7 @@ class TestAutomaticLearningWire(unittest.TestCase):
       old_bytes = old.to_bytes()
       readers = []
       for tick in range(100):
-        now = integration.NOW + tick * 10_000_000
+        now = NOW + tick * 10_000_000
         if tick % 25 == 0:
           event = messaging.new_message(SERVICE, valid=True)
           with custom.StarPilotCarParams.from_bytes(old_bytes) as envelope:
@@ -178,9 +180,9 @@ class TestAutomaticLearningWire(unittest.TestCase):
       self.assertIsNotNone(identity)
       old = historical.AutoSteeringLearning.new_message(
         version=1, status='qualifiedFit', identity=identity, session='transient-c204', sequence=1,
-        observedMonoTime=integration.NOW, validUntilMonoTime=integration.NOW + 500_000_000,
-        sourceWindowStartMonoTime=integration.NOW - 10_000_000_000,
-        sourceWindowEndMonoTime=integration.NOW - 1_000_000_000,
+        observedMonoTime=NOW, validUntilMonoTime=NOW + 500_000_000,
+        sourceWindowStartMonoTime=NOW - 10_000_000_000,
+        sourceWindowEndMonoTime=NOW - 1_000_000_000,
         family='linearFactor', latAccelFactor=native_factor * 1.05,
         acceptancePolicyId=next(iter(legacy.policies)),
         trainWindows=10, heldoutWindows=8, trainBaselineLoss=.1, trainCandidateLoss=.09,
@@ -191,7 +193,7 @@ class TestAutomaticLearningWire(unittest.TestCase):
       old_bytes = old.to_bytes()
       readers = []
       for tick in range(50):
-        now = integration.NOW + tick * 10_000_000
+        now = NOW + tick * 10_000_000
         if tick % 25 == 0:
           event = messaging.new_message(SERVICE, valid=True)
           with custom.StarPilotCarParams.from_bytes(old_bytes) as envelope:

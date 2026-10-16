@@ -5,14 +5,20 @@ validated lead data for Sienna and reset it whenever longitudinal control or
 source authority is lost. It does not select a planner profile or grant control.
 """
 
+from collections import OrderedDict
 from dataclasses import dataclass
+from typing import cast
+
+import capnp
 import math
 import os
 import time
+import threading
 
 import numpy as np
 
 from opendbc.car import structs
+from openpilot.cereal import log
 from opendbc.car.toyota.values import CAR, EPS_SCALE, ToyotaFlags, ToyotaSafetyFlags
 from openpilot.common.realtime import DT_CTRL
 
@@ -54,6 +60,18 @@ def leads_from_radar(radar, *, message_ns: int, receipt_ns: int, now_ns: int,
       not 0 < drive_id < message_ns <= receipt_ns <= now_ns or
       now_ns - message_ns > RADAR_MAX_AGE_NS or now_ns - receipt_ns > RADAR_MAX_AGE_NS):
     return None
+  rows = _radar_lead_rows(radar)
+  return cast(tuple[Lead, Lead], tuple(Lead(*row) for row in rows)) if rows is not None else None
+
+
+# Only immutable pure projection values are retained, never transport authority.
+_RADAR_LEAD_ROWS = OrderedDict()
+_RADAR_LEAD_LOCK = threading.Lock()
+_RADAR_LEAD_CACHE_MAX = 8
+_RADAR_LEAD_KEY_MAX_BYTES = 4096
+
+
+def _decode_radar_lead_rows(radar):
   try:
     if any(type(item.present) is not bool for item in (radar.leadOne, radar.leadTwo)):
       return None
@@ -63,7 +81,36 @@ def leads_from_radar(radar, *, message_ns: int, receipt_ns: int, now_ns: int,
     return None
   if len(leads) != 2 or not ToyotaOutputPolicy._leads_valid(leads):
     return None
-  return leads[0], leads[1]
+  return tuple((lead.present, lead.distance_m, lead.lateral_m, lead.speed_mps, lead.accel_mps2) for lead in leads)
+
+
+def _radar_lead_rows(radar):
+  # Custom fixtures retain their original decoding behavior. A builder is copied
+  # on every call so mutation changes the key and cannot poison prior rows.
+  if type(radar) not in (capnp._DynamicStructReader, capnp._DynamicStructBuilder):
+    return _decode_radar_lead_rows(radar)
+  try:
+    if radar.schema != log.RadarState.schema:
+      return _decode_radar_lead_rows(radar)
+    snapshot = radar.as_builder() if type(radar) is capnp._DynamicStructReader else radar.as_reader().as_builder()
+    key = snapshot.to_bytes()
+  except (AttributeError, TypeError, ValueError, OverflowError, capnp.KjException):
+    return _decode_radar_lead_rows(radar)
+  if len(key) > _RADAR_LEAD_KEY_MAX_BYTES:
+    return _decode_radar_lead_rows(snapshot)
+  with _RADAR_LEAD_LOCK:
+    rows = _RADAR_LEAD_ROWS.get(key)
+    if rows is not None:
+      _RADAR_LEAD_ROWS.move_to_end(key)
+      return rows
+  rows = _decode_radar_lead_rows(snapshot)
+  if rows is not None:
+    with _RADAR_LEAD_LOCK:
+      _RADAR_LEAD_ROWS[key] = rows
+      _RADAR_LEAD_ROWS.move_to_end(key)
+      if len(_RADAR_LEAD_ROWS) > _RADAR_LEAD_CACHE_MAX:
+        _RADAR_LEAD_ROWS.popitem(last=False)
+  return rows
 
 
 def eligible(cp) -> bool:

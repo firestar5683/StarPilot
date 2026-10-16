@@ -328,6 +328,10 @@ class TransportPauseFeedback:
     from openpilot.starpilot.aol.vehicle import policy_for
     if not policy_for(cp).intent_supported:
       return False
+    if pedal and not temporary and not eps_recovery and not native.requestedLongitudinal:
+      # Healthy LAT-only braking belongs to the normal baseline refresh below.
+      # The exception is needed only while native LONG withdrawal is pending.
+      return False
     self.temporary_host_qualified = True
     return True
 

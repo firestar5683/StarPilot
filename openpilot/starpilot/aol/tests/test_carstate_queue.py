@@ -119,8 +119,8 @@ def test_queue_reorder_bound_and_pair_loss_still_withdraw(failure):
         assert axis.sourceCarStateMonoTime == 0 and not sd.conditional_car_state_valid
 
 
-@pytest.mark.parametrize('first_gear,valid,retained', [('reverse', True, True), ('unknown', True, False),
-                                                    ('reverse', False, False), ('eco', True, False)])
+@pytest.mark.parametrize('first_gear,valid,retained', [('reverse', True, True), ('neutral', True, True), ('park', True, False), ('unknown', True, False),
+                                                    ('reverse', False, False), ('neutral', False, False), ('eco', True, False)])
 def test_reverse_queue_pause_requires_known_valid_gears(first_gear, valid, retained):
   from openpilot.starpilot.aol.runtime import known_reverse_pause
   first, last = fixture.car_state(), fixture.car_state()

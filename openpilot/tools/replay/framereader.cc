@@ -310,11 +310,10 @@ bool V4LVideoDecoder::decode(FrameReader *reader, int idx, VisionBuf *buf) {
   if (!v4l_decoder) return false;
   int from_idx = idx;
   const bool reset = active_reader_ != reader || idx != reader->prev_idx + 1;
-  const bool next_segment = active_reader_ && active_reader_ != reader && idx == 0 &&
-                            size_t(active_reader_->prev_idx + 1) == active_reader_->getFrameCount() &&
+  const bool next_segment = active_reader_ != reader && idx == 0 && drained_ &&
                             (reader->packets_info[0].flags & AV_PKT_FLAG_KEY);
+  drained_ = false;
   if (reset) {
-    // A drained decoder accepts the new file's keyframe without reallocating its capture buffers.
     if (decoded_ && !next_segment) {
       v4l_decoder = std::make_unique<V4LDecoder>();
       if (!v4l_decoder->init(V4LDecoder::DEVICE, width, height, V4L2_PIX_FMT_HEVC)) {
@@ -385,6 +384,7 @@ bool V4LVideoDecoder::decode(FrameReader *reader, int idx, VisionBuf *buf) {
       av_packet_unref(&pkt);
     }
   }
+  drained_ = result && size_t(idx + 1) == reader->getFrameCount();
   return result;
 }
 #endif

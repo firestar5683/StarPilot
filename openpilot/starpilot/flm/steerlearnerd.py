@@ -79,18 +79,19 @@ def run(
       elif collector is None:
         unavailable_reason = 'no_current_controller_evidence'
 
-      def control(event, current, stamp, *, source=source, now=now):
+      def control(event, current, stamp, *, source=source):
         nonlocal collector, raw_context, active_key, unavailable_reason
         if event.which() == 'starpilotLateralState' and event.starpilotLateralState.learningEvidence.version == 0:
           if collector is not None:
             collector.split('no_current_learning_evidence')
           return
         evidence = read_control(event)
+        received_now = clock()
         if (
           not source.enabled
           or source.manual
           or evidence.source_epoch != source.source_epoch
-          or not 0 < evidence.source_receipt_ns <= evidence.control_ns <= now <= source.expires_ns
+          or not 0 < evidence.source_receipt_ns <= evidence.control_ns <= received_now <= source.expires_ns
         ):
           clear('learning_disabled' if not source.enabled else 'manual_profile_override' if source.manual else 'controller_source_receipt_mismatch')
           return
@@ -124,6 +125,7 @@ def run(
             unavailable_reason = 'actual_adapter_unavailable'
             return
           collector = FullrateCollector(adapter)
+        collector._calibration_generation = source.calibration_generation
         collector.adapter.select_objective(active_key)
         # This records primitive actual frames/checkpoints ONLY. No selected
         # controller update, baseline probes or numerical fitting at100Hz.
@@ -131,17 +133,22 @@ def run(
         if prepared is None:
           collector.split('actual_stage_capture_unqualified')
         else:
-          collector.control(prepared, stamp)
+          collector.control(prepared, received_now)
 
       def output(event, current, stamp, *, source=source):
+        received_now = clock()
+        if not source.observed_ns <= received_now <= source.expires_ns:
+          clear('settings_receipt_expired')
+          return
         if collector is not None:
           if event.which() == 'starpilotCarState' and event.starpilotCarState.appliedEvidence.version == 0:
             collector.split('no_current_applied_evidence')
             return
-          collector.output(read_applied(event), stamp)
+          collector.output(read_applied(event), received_now)
 
       drain(control_socket, control, messaging.recv_one_or_none, sink, now)
       drain(applied_socket, output, messaging.recv_one_or_none, sink, now)
+      now = clock()
       current_native = False
       if collector is not None and collector.ready:
         current_native = current_native_health(sm, CP, collector.ready[-1][0], now)
@@ -254,26 +261,34 @@ def main():
   cp_sha256 = car_params_digest(CP)
   source_cache = [None]
   vehicle_session = uuid.uuid4().hex
+  from openpilot.starpilot.flm.calibration_lifecycle import ProducerCalibrationLifecycle
+  calibration_lifecycle = ProducerCalibrationLifecycle()
 
-  def calibration_basis():
-    calibration = sm["extrinsicsCalibration"]
-    if not (
-      sm.seen["extrinsicsCalibration"]
-      and sm.valid["extrinsicsCalibration"]
-      and sm.alive["extrinsicsCalibration"]
-      and str(calibration.calStatus) == "calibrated"
-    ):
-      return ()
-    return tuple(float(value) for value in calibration.rpyCalib)
+  def calibration_frame(now):
+    stamp = int(sm.logMonoTime['extrinsicsCalibration'])
+    receipt = int(sm.recv_time['extrinsicsCalibration'] * 1e9)
+    current = bool(sm.all_checks(['extrinsicsCalibration']) and
+      0 < stamp <= now <= stamp + 500_000_000 and
+      0 < receipt <= now <= receipt + 500_000_000)
+    return calibration_lifecycle.observe(sm['extrinsicsCalibration'], current=current)
+
+  def current_source(now, frame):
+    return read_source(CP, params, now_ns=now, cp_sha256=cp_sha256,
+      calibration=() if frame is None else frame[1], vehicle_session=vehicle_session,
+      calibration_generation='' if frame is None else frame[0])
 
   def source_reader(now):
-    # Read once each4Hz receipt renewal, outside all controller/torqued processes.
-    if source_cache[0] is None or now - source_cache[0].observed_ns >= 250_000_000:
-      source_cache[0] = read_source(CP, params, now_ns=now, cp_sha256=cp_sha256, calibration=calibration_basis(), vehicle_session=vehicle_session)
+    # Observe resets on every loop, but keep settings reads at receipt-renewal rate.
+    frame = calibration_frame(now)
+    generation = '' if frame is None else frame[0]
+    if (source_cache[0] is None or generation != source_cache[0].calibration_generation or
+        now - source_cache[0].observed_ns >= 250_000_000):
+      source_cache[0] = current_source(now, frame)
     return source_cache[0]
 
   def current_sources(identity, epoch):
-    current = read_source(CP, params, now_ns=time.monotonic_ns(), cp_sha256=cp_sha256, calibration=calibration_basis(), vehicle_session=vehicle_session)
+    now = time.monotonic_ns()
+    current = current_source(now, calibration_frame(now))
     return (identity if persistent_unit and epoch == current.source_epoch else '', current.enabled, current.manual, current.reset)
 
   persistence = PersistenceModule(params, current_sources)

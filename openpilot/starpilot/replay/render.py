@@ -242,10 +242,7 @@ class Compositor:
   def __init__(self, profile: str, width: int, height: int, *, nv12: bool, wide: bool, cabin: bool):
     from openpilot.starpilot.system.android_auto.headless_egl import HeadlessContext, FrameReadback
     from openpilot.starpilot.system.android_auto import gpu_nv12
-    from openpilot.starpilot.system.android_auto.placement import RendererPlacement
     self.resources = ExitStack()
-    self.placement = RendererPlacement()
-    self.placement.start()
     self.context = HeadlessContext(width, height)
     self.resources.callback(self.context.close)
     try:
@@ -531,7 +528,6 @@ class Compositor:
     from openpilot.starpilot.ui.shell import ShellMode
     rl = self.rl
     self.context.begin_frame(cast(int, sample.now_ns) / 1e9)
-    self.placement.maintain(now_ns / 1e9)
     snapshot = self.adapter.build(ShellMode.ONROAD)
     self.primary_ready = False
     self._prepare()

@@ -177,6 +177,49 @@ def test_leased_switchback_status_rejects_expiry_reorder_and_retired_session():
   assert not status.sample(first, drive_id=DRIVE, now_ns=NOW + 1)
 
 
+def test_switchback_payload_reader_matches_generic_envelope_metadata():
+  from openpilot.cereal import log
+  from openpilot.starpilot.controllers.mode_actions import ModeIntent, publish_switchback, SwitchbackStatusOwner
+
+  # Actual SubMaster payload shape; compare to the existing public envelope API.
+  for valid, age, stamp_delta, drive, expected in (
+      (True, 0, 0, DRIVE, True), (False, 0, 0, DRIVE, False),
+      (True, 100_000_000, 0, DRIVE, True), (True, 100_000_001, 0, DRIVE, False),
+      (True, 0, -1, DRIVE, False), (True, 0, 0, DRIVE + 1, False)):
+    message = publish_switchback(None, ModeIntent(DRIVE, True, True), session='a' * 32,
+      sequence=2, now_ns=NOW, source_car_control_ns=NOW - 1)
+    message.valid, message.logMonoTime = valid, NOW + stamp_delta
+    with log.Event.from_bytes(message.to_bytes()) as event:
+      generic, payload = SwitchbackStatusOwner(), SwitchbackStatusOwner()
+      assert generic.sample(event, drive_id=drive, now_ns=NOW + age) is expected
+      assert payload.sample_state(event.slcState, drive_id=drive, now_ns=NOW + age,
+        event_ns=event.logMonoTime, valid=event.valid) is expected
+      assert (payload.drive, payload.last, payload.retired) == (generic.drive, generic.last, generic.retired)
+      if valid:
+        bare = SwitchbackStatusOwner()
+        assert bare.sample(event.slcState, drive_id=drive, now_ns=NOW + age, event_ns=event.logMonoTime) is expected
+        assert (bare.drive, bare.last, bare.retired) == (payload.drive, payload.last, payload.retired)
+
+
+def test_switchback_payload_reader_preserves_duplicates_retirement_and_drive_reset():
+  from openpilot.cereal import log
+  from openpilot.starpilot.controllers.mode_actions import ModeIntent, publish_switchback, SwitchbackStatusOwner
+
+  generic, payload = SwitchbackStatusOwner(), SwitchbackStatusOwner()
+  for session, sequence, observed, drive, expected in (
+      ('a', 2, NOW, DRIVE, True), ('a', 2, NOW, DRIVE, True),
+      ('a', 1, NOW, DRIVE, False), ('b', 1, NOW + 1, DRIVE, False),
+      ('b', 1, NOW + 1, DRIVE, True), ('a', 2, NOW, DRIVE, False),
+      ('a', 2, NOW, 0, False), ('a', 2, NOW, DRIVE, True)):
+    message = publish_switchback(None, ModeIntent(DRIVE, True, True), session=session * 32,
+      sequence=sequence, now_ns=observed, source_car_control_ns=observed - 1)
+    with log.Event.from_bytes(message.to_bytes()) as event:
+      assert generic.sample(event, drive_id=drive, now_ns=NOW + 2) is expected
+      assert payload.sample_state(event.slcState, drive_id=drive, now_ns=NOW + 2,
+        event_ns=event.logMonoTime) is expected
+      assert (payload.drive, payload.last, payload.retired) == (generic.drive, generic.last, generic.retired)
+
+
 def test_controller_dispatch_requires_live_producer_and_binds_current_control_stamp():
   from unittest.mock import Mock
   from openpilot.starpilot.controllers.mode_actions import ModeActionPublisher, ModeIntent, publish_switchback

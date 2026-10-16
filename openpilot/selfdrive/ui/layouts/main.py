@@ -5,6 +5,7 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets import Widget
 from openpilot.selfdrive.ui.layouts.sidebar import Sidebar, SIDEBAR_WIDTH
 from openpilot.selfdrive.ui.layouts.home import HomeLayout
+from openpilot.selfdrive.ui.layouts.arabesque import ArabesqueLayout
 from openpilot.selfdrive.ui.layouts.settings.settings import SettingsLayout, PanelType
 from openpilot.selfdrive.ui.onroad.augmented_road_view import AugmentedRoadView
 from openpilot.selfdrive.ui.ui_state import device, ui_state
@@ -16,6 +17,7 @@ class MainState(IntEnum):
   HOME = 0
   SETTINGS = 1
   ONROAD = 2
+  ARABESQUE = 3
 
 
 class MainLayout(Widget):
@@ -33,8 +35,9 @@ class MainLayout(Widget):
     self._home_body_layout = BodyLayout()
     self._layouts: dict[MainState, Widget] = {
       MainState.HOME: self._home_layout,
-      MainState.SETTINGS: SettingsLayout(),
+      MainState.SETTINGS: SettingsLayout(on_open_arabesque=self._open_arabesque, arabesque_available=self._arabesque_allowed),
       MainState.ONROAD: AugmentedRoadView(),
+      MainState.ARABESQUE: ArabesqueLayout(self._exit_arabesque),
     }
 
     self._sidebar_rect = rl.Rectangle(0, 0, 0, 0)
@@ -52,6 +55,8 @@ class MainLayout(Widget):
 
   def _render(self, _):
     self._handle_onroad_transition()
+    if self._current_mode == MainState.ARABESQUE and not self._arabesque_allowed():
+      self._set_mode_for_state()
     self._render_main_content()
 
   def _setup_callbacks(self):
@@ -98,9 +103,30 @@ class MainLayout(Widget):
 
   def _set_current_layout(self, layout: MainState):
     if layout != self._current_mode:
+      if MainState.ARABESQUE in (layout, self._current_mode):
+        # Discard the handoff frame so queued touches cannot reach the next view.
+        gui_app.mouse_events.clear()
       self._layouts[self._current_mode].hide_event()
       self._current_mode = layout
       self._layouts[self._current_mode].show_event()
+
+  def _arabesque_allowed(self) -> bool:
+    return ui_state.is_offroad()
+
+  def _open_arabesque(self):
+    if self._current_mode == MainState.SETTINGS and self._arabesque_allowed():
+      self._sidebar.set_visible(False)
+      self._set_current_layout(MainState.ARABESQUE)
+
+  def _exit_arabesque(self):
+    if self._arabesque_allowed():
+      self._set_current_layout(MainState.SETTINGS)
+    else:
+      self._set_mode_for_state()
+
+  def close(self):
+    if self._current_mode == MainState.ARABESQUE:
+      self._layouts[MainState.ARABESQUE].hide_event()
 
   def open_settings(self, panel_type: PanelType):
     self._layouts[MainState.SETTINGS].set_current_panel(panel_type)

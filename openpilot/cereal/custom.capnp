@@ -1233,6 +1233,7 @@ struct AutomaticLearningSourceReceipt {
   validUntilMonoTime @6 :UInt64;
   cpSha256 @7 :Text;
   calibrationBasis @8 :List(Float64);
+  calibrationGeneration @9 :Text;
 }
 
 struct LearningApplication {

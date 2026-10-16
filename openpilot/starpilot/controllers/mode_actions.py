@@ -166,11 +166,24 @@ def switchback_observation(event, *, drive_id: int, now_ns: int, event_ns: int |
     return False
 
 
+@dataclass(frozen=True, slots=True)
+class _SwitchbackStateEnvelope:
+  # Explicit payload entry avoids probing nonexistent fields on a Capnp reader.
+  slcState: object
+  logMonoTime: int
+  valid: bool
+
+
 class SwitchbackStatusOwner:
   def __init__(self):
     self.drive = 0
     self.last = None
     self.retired = ()
+
+  def sample_state(self, state, *, drive_id: int, now_ns: int, event_ns: int, valid: bool = True) -> bool:
+    """Explicit SlcState payload + original envelope metadata; no retained cache."""
+    return self.sample(_SwitchbackStateEnvelope(state, event_ns, valid),
+                       drive_id=drive_id, now_ns=now_ns, event_ns=event_ns)
 
   def sample(self, event, *, drive_id: int, now_ns: int, event_ns: int | None = None) -> bool:
     if drive_id != self.drive or drive_id <= 0:

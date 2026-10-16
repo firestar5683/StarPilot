@@ -42,6 +42,8 @@ class GlobalRuntime:
   def __init__(self, cp, ci, controller):
     # Construct AFTER actual LaC selection, startup native/manual configuration.
     self.cp, self.ci, self.controller = cp, ci, controller
+    from openpilot.starpilot.flm.calibration_lifecycle import ConsumerCalibrationLifecycle
+    self._calibration_lifecycle = ConsumerCalibrationLifecycle()
     self.health_services = ('carState', 'modelV2', 'vehicleParameters', 'lateralDelay', 'driverMonitoringState', 'extrinsicsCalibration')
     try:
       self.descriptor = selected_descriptor(cp, ci, controller)
@@ -114,6 +116,29 @@ class GlobalRuntime:
     """Bounded current source/admission checks; invoked immediately before LaC."""
     self.used, self.stage, self.frame, self.eligible = False, None, None, False
     self.source = None
+    # Capture a fresh V2 generation and calibration interruption before ANY
+    # unrelated adapter/native/vehicle health gate can return.
+    tracker = self._calibration_lifecycle
+    early_source = None
+    try:
+      if (type(now_ns) is int and now_ns > 0 and self.descriptor is not None and
+          sm.seen[SERVICE] and sm.alive[SERVICE] and sm.valid[SERVICE] and sm.freq_ok[SERVICE] and
+          0 <= now_ns - int(sm.recv_time[SERVICE] * 1e9) <= SOURCE_LEASE_NS):
+        envelope = sm[SERVICE]
+        if envelope.learning.sourceReceipt.version == 2:
+          early_source = read_source_receipt(SimpleNamespace(valid=True, autoSteeringLearning=envelope),
+            now_ns=now_ns, cp_sha256=self.descriptor.cp_sha256)
+          if early_source is not None and not tracker.generation:
+            tracker.capture(early_source.calibration_generation)
+      stamp = int(sm.logMonoTime['extrinsicsCalibration'])
+      receipt = int(sm.recv_time['extrinsicsCalibration'] * 1e9)
+      current_calibration = bool(type(now_ns) is int and now_ns > 0 and
+        sm.all_checks(['extrinsicsCalibration']) and
+        0 < stamp <= now_ns <= stamp + 500_000_000 and
+        0 < receipt <= now_ns <= receipt + 500_000_000)
+      tracker.observe(sm['extrinsicsCalibration'], current=current_calibration, now_ns=now_ns)
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+      tracker.reject(now_ns=now_ns)
     self.outcome = None
     self.centre_frame = None
     self.centre_raw = ()
@@ -167,6 +192,8 @@ class GlobalRuntime:
         stamp = int(sm.logMonoTime[service])
         receipt = int(sm.recv_time[service] * 1e9)
         if not (sm.seen[service] and 0 < stamp <= now_ns <= stamp + maximum and 0 < receipt <= now_ns <= receipt + maximum):
+          if service == 'extrinsicsCalibration' and hasattr(self, '_calibration_lifecycle'):
+            self._calibration_lifecycle.reject()
           raise ValueError('stale_original_source')
       if self.controller.sat_time > 0:
         raise ValueError('controller_saturation')
@@ -177,7 +204,7 @@ class GlobalRuntime:
         raise ValueError('stale_receipt')
       envelope = sm[SERVICE]
       event = SimpleNamespace(valid=True, autoSteeringLearning=envelope)
-      source = read_source_receipt(event, now_ns=now_ns, cp_sha256=self.descriptor.cp_sha256)
+      source = early_source if early_source is not None else read_source_receipt(event, now_ns=now_ns, cp_sha256=self.descriptor.cp_sha256)
       if (
         source is None
         or source.cp_sha256 != self.descriptor.cp_sha256
@@ -185,7 +212,11 @@ class GlobalRuntime:
       ):
         raise ValueError('source_identity_or_clock')
       calibration = sm['extrinsicsCalibration']
-      if str(calibration.calStatus) != 'calibrated' or source.calibration != tuple(float(value) for value in calibration.rpyCalib):
+      if source.calibration_generation:
+        if (len(source.calibration) != 3 or not all(math.isfinite(value) for value in source.calibration) or
+            not tracker.admit(source.calibration_generation, source.observed_ns)):
+          raise ValueError('calibration_identity_changed')
+      elif str(calibration.calStatus) != 'calibrated' or source.calibration != tuple(float(value) for value in calibration.rpyCalib):
         raise ValueError('calibration_identity_changed')
       if not self.settings_cache.install(source, received_ns=received) or self.settings_cache.current(now_ns=now_ns) is None:
         raise ValueError('source_cache')

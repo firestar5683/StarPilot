@@ -771,7 +771,24 @@ class Ioniq6TorquePolicy:
     self.previous_measurement = 0.0
     self.prev_desired_lateral_accel = 0.0
     self.prev_steering_pressed = False
+    self.prev_center_friction = None
     self.low_speed_reset_threshold = min(max(CP.minSteerSpeed, 0.3), IONIQ_6_LOW_SPEED_PID_RESET_SPEED)
+
+  def center_friction(self, friction, CS, *, saturated):
+    """Bound growing unsaturated friction in lateral-acceleration units."""
+    weight = clip_scalar((CS.vEgo - 12.0) / 13.0, 0.0, 1.0)
+    if self.surface is not None or weight <= 0.0 or CS.steeringPressed or saturated:
+      self.prev_center_friction = None
+      return friction
+    previous = self.prev_center_friction
+    if previous is not None:
+      step = MAX_LAT_JERK_UP * self.dt / weight
+      # Shrinking or reversing requests must never retain an old force.
+      requested = friction
+      friction = clip_scalar(friction, previous - step, previous + step)
+      friction = clip_scalar(friction, min(0.0, requested), max(0.0, requested))
+    self.prev_center_friction = friction
+    return friction
 
   def turn_assist_active(self, CS) -> bool:
     return bool(self.turn_assist and math.isfinite(CS.vEgo) and
@@ -787,6 +804,7 @@ class Ioniq6TorquePolicy:
     measurement = measured_curvature * CS.vEgo ** 2
     future_desired_lateral_accel = desired_curvature * CS.vEgo ** 2
     if not active:
+      self.prev_center_friction = None
       parent.pid.reset()
       self.curvature_request_buffer.append(desired_curvature)
       self.previous_measurement = measurement
@@ -807,8 +825,16 @@ class Ioniq6TorquePolicy:
       effective_deadzone_deg += self.surface_math.center_deadband(self.surface, CS.vEgo)
     curvature_deadzone = abs(VM.calc_curvature(math.radians(effective_deadzone_deg), CS.vEgo, 0.0))
     lateral_accel_deadzone = curvature_deadzone * CS.vEgo ** 2
-    delay_frames = int(np.clip(lat_delay / self.dt, 1, self.request_buffer_len))
-    expected_lateral_accel = self.curvature_request_buffer[-delay_frames] * CS.vEgo ** 2
+    # Honor the measured delay instead of rounding across a whole request tick.
+    delay_frames = clip_scalar(lat_delay / self.dt, 1.0, float(self.request_buffer_len))
+    recent = int(delay_frames)
+    older = min(recent + 1, self.request_buffer_len)
+    fraction = delay_frames - recent
+    delayed_curvature = self.curvature_request_buffer[-recent]
+    if fraction:
+      delayed_curvature = ((1.0 - fraction) * delayed_curvature +
+                           fraction * self.curvature_request_buffer[-older])
+    expected_lateral_accel = delayed_curvature * CS.vEgo ** 2
     self.curvature_request_buffer.append(desired_curvature)
     raw_lateral_jerk = (future_desired_lateral_accel - expected_lateral_accel) / max(lat_delay, self.dt)
     raw_lateral_jerk = clip_scalar(raw_lateral_jerk, -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP)
@@ -860,8 +886,11 @@ class Ioniq6TorquePolicy:
     friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0), desired_lateral_jerk)
     ff, friction_threshold = auto_stages.apply_stages(parent, CS, setpoint, desired_lateral_jerk, ff, friction_threshold,
       active=active, limited=steer_limited_by_safety or curvature_limited)
-    ff += friction_scale * parent.friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone,
-                                          friction_threshold, CS, setpoint)
+    friction_error = error_with_lsf + JERK_GAIN * friction_jerk
+    friction = friction_scale * parent.friction(friction_error, lateral_accel_deadzone,
+                                                friction_threshold, CS, setpoint)
+    ff += self.center_friction(friction, CS,
+      saturated=abs(friction_error) >= friction_threshold + lateral_accel_deadzone)
     if CS.vEgo < self.low_speed_reset_threshold:
       parent.pid.reset()
     freeze_integrator = (steer_limited_by_safety or CS.steeringPressed or

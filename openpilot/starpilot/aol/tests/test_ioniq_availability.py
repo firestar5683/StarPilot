@@ -660,3 +660,37 @@ class IoniqAvailabilityTests(unittest.TestCase):
         self.assertFalse(receive(10_030_000_000, axis=sd.pm.messages['aolAxisState'],
                                  event=sd.pm.messages['onroadEvents'], state=observed))
         self.assertFalse(card.aol_card_intent.allowed_latch)
+
+  def test_neutral_reverse_neutral_drive_preserves_actual_card_latch(self):
+    from openpilot.starpilot.aol.wire import decode_intent
+
+    with OpenpilotPrefix():
+      sd, _, step, card, receive = self._ioniq_availability_callers()
+      card.pm = type(sd.pm)()
+      card.aol_sequence = 2
+      gears = ['neutral'] * 3 + ['reverse'] * 40 + ['neutral'] * 3 + ['drive'] * 4
+      for tick, gear in enumerate(gears, 2):
+        cs = car_state(brake=True)
+        cs.gearShifter = gear
+        now = 10_000_000_000 + tick * 10_000_000
+        original_message = messaging.new_message
+        def current_message(*args, _original=original_message, _now=now, **kwargs):
+          message = _original(*args, **kwargs)
+          message.logMonoTime = _now
+          return message
+        with mock.patch('openpilot.selfdrive.car.card.messaging.new_message', side_effect=current_message):
+          card.state_publish(cs, None)
+        intent_message = card.pm.messages['aolIntentWire'].as_builder()
+        intent = decode_intent(bytes(intent_message.aolIntentWire))
+        self.assertTrue(intent.lateralArmed)
+        requested = gear == 'drive'
+        axis, state, command = step(tick, observed_state=cs, intent_message=intent_message,
+                                    native_request_lat=requested, allowed=requested, native_request_long=False)
+        if gear != 'drive':
+          self.assertFalse(axis.desiredLateral or axis.lateralActive or command.latActive)
+        self.assertFalse(axis.longitudinalActive or command.longActive)
+        self.assertEqual(str(axis.faultReason), 'none')
+        self.assertTrue(receive(now, state=cs, axis=sd.pm.messages['aolAxisState'],
+                                event=sd.pm.messages['onroadEvents']))
+      self.assertTrue(axis.lateralActive and command.latActive)
+      self.assertFalse(state.enabled or state.active)

@@ -235,9 +235,10 @@ class SourceState:
   expires_ns: int
   cp_sha256: str
   calibration: tuple[float, ...] = ()
+  calibration_generation: str = ''
 
 
-def read_source(cp, params, *, now_ns, cp_sha256=None, calibration=(), vehicle_session=""):
+def read_source(cp, params, *, now_ns, cp_sha256=None, calibration=(), vehicle_session="", calibration_generation=''):
   """Only startup/separate-process settings work; errors disable learning."""
   cp_sha256 = car_params_digest(cp) if cp_sha256 is None else cp_sha256
   try:
@@ -294,8 +295,13 @@ def read_source(cp, params, *, now_ns, cp_sha256=None, calibration=(), vehicle_s
       unit = vehicle_session
     else:
       unit = vin
-    epoch = digest((tuple((key, None if raw is None else raw.hex()) for key, raw in snapshots), calibration, unit))
-    return SourceState(bool(preference.valid and preference.enabled), manual, reset, epoch, now_ns, now_ns + SOURCE_LEASE_NS, cp_sha256, calibration)
+    if type(calibration_generation) is not str or (calibration_generation and (
+        len(calibration_generation) != 32 or any(c not in '0123456789abcdef' for c in calibration_generation))):
+      raise ValueError('invalid calibration lifecycle')
+    frame_identity = calibration if not calibration_generation else ('live_vehicle_frame_v2', calibration_generation)
+    epoch = digest((tuple((key, None if raw is None else raw.hex()) for key, raw in snapshots), frame_identity, unit))
+    return SourceState(bool(preference.valid and preference.enabled), manual, reset, epoch, now_ns,
+                       now_ns + SOURCE_LEASE_NS, cp_sha256, calibration, calibration_generation)
   except (AttributeError, UnicodeError, TypeError, ValueError, OSError, OverflowError):
     return SourceState(False, False, '', '', now_ns, now_ns + SOURCE_LEASE_NS, cp_sha256)
 
@@ -464,12 +470,19 @@ def physical_observer(sm, cp, collector, now_ns):
     state_ns, delay_ns = int(sm.logMonoTime['carState']), int(sm.logMonoTime['lateralDelay'])
     if not 0 < state_ns <= now_ns or now_ns - state_ns > 100_000_000 or not 0 < delay_ns <= now_ns or now_ns - delay_ns > 500_000_000:
       return None
+    from openpilot.starpilot.flm.calibration_lifecycle import calibrated_basis
     generation = digest(tuple(float(v) for v in calibration.rpyCalib))
+    estimate = generation
+    lifecycle = getattr(collector, '_calibration_generation', '')
+    if lifecycle:
+      if calibrated_basis(calibration) is None:
+        return None
+      generation = digest(('live_vehicle_frame_v2', lifecycle))
     cache = getattr(collector, '_physical_calibrator', None)
-    if cache is None or cache[0] != generation:
+    if cache is None or cache[0] != estimate:
       calibrator = PoseCalibrator()
       calibrator.feed_extrinsics_calibration(calibration)
-      collector._physical_calibrator = (generation, calibrator)
+      collector._physical_calibrator = (estimate, calibrator)
     calibrator = collector._physical_calibrator[1]
     if not calibrator.calib_valid:
       return None

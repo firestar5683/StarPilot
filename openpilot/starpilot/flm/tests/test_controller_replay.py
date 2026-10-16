@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 from opendbc.car import structs, scale_rot_inertia, scale_tire_stiffness
 from opendbc.car.car_helpers import interfaces
@@ -71,7 +72,7 @@ def _assert_rows(test, actual, expected):
       test.assertAlmostEqual(value, frozen, places=8)
 
 
-def _trace(controller, cp, sequence):
+def _trace(controller, cp, sequence, *, historical_friction=False):
   vm = VehicleModel(cp)
   cs = structs.CarState.new_message()
   cs.gearShifter = structs.CarState.GearShifter.drive
@@ -81,7 +82,14 @@ def _trace(controller, cp, sequence):
     cs.vEgo = speed
     cs.steeringAngleDeg = angle
     cs.steeringPressed = pressed
-    torque, _, state = controller.update(active, cs, vm, params, limited, curvature, limited, 0.1)
+    # Historical vectors qualify the unchanged calibration/PID equations before
+    # the separately tested friction growth guard, not its new transients.
+    if historical_friction:
+      with mock.patch.object(selected_policy(controller), 'center_friction',
+                             side_effect=lambda friction, *args, **kwargs: friction):
+        torque, _, state = controller.update(active, cs, vm, params, limited, curvature, limited, 0.1)
+    else:
+      torque, _, state = controller.update(active, cs, vm, params, limited, curvature, limited, 0.1)
     rows.append((torque, state.desiredLateralAccel, state.desiredLateralJerk,
                  state.p, state.i, state.f, selected_policy(controller).directional_taper_filter.x))
   return rows
@@ -129,7 +137,7 @@ class TestIoniq6ControllerReplay(unittest.TestCase):
         with self.subTest(firmware=firmware, mode=mode):
           cp = _params(firmware_2025=fw)
           surface = Ioniq6Surface.validated("firmware_2025" if fw else "standard", _TUNED_KNOBS) if mode == "tuned" else None
-          actual = _trace(_controller(cp, surface, original_constructor_context=True), cp, sequence)
+          actual = _trace(_controller(cp, surface, original_constructor_context=True), cp, sequence, historical_friction=True)
           expected = _EXTENDED["cases"][f"{firmware}_{mode}"]
           _assert_rows(self, actual, expected)
 
@@ -148,8 +156,28 @@ class TestIoniq6ControllerReplay(unittest.TestCase):
           controller.update_torque_parameters(3.0, 0.0, 0.09)
           self.assertAlmostEqual(controller.pid.pos_limit, expected["after"]["posLimit"], places=8)
           self.assertAlmostEqual(controller.pid.neg_limit, expected["after"]["negLimit"], places=8)
-          actual = _trace(controller, cp, _EXTENDED["sequence"])
+          actual = _trace(controller, cp, _EXTENDED["sequence"], historical_friction=True)
           _assert_rows(self, actual, expected["rows"])
+
+  def test_guarded_extended_trace_preserves_model_pid_inputs_and_manual_surface(self):
+    for firmware, fw in (("2023", False), ("2025", True)):
+      for mode in ("default", "tuned"):
+        with self.subTest(firmware=firmware, mode=mode):
+          cp = _params(firmware_2025=fw)
+          surface = Ioniq6Surface.validated("firmware_2025" if fw else "standard", _TUNED_KNOBS) if mode == "tuned" else None
+          controller = _controller(cp, surface, original_constructor_context=True)
+          tune = controller.torque_params.to_dict()
+          actual = _trace(controller, cp, _EXTENDED["sequence"])
+          expected = _EXTENDED["cases"][f"{firmware}_{mode}"]
+          for row, reference in zip(actual, expected, strict=True):
+            for index in (1, 2, 3, 6):
+              self.assertAlmostEqual(row[index], reference[index], places=8)
+            self.assertLessEqual(abs(row[0]), controller.steer_max)
+          if mode == "tuned":
+            _assert_rows(self, actual, expected)
+          else:
+            self.assertTrue(any(abs(row[5] - ref[5]) > 1e-8 for row, ref in zip(actual, expected, strict=True)))
+          self.assertEqual(controller.torque_params.to_dict(), tune)
 
   def test_current_startup_and_equal_live_update_use_compensated_limits(self):
     for firmware, fw in (("2023", False), ("2025", True)):

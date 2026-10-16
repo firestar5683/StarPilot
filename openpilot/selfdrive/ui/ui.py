@@ -94,6 +94,8 @@ def main():
             controllers.close()
         finally:
           layout.close()
+    elif BIG_UI:
+      layout.close()
 
 
 if __name__ == "__main__":

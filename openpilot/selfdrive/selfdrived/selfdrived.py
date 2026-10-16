@@ -1029,7 +1029,7 @@ class SelfdriveD:
     drive = int(self.sm['deviceState'].startedMonoTime) if self.sm['deviceState'].started else 0
     switchback = bool(self.switchback_capable and self.sm.seen['slcState'] and self.sm.alive['slcState'] and
                       self.sm.valid['slcState'] and self.sm['carControl'].latActive and
-                      self.switchback_status.sample(self.sm['slcState'], drive_id=drive, now_ns=now_ns,
+                      self.switchback_status.sample_state(self.sm['slcState'], drive_id=drive, now_ns=now_ns,
                         event_ns=int(self.sm.logMonoTime['slcState'])))
     if now_ns - self.switchback_setting_ns >= 1_000_000_000:
       self.switchback_setting_ns = now_ns

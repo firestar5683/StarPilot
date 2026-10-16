@@ -47,7 +47,7 @@ class PanelInfo:
 
 
 class SettingsLayout(Widget):
-  def __init__(self):
+  def __init__(self, on_open_arabesque: Callable | None = None, arabesque_available: Callable[[], bool] = lambda: False):
     super().__init__()
     self._current_panel = PanelType.DEVICE
 
@@ -61,7 +61,7 @@ class SettingsLayout(Widget):
       PanelType.TOGGLES: PanelInfo(tr_noop("Toggles"), TogglesLayout()),
       PanelType.SOFTWARE: PanelInfo(tr_noop("Software"), SoftwareLayout()),
       PanelType.FIREHOSE: PanelInfo(tr_noop("Firehose"), FirehoseLayout()),
-      PanelType.DEVELOPER: PanelInfo(tr_noop("Developer"), DeveloperLayout()),
+      PanelType.DEVELOPER: PanelInfo(tr_noop("Developer"), DeveloperLayout(on_open_arabesque, arabesque_available)),
     }
 
     self._font_medium = gui_app.font(FontWeight.MEDIUM)

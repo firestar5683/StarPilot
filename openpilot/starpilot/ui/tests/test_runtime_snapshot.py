@@ -989,5 +989,25 @@ class TestParkedClockDomains(unittest.TestCase):
     self.assertTrue(self.parked())
 
 
+class TestHostOffroad(unittest.TestCase):
+  def test_only_private_parked_host_ui_has_authority_without_publishers(self):
+    env = {'SP_HOST_PARKED': '1', 'SP_HOST_RUNTIME': '1', 'OPENPILOT_PREFIX': 'starpilot-dev-test', 'SP_HOST_PREFIX': 'starpilot-dev-test'}
+    for overrides, expected in (({}, True), ({'SP_HOST_PARKED': '0'}, False), ({'SP_HOST_RUNTIME': '0'}, False),
+                                ({'SP_HOST_PREFIX': 'other'}, False), ({'OPENPILOT_PREFIX': ''}, False)):
+      with self.subTest(overrides=overrides), patch.dict('os.environ', {**env, **overrides}, clear=True):
+        ui = ui_fake()
+        ui.started = False
+        ui.sm = SubMasterFake()
+        adapter = RuntimeSnapshotAdapter(ui)
+        self.assertEqual(adapter.confirmed_offroad(), expected)
+        self.assertEqual(adapter.build(ShellMode.HOME).device.offroad, expected)
+        ui.started = True
+        self.assertFalse(adapter.confirmed_offroad())
+        ui.started = False
+        ui.replay_clock = object()
+        self.assertFalse(adapter.confirmed_offroad())
+        self.assertFalse(adapter.build(ShellMode.HOME).device.offroad)
+
+
 if __name__ == "__main__":
   unittest.main()

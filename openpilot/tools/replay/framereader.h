@@ -82,5 +82,6 @@ public:
 private:
   std::unique_ptr<V4LDecoder> v4l_decoder;
   bool decoded_ = false;
+  bool drained_ = false;  // Survives reader eviction.
 };
 #endif

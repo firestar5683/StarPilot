@@ -161,12 +161,13 @@ def current_native(sm, CP, *, now_ns: int, axis_session_id: str | None = None):
 
 
 def known_reverse_pause(car_state, samples=()) -> bool:
+  """Include the known Neutral transition into and out of Reverse."""
   states = [car_state, *(state for state, _ in samples)]
   gears = car.CarState.GearShifter
   return bool(all(valid for _, valid in samples) and
-              any(state.gearShifter == gears.reverse for state in states) and
+              any(state.gearShifter in (gears.neutral, gears.reverse) for state in states) and
               all(state.canValid and not state.canTimeout and state.gearShifter in
-                  (gears.drive, gears.low, gears.sport, gears.brake, gears.reverse) for state in states))
+                  (gears.drive, gears.low, gears.sport, gears.brake, gears.neutral, gears.reverse) for state in states))
 
 
 def decide_axes(*, standard_lateral: bool, standard_longitudinal: bool, intent,

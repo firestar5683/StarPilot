@@ -42,17 +42,20 @@ def _row_action(row, apply, section):
                         token, (lambda: apply(request)) if allowed else None, section)
 
 
-def mapped_actions(feature_snapshot, feature_apply, appearance_snapshot, appearance_apply):
+def mapped_actions(feature_snapshot, feature_apply, appearance_snapshot, appearance_apply, *, requested_keys=None):
   actions = {}
   for page, keys in FEATURE_KEYS.items():
+    if requested_keys is not None and not requested_keys.intersection(keys):
+      continue
     state = feature_snapshot(page)
     for row in state.rows:
-      if row.key in keys:
+      if row.key in keys and (requested_keys is None or row.key in requested_keys):
         actions[row.key] = _row_action(row, feature_apply, state.title)
-  appearance = appearance_snapshot()
-  for row in appearance.rows:
-    if row.key in APPEARANCE_KEYS:
-      actions[row.key] = _row_action(row, appearance_apply, "Visual")
+  if requested_keys is None or requested_keys.intersection(APPEARANCE_KEYS):
+    appearance = appearance_snapshot()
+    for row in appearance.rows:
+      if row.key in APPEARANCE_KEYS and (requested_keys is None or row.key in requested_keys):
+        actions[row.key] = _row_action(row, appearance_apply, "Visual")
   actions[BOOKMARK] = FavoriteAction(BOOKMARK, "Bookmark", reason="Use this control on the device")
   actions[EXPERIMENTAL] = FavoriteAction(EXPERIMENTAL, "Experimental Mode", kind="toggle", state_label="On device",
                                         reason="Use this control on the device")
@@ -64,4 +67,4 @@ def mapped_actions(feature_snapshot, feature_apply, appearance_snapshot, appeara
                      (TRAFFIC, "Traffic Mode"), (SWITCHBACK, "Switchback Mode"), (SCREEN_OFF, "Toggle Screen Off"), (SELFIE, "Selfie")):
     actions[key] = FavoriteAction(key, label, kind="toggle" if key in (TRAFFIC, SWITCHBACK, SCREEN_OFF) else "action",
                                   reason="Use the qualified control on the device", section="Driving")
-  return actions
+  return actions if requested_keys is None else {key: action for key, action in actions.items() if key in requested_keys}

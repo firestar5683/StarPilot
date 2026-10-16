@@ -223,6 +223,11 @@ def result_message(result, session, sequence, now_ns, *, replay_validation=None)
       raise ValueError('profile bound')
     if any(not finite(p.excitation_floor) or p.excitation_floor <= 0 for p in profile.parameters):
       raise ValueError('profile excitation floor')
+    if any(not all(finite(v) for v in (p.low, p.high, p.max_step, p.slew_per_s, coefficient))
+           or p.low > p.high or p.max_step <= 0 or p.slew_per_s <= 0
+           or not p.low <= coefficient <= p.high or abs(coefficient) > p.max_step
+           for p, coefficient in zip(profile.parameters, profile.coefficients, strict=True)):
+      raise ValueError('profile parameter bound')
     if not replay_accepts(replay_validation, profile):
       raise ValueError('actual replay validation required')
     value.status = 'qualifiedFit' if result.status == 'qualified' else 'rejected'
@@ -331,10 +336,12 @@ def write_source_receipt(event, source):
     not identity(source.cp_sha256) or type(source.observed_ns) is not int or not 0 < source.observed_ns <= source.expires_ns <= source.observed_ns + 500_000_000
   ):
     raise ValueError('source receipt bounds')
+  if source.calibration_generation and not _calibration_generation(source.calibration_generation):
+    raise ValueError('calibration lifecycle generation')
   if source.enabled and (not identity(source.source_epoch) or not source.reset):
     raise ValueError('enabled source receipt identity')
   event.autoSteeringLearning.learning.sourceReceipt = {
-    'version': VERSION,
+    'version': 2 if source.calibration_generation else VERSION,
     'enabled': source.enabled,
     'manual': source.manual,
     'resetGeneration': source.reset,
@@ -343,11 +350,13 @@ def write_source_receipt(event, source):
     'validUntilMonoTime': source.expires_ns,
     'cpSha256': source.cp_sha256,
     'calibrationBasis': source.calibration,
+    'calibrationGeneration': source.calibration_generation,
   }
 
 
 def _read_native_source_receipt(row, now_ns, cp_sha256, source_type):
-  if row.version != VERSION:
+  version = row.version
+  if version not in (VERSION, 2):
     return None
   cp = str(row.cpSha256)
   if cp != cp_sha256 or not identity(cp):
@@ -382,7 +391,14 @@ def _read_native_source_receipt(row, now_ns, cp_sha256, source_type):
   manual = bool(row.manual)
   if not enabled:
     epoch = str(row.sourceEpoch)
-  return source_type(enabled, manual, reset, epoch, observed, expires, cp, tuple(calibration))
+  generation = str(row.calibrationGeneration) if version == 2 else ''
+  if version == 2 and not _calibration_generation(generation):
+    return None
+  return source_type(enabled, manual, reset, epoch, observed, expires, cp, tuple(calibration), generation)
+
+
+def _calibration_generation(value):
+  return type(value) is str and len(value) == 32 and all(c in '0123456789abcdef' for c in value)
 
 
 def read_source_receipt(event, *, now_ns, cp_sha256):
@@ -394,8 +410,11 @@ def read_source_receipt(event, *, now_ns, cp_sha256):
   if (type(row) is _DynamicStructReader and row.schema == custom.AutomaticLearningSourceReceipt.schema
       and type(now_ns) is int and type(cp_sha256) is str):
     return _read_native_source_receipt(row, now_ns, cp_sha256, SourceState)
+  version = row.version
+  if version == 2:
+    return _read_native_source_receipt(row, now_ns, cp_sha256, SourceState)
   if (
-    row.version != VERSION
+    version != VERSION
     or str(row.cpSha256) != cp_sha256
     or not identity(str(row.cpSha256))
     or not 0 < row.observedMonoTime <= now_ns <= row.validUntilMonoTime <= row.observedMonoTime + 500_000_000

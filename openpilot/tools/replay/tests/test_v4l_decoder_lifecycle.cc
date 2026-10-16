@@ -52,6 +52,7 @@ struct Fixture {
   }
 };
 Fixture *Fixture::current = nullptr;
+int decoder_opens = 0;
 
 void complete_format(v4l2_format *format) {
   auto &pixel = format->fmt.pix_mp;
@@ -76,6 +77,7 @@ extern "C" void __wrap_av_packet_unref(AVPacket *packet) {
 }
 
 extern "C" int __wrap_open(const char *path, int flags, ...) {
+  if (std::strcmp(path, V4LDecoder::DEVICE) == 0) ++decoder_opens;
   mode_t mode = 0;
   bool needs_mode = (flags & O_CREAT) != 0;
 #ifdef O_TMPFILE
@@ -350,10 +352,57 @@ void test_frame_reader_ioctl_exception_releases_packet() {
   }
   fixture.check_clean(24, 1);
 }
+
+// Hardware test: two consecutive HEVC segments.
+void test_evicted_reader_handoff(const char *first, const char *second) {
+  auto previous = std::make_unique<FrameReader>();
+  REQUIRE(previous->loadFromFile(NarrowRoadCam, first, false));
+  REQUIRE(dynamic_cast<V4LVideoDecoder *>(previous->decoder_.get()) != nullptr);
+  REQUIRE(previous->getFrameCount() > 2);
+  std::vector<uint8_t> pixels(previous->width * previous->height * 3 / 2);
+  VisionBuf buffer;
+  buffer.width = buffer.stride = previous->width;
+  buffer.height = previous->height;
+  buffer.y = pixels.data();
+  buffer.uv = pixels.data() + buffer.width * buffer.height;
+  REQUIRE(previous->get(previous->getFrameCount() - 1, &buffer));
+  auto decoder = previous->decoder_;
+  previous.reset();
+  CHECK(decoder->active_reader_ == nullptr);
+
+  auto next = std::make_unique<FrameReader>();
+  REQUIRE(next->loadFromFile(NarrowRoadCam, second, false));
+  REQUIRE(next->decoder_ == decoder);
+  REQUIRE(next->getFrameCount() > 2);
+  int before = decoder_opens;
+  REQUIRE(next->get(0, &buffer));
+  CHECK(decoder_opens == before);
+  const auto first_pixels = pixels;
+
+  REQUIRE(next->get(1, &buffer));
+  before = decoder_opens;
+  REQUIRE(next->get(0, &buffer));
+  CHECK(decoder_opens == before + 1);
+  CHECK(pixels == first_pixels);
+
+  REQUIRE(next->get(1, &buffer));
+  next.reset();
+  FrameReader partial;
+  REQUIRE(partial.loadFromFile(NarrowRoadCam, first, false));
+  REQUIRE(partial.decoder_ == decoder);
+  before = decoder_opens;
+  REQUIRE(partial.get(0, &buffer));
+  CHECK(decoder_opens == before + 1);
+}
 }  // namespace
 
-int main() {
-  return run_native_test([] {
+int main(int argc, char **argv) {
+  return run_native_test([&] {
+    REQUIRE(argc == 1 || argc == 3);
+    if (argc == 3) {
+      test_evicted_reader_handoff(argv[1], argv[2]);
+      return;
+    }
     test_uninitialized_destructor();
     test_repeated_init_and_destruction();
     test_open_failure_does_not_close_stdin();

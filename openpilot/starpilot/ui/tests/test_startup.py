@@ -51,11 +51,12 @@ class TestStartup(unittest.TestCase):
       events.append("window")
 
     with patch.object(ui, "select_ui", side_effect=selection), patch.object(ui.gui_app, "init_window", side_effect=window), \
-         patch.object(ui.gui_app, "render", return_value=iter(())), patch.object(ui, "MainLayout", return_value=object()), \
+         patch.object(ui.gui_app, "render", return_value=iter(())), patch.object(ui, "MainLayout") as layout, \
          patch.object(ui, "MiciMainLayout", return_value=object()), patch.object(ui.messaging, "PubMaster"), \
          patch.object(ui, "config_realtime_process"), patch.object(ui, "BIG_UI", True):
       ui.main()
     self.assertEqual(events, ["select:large", "window"])
+    layout.return_value.close.assert_called_once_with()
 
     with patch.object(ui, "select_ui", side_effect=RuntimeError("bad reviewed font")), \
          patch.object(ui.gui_app, "init_window") as initialize, patch.object(ui, "config_realtime_process"):
@@ -72,7 +73,7 @@ class TestStartup(unittest.TestCase):
            patch.object(ui, "select_ui", return_value=startup.UiSelection(False, "fixture")), \
            patch.object(ui.gui_app, "init_window"), \
            patch.object(ui.gui_app, "render", return_value=iter(((False, 0., 0.), (True, .01, .005), (True, .01, .005)))), \
-           patch.object(ui, "MainLayout", return_value=object()), patch.object(ui, "MiciMainLayout", return_value=object()), \
+           patch.object(ui, "MainLayout"), patch.object(ui, "MiciMainLayout", return_value=object()), \
            patch.object(ui.messaging, "PubMaster"), patch.object(ui, "config_realtime_process") as realtime, \
            patch.object(ui, "drop_realtime") as normal, patch.object(ui.os, "setpriority") as nice, \
            patch.object(ui.os, "sched_getscheduler", return_value=0, create=True), \

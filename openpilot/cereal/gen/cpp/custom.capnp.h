@@ -1502,7 +1502,7 @@ struct AutomaticLearningSourceReceipt {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(9fe2d23e75805149, 3, 4)
+    CAPNP_DECLARE_STRUCT_HEADER(9fe2d23e75805149, 3, 5)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -10792,6 +10792,9 @@ public:
   inline bool hasCalibrationBasis() const;
   inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getCalibrationBasis() const;
 
+  inline bool hasCalibrationGeneration() const;
+  inline  ::capnp::Text::Reader getCalibrationGeneration() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -10863,6 +10866,13 @@ public:
   inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initCalibrationBasis(unsigned int size);
   inline void adoptCalibrationBasis(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
   inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownCalibrationBasis();
+
+  inline bool hasCalibrationGeneration();
+  inline  ::capnp::Text::Builder getCalibrationGeneration();
+  inline void setCalibrationGeneration( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initCalibrationGeneration(unsigned int size);
+  inline void adoptCalibrationGeneration(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownCalibrationGeneration();
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -26363,6 +26373,40 @@ inline void AutomaticLearningSourceReceipt::Builder::adoptCalibrationBasis(
 inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> AutomaticLearningSourceReceipt::Builder::disownCalibrationBasis() {
   return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
       ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline bool AutomaticLearningSourceReceipt::Reader::hasCalibrationGeneration() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutomaticLearningSourceReceipt::Builder::hasCalibrationGeneration() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutomaticLearningSourceReceipt::Reader::getCalibrationGeneration() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutomaticLearningSourceReceipt::Builder::getCalibrationGeneration() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void AutomaticLearningSourceReceipt::Builder::setCalibrationGeneration( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutomaticLearningSourceReceipt::Builder::initCalibrationGeneration(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), size);
+}
+inline void AutomaticLearningSourceReceipt::Builder::adoptCalibrationGeneration(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutomaticLearningSourceReceipt::Builder::disownCalibrationGeneration() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
 }
 
 inline  ::uint16_t LearningApplication::Reader::getVersion() const {

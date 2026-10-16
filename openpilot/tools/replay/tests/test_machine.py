@@ -394,7 +394,11 @@ time.sleep(30)
       deadline = time.monotonic() + 3
       while time.monotonic() < deadline:
         path = Path(f"/proc/{child}/stat")
-        if not path.exists() or path.read_text().split()[2] == "Z":
+        try:
+          state = path.read_text().split()[2]
+        except (FileNotFoundError, ProcessLookupError):
+          break
+        if state == "Z":
           break
         time.sleep(.02)
       else:

@@ -108,3 +108,24 @@ class TestFeedbackIntentBoundary(unittest.TestCase):
         self.assert_expired_commands_off(controls, changed.as_reader(), now)
         self.assertFalse(receive(now, axis=changed.as_reader(), event=self.event_at(now, name), state=state))
         self.assertFalse(card.aol_card_intent.allowed_latch)
+
+  def test_sustained_brake_refreshes_healthy_lateral_baseline_before_output_gap(self):
+    with OpenpilotPrefix():
+      sd, controls, step, card, receive = self._ioniq_availability_callers()
+      for tick in range(2, 32):
+        axis, _, command = step(tick, brake=True, native_request_long=False)
+        self.assertTrue(axis.lateralActive and command.latActive)
+        self.assertFalse(axis.longitudinalActive or command.longActive)
+        self.assertTrue(receive(10_000_000_000 + tick * 10_000_000,
+                                axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'],
+                                state=availability.car_state(brake=True)))
+      proof = sd.pm.messages['aolAxisState']
+      deadline = proof.aolAxisState.validUntilMonoTime
+      now = deadline + 2_477_787
+      step(34, offset_ns=2_477_787, brake=True, native_request_long=False)
+      self.assert_expired_commands_off(controls, proof, now)
+      self.assertTrue(receive(now, axis=proof, event=sd.pm.messages['onroadEvents'],
+                              state=availability.car_state(brake=True)))
+      self.assertTrue(card.aol_card_intent.allowed_latch)
+      self.assertFalse(card.aol_transport_feedback.failed)
+      self.assertEqual(proof.aolAxisState.validUntilMonoTime, deadline)

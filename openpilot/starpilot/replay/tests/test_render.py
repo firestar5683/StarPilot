@@ -80,7 +80,7 @@ def test_recorded_camera_preview_does_not_require_initial_device_state(frame_rea
   core.ui = SimpleNamespace(replay_sample=ClockSample(100, 100, 100, epoch=2, valid=True),
                             sm=SimpleNamespace(seen={'extrinsicsCalibration': False}))
   core.last_route_frame = None
-  core.context = core.placement = Mock()
+  core.context = Mock()
   core.adapter = Mock()
   core.adapter.build.return_value = SimpleNamespace(onroad=Onroad())
   core._primary_matches = Mock(return_value=frame_ready)
@@ -142,7 +142,7 @@ def draw_core(request):
   core.camera._poll_camera.side_effect = lambda: CameraView._poll_camera(core.camera)
   core.last_route_frame = None
   core.render_receipts = {'modelV2': 1}
-  core.context, core.placement, core.adapter = Mock(), Mock(), Mock()
+  core.context, core.adapter = Mock(), Mock()
   core.adapter.build.return_value = SimpleNamespace(onroad=OnroadState(True, False, 15., 80., SpeedLimitObservation()))
   core.rl, core.content = Mock(), Mock()
   core.gui = SimpleNamespace(_render_prepare=[Mock()], _frame=0)

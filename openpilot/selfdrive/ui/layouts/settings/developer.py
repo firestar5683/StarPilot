@@ -1,9 +1,11 @@
+from collections.abc import Callable
+
 from openpilot.common.params import Params
 from openpilot.starpilot.car.hyundai.aol import ioniq6_settings_capable
 from openpilot.selfdrive.ui.widgets.ssh_key import ssh_key_item
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.list_view import toggle_item
+from openpilot.system.ui.widgets.list_view import button_item, toggle_item
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.lib.application import gui_app
@@ -31,7 +33,7 @@ DESCRIPTIONS = {
 
 
 class DeveloperLayout(Widget):
-  def __init__(self):
+  def __init__(self, on_open_arabesque: Callable | None = None, arabesque_available: Callable[[], bool] = lambda: False):
     super().__init__()
     self._params = Params()
     self._is_release = self._params.get_bool("IsReleaseBranch")
@@ -93,6 +95,8 @@ class DeveloperLayout(Widget):
     self._on_enable_ui_debug(self._params.get_bool("ShowDebugInfo"))
 
     self._scroller = Scroller([
+      button_item("Arabesque", lambda: tr("OPEN"), callback=on_open_arabesque,
+                  enabled=lambda: on_open_arabesque is not None and arabesque_available()),
       self._adb_toggle,
       self._ssh_toggle,
       self._ssh_keys,
