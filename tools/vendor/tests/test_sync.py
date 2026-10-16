@@ -136,6 +136,32 @@ class TestSourceSync(unittest.TestCase):
     self.assertEqual((self.repo / 'jetlink_repo/upstream.txt').read_text(), 'extension upstream update\n')
     self.assertEqual(self.git(self.repo, 'diff', '--name-only'), b'')
 
+  def test_include_list_imports_only_listed_paths(self):
+    (self.source / "keep").mkdir()
+    (self.source / "keep/a.txt").write_text("base\n")
+    base = self.commit(self.source)
+    entry = next(e for e in self.manifest["dependencies"] if e["path"] == "panda")
+    entry.update(commit=base, tree=self.git(self.source, "rev-parse", "HEAD^{tree}").strip().decode(), include=["keep", "run.sh"])
+    shutil.rmtree(self.repo / "panda")
+    (self.repo / "panda/keep").mkdir(parents=True)
+    (self.repo / "panda/keep/a.txt").write_text("base\n")
+    shutil.copy2(self.source / "run.sh", self.repo / "panda/run.sh")
+    self.write_manifest()
+    self.commit(self.repo)
+    (self.source / "keep/a.txt").write_text("upstream\n")
+    (self.source / "keep/new.txt").write_text("new\n")
+    (self.source / "upstream.txt").write_text("outside the list\n")
+    self.commit(self.source)
+    self.assertEqual(set(self.update()["changed_files"]), {"keep/a.txt", "keep/new.txt"})
+    files = sorted(p.relative_to(self.repo / "panda").as_posix() for p in (self.repo / "panda").rglob("*") if p.is_file())
+    self.assertEqual(files, ["keep/a.txt", "keep/new.txt", "run.sh"])
+    self.assertEqual((self.repo / "panda/keep/a.txt").read_text(), "upstream\n")
+    self.commit(self.repo)
+    (self.repo / "panda/stray.txt").write_text("not imported\n")
+    self.git(self.repo, "add", "--", "panda/stray.txt")
+    with self.assertRaisesRegex(ValueError, "outside its include list"):
+      validate_worktree(self.repo)
+
   def test_conflict_leaves_worktree_index_and_manifest_unchanged(self):
     (self.repo / "panda/local.txt").write_text("local side\n")
     self.commit(self.repo)

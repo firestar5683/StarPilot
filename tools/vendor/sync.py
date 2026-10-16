@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from openpilot.common.vendor_manifest import MANIFEST, SHA, dependency_entries, git, validate_worktree
+from openpilot.common.vendor_manifest import MANIFEST, SHA, dependency_entries, git, under, validate_worktree
 
 
 def run(repo: Path, *args: str, data: bytes | None = None) -> bytes:
@@ -26,7 +26,8 @@ def commit_tree(repo: Path, tree: str, parent: str | None = None) -> str:
   return run(repo, *args, data=b"Temporary source merge\n").decode().strip()
 
 
-def filtered_tree(repo: Path, revision: str, excluded: list[str]) -> str:
+def filtered_tree(repo: Path, revision: str, excluded: list[str], included: list[str] | None = None) -> str:
+  # With an include list, only the listed upstream paths are imported, less any exclusions.
   run(repo, "read-tree", revision)
   records = run(repo, "ls-files", "--stage", "-z").split(b"\0")
   remove = []
@@ -35,7 +36,7 @@ def filtered_tree(repo: Path, revision: str, excluded: list[str]) -> str:
       continue
     meta, path = record.split(b"\t", 1)
     name = path.decode()
-    if any(name == omit or name.startswith(omit + "/") for omit in excluded):
+    if under(name, excluded) or (included is not None and not under(name, included)):
       remove.append(path)
     elif meta.startswith(b"160000") or Path(name).name.lower() in (".gitmodules", "agents.md"):
       raise ValueError(f"Upstream snapshot contains unsupported metadata: {name}")
@@ -83,8 +84,8 @@ def sync(repo: Path, dependency: str, target: str, source_repo: Path | None = No
       objects = Path(run(source_path, "rev-parse", "--git-path", "objects").decode().strip())
       object_dirs.append(str(objects if objects.is_absolute() else (source_path / objects).resolve()))
     (scratch / ".git/objects/info/alternates").write_text("\n".join(object_dirs) + "\n")
-    base_tree = filtered_tree(scratch, entry["commit"], entry["exclude"])
-    incoming_tree = filtered_tree(scratch, target, entry["exclude"])
+    base_tree = filtered_tree(scratch, entry["commit"], entry["exclude"], entry.get("include"))
+    incoming_tree = filtered_tree(scratch, target, entry["exclude"], entry.get("include"))
     base = commit_tree(scratch, base_tree)
     ours = commit_tree(scratch, current_tree, base)
     theirs = commit_tree(scratch, incoming_tree, base)

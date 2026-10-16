@@ -6,7 +6,7 @@ Dependencies are ordinary folders in this repository. Clone normally, run
 `upstream-sync.json` records the last integrated upstream commit and its pristine
 tree for each dependency. A recorded tree identifies the merge base; it does not
 claim that the current folder is unchanged. Optional import exclusions are
-explicit. Required third-party license notices remain in the source folders.
+explicit, and an optional `include` list imports only the listed upstream paths. Required third-party license notices remain in the source folders.
 
 Run `python3 tools/vendor/check.py` to validate the tracked working tree, or add
 `--revision REV` to validate a fetched commit before checking it out. Validation

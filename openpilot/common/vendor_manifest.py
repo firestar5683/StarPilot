@@ -58,7 +58,10 @@ def parse_manifest(data: bytes | str) -> dict:
     excluded = entry.get("exclude")
     if not isinstance(excluded, list) or not all(isinstance(name, str) for name in excluded) or len(set(excluded)) != len(excluded):
       raise ValueError(f"Invalid exclusions for {path}")
-    for name in excluded:
+    included = entry.get("include", [])
+    if not isinstance(included, list) or not all(isinstance(name, str) for name in included) or len(set(included)) != len(included):
+      raise ValueError(f"Invalid inclusions for {path}")
+    for name in [*excluded, *included]:
       invalid_name = not name or name == "." or "\0" in name or name != PurePosixPath(name).as_posix()
       if invalid_name or any(p in ("..", ".git") for p in PurePosixPath(name).parts) or name.startswith("/"):
         raise ValueError(f"Unsafe exclusion for {path}")
@@ -75,6 +78,10 @@ def tree_entries(repo: Path | str, revision: str) -> dict[str, str]:
       meta, name = record.split(b"\t", 1)
       entries[name.decode()] = meta.split()[0].decode()
   return entries
+
+
+def under(name: str, paths: list[str]) -> bool:
+  return any(name == path or name.startswith(path + "/") for path in paths)
 
 
 def validate_layout(manifest: dict, entries: dict[str, str]) -> None:
@@ -95,6 +102,10 @@ def validate_layout(manifest: dict, entries: dict[str, str]) -> None:
     members = [name for name in entries if name.startswith(path + "/")]
     if path in entries or not members:
       raise ValueError(f"Missing tracked dependency folder: {path}")
+    if "include" in dependency:
+      included = [f"{path}/{name}" for name in dependency["include"]]
+      if outside := next((name for name in members if not under(name, included)), None):
+        raise ValueError(f"Dependency content outside its include list is tracked: {outside}")
     for excluded in dependency["exclude"]:
       prefix = f"{path}/{excluded}"
       if any(name == prefix or name.startswith(prefix + "/") for name in members):
