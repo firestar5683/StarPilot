@@ -274,7 +274,11 @@ def _default_slc_controls(profile: Profile, state: OnroadState) -> tuple[SlcCont
     # or to raise a set speed that sits below it.
     accepted = observation.accepted_speed_limit_mps
     adjusted = observation.presentation_adjusted_limit_mps or observation.speed_limit_mps
-    raises_set = state.cruise_active and state.cruise_kph is not None and state.cruise_kph / 3.6 < adjusted - 0.1
+    # Card selects whole display units. Compare those same units so its rounded
+    # set speed does not keep offering an already applied limit (e.g. 70 mph).
+    display_units = 3.6 if state.metric else 2.2369362921
+    raises_set = (state.cruise_active and state.cruise_kph is not None and
+                  round(state.cruise_kph / 3.6 * display_units) < round(adjusted * display_units))
     if (accepted is not None and abs(accepted - observation.speed_limit_mps) <= 0.02 and
         not observation.driver_override_active and not raises_set):
       return ()
