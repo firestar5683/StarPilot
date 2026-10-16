@@ -1,16 +1,16 @@
-# Test branch validation
+# Test results
 
-Base: official SecretGoodStarPilot `01fd37fa7509174d71a626f66fa5567b4603b00e`.
+The combined `secretgood-ios-integration` branch includes the iPhone app under `ios/` and the comma bridge here. It was synced with official SecretGood through `e62a518` when the combined PR was prepared.
 
-- 35 bridge/startup/pairing/proxy tests passed, including encrypted framing, ACK windows, reconnect credentials, per-handshake cookie isolation, authenticated mutation headers, explicit session expiry refresh, no network-error mutation replay, Wi-Fi-only restrictions, and respecting Bluetooth power preference.
-- 19 real Galaxy HTTP tests passed (16 existing authentication tests plus three new bridge/settings tests). New tests read the actual hub/runtime APIs and preview/confirm a disposable display preference. Cross-session intents are rejected.
-- 27 existing Bluetooth UI/status regression tests passed. The large-screen pure test fixture supplies the new phone-row dependency; other radio/device tests retain their original checks.
-- All new Python files compile; shell installer scripts pass syntax checks.
-- Upstream's AArch64/QCOM artifact validation passed. No shipped native binaries, models, control code or Galaxy web assets differ from the official base. No new device compile is required for these Python/UI additions.
-- The iPhone migration's bundled Galaxy files exactly match this comma base (excluding intentional runtime/sample data exclusions).
+Local checks passed:
 
-Host: macOS, isolated Python 3.12 environment. The unchanged Params library and messaging module were compiled for host tests only and are not committed. The real HTTP/UI tests use a test adapter that refuses construction of the device-only QCOM solver; those tests do not execute vehicle calculations. Source and device artifacts remain unchanged.
+- 38 bridge tests covering framing, encryption, notifications, pairing, startup, discovery and API forwarding.
+- Swift tests for Wi-Fi cookies, session refresh, device identity, read caching, reconnects and localhost recovery.
+- Galaxy asset checks and toggle search tests.
+- An unsigned iOS Simulator build.
 
-Not yet checked: boot/install on a physical comma, real BlueZ advertising/ATT performance, QR display/camera scan on device, iPhone 0.2.0 TestFlight installation, and CarPlay. The staged SSH installer has been reviewed and syntax checked, not executed on the user's comma. Passing these tests means ready for personal parked hardware testing, not device validation.
+Earlier checks on the initial SecretGood integration also passed 19 Galaxy HTTP tests and 27 Bluetooth UI/status tests. Those are historical results, not a rerun against every later upstream commit.
 
-Package wire implementation originates from `natehuby76/StarPilotBT:Nate/galaxybt-secretgood` at `11671f58c1e6c58b966bedcd04b1ef34823feb2d`; its protocol/crypto logic is retained and its proxy/startup/pairing integration is adapted to SecretGood. Persistent app keys remain in `/data/galaxy-ble`.
+Pairing, settings access and reconnects have had personal device testing. CarPlay, radio recovery and longer sessions across different phones and head units still need broader testing. Check the PR's CI results for the current commit; local test results do not establish that hosted CI passed.
+
+The bridge began in `natehuby76/StarPilotBT:Nate/galaxybt-secretgood` at `11671f58c1e6c58b966bedcd04b1ef34823feb2d`. Pairing keys stay in `/data/galaxy-ble`.
