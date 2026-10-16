@@ -31,8 +31,8 @@ class PhoneUITest(unittest.TestCase):
   def test_forget_one_phone_keeps_the_others(self):
     with tempfile.TemporaryDirectory() as directory:
       key_path = Path(directory) / 'pairing.json'
-      iphone = pairing.add_phone('iPhone', key_path)
-      android = pairing.add_phone('Android phone', key_path)
+      _, iphone = pairing.add_phone('iPhone', key_path)
+      _, android = pairing.add_phone('Android phone', key_path)
       with patch.object(phone_ui, 'load_phones', side_effect=lambda: pairing.load_phones(key_path)), \
            patch.object(phone_ui, 'remove_phone', side_effect=lambda phone_id: pairing.remove_phone(phone_id, key_path)):
         rows = phone_ui.paired_phones()

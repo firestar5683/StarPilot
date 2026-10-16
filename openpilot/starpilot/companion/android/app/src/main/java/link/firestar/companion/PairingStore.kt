@@ -11,6 +11,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 class PairingStore(context: Context) {
+    companion object { private val PHONE_ID = Regex("[0-9a-f]{8}") }
     private val prefs = context.getSharedPreferences("bluetooth-pairing", Context.MODE_PRIVATE)
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -21,12 +22,19 @@ class PairingStore(context: Context) {
             generateKey()
         }
     }
-    fun save(value: ByteArray) {
+    /** [id] is comma's id for this phone's key (newer comma). The id it replaces is kept so comma can drop that entry. */
+    fun save(value: ByteArray, id: String? = null) {
         require(value.size == 32)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
-        prefs.edit().remove("deviceAddress").putString("key", Base64.getEncoder().encodeToString(cipher.iv + cipher.doFinal(value))).commit()
+        val previous = id()
+        prefs.edit().remove("deviceAddress").putString("key", Base64.getEncoder().encodeToString(cipher.iv + cipher.doFinal(value)))
+            .apply { if (id != null && PHONE_ID.matches(id)) putString("id", id) else remove("id") }
+            .apply { if (previous != null && previous != id) putString("previousId", previous) else remove("previousId") }
+            .commit()
     }
+    fun id(): String? = prefs.getString("id", null)?.takeIf { PHONE_ID.matches(it) }
+    fun previousId(): String? = prefs.getString("previousId", null)?.takeIf { PHONE_ID.matches(it) }
     fun load(): ByteArray? = try {
         prefs.getString("key", null)?.let {
             val value = Base64.getDecoder().decode(it)

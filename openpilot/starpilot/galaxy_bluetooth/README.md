@@ -13,6 +13,20 @@ Comma side of the Android and iPhone companion apps (`openpilot/starpilot/compan
 - `bridge/pairing.py` — the shared pairing key, `/data/galaxy-ble/pairing.json`.
 - `phone_ui.py` — pairing code and setup status in comma Settings → Bluetooth.
 
+## Per-phone keys
+
+Every phone has its own key in `/data/galaxy-ble/pairing.json`, so a phone can be
+forgotten on its own (Settings → Bluetooth). Two optional app fields keep the list
+tidy; older apps without them still work:
+
+- The pairing code / Android pairing response includes `"id"` (8 hex characters),
+  comma's id for that phone's key. Apps should store it with the key.
+- With its first Bluetooth request (the `/_bridge/health` check), an app may add
+  `"phone": {"name": "Danny's iPhone", "replaces": "<id of its previous key>"}`
+  inside the encrypted request. comma shows the name in its phone list and removes
+  the replaced entry. Android also sends `name` and `replaces` with
+  `POST /api/companion/bluetooth` over Galaxy Wi-Fi.
+
 ## Troubleshooting on comma
 
 ```sh

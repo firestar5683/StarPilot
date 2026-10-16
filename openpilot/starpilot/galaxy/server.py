@@ -1449,7 +1449,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         if not self.direct_local() or getattr(self.server, 'remote_transport', False):
           self.json(403, {'error': 'Pair over Galaxy Wi-Fi or a trusted LAN'})
           return
-        if not isinstance(payload, dict) or set(payload) != {'rotate'} or type(payload['rotate']) is not bool:
+        if (not isinstance(payload, dict) or 'rotate' not in payload or set(payload) - {'rotate', 'name', 'replaces'}
+            or type(payload['rotate']) is not bool or not all(type(payload.get(key, '')) is str for key in ('name', 'replaces'))):
           self.json(400, {'error': 'Expected rotate boolean'})
           return
         with effect_lock:
@@ -1458,7 +1459,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             return
           try:
             from openpilot.starpilot.galaxy.companion import bluetooth_pairing
-            self.json(200, bluetooth_pairing(payload['rotate']))
+            self.json(200, bluetooth_pairing(payload['rotate'], name=payload.get('name'), replaces=payload.get('replaces')))
           except (OSError, ValueError):
             self.json(503, {'error': 'Bluetooth pairing unavailable'})
         return

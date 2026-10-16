@@ -431,8 +431,13 @@ class MainActivity : Activity() {
         require(value.getString("type") == "galaxy-bluetooth" && value.getInt("version") == 1)
         val hex = value.getString("key")
         require(hex.matches(Regex("[0-9a-fA-F]{64}")))
-        pairing.save(hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray())
+        pairing.save(hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray(), value.optString("id").ifEmpty { null })
     }
+    /** How comma lists this phone under Settings → Bluetooth, e.g. "Danny's Pixel 8". */
+    private fun phoneName(): String =
+        (Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: "${Build.MANUFACTURER} ${Build.MODEL}").take(40)
+    private fun phoneHello(): JSONObject = JSONObject().put("name", phoneName()).apply { pairing.previousId()?.let { put("replaces", it) } }
     private fun pairOverWifi(rotate: Boolean) {
         val generation = connectionGeneration.get()
         val wifi = Networks.wifi(this) ?: Networks.wifi(this, false)
@@ -451,26 +456,34 @@ class MainActivity : Activity() {
                     check(auth.responseCode == 200) { "Galaxy authentication failed" }
                     auth.getHeaderField("Set-Cookie")?.substringBefore(';') ?: error("Galaxy session unavailable")
                 } finally { auth.disconnect() }
-                val call = connection("/api/companion/bluetooth")
-                val result = try {
-                    call.requestMethod = "POST"; call.doOutput = true
-                    call.setRequestProperty("Cookie", cookie); call.setRequestProperty("Content-Type", "application/json")
-                    call.outputStream.use { it.write(JSONObject().put("rotate", rotate).toString().toByteArray()) }
-                    val status = call.responseCode
-                    val body = (if (status == 200) call.inputStream else call.errorStream).use { input ->
-                        val bytes = java.io.ByteArrayOutputStream()
-                        val buffer = ByteArray(1024)
-                        while (true) {
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            require(bytes.size() + count <= 8192) { "Invalid pairing response" }
-                            bytes.write(buffer, 0, count)
+                fun post(payload: JSONObject): Pair<Int, JSONObject> {
+                    val call = connection("/api/companion/bluetooth")
+                    try {
+                        call.requestMethod = "POST"; call.doOutput = true
+                        call.setRequestProperty("Cookie", cookie); call.setRequestProperty("Content-Type", "application/json")
+                        call.outputStream.use { it.write(payload.toString().toByteArray()) }
+                        val status = call.responseCode
+                        val body = (if (status == 200) call.inputStream else call.errorStream).use { input ->
+                            val bytes = java.io.ByteArrayOutputStream()
+                            val buffer = ByteArray(1024)
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                require(bytes.size() + count <= 8192) { "Invalid pairing response" }
+                                bytes.write(buffer, 0, count)
+                            }
+                            bytes.toByteArray()
                         }
-                        bytes.toByteArray()
-                    }
-                    val value = JSONObject(String(body))
-                    check(status == 200) { value.optString("error", "Pairing failed") }; value
-                } finally { call.disconnect() }
+                        return status to JSONObject(String(body))
+                    } finally { call.disconnect() }
+                }
+                // Newer comma names this phone and replaces its previous key instead of adding another phone.
+                val payload = JSONObject().put("rotate", rotate)
+                if (!rotate) { payload.put("name", phoneName()); pairing.id()?.let { payload.put("replaces", it) } }
+                var (status, value) = post(payload)
+                if (status == 400 && !rotate) { val retry = post(JSONObject().put("rotate", false)); status = retry.first; value = retry.second }  // older comma
+                check(status == 200) { value.optString("error", "Pairing failed") }
+                val result = value
                 if (!rotate && generation != connectionGeneration.get()) return@Thread
                 if (rotate) { pairing.forget(); ble?.close() } else savePairing(result)
                 runOnUiThread {
@@ -511,7 +524,7 @@ class MainActivity : Activity() {
             detail("Keep Bluetooth on for comma and this phone. Bluetooth opens Galaxy controls; maps and video need Wi-Fi.")
         }
         Thread {
-            var transport = BleTransport(this, key)
+            var transport = BleTransport(this, key, phoneHello())
             if (generation != connectionGeneration.get()) { transport.close(); return@Thread }
             ble = transport
             try {
@@ -519,7 +532,7 @@ class MainActivity : Activity() {
                 val device = try { transport.connect(remembered) } catch (first: Exception) {
                     if (remembered == null || generation != connectionGeneration.get()) throw first
                     transport.close()
-                    transport = BleTransport(this, key)
+                    transport = BleTransport(this, key, phoneHello())
                     ble = transport
                     transport.connect()
                 }

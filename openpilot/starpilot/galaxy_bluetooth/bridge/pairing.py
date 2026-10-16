@@ -10,6 +10,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import stat
 import tempfile
@@ -21,6 +22,20 @@ MAX_FILE_BYTES = 16384
 LEGACY_ID = "legacy"
 LEGACY_LABEL = "Phones paired before update"
 UNUSED_GRACE = datetime.timedelta(hours=1)  # A code that was shown but never scanned.
+PHONE_ID = re.compile(r"[0-9a-f]{8}")
+
+
+def clean_name(name):
+  """A phone-supplied name, safe to show in comma's UI, or None."""
+  if not isinstance(name, str):
+    return None
+  name = "".join(ch for ch in name if ch.isprintable()).strip()[:40]
+  return name or None
+
+
+def valid_replaces(phone_id):
+  # Only per-phone ids; the shared pre-update entry may still serve other phones.
+  return isinstance(phone_id, str) and PHONE_ID.fullmatch(phone_id) is not None
 
 
 def _now():
@@ -107,13 +122,15 @@ def ensure_store(path=DEFAULT_KEY_PATH):
     return phones
 
 
-def add_phone(label, path=DEFAULT_KEY_PATH):
-  """Issue a new key for one phone and return it."""
+def add_phone(label, path=DEFAULT_KEY_PATH, replaces=None):
+  """Issue a new key for one phone and return (id, key). `replaces` drops that phone's previous entry."""
   path = Path(path)
   with _locked(path):
     now = _now()
     phones = []
     for phone in _load_or_empty(path):
+      if valid_replaces(replaces) and phone["id"] == replaces:
+        continue
       try:
         stale = not phone["last_used"] and phone["added"] and now - datetime.datetime.fromisoformat(phone["added"]) > UNUSED_GRACE
       except ValueError:
@@ -123,9 +140,10 @@ def add_phone(label, path=DEFAULT_KEY_PATH):
     if len(phones) >= MAX_PHONES:
       raise ValueError("Too many phones. Forget one first.")
     key = secrets.token_bytes(32)
-    phones.append({"id": secrets.token_hex(4), "key": key, "label": str(label)[:64], "added": now.isoformat(), "last_used": ""})
+    phone_id = secrets.token_hex(4)
+    phones.append({"id": phone_id, "key": key, "label": clean_name(label) or "Phone", "added": now.isoformat(), "last_used": ""})
     _write(path, phones)
-    return key
+    return phone_id, key
 
 
 def remove_phone(phone_id, path=DEFAULT_KEY_PATH):
@@ -142,6 +160,25 @@ def forget_all(path=DEFAULT_KEY_PATH):
   path = Path(path)
   with _locked(path):
     _write(path, [])
+
+
+def introduce(phone_id, name=None, replaces=None, path=DEFAULT_KEY_PATH):
+  """A connected phone names itself and drops the entry its new key replaced."""
+  name = clean_name(name)
+  path = Path(path)
+  with _locked(path):
+    phones = _load_or_empty(path)
+    changed = False
+    if valid_replaces(replaces) and replaces != phone_id and any(phone["id"] == replaces for phone in phones):
+      phones = [phone for phone in phones if phone["id"] != replaces]
+      changed = True
+    for phone in phones:
+      if phone["id"] == phone_id and name and phone["id"] != LEGACY_ID and phone["label"] != name:
+        phone["label"] = name
+        changed = True
+    if changed:
+      _write(path, phones)
+    return changed
 
 
 def mark_used(phone_id, path=DEFAULT_KEY_PATH):
@@ -165,7 +202,11 @@ def describe(phone):
   return f"{phone['label']} · added {added}"
 
 
-def qr_payload(key):
+def qr_payload(key, phone_id=None):
+  # "id" is new; older apps ignore it. Apps that keep it can name themselves and replace their old entry.
   if len(key) != 32:
     raise ValueError("Invalid pairing key")
-  return json.dumps({"type": "galaxy-bluetooth", "version": 1, "key": key.hex()}, separators=(",", ":"))
+  value = {"type": "galaxy-bluetooth", "version": 1, "key": key.hex()}
+  if phone_id:
+    value["id"] = phone_id
+  return json.dumps(value, separators=(",", ":"))

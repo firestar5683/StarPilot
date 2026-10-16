@@ -32,7 +32,8 @@ def open_pairing(allowed):
   from openpilot.system.ui.lib.application import gui_app
   try:
     # Every scanned code is a new phone with its own key, so it can be forgotten on its own.
-    code = PhoneCode(add_phone('iPhone'), allowed)
+    phone_id, key = add_phone('Phone')  # the app sends its own name when it first connects
+    code = PhoneCode(key, allowed, phone_id)
     gui_app.push_widget(code)
   except (OSError, ValueError):
     from openpilot.system.ui.widgets.confirm_dialog import alert_dialog
@@ -67,7 +68,7 @@ def paired_phones():
 
 
 class PhoneCode:
-  def __new__(cls, key, allowed):
+  def __new__(cls, key, allowed, phone_id=None):
     import pyray as rl
     from openpilot.common.qrcode import make_texture
     from openpilot.system.ui.lib.application import gui_app, FontWeight
@@ -80,7 +81,7 @@ class PhoneCode:
         self.key = key
         self.expires = time.monotonic() + 120
         self.next_check = 0.
-        self.texture = make_texture(qr_payload(key))
+        self.texture = make_texture(qr_payload(key, phone_id))
         rl.set_texture_filter(self.texture, rl.TextureFilter.TEXTURE_FILTER_POINT)
         self.close_button = self._child(Button('Close', gui_app.pop_widget, font_size=42))
 

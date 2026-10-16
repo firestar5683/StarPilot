@@ -93,7 +93,7 @@ def test_bluetooth_pairing_requires_session_origin_local_and_parked(companion_ht
   request, _, server = companion_http
   from openpilot.starpilot.galaxy.companion import bluetooth_pairing
   key_file = tmp_path / 'pairing.json'
-  with patch('openpilot.starpilot.galaxy.companion.bluetooth_pairing', side_effect=lambda rotate: bluetooth_pairing(rotate, path=key_file)):
+  with patch('openpilot.starpilot.galaxy.companion.bluetooth_pairing', side_effect=lambda rotate, **kwargs: bluetooth_pairing(rotate, path=key_file, **kwargs)):
     assert request('/api/companion/bluetooth', {'rotate': False})[0] == 401
     cookie = request('/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
     assert request('/api/companion/bluetooth', {'rotate': False}, cookie, 'https://evil.test')[0] == 403
@@ -109,6 +109,14 @@ def test_bluetooth_pairing_requires_session_origin_local_and_parked(companion_ht
     status, data, _ = request('/api/companion/bluetooth', {'rotate': False}, cookie)
     assert status == 200 and json.loads(data)['key'] != first  # each phone gets its own key
     assert len(json.loads(key_file.read_text())['phones']) == 2
+    # A newer app names itself and replaces its own previous entry instead of adding one.
+    old_id = json.loads(data)['id']
+    status, data, _ = request('/api/companion/bluetooth', {'rotate': False, 'name': 'Pixel 8', 'replaces': old_id}, cookie)
+    assert status == 200
+    phones = json.loads(key_file.read_text())['phones']
+    assert len(phones) == 2 and old_id not in {phone['id'] for phone in phones} and phones[-1]['label'] == 'Pixel 8'
+    assert request('/api/companion/bluetooth', {'rotate': False, 'name': 7}, cookie)[0] == 400
+    assert request('/api/companion/bluetooth', {'rotate': False, 'other': ''}, cookie)[0] == 400
     first = key_file.read_bytes()
     server.remote_transport = True
     assert request('/api/companion/bluetooth', {'rotate': True}, cookie)[0] == 403

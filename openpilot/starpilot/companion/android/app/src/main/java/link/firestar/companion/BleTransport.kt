@@ -16,7 +16,8 @@ import java.util.concurrent.TimeUnit
 
 /** Serialized GATT operations; a failed mutation is never replayed. Call from a worker thread. */
 @SuppressLint("MissingPermission")
-class BleTransport(private val context: Context, private val key: ByteArray) : Closeable {
+/** [hello] ({"name", "replaces"}) is sent once with the first request so comma can label this phone and drop its old key. */
+class BleTransport(private val context: Context, private val key: ByteArray, private val hello: JSONObject? = null) : Closeable {
     companion object {
         fun uuid(part: String): UUID = UUID.fromString("bd49000$part-6dc1-4de7-a7d0-6cdb441f7650")
     }
@@ -89,7 +90,7 @@ class BleTransport(private val context: Context, private val key: ByteArray) : C
             require(info.size == 17 && info[0].toInt() == 1)
             session = info.drop(1).joinToString("") { "%02x".format(it.toInt() and 255) }
             // Authenticate before exposing cached controls. Do not trust the advertised device name.
-            val response = request(JSONObject().put("method", "GET").put("path", "/_bridge/health"))
+            val response = request(JSONObject().put("method", "GET").put("path", "/_bridge/health").apply { hello?.let { put("phone", it) } })
             if (response.getInt("status") != 200) throw IOException("Galaxy Bluetooth authentication failed")
             return device.address
         } catch (e: Exception) { close(); throw e }

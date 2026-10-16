@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "vendor"))
-from pairing import add_phone, ensure_store, forget_all, load_keys, load_phones, qr_payload, remove_phone, LEGACY_ID
+from pairing import add_phone, ensure_store, forget_all, introduce, load_keys, load_phones, qr_payload, remove_phone, LEGACY_ID
 from server import Gateway
 from protocol import packets, seal
 from dbus_next import Variant, DBusError
@@ -37,10 +37,10 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
       path = Path(directory) / "pairing.json"
       self.assertEqual(ensure_store(path), [])
       self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-      iphone = add_phone("iPhone", path)
-      android = add_phone("Android phone", path)
+      iphone_id, iphone = add_phone("iPhone", path)
+      _, android = add_phone("Android phone", path)
       self.assertNotEqual(iphone, android)
-      self.assertEqual(json.loads(qr_payload(iphone))["key"], iphone.hex())
+      self.assertEqual(json.loads(qr_payload(iphone, iphone_id)), {"type": "galaxy-bluetooth", "version": 1, "key": iphone.hex(), "id": iphone_id})
 
       proxy = Proxy()
       gateway = Gateway(load_keys(path), proxy, path)
@@ -51,7 +51,6 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
       self.assertEqual(proxy.calls, 2)
       self.assertTrue(all(phone["last_used"] for phone in load_phones(path)))
 
-      iphone_id = next(phone_id for phone_id, key in load_keys(path).items() if key == iphone)
       remove_phone(iphone_id, path)
       gateway.refresh_key()
       self.assertTrue(iphone_state.closed)
@@ -67,6 +66,30 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
       with self.assertRaises(DBusError):
         gateway.session(android_options)
       self.assertTrue(android_state.closed)
+
+  async def test_phone_names_itself_and_replaces_its_old_entry(self):
+    with tempfile.TemporaryDirectory() as directory:
+      path = Path(directory) / "pairing.json"
+      old_id, _ = add_phone("Phone", path)
+      other_id, _ = add_phone("Phone", path)
+      new_id, new = add_phone("Phone", path)
+      proxy = Proxy()
+      gateway = Gateway(load_keys(path), proxy, path)
+      options = {"device": Variant("o", "/org/bluez/hci0/dev_iphone")}
+      state = gateway.session(options)
+      request = {"id": "t", "session": state.challenge.hex(), "counter": 1, "path": "/api/params", "method": "GET", "body": "",
+                 "phone": {"name": "Danny\u2019s iPhone\n", "replaces": old_id}}
+      for packet in packets(seal(request, new, "request")):
+        gateway.write(packet, options)
+      await state.task
+      phones = {phone["id"]: phone for phone in load_phones(path)}
+      self.assertEqual(set(phones), {other_id, new_id})
+      self.assertEqual(phones[new_id]["label"], "Danny\u2019s iPhone")
+      self.assertEqual(proxy.calls, 1)
+      # A phone can't drop the shared pre-update entry or itself, and bad ids are ignored.
+      self.assertFalse(introduce(new_id, replaces=new_id, path=path))
+      self.assertFalse(introduce(new_id, replaces="legacy", path=path))
+      self.assertFalse(introduce(new_id, replaces="../../x", path=path))
 
   async def test_single_key_file_from_before_update_still_works(self):
     with tempfile.TemporaryDirectory() as directory:

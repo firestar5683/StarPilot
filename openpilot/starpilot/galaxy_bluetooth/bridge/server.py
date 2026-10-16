@@ -20,7 +20,7 @@ from dbus_next.service import ServiceInterface, dbus_property, method
 from protocol import (Assembler, INFO_UUID, RX_UUID, SERVICE_UUID, TX_UUID, NOTIFY_UUID,
                       NOTIFICATION_WINDOW, open_message, packets, seal, stream_tag, notification_packets)
 from proxy import GalaxyProxy
-from pairing import load_keys, mark_used
+from pairing import introduce, load_keys, mark_used
 from setup_health import write_ready, clear_ready
 
 ROOT = "/link/galaxy/ble"
@@ -51,6 +51,7 @@ class Session:
     self.notification_task = None
     self.closed = False
     self.phone = None  # (id, key) of the phone whose key opened this session
+    self.introduced = False
 
   def close(self):
     self.closed = True
@@ -215,6 +216,14 @@ class Gateway:
       if notify and (self.notifier is None or not self.notifier.notifying):
         raise ValueError("Subscribe to notifications before requesting that response flow")
       state.counter = counter  # Consume before invoking any mutating endpoint.
+      hello = request.get("phone")
+      if self.key_path is not None and not state.introduced and isinstance(hello, dict):
+        # Optional {"name", "replaces"}: the app names itself and drops the entry its new key replaced.
+        state.introduced = True
+        try:
+          await asyncio.to_thread(introduce, state.phone[0], hello.get("name"), hello.get("replaces"), self.key_path)
+        except (OSError, ValueError):
+          LOG.warning("Could not record phone name")
       if self.key_path is not None and state.phone[0] not in self.used:
         self.used.add(state.phone[0])
         try:
