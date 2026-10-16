@@ -23,7 +23,7 @@ The standard `installer.comma.ai/<user>/<branch>` assumes a repository named `op
 
 Connect the comma to the internet for the first phone bridge setup. Subsequent Bluetooth use requires no network. In comma Settings → Bluetooth, enable Bluetooth, then open **StarPilot iPhone app → Pair** and scan the private code in the iPhone app. **Forget all app links** rotates the app key; it does not remove the car's or other Bluetooth devices' pairings. The existing radio power/device controls still use SecretGood's shared BluetoothOwner.
 
-The phone must run the SecretGood app migration from `natehuby76/ios-clone`, branch `codex/secretgood-galaxy` (version 0.2.0), PR #1. The older Dom app is not compatible with these new Galaxy APIs. The native app's bundled Galaxy files match this comma base exactly.
+The phone must run the SecretGood app migration from `natehuby76/ios-clone`, branch `codex/secretgood-galaxy` (version 0.2.0), PR #1. Xcode Cloud build 28 has been started from that branch for internal TestFlight testing. The older Dom app is not compatible with these new Galaxy APIs. The native app's bundled Galaxy files match this comma base exactly.
 
 ## Parked checks
 
