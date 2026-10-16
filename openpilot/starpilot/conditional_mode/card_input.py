@@ -51,7 +51,7 @@ def conditional_manual_candidate(CS: car.CarState, tracker: ButtonTracker, param
   if choice not in (ModeChoice.CEM, ModeChoice.CCM) or snapshot.preferences is None:
     tracker.invalidate_media()
     return None
-  fingerprint = settings_fingerprint(snapshot)
+  fingerprint = settings_fingerprint(snapshot, owner=settings_owner)
   if fingerprint is None:
     tracker.invalidate_media()
     return None
@@ -113,7 +113,7 @@ def conditional_traffic_candidate(CS: car.CarState, tracker: ButtonTracker, para
     return None
   snapshot = settings_owner.refresh(now_ns)
   verdict = settings_owner.verdict(snapshot, now_mono_ns=now_ns, drive_id=drive_id)
-  fingerprint = settings_fingerprint(snapshot) if verdict.status == 'ready' and verdict.safe_mode is False else None
+  fingerprint = settings_fingerprint(snapshot, owner=settings_owner) if verdict.status == 'ready' and verdict.safe_mode is False else None
   if fingerprint is None:
     tracker.invalidate_media()
     return None

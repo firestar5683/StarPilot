@@ -22,7 +22,16 @@ CHOICES = {ModeChoice.STOCK: 'stock', ModeChoice.CEM: 'conditionalExperimental',
 _HEX = re.compile(r'[0-9a-f]{64}\Z')
 
 
-def settings_fingerprint(snapshot: SettingsSnapshot | None) -> str | None:
+def settings_fingerprint(snapshot: SettingsSnapshot | None, *, owner=None) -> str | None:
+  if owner is not None:
+    from openpilot.starpilot.conditional_mode.card_settings import CardSettingsView
+
+    if type(owner) is CardSettingsView:
+      return owner.fingerprint(snapshot)
+  return _settings_fingerprint(snapshot)
+
+
+def _settings_fingerprint(snapshot: SettingsSnapshot | None) -> str | None:
   """Bind two independent readers to the exact saved document and SafeMode."""
   if (
     snapshot is None

@@ -655,7 +655,8 @@ class Car:
       manual_snapshot = self.manual_settings_owner.refresh(now_ns)
       manual_drive_id = int(self.sm['deviceState'].startedMonoTime)
       manual_verdict = self.manual_settings_owner.verdict(manual_snapshot, now_mono_ns=now_ns, drive_id=manual_drive_id)
-      manual_fingerprint = (settings_fingerprint(manual_snapshot) if manual_verdict.status == 'ready' and manual_verdict.safe_mode is False and
+      manual_fingerprint = (settings_fingerprint(manual_snapshot, owner=self.manual_settings_owner)
+                            if manual_verdict.status == 'ready' and manual_verdict.safe_mode is False and
                             manual_verdict.selection is not None and manual_verdict.selection.choice in (ModeChoice.CEM, ModeChoice.CCM)
                             else None)
       self.manual_button_tracker.keep_claim(manual_drive_id, manual_fingerprint)

@@ -218,7 +218,11 @@ class ConditionalSettingsOwner:
                              current.observed_mono_ns if current is not None else None,
                              None, None, None, safe)
     assert snapshot is not None and snapshot.preferences is not None
-    selection = saved_selection_for_drive(snapshot.preferences, drive_id)
+    selection = self._selection_for_drive(snapshot, drive_id)
     return SettingsVerdict('ready' if selection is not None else 'invalid_drive', snapshot.revision,
                            snapshot.observed_mono_ns, selection, snapshot.preferences.cem,
                            snapshot.preferences.ccm, False)
+
+  def _selection_for_drive(self, snapshot: SettingsSnapshot, drive_id: int) -> ModeSelection | None:
+    assert snapshot.preferences is not None
+    return saved_selection_for_drive(snapshot.preferences, drive_id)
