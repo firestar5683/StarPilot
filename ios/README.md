@@ -1,18 +1,18 @@
 # StarPilot iPhone app
 
-The iPhone companion and its Swift tests live here alongside the comma Bluetooth bridge in `openpilot/starpilot/galaxy_bluetooth`.
+The iPhone app lives here. The comma Bluetooth bridge is in `openpilot/starpilot/galaxy_bluetooth`.
 
-Open `GalaxyBluetooth.xcodeproj` and use the `GalaxyBluetooth` scheme. Simulator builds do not need an Apple signing account. Device and TestFlight builds require the maintainer’s Apple team and signing setup.
+Open `GalaxyBluetooth.xcodeproj` in Xcode and choose the `GalaxyBluetooth` scheme. Device and TestFlight builds need your Apple team and signing profile. Simulator builds do not need signing.
 
-Run the regression checks on macOS from this folder:
+From this folder, run:
 
 ```sh
-CI_PRIMARY_REPOSITORY_PATH="$PWD" sh ci_scripts/ci_post_clone.sh
+sh ci_scripts/ci_post_clone.sh
 xcodebuild -project GalaxyBluetooth.xcodeproj -scheme GalaxyBluetooth -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 
-GitHub Actions runs these checks for changes to the app or companion bridge. Hardware pairing, Bluetooth reliability and CarPlay still need real-device testing.
+GitHub Actions runs the app tests, simulator build and bridge tests. Bluetooth and CarPlay also need testing on real devices.
 
-Imported from `natehuby76/ios-clone`, branch `codex/secretgood-galaxy`, commit `081aa0e`. Bundled Galaxy resources retain their upstream license in `UPSTREAM-GALAXY-LICENSE`.
+See [Quick start](QUICK-START.md) for pairing and [Tester guide](TESTER-GUIDE.md) for connection checks.
 
-App Store ownership and signing credentials are managed separately from this source repository.
+App source: `natehuby76/ios-clone`, branch `codex/secretgood-galaxy`, commit `081aa0e`. The bundled Galaxy UI keeps its upstream license in `UPSTREAM-GALAXY-LICENSE`. App Store ownership and signing are separate from this repo.

@@ -1,64 +1,31 @@
-# SecretGood phone test build
+# Bluetooth phone testing
 
-Repository: `natehuby76/StarPilotBT`
-Branch: `secretgood-phone-test`
-Official base: `firestar5683/StarPilot:SecretGoodStarPilot` at `01fd37fa7509174d71a626f66fa5567b4603b00e`.
+The combined app and bridge branch is `natehuby76/StarPilotBT:secretgood-ios-integration`, based on official `SecretGoodStarPilot`. The app source and tests are under `ios/`.
 
-This is the official SecretGood source and its shipped device artifacts, with phone-app Bluetooth startup, pairing, authenticated API forwarding and Wi-Fi discovery added. No vehicle controls, models, tuning defaults, migration rules or Galaxy web files are changed. It does not depend on PR #221 being merged.
+## Setup
 
-## Install
+Install the matching branch on comma while Offroad. First bridge setup needs internet on comma. Enable Bluetooth, open the StarPilot iPhone app pairing code and scan it from the app's Settings page.
 
-If your comma already runs `natehuby76/StarPilotBT`, use its Software settings: check for updates, select `secretgood-phone-test` as the target branch, download it and install while parked. Confirm the installed repository and branch after reboot. If the branch selector cannot change between these layouts, use the staged SSH installation below.
+Once paired, Bluetooth settings access works without a network on either device. Internet downloads still use comma's own connection.
 
-Over SSH on the parked comma, download and run the staged installer:
+The script `scripts/install_secretgood_phone_test.sh` targets the separate `secretgood-phone-test` branch. It does not install this combined branch. Check its target before using it.
 
-```sh
-curl -fL --output /tmp/install-secretgood-phone-test.sh https://raw.githubusercontent.com/natehuby76/StarPilotBT/secretgood-phone-test/scripts/install_secretgood_phone_test.sh
-bash /tmp/install-secretgood-phone-test.sh
-```
+## Checks
 
-It downloads a separate checkout, verifies the exact repository/branch and SecretGood base, rechecks Offroad state, preserves the previous checkout as `/data/openpilot-before-secretgood-<timestamp>`, and reboots. It does not delete Params or pairing keys. SecretGood's unchanged launcher handles its required AGNOS version (currently 19.8.1); allow time for that official OS update if your device is older. This script has been syntax/review checked, not run against your comma.
+- Select Bluetooth only. Load several settings sections, then change and restore a display preference.
+- Close and reopen the app, switch Developer Mode, toggle phone Bluetooth and restart comma while Offroad. Check reconnects and saved settings.
+- Turn comma Bluetooth off. The bridge should leave it off. Turn it back on with the normal control and reconnect.
+- Select Wi-Fi only. Check that Galaxy loads and a display setting saves.
+- Try a Wi-Fi-only feature over Bluetooth and check the message. These include recordings, replay, cameras, map tiles, phone internet sharing, Android Auto upload/APK download and login/logout.
+- Use **Forget all app links** and check that the old app key stops working. Scan the new code to reconnect. Car Bluetooth pairings should remain intact.
 
-The standard `installer.comma.ai/<user>/<branch>` assumes a repository named `openpilot`. Your repository is named `StarPilotBT`, and that alias currently returns 404. Do not use an unverified generic installer link for this branch.
+## Discovery and logs
 
-Connect the comma to the internet for the first phone bridge setup. Subsequent Bluetooth use requires no network. In comma Settings → Bluetooth, enable Bluetooth, then open **StarPilot iPhone app → Pair** and scan the private code in the iPhone app. **Forget all app links** rotates the app key; it does not remove the car's or other Bluetooth devices' pairings. The existing radio power/device controls still use SecretGood's shared BluetoothOwner.
+Opening the iPhone pairing code requests a fresh bridge registration while Offroad. It restarts `galaxy-ble-fork.service` and closes any active app connection. It does not toggle the radio, remove bonds or replace the pairing key.
 
-The phone must run the SecretGood app migration from `natehuby76/ios-clone`, branch `codex/secretgood-galaxy` (version 0.2.0), PR #1. Xcode Cloud build 28 has been started from that branch for internal TestFlight testing. The older Dom app is not compatible with these new Galaxy APIs. The native app's bundled Galaxy files match this comma base exactly.
+If BlueZ releases the advertisement or the adapter/system bus becomes unavailable, the bridge clears its ready marker and exits so systemd can restart it. An idle phone does not trigger a restart. A registered advertisement alone does not prove a phone can receive it.
 
-## Parked checks
-
-- Bluetooth only: connect, open Galaxy settings, read several sections, change and restore one appearance setting.
-- Close/reopen the app; switch Developer Mode; turn phone Bluetooth off/on; restart the comma; confirm recovery and saved settings.
-- Turn comma Bluetooth off. The phone bridge must not turn it back on. Turn it back on with the normal comma control and reconnect.
-- Wi-Fi only: use the comma's local address; verify Galaxy loads and settings save through its local login session.
-- Bluetooth recordings, replay, cameras, map tiles, phone internet sharing, Android Auto upload/APK download and login/logout return a Wi-Fi-required message.
-- Copy the iPhone's Developer Mode → Dev / Logs reports after any failure. On comma, setup status is `/data/galaxy-ble/setup-status.json`, setup log `/data/galaxy-ble/setup.log`, runtime logs `journalctl -u galaxy-ble-fork.service -u galaxy-lan-discovery.service`.
-
-First startup uses SecretGood's own settings migration and recovery rules. A local build/test result does not establish vehicle qualification or successful radio operation on your comma. Keep initial testing parked.
-
-## Validation
-
-`python -m unittest discover -s openpilot/starpilot/galaxy_bluetooth/tests -v` checks encryption/framing, notification windows, key rotation, proxy login/retry/isolation, blocked media and startup/radio preference handling.
-
-On a configured SecretGood runtime, run `python -m unittest openpilot.starpilot.galaxy_bluetooth.tests.integration_secretgood_http -v` for the actual HTTP settings pages and display preview/confirm tests. Tests use temporary Params and access directories.
-
-`python tools/laptop_device_build/validate_artifacts.py .` checks the shipped AArch64/QCOM artifacts. This branch retains upstream prebuilt binaries; it does not rebuild or claim device inference validation.
-
-
-## Discovery recovery and logs
-
-Opening the iPhone pairing code requests a fresh bridge registration while parked.
-This restarts only `galaxy-ble-fork.service`; it does not toggle the shared radio,
-remove bonds, or change the app pairing key. An existing app connection will close
-while the bridge restarts. The bootstrap checks for pairing requests every second
-between normal ten-second setup checks.
-
-If BlueZ releases the advertisement, the adapter powers off, its property query
-fails, or the system bus disconnects, the bridge clears its ready marker and exits.
-The existing service restart policy handles re-registration. An idle phone is not
-considered a fault; a registered advertisement alone cannot prove over-air reception.
-
-Collect these on comma after reproducing a problem:
+After a failure, copy **Dev / Logs → Copy all reports** on the phone. On comma, collect:
 
 ```sh
 journalctl -u galaxy-ble-fork.service -n 100 --no-pager
@@ -66,11 +33,20 @@ cat /data/galaxy-ble/setup-status.json
 cat /data/galaxy-ble/bridge-ready.json
 ```
 
-Bridge logs include the running source fingerprint, GATT/advertisement registration,
-BlueZ release, handshake challenge arrival, and shutdown. The iPhone connection
-report includes scan results, service discovery, handshake, and transfer timings.
-Pairing keys, challenges, device addresses and private remote Galaxy URLs are not
-written to these new events.
+Setup details are also in `/data/galaxy-ble/setup.log`. Bridge events cover startup, advertisement registration, handshake attempts and shutdown without logging keys or payloads.
 
-Host tests exercise the recovery gates and adapter failure checks. Physical radio
-recovery, head-unit coexistence and overnight reliability still need comma testing.
+## Automated tests
+
+From the repo root:
+
+```sh
+python -m unittest discover -s openpilot/starpilot/galaxy_bluetooth/tests -v
+```
+
+With the SecretGood runtime dependencies installed, also run:
+
+```sh
+python -m unittest openpilot.starpilot.galaxy_bluetooth.tests.integration_secretgood_http -v
+```
+
+The HTTP tests use temporary settings and access directories. See `VALIDATION.md` for recorded results and remaining device checks.
