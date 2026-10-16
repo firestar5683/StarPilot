@@ -293,6 +293,11 @@ class StarShellSession:
   def _favorite_authority(self, *, allow_personality_notice: bool = False) -> bool:
     if getattr(ui_state, "replay_clock", None) is not None:
       return False
+    if getattr(self, "_projection_tap", False):
+      # A car-screen tap acts whenever onroad with live car state, like a bookmark tap:
+      # the comma screen's page, alerts and camera (or the screen being off) do not gate it.
+      return bool(ui_state.started and display_message(ui_state.sm, 'carState', time.monotonic_ns(),
+                                                       after_frame=ui_state.started_frame) is not None)
     if self._mode != ShellMode.ONROAD:
       return False
     state = self.snapshot(ShellMode.ONROAD).onroad
@@ -504,11 +509,15 @@ class StarShellSession:
   def _projection_experimental(self, requested: bool) -> None:
     """A car-screen wheel tap: the native experimental binding acts only if it is
     available and still in the state the car screen showed (the opposite of requested)."""
-    binding = self._native_favorite_actions().get(EXPERIMENTAL)
-    current = self.snapshot(ShellMode.ONROAD).onroad.experimental_enabled
-    if not (binding is not None and binding.available and binding.invoke is not None and
-            current != requested and binding.invoke()):
-      self._unavailable("experimental shortcut in this context")
+    self._projection_tap = True
+    try:
+      binding = self._native_favorite_actions().get(EXPERIMENTAL)
+      current = self.snapshot(ShellMode.ONROAD).onroad.experimental_enabled
+      if not (binding is not None and binding.available and binding.invoke is not None and
+              current != requested and binding.invoke()):
+        self._unavailable("experimental shortcut in this context")
+    finally:
+      self._projection_tap = False
 
   def _poll_wheel(self, now_ns):
     if getattr(ui_state, "replay_clock", None) is not None:

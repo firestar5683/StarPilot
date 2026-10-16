@@ -123,3 +123,31 @@ def test_projected_wheel_tap_hits_the_drawn_wheel_on_a_1280x720_head_unit():
   # The comma's default width put the target off the drawn wheel.
   gesture.press(x, y, replace(state, viewport_width=2160.0))
   assert not gesture.claimed
+
+
+def test_projection_experimental_tap_is_not_gated_by_the_comma_screen(monkeypatch):
+  from types import SimpleNamespace as NS
+  from unittest.mock import Mock
+  from openpilot.starpilot.favorites.actions import EXPERIMENTAL
+  from openpilot.starpilot.ui import runtime_app
+  from openpilot.starpilot.ui.shell import ShellMode
+  session = _native_session(False, None)
+  # The comma screen is off its onroad page (or covered by an alert or turned off).
+  session._mode = ShellMode.HOME
+  invoke = Mock(return_value=True)
+  session._native_favorite_actions = lambda: {EXPERIMENTAL: NS(available=session._favorite_authority(), invoke=invoke, token='native')}
+  car = object()
+  monkeypatch.setattr(runtime_app, 'ui_state', NS(started=True, replay_clock=None, sm=None, started_frame=0))
+  monkeypatch.setattr(runtime_app, 'display_message', lambda *_a, **_k: car)
+  assert not session._favorite_authority()  # comma-screen favorites stay gated
+  session._projection_experimental(True)
+  invoke.assert_called_once_with()
+  session._unavailable.assert_not_called()
+  assert not session._projection_tap
+
+  # Without live car state the car-screen tap is still refused.
+  car = None
+  session._projection_experimental(True)
+  invoke.assert_called_once_with()
+  session._unavailable.assert_called_once()
+
