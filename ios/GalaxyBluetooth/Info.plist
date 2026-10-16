@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Galaxy Bluetooth</string>
+	<string>StarPilot BT</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>StarPilot BT</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -34,7 +34,7 @@
 		</dict>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Connect directly to your comma's Galaxy Bluetooth bridge.</string>
+	<string>Connect StarPilot BT to your comma over Bluetooth.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan the pairing code displayed on your comma to connect the Galaxy app over Bluetooth.</string>
 	<key>NSBonjourServices</key>
@@ -55,7 +55,7 @@
 					<key>UISceneClassName</key>
 					<string>CPTemplateApplicationScene</string>
 					<key>UISceneConfigurationName</key>
-					<string>StarPilot CarPlay</string>
+					<string>StarPilot BT CarPlay</string>
 					<key>UISceneDelegateClassName</key>
 					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
 				</dict>

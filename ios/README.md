@@ -1,4 +1,4 @@
-# starpilot iPhone app
+# StarPilot BT
 
 the iPhone app lives here. the comma Bluetooth bridge is in `openpilot/starpilot/galaxy_bluetooth`.
 

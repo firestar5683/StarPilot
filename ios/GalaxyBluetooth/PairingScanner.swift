@@ -12,7 +12,7 @@ struct PairingCode: Decodable {
               value.key.utf8.count == 64,
               value.key.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) else {
             throw NSError(domain: "GalaxyPairing", code: 1, userInfo: [NSLocalizedDescriptionKey:
-                "This isn’t a Galaxy Bluetooth pairing code. Open Pair phone on your comma."])
+                "This isn’t a StarPilot BT pairing code. Open Pair phone on your comma."])
         }
         return value.key.lowercased()
     }

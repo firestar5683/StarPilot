@@ -1,4 +1,4 @@
-# carplay testing
+# StarPilot BT CarPlay testing
 
 carplay support is in `GalaxyBluetooth/CarPlaySceneDelegate.swift`. it uses native CarPlay templates for the overview, temperatures, rates and Galaxy settings.
 

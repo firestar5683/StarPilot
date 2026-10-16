@@ -1,4 +1,4 @@
-# connection testing
+# StarPilot BT connection testing
 
 start with a powered, Offroad comma and the matching SecretGood phone build. pair once using the comma's private QR code.
 

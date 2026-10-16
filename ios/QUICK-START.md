@@ -1,4 +1,4 @@
-# iPhone quick start
+# StarPilot BT quick start
 
 use the SecretGood version of the app with a comma running the matching Bluetooth bridge. the older Dom app uses different Galaxy APIs.
 

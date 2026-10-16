@@ -367,7 +367,7 @@ struct GalaxyRootView: View {
                         }
                         Text("Settings").font(.title3.bold())
                     } else {
-                        Text("StarPilot").font(.title3.bold())
+                        Text("StarPilot BT").font(.title3.bold())
                     }
                     Spacer()
                     HStack(spacing: 5) {
@@ -464,8 +464,8 @@ struct GalaxyRootView: View {
                     Image("StarPilotHero")
                         .resizable().scaledToFit()
                         .frame(maxWidth: 480)
-                        .accessibilityLabel("StarPilot")
-                    Text("Galaxy companion")
+                        .accessibilityLabel("StarPilot BT")
+                    Text("StarPilot BT")
                         .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity).padding(.top, 8)
                 Text("Connect your comma").font(.title2.bold())
@@ -611,7 +611,7 @@ final class ConnectionEventLog: ObservableObject {
     func report(model: AppModel) -> String {
         let info = Bundle.main.infoDictionary ?? [:]
         return """
-        StarPilot connection diagnostics
+        StarPilot BT connection diagnostics
         \(ISO8601DateFormatter().string(from: Date()))
         App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))
         iOS: \(UIDevice.current.systemVersion)

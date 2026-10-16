@@ -61,7 +61,7 @@ final class GalaxyPageDiagnostics: ObservableObject {
     func report(server: LoopbackServer, connection: String) -> String {
         let info = Bundle.main.infoDictionary ?? [:]
         return """
-        StarPilot Galaxy diagnostics
+        StarPilot BT Galaxy diagnostics
         \(ISO8601DateFormatter().string(from: Date()))
         App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))
         iOS: \(UIDevice.current.systemVersion)
