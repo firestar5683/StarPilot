@@ -4,6 +4,11 @@ from unittest.mock import Mock
 from openpilot.starpilot.analytics.runtime import AnalyticsWorker
 
 
+def jetlink(record):
+  """Jetlink's hooks with runtime() answering `record`."""
+  return SimpleNamespace(runtime=lambda: record)
+
+
 class Source:
   def __init__(self):
     self.data = {'deviceState': SimpleNamespace(started=False), 'carState': SimpleNamespace(vEgo=10),
@@ -168,15 +173,15 @@ def test_executed_model_reports_verified_fallback_not_saved_request():
   source = Source()
   status = SimpleNamespace(health=ModelHealth.ACTIVE, loaded_id='rdf43', artifact_sha256='a' * 64,
                            variant=ModelVariant.SMALL, requested_id='some-selected-large-model')
-  with patch('openpilot.starpilot.models.jetlink_adapter.runtime_status', return_value={'active': False}), \
+  with patch('openpilot.starpilot.models.jetlink_adapter.hooks', return_value=jetlink(None)), \
        patch('openpilot.starpilot.models.runtime.snapshot', return_value=status):
     result = executed_model(source, Mock(), 1_000_000_000)
   assert result['driving_model'] == BY_ID['rdf43'].name
   assert result['metrics']['model_variant'] == 'small'
   assert 'some-selected-large-model' not in str(result)
   source.data['modelV2'].big = True
-  with patch('openpilot.starpilot.models.jetlink_adapter.runtime_status',
-             return_value={'active': True, 'artifact_sha256': 'b' * 64}):
+  with patch('openpilot.starpilot.models.jetlink_adapter.hooks',
+             return_value=jetlink(SimpleNamespace(active=True, sha256='b' * 64))):
     remote = executed_model(source, Mock(), 1_000_000_000)
   assert remote['metrics']['model_sha256'] == 'b' * 64
   assert remote['metrics']['model_variant'] == 'jetlink'
@@ -228,7 +233,7 @@ def test_executed_model_real_message_catalog_identity_and_actual_small_fallback(
   source.data['modelV2'] = messaging.new_message('modelV2').modelV2
   status = ModelStatus('selected-large', 'rdf43', ModelVariant.SMALL, ModelHealth.ACTIVE, True,
                        'large model unavailable', 'a' * 64)
-  with patch('openpilot.starpilot.models.jetlink_adapter.runtime_status', return_value={'active': False}), \
+  with patch('openpilot.starpilot.models.jetlink_adapter.hooks', return_value=jetlink(None)), \
        patch('openpilot.starpilot.models.runtime.snapshot', return_value=status) as projection:
     params = Mock()
     result = executed_model(source, params, 1_000_000_000)
@@ -247,8 +252,8 @@ def test_executed_model_remote_requires_actual_big_output_not_remote_selection()
   source = Source()
   source.data['modelV2'] = messaging.new_message('modelV2').modelV2
   small = ModelStatus('selected-large', 'rdf43', ModelVariant.SMALL, ModelHealth.ACTIVE, False, None, 'a' * 64)
-  remote = {'active': True, 'artifact_sha256': 'b' * 64}
-  with patch('openpilot.starpilot.models.jetlink_adapter.runtime_status', return_value=remote), \
+  remote = SimpleNamespace(active=True, sha256='b' * 64)
+  with patch('openpilot.starpilot.models.jetlink_adapter.hooks', return_value=jetlink(remote)), \
        patch('openpilot.starpilot.models.runtime.snapshot', return_value=small) as projection:
     source.data['modelV2'].big = True
     big = executed_model(source, Mock(), 1_000_000_000)
@@ -271,6 +276,6 @@ def test_executed_model_unverified_receipt_never_reports_requested_identity():
   for health in (ModelHealth.UNAVAILABLE, ModelHealth.IDENTITY_UNAVAILABLE, ModelHealth.LOADING,
                  ModelHealth.STALE, ModelHealth.FAILED):
     status = ModelStatus('selected-large', None, None, health, True, 'unverified', None)
-    with patch('openpilot.starpilot.models.jetlink_adapter.runtime_status', return_value={'active': False}), \
+    with patch('openpilot.starpilot.models.jetlink_adapter.hooks', return_value=jetlink(None)), \
          patch('openpilot.starpilot.models.runtime.snapshot', return_value=status):
       assert executed_model(source, Mock(), 1_000_000_000) == {}

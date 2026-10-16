@@ -1,5 +1,4 @@
 """Opt-in process ownership and remote shutdown before manager cleanup."""
-import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -25,45 +24,54 @@ def _cleanup_child(ready, cleaned, release):
 
 
 class TestJetlinkLifecycle(unittest.TestCase):
-  def setUp(self):
-    hardware = patch('openpilot.common.hardware.HARDWARE.get_device_type', return_value='tizi')
-    hardware.start()
-    self.addCleanup(hardware.stop)
-
-  def test_disabled_or_malformed_mode_never_imports_adapter(self):
-    for mode in (None, 0, -1, 3, True, False, b'1', b'2', b'corrupt'):
-      params = SimpleNamespace(get=lambda key, mode=mode: mode)
-      with self.subTest(mode=mode), patch.dict(sys.modules, {'openpilot.starpilot.models.jetlink_adapter': None}):
-        self.assertFalse(lifecycle.enabled(params))
-
-  def test_selected_owner_requires_available_transport_without_chestnut(self):
-    params = SimpleNamespace(get=lambda key: 1)
+  def jetlink(self, on):
     link = Mock()
-    adapter = SimpleNamespace(get_jetlink=Mock(return_value=link), supported_device=lambda: True)
-    with patch.dict(sys.modules, {'openpilot.starpilot.models.jetlink_adapter': adapter}):
-      for available in (True, False):
-        link.enabled.return_value = available
-        self.assertEqual(lifecycle.enabled(params), available)
-      adapter.get_jetlink.return_value = None
-      self.assertFalse(lifecycle.enabled(params))
+    for name, value in (('hooks', lambda: link), ('link_on', lambda: on)):
+      patcher = patch(f'openpilot.starpilot.models.jetlink_adapter.{name}', value)
+      patcher.start()
+      self.addCleanup(patcher.stop)
+    return link
 
-  def test_only_power_actions_request_bounded_remote_shutdown(self):
-    link = Mock()
-    link.enabled.return_value = True
-    adapter = SimpleNamespace(get_jetlink=lambda: link, supported_device=lambda: True)
-    with patch.dict(sys.modules, {'openpilot.starpilot.models.jetlink_adapter': adapter}):
-      for reason in (None, 'DoShutdown', 'DoReboot', 'DoUninstall'):
-        link.shutdown.reset_mock()
-        params = SimpleNamespace(get=lambda key: 2, get_bool=lambda key, reason=reason: key == reason)
-        lifecycle.shutdown(params)
-        if reason is None:
-          link.shutdown.assert_not_called()
-        else:
-          link.shutdown.assert_called_once_with(reason, timeout=25.0)
-      link.enabled.return_value = False
-      link.shutdown.reset_mock()
+  def test_with_the_link_off_jetlink_is_never_bound(self):
+    from jetlink.openpilot.hooks import Hooks
+    from openpilot.starpilot.models.jetlink_adapter import API
+    self.jetlink(False)
+    factory = Mock()
+    with patch('openpilot.starpilot.models.jetlink_adapter.hooks', lambda: Hooks(API, factory, link_on=lambda: False)):
+      self.assertFalse(lifecycle.enabled(None))
+      lifecycle.shutdown(SimpleNamespace(get_bool=lambda key: key == 'DoShutdown'))
+    factory.assert_not_called()
+
+  def test_the_owner_follows_jetlink(self):
+    link = self.jetlink(True)
+    for available in (True, False):
+      link.should_run.return_value = available
+      self.assertEqual(lifecycle.enabled(None), available)
+
+  def test_only_power_off_asks_the_host_and_is_capped(self):
+    link = self.jetlink(True)
+    for reason in (None, 'DoReboot', 'DoUninstall', 'DoShutdown'):
+      link.shutdown_step.reset_mock()
+      link.shutdown_step.return_value = True
+      params = SimpleNamespace(get_bool=lambda key, reason=reason: key == reason)
       lifecycle.shutdown(params)
-      link.shutdown.assert_not_called()
+      if reason == 'DoShutdown':
+        link.shutdown_step.assert_called_once_with(True, 'DoShutdown')
+      else:
+        link.shutdown_step.assert_not_called()
+
+    # a host that never answers holds the power-off for the cap, no longer
+    now, waits = [0.], []
+
+    def sleep(seconds):
+      waits.append(seconds)
+      if len(waits) > 1000:
+        raise AssertionError("the power-off wait has no cap")
+      now[0] += seconds
+    link.shutdown_step.return_value = False
+    lifecycle.shutdown(params, clock=lambda: now[0], sleep=sleep)
+    self.assertGreaterEqual(now[0], lifecycle.SHUTDOWN_CAP_S)
+    self.assertLess(now[0], lifecycle.SHUTDOWN_CAP_S + 1)
 
   def test_registered_native_int_and_owner_file_reader_agree(self):
     from pathlib import Path
@@ -76,9 +84,11 @@ class TestJetlinkLifecycle(unittest.TestCase):
       params = Params()
       config = owner_config()
       settings = Settings(FileParams(config.params_dir), config.keys)
-      link = Mock()
-      link.enabled.return_value = True
-      with patch('openpilot.starpilot.models.jetlink_adapter.get_jetlink', return_value=link):
+      from openpilot.starpilot.models import jetlink_adapter
+      jetlink_adapter.hooks.cache_clear()
+      self.addCleanup(jetlink_adapter.hooks.cache_clear)
+      with patch('jetlink.openpilot.parts.Parts.chestnut_fitted', return_value=False), \
+           patch('openpilot.common.hardware.HARDWARE.get_device_type', return_value='tizi'):
         for value, mode in ((0, 'off'), (1, 'usb'), (2, 'ios'), (3, 'off'), (-1, 'off')):
           with self.subTest(value=value):
             params.put('JetlinkMode', value, block=True)
@@ -86,45 +96,12 @@ class TestJetlinkLifecycle(unittest.TestCase):
             self.assertEqual(params.get('JetlinkMode'), value)
             self.assertEqual(FileParams(config.params_dir).get_int('JetlinkMode'), value)
             self.assertEqual(settings.mode(), mode)
+            self.assertEqual(jetlink_adapter.link_on(), value in (1, 2))
             self.assertEqual(lifecycle.enabled(params), value in (1, 2))
         params.put('JetlinkMode', 1, block=True)
-        for device, supported in (('tizi', True), ('mici', True), ('tici', False), ('pc', False)):
-          with self.subTest(device=device), patch('openpilot.common.hardware.HARDWARE.get_device_type', return_value=device):
-            self.assertEqual(lifecycle.enabled(params), supported)
         Path(params.get_param_path('JetlinkMode')).write_bytes(b'corrupt')
         self.assertEqual(settings.mode(), 'off')
         self.assertFalse(lifecycle.enabled(params))
-
-  def test_owner_releases_resources_before_blocked_worker_wait(self):
-    import subprocess
-    from openpilot.starpilot.system.jetlink.daemon import owner_class
-    from jetlink.comma import owner as upstream
-    from jetlink.comma import root
-    from unittest.mock import call
-
-    owner = owner_class()([], settings=SimpleNamespace(mode=lambda: 'usb'), chestnut_ids=frozenset())
-    owner.stop = True
-    owner.tuned = 'ios'
-    owner.port = Mock()
-    owner.close_link = Mock()
-    owner.beat = Mock()
-    order = Mock()
-    order.attach_mock(owner.port.off, 'port')
-    order.attach_mock(owner.close_link, 'close')
-    worker = Mock()
-    owner.worker = worker
-    with patch.object(root, 'run', return_value=True) as restore, patch.object(upstream, 'WORKER_GRACE', 0):
-      order.attach_mock(restore, 'restore')
-      order.attach_mock(worker.wait, 'wait')
-      worker.wait.side_effect = subprocess.TimeoutExpired('provision', .5)
-      owner.stop_worker()
-    self.assertEqual(order.mock_calls[:6], [call.port(), call.close(), call.restore('vm', 'restore', timeout=1.0),
-                                         call.restore('udc', 'restore', timeout=1.0), call.restore('draw', 'on', timeout=1.0),
-                                         call.wait(upstream.POLL)])
-    worker.terminate.assert_called_once()
-    worker.kill.assert_called_once()
-    self.assertIsNone(owner.worker)
-    self.assertIsNone(owner.tuned)
 
   def test_process_nonblocking_stop_and_blocking_signal_cleanup(self):
     import multiprocessing

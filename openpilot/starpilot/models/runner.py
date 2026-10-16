@@ -239,6 +239,13 @@ class CatalogModelState:
     parsed.update(results["on_policy" if "on_policy" in results else "policy"])
     return parsed
 
+  def get_action_from_model(self, outputs: dict[str, np.ndarray], previous: log.ModelDataV2.Action,
+                            lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
+    """modeld's action call: this catalog generation's units, with modeld's smoothing."""
+    from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS, LONG_SMOOTH_SECONDS
+    return action_from_outputs(outputs, self.behavior_version, previous, lat_action_t, long_action_t, v_ego,
+                               LAT_SMOOTH_SECONDS, LONG_SMOOTH_SECONDS)
+
   def warmup(self) -> None:
     frames = {name: np.zeros(self.frame_buf_size, dtype=np.uint8) for name in self.vision_input_names}
     self._blob_cache.update({(name, frame.ctypes.data): Tensor(frame, device=self.warp_device).realize()

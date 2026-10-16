@@ -4,6 +4,14 @@ from __future__ import annotations
 MODES = ("off", "usb", "ios")
 
 
+def runtime_view(status):
+  # what modeld runs over the link, by jetlink's runtime record
+  if status is None or not status.active:
+    return {"state": getattr(status, "running", None) or "unavailable", "active": False}
+  return {"state": status.running, "active": True, "artifact_sha256": status.running_sha256,
+          "model_checkpoint": status.running_checkpoint}
+
+
 class JetlinkSettings:
   def __init__(self, *, params=None, link=None, device_type=None, chestnut=None, runtime=None):
     self._params = params
@@ -28,7 +36,7 @@ class JetlinkSettings:
               "progress": "", "model": None, "transport": "USB", "chargePhone": False}
 
   def _snapshot(self):
-    from openpilot.starpilot.models.jetlink_adapter import adapter, get_jetlink, runtime_status, supported_device
+    from openpilot.starpilot.models.jetlink_adapter import adapter, hooks, supported_device
     if self._device_type is None:
       from openpilot.common.hardware import HARDWARE
       device = HARDWARE.get_device_type()
@@ -39,7 +47,7 @@ class JetlinkSettings:
     params = self.params()
     raw = params.get("JetlinkMode")
     mode = MODES[raw] if type(raw) is int and 0 <= raw < len(MODES) else "off"
-    link = self._link() if self._link is not None else get_jetlink()
+    link = self._link() if self._link is not None else hooks()
     status = link.status() if link is not None else None
     reason = "" if supported else "Jetlink requires a comma 3X or comma 4."
     if mode != "off" and status is None:
@@ -47,7 +55,7 @@ class JetlinkSettings:
     if status is not None and status.reason:
       reason = str(status.reason)
     progress = status.progress if status is not None and isinstance(status.progress, dict) else {}
-    runtime = self._runtime() if self._runtime is not None else runtime_status()
+    runtime = self._runtime() if self._runtime is not None else runtime_view(status)
     active = mode != "off" and supported and not chestnut and runtime.get("active") is True
     runtime_state = runtime.get("state", "unavailable")
     stage = str(progress.get("stage", ""))

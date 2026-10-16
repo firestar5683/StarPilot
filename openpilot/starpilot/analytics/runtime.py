@@ -17,13 +17,12 @@ COUNTERS = ('drives', 'meters', 'seconds', 'current_months_meters', 'total_track
 
 
 def executed_model(sm, params, now):
-  from openpilot.starpilot.models.jetlink_adapter import runtime_status
+  from openpilot.starpilot.models.jetlink_adapter import hooks
   from openpilot.starpilot.models.runtime import snapshot
   from openpilot.starpilot.models.status import ModelHealth
   from openpilot.starpilot.models.catalog import model_entries
-  remote = runtime_status()
-  if remote.get('active') and bool(sm['modelV2'].big):
-    digest = remote['artifact_sha256']
+  if bool(sm['modelV2'].big) and (remote := hooks().runtime()) is not None and remote.active and remote.sha256:
+    digest = remote.sha256
     return {'driving_model': 'jetlink:' + digest[:16], 'metrics': {'model_sha256': digest, 'model_variant': 'jetlink'}}
   status = snapshot(sm, params, now)
   entries = model_entries()

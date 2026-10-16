@@ -45,8 +45,8 @@ from openpilot.starpilot.models.status import ModelVariant
 from openpilot.starpilot.models.startup import report_load_timeout, wait_for_chestnut_power
 from openpilot.starpilot.navigation.intent import TurnIntent, matching_turn_signal
 from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, BY_ID, DEFAULT_SMALL, DEFAULT_SMALL_SHA256
-from openpilot.starpilot.models.runner import CatalogModelState, action_from_outputs, load_verified_model
-from openpilot.starpilot.models.jetlink_adapter import JetlinkModel, attach as attach_jetlink
+from openpilot.starpilot.models.runner import CatalogModelState, load_verified_model
+from openpilot.starpilot.models import jetlink_adapter
 import uuid
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value, get_curvature_from_plan
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
@@ -159,6 +159,7 @@ def input_view(buffer: Buffer, shape: tuple[int, ...], dtype: DType, offset: int
 
 class ModelState:
   prev_desire: np.ndarray  # for tracking the rising edge of the pulse
+  get_action_from_model = staticmethod(get_action_from_model)
 
   def __init__(self, cam_w: int, cam_h: int, chestnut: bool):
     if not chestnut:
@@ -388,8 +389,13 @@ def main(demo=False):
                        "chestnut-load-failed" if initial_chestnut_fallback else
                        "selected-load-failed" if (selected_small_failed and not model.chestnut) or requested_model_id != model.model_id else None,
                        model_id=model.model_id)
-  model = attach_jetlink(model, vipc_client_main.width, vipc_client_main.height,
-                         chestnut=CHESTNUT, recovery=recovery_small_only)
+  HOOKS = jetlink_adapter.hooks()
+  jetlink_model = None
+  # before going realtime: the GPU thread it starts would inherit SCHED_FIFO 54 on core 7
+  if HOOKS.prepare(CHESTNUT or recovery_small_only):
+    # the joining model drives as small_model until the big model is ready
+    model = HOOKS.attach(model, small_model, vipc_client_main.width, vipc_client_main.height)
+    jetlink_model = model if model is not small_model else None
   params.put_bool("ChestnutLoading", False)
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
   release_compile_pool()
@@ -517,14 +523,13 @@ def main(demo=False):
       'action_t': np.array([lat_action_t, long_action_t], dtype=np.float32),
     }
 
-    if isinstance(model, (CatalogModelState, JetlinkModel)):
+    if isinstance(model, CatalogModelState) or model is jetlink_model:
       inputs['prev_action'] = np.array([prev_action.desiredCurvature * max(1.0, v_ego) ** 2,
                                         prev_action.desiredAcceleration], dtype=np.float32)
       inputs['lateral_control_params'] = np.array([v_ego, lat_delay], dtype=np.float32)
 
-    jetlink_handovers = model.handovers if isinstance(model, JetlinkModel) else None
-    if isinstance(model, JetlinkModel):
-      model.observe_frame(lat_delay, frame_drop_ratio)
+    model.lat_delay = lat_delay
+    model.frame_drop_ratio = frame_drop_ratio
     mt1 = time.perf_counter()
     try:
       send_chestnut = (chestnut_state is not None and
@@ -535,7 +540,7 @@ def main(demo=False):
         raise
       # fallback to small model
       fallback_reason = "chestnut-load-failed"
-      if isinstance(model, JetlinkModel):
+      if model is jetlink_model:
         model.close()
         fallback_reason = None
       else:
@@ -550,27 +555,21 @@ def main(demo=False):
       model_output = None
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
-    if isinstance(model, JetlinkModel) and model.handovers != jetlink_handovers:
+    if model is jetlink_model and HOOKS.handed_over(model):
       frame_dropped_filter.x = 0.
       frame_drop_ratio = 0.
       if model.chestnut:
         receipt_owner.loaded(None, ModelVariant.CHESTNUT)
       else:
         receipt_owner.loaded(small_prepared, ModelVariant.SMALL, model_id=small_model.model_id)
-      cloudlog.event("jetlinkHandover", state=model.big_model_state, handovers=model.handovers)
+      cloudlog.event("jetlinkHandover", state=HOOKS.state(model), handovers=model.handovers)
 
     if model_output is not None:
       modelv2_send = messaging.new_message('modelV2')
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
 
-      if isinstance(model, JetlinkModel):
-        action = model.action(model_output, prev_action, lat_action_t, long_action_t, v_ego)
-      elif isinstance(model, CatalogModelState):
-        action = action_from_outputs(model_output, model.behavior_version, prev_action, lat_action_t, long_action_t, v_ego,
-                                     LAT_SMOOTH_SECONDS, LONG_SMOOTH_SECONDS)
-      else:
-        action = get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
+      action = model.get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
       prev_action = action
       fill_model_msg(modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,

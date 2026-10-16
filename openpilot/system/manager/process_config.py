@@ -146,7 +146,7 @@ procs = [
                 enabled=COMMA_HARDWARE and not os.environ.get('OPENPILOT_PREFIX'), restart_on_exit=True),
   PythonProcess("companion_uplink", "openpilot.starpilot.galaxy.companion_uplink_daemon", galaxy_local,
                 enabled=COMMA_HARDWARE and not os.environ.get('OPENPILOT_PREFIX'), restart_on_exit=True),
-  JetlinkProcess("jetlinkd", "openpilot.starpilot.system.jetlink.daemon", jetlink_enabled, enabled=COMMA_HARDWARE),
+  JetlinkProcess("jetlinkd", "openpilot.starpilot.models.jetlink_adapter", jetlink_enabled, enabled=COMMA_HARDWARE),
   PythonProcess("android_autod", "openpilot.starpilot.system.android_auto.daemon", android_auto_enabled, enabled=COMMA_HARDWARE,
                 restart_on_exit=True),  # boot can race bluetoothd (NoSuchUnit)
   PythonProcess("spotifyd", "openpilot.starpilot.soloist.supervisor", spotify_enabled, enabled=COMMA_HARDWARE, restart_on_exit=True),
