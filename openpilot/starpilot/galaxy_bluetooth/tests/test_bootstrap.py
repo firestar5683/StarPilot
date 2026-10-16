@@ -6,7 +6,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
-from openpilot.starpilot.galaxy_bluetooth.bootstrap import Bootstrap, UNIT
+from openpilot.starpilot.galaxy_bluetooth.bootstrap import Bootstrap, UNIT, refresh_pairing
 
 
 class BootstrapTest(unittest.TestCase):
@@ -55,6 +55,29 @@ class BootstrapTest(unittest.TestCase):
     self.assertTrue(any('start' in call and UNIT in call for call in self.calls))
     self.assertFalse(any('bluetooth.service' in call for call in self.calls))
     self.assertFalse(any('install.sh' in ' '.join(call) for call in self.calls))
+
+  def test_pairing_refresh_restarts_only_bridge_and_only_offroad(self):
+    self.installed()
+    refresh_pairing(self.data)
+    self.params.get_bool.return_value = False
+    with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=True):
+      self.worker.step()
+      self.assertFalse(any('restart' in call for call in self.calls))
+      self.assertTrue((self.data / 'refresh-pairing.json').exists())
+      self.params.get_bool.return_value = True
+      self.worker.step()
+      self.assertEqual([call for call in self.calls if 'restart' in call], [['sudo', '-n', 'systemctl', 'restart', UNIT]])
+      self.assertFalse((self.data / 'refresh-pairing.json').exists())
+      self.worker.step()
+      self.assertEqual(sum('restart' in call for call in self.calls), 1)
+    self.assertFalse(any('bluetooth.service' in call for call in self.calls))
+
+  def test_pairing_refresh_respects_radio_off(self):
+    self.installed()
+    refresh_pairing(self.data)
+    with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=False):
+      self.worker.step()
+    self.assertFalse(any('restart' in call for call in self.calls))
 
 
 if __name__ == '__main__': unittest.main()

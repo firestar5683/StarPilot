@@ -1,7 +1,7 @@
 """Phone-app pairing beside the existing SecretGood Bluetooth controls."""
 import time
 
-from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup, setup_status
+from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup, setup_status, refresh_pairing
 from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import ensure_key, load_key, rotate_key, qr_payload
 
 
@@ -17,7 +17,9 @@ def open_pairing(allowed):
     return
   from openpilot.system.ui.lib.application import gui_app
   try:
-    gui_app.push_widget(PhoneCode(ensure_key(), allowed))
+    code = PhoneCode(ensure_key(), allowed)
+    refresh_pairing()
+    gui_app.push_widget(code)
   except (OSError, ValueError):
     from openpilot.system.ui.widgets.confirm_dialog import alert_dialog
     gui_app.push_widget(alert_dialog('Phone pairing unavailable. Check Bluetooth setup and try again.'))

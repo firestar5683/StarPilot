@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import base64
 import json
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -108,6 +109,7 @@ class Gateway:
         if path not in self.sessions:
             if len(self.sessions) >= 4:
                 raise DBusError("org.bluez.Error.InProgress", "Too many sessions")
+            LOG.info("Galaxy BLE handshake challenge requested; active sessions=%d", len(self.sessions) + 1)
             self.sessions[path] = Session()
             self.sessions[path].proxy = self.proxy.new_session() if hasattr(self.proxy, "new_session") else self.proxy
         state = self.sessions[path]
@@ -365,6 +367,7 @@ class Application(ServiceInterface):
 class Advertisement(ServiceInterface):
     def __init__(self):
         super().__init__("org.bluez.LEAdvertisement1")
+        self.released = False
 
     @dbus_property(access=PropertyAccess.READ)
     def Type(self) -> 's':
@@ -380,7 +383,8 @@ class Advertisement(ServiceInterface):
 
     @method()
     def Release(self):
-        LOG.info("BLE advertisement released")
+        self.released = True
+        LOG.warning("BLE advertisement released by BlueZ; bridge will re-register after restart")
 
 
 def create_key(path):
@@ -392,7 +396,15 @@ def create_key(path):
     return key
 
 
+async def check_adapter(properties, advertisement):
+    if advertisement.released:
+        raise RuntimeError("BlueZ released the Galaxy advertisement")
+    if not (await asyncio.wait_for(properties.call_get("org.bluez.Adapter1", "Powered"), timeout=5)).value:
+        raise RuntimeError("Bluetooth switched off")
+
+
 async def serve(args):
+    LOG.info("Starting Galaxy bridge pid=%d source=%s", os.getpid(), hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12])
     key_path = Path(args.key_file)
     clear_ready(key_path.parent)
     key = load_key(key_path)
@@ -409,7 +421,8 @@ async def serve(args):
     for path, interface in objects.items():
         bus.export(path, interface)
     ad_path = ROOT + "/advertisement"
-    bus.export(ad_path, Advertisement())
+    advertisement = Advertisement()
+    bus.export(ad_path, advertisement)
     introspection = await bus.introspect("org.bluez", "/")
     manager = bus.get_proxy_object("org.bluez", "/", introspection).get_interface("org.freedesktop.DBus.ObjectManager")
     managed = await manager.call_get_managed_objects()
@@ -426,9 +439,11 @@ async def serve(args):
         raise RuntimeError("Bluetooth is off. Enable it in StarPilot before starting the bridge.")
     gatt = obj.get_interface("org.bluez.GattManager1")
     advertising = obj.get_interface("org.bluez.LEAdvertisingManager1")
+    LOG.info("Registering Galaxy GATT application on %s", adapter_path)
     await gatt.call_register_application(ROOT, {})
     watcher = asyncio.create_task(gateway.watch_key())
     try:
+        LOG.info("Registering Galaxy BLE advertisement")
         await advertising.call_register_advertisement(ad_path, {})
         write_ready(key_path.parent)
         LOG.info("Galaxy BLE bridge ready on %s; forwarding to localhost:%s", adapter_path, args.galaxy_port)
@@ -439,19 +454,23 @@ async def serve(args):
         async def monitor_adapter():
             while not stopped.is_set():
                 await asyncio.sleep(2)
-                if not (await properties.call_get("org.bluez.Adapter1", "Powered")).value:
-                    raise RuntimeError("Bluetooth switched off")
+                await check_adapter(properties, advertisement)
         monitor = asyncio.create_task(monitor_adapter())
         stop_waiter = asyncio.create_task(stopped.wait())
+        disconnected = asyncio.create_task(bus.wait_for_disconnect())
         try:
-            done, _ = await asyncio.wait((monitor, stop_waiter), return_when=asyncio.FIRST_COMPLETED)
+            done, _ = await asyncio.wait((monitor, stop_waiter, disconnected), return_when=asyncio.FIRST_COMPLETED)
+            if disconnected in done:
+                raise RuntimeError("System D-Bus connection closed")
             for task in done:
                 task.result()
         finally:
             monitor.cancel()
             stop_waiter.cancel()
-            await asyncio.gather(monitor, stop_waiter, return_exceptions=True)
+            disconnected.cancel()
+            await asyncio.gather(monitor, stop_waiter, disconnected, return_exceptions=True)
     finally:
+        LOG.info("Stopping Galaxy bridge; clearing ready status and Bluetooth sessions")
         clear_ready(key_path.parent)
         watcher.cancel()
         try:
@@ -461,11 +480,11 @@ async def serve(args):
         for state in gateway.sessions.values():
             state.close()
         try:
-            await advertising.call_unregister_advertisement(ad_path)
+            await asyncio.wait_for(advertising.call_unregister_advertisement(ad_path), timeout=5)
         except Exception:
             pass
         try:
-            await gatt.call_unregister_application(ROOT)
+            await asyncio.wait_for(gatt.call_unregister_application(ROOT), timeout=5)
         finally:
             bus.disconnect()
 
