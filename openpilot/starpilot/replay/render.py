@@ -752,7 +752,11 @@ def run(session_dir: Path, route_id: str, data_dir: Path, target: str, profile: 
           raise RuntimeError(status.get('error') or 'Replay failed')
       if not published_epoch and now - began > STARTUP_TIMEOUT:
         raise TimeoutError('Replay camera and HUD did not become ready')
-      time.sleep(.002 if core.readback.pending else .01)
+      delay = .002 if core.readback.pending else .01
+      if target == 'web' and valid and status is not None and status['state'] == 'playing' and not status['paused']:
+        # Wake before the next draw deadline without increasing paused/native polling.
+        delay = min(delay, max(.002, last_draw + interval - time.monotonic()))
+      time.sleep(delay)
 
 
 def main():

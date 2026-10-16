@@ -464,7 +464,9 @@ def test_published_readiness_survives_buffering_but_rejects_seeks_and_old_epochs
     return step[0] == 1
   core.draw.side_effect = draw
   monkeypatch.setattr(render, 'Compositor', lambda *args, **kwargs: core)
+  sleeps = []
   def next_loop(delay):
+    sleeps.append(delay)
     if step[0] == len(times) - 1:
       engine.error = 'test complete'
       return
@@ -484,6 +486,7 @@ def test_published_readiness_survives_buffering_but_rejects_seeks_and_old_epochs
     ('preparing', False), ('playing', True), ('buffering', True), ('buffering', True), ('paused', True),
     ('seeking', False), ('seeking', False), ('seeking', False), ('seeking', False)]
   publisher.publish.assert_called_once_with(b'pixels', epoch=1, position=0, captured_ns=1_010_000_000)
+  assert sleeps == [.01] * len(times)  # Native playback keeps its original idle wait.
 
 
 @pytest.mark.parametrize('matching_frame', (False, True))
@@ -786,7 +789,7 @@ def test_web_delivery_times_packets_and_flushes_pause_end_and_stall(tmp_path, mo
   catalog = Mock()
   catalog.detail.return_value = {'playable': True, 'segments': []}
   monkeypatch.setattr('openpilot.starpilot.replay.catalog.ReplayCatalog', lambda path: catalog)
-  times = (1., 1.06, 1.125, 1.15, 10., 10.06, 10.12, 10.125, 10.23, 10.25, 11.3, 11.36, 11.42, 11.54)
+  times = (1., 1.06, 1.125, 1.15, 10., 10.06, 10.12, 10.125, 10.23, 10.275, 11.3, 11.36, 11.42, 11.54)
   step = [0]
   monkeypatch.setattr(render.time, 'monotonic', lambda: times[step[0]])
   monkeypatch.setattr(render.time, 'monotonic_ns', lambda: round(times[step[0]] * 1e9))
@@ -804,7 +807,7 @@ def test_web_delivery_times_packets_and_flushes_pause_end_and_stall(tmp_path, mo
   delivered = {0, 1, 2, 5, 6, 7, 9, 11, 12}
   core.finish.side_effect = lambda: nullcontext((b'pixels', (engine.status['epoch'], 0, round(times[step[0]] * 1e9)))
                                                if step[0] in delivered else None)
-  core.draw.return_value = False
+  core.draw.return_value = True
   monkeypatch.setattr(render, 'Compositor', lambda *args, **kwargs: core)
   encoder = Mock(supports_nv12=True)
   encoder.encode_nv12.side_effect = lambda pixels, keyframe: (b'packet', keyframe)
@@ -816,7 +819,9 @@ def test_web_delivery_times_packets_and_flushes_pause_end_and_stall(tmp_path, mo
     muxes.append(mux)
     return mux
   monkeypatch.setattr(render, 'MediaMux', new_mux)
+  sleeps = []
   def next_loop(delay):
+    sleeps.append(delay)
     if step[0] == len(times) - 1:
       engine.error = 'test complete'
       return
@@ -846,3 +851,6 @@ def test_web_delivery_times_packets_and_flushes_pause_end_and_stall(tmp_path, mo
   assert states[-1]['state'] == 'ended' and states[-1]['mediaReady']
   for mux in muxes:
     mux.close.assert_called_once()
+  assert min(sleeps) == .002 and max(sleeps) == .01
+  assert sleeps[9] == pytest.approx(.005)  # Processing leaves only 5 ms to the next draw.
+  assert [sleeps[i] for i in (3, 4, 7, 8, 13)] == [.01] * 5  # Paused, invalid clock, ended.
