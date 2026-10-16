@@ -17,7 +17,7 @@ from Crypto.Cipher import AES
 from protocol import (Assembler, MAX_BODY, MAX_FRAME, NOTIFICATION_WINDOW, open_message,
                       packets, seal, stream_tag, notification_packets)
 from proxy import GalaxyProxy, validate_target
-from server import Application, Characteristic, NotificationCharacteristic, GattService, Gateway, SERVICE_PATH
+from server import Advertisement, check_adapter, Application, Characteristic, NotificationCharacteristic, GattService, Gateway, SERVICE_PATH
 
 KEY = bytes(range(32))
 
@@ -344,3 +344,22 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdapterHealthTests(unittest.IsolatedAsyncioTestCase):
+    async def test_registered_advertisement_and_power_on_are_required(self):
+        from unittest.mock import AsyncMock
+        properties = type('Properties', (), {})()
+        properties.call_get = AsyncMock(return_value=Variant('b', True))
+        advertisement = Advertisement()
+        await check_adapter(properties, advertisement)
+        advertisement.released = True
+        with self.assertRaisesRegex(RuntimeError, 'released'):
+            await check_adapter(properties, advertisement)
+        advertisement.released = False
+        properties.call_get.return_value = Variant('b', False)
+        with self.assertRaisesRegex(RuntimeError, 'switched off'):
+            await check_adapter(properties, advertisement)
+        properties.call_get.side_effect = ConnectionError('BlueZ owner disappeared')
+        with self.assertRaises(ConnectionError):
+            await check_adapter(properties, advertisement)

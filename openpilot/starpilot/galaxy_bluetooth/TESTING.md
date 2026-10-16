@@ -43,3 +43,34 @@ First startup uses SecretGood's own settings migration and recovery rules. A loc
 On a configured SecretGood runtime, run `python -m unittest openpilot.starpilot.galaxy_bluetooth.tests.integration_secretgood_http -v` for the actual HTTP settings pages and display preview/confirm tests. Tests use temporary Params and access directories.
 
 `python tools/laptop_device_build/validate_artifacts.py .` checks the shipped AArch64/QCOM artifacts. This branch retains upstream prebuilt binaries; it does not rebuild or claim device inference validation.
+
+
+## Discovery recovery and logs
+
+Opening the iPhone pairing code requests a fresh bridge registration while parked.
+This restarts only `galaxy-ble-fork.service`; it does not toggle the shared radio,
+remove bonds, or change the app pairing key. An existing app connection will close
+while the bridge restarts. The bootstrap checks for pairing requests every second
+between normal ten-second setup checks.
+
+If BlueZ releases the advertisement, the adapter powers off, its property query
+fails, or the system bus disconnects, the bridge clears its ready marker and exits.
+The existing service restart policy handles re-registration. An idle phone is not
+considered a fault; a registered advertisement alone cannot prove over-air reception.
+
+Collect these on comma after reproducing a problem:
+
+```sh
+journalctl -u galaxy-ble-fork.service -n 100 --no-pager
+cat /data/galaxy-ble/setup-status.json
+cat /data/galaxy-ble/bridge-ready.json
+```
+
+Bridge logs include the running source fingerprint, GATT/advertisement registration,
+BlueZ release, handshake challenge arrival, and shutdown. The iPhone connection
+report includes scan results, service discovery, handshake, and transfer timings.
+Pairing keys, challenges, device addresses and private remote Galaxy URLs are not
+written to these new events.
+
+Host tests exercise the recovery gates and adapter failure checks. Physical radio
+recovery, head-unit coexistence and overnight reliability still need comma testing.

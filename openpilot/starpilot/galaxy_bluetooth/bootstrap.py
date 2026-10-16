@@ -2,6 +2,7 @@
 import fcntl
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import subprocess
@@ -12,6 +13,7 @@ DATA = Path('/data/galaxy-ble')
 BRIDGE = Path(__file__).resolve().parent / 'bridge'
 UNIT = 'galaxy-ble-fork.service'
 LAN_UNIT = 'galaxy-lan-discovery.service'
+LOG = logging.getLogger('galaxy.bluetooth.setup')
 
 
 def write_json(path, value):
@@ -38,6 +40,11 @@ def setup_status(data=DATA):
 
 def retry_setup(data=DATA):
   write_json(data / 'retry-setup.json', {'requested': time.time()})
+
+
+def refresh_pairing(data=DATA):
+  # Explicit user action only; credentials and the shared radio stay unchanged.
+  write_json(data / 'refresh-pairing.json', {'requested': time.time()})
 
 
 class Bootstrap:
@@ -124,6 +131,11 @@ class Bootstrap:
                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.status('waiting', 'Turn Bluetooth on in comma Settings to pair your phone')
         return
+      refresh = self.data / 'refresh-pairing.json'
+      if refresh.exists() and self.params.get_bool('IsOffroad'):
+        LOG.info('Refreshing phone bridge advertisement: pairing code opened')
+        self.systemctl('restart', UNIT, stdout=subprocess.DEVNULL)
+        refresh.unlink(missing_ok=True)
       started = self.run(['sudo', '-n', 'systemctl', 'start', UNIT], timeout=20, check=False,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
       if started.returncode != 0:
@@ -136,12 +148,14 @@ class Bootstrap:
       except (OSError, ValueError, KeyError, TypeError):
         running = False
       self.status('ready' if running else 'waiting', 'Ready to pair' if running else 'Waiting for Bluetooth. Enable Bluetooth on comma.')
-    except (OSError, subprocess.SubprocessError, ValueError):
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+      LOG.error('Phone bridge setup failed: %s', type(error).__name__)
       self.next_attempt = time.monotonic() + 60
       self.status('error', 'Setup failed. Connect comma to internet, then Retry setup. See setup.log.')
 
 
 def main():
+  logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
   from openpilot.common.params import Params
   DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
   os.chmod(DATA, 0o700)
@@ -153,7 +167,10 @@ def main():
     worker = Bootstrap(Params())
     while True:
       worker.step()
-      time.sleep(10)
+      for _ in range(10):
+        time.sleep(1)
+        if (DATA / 'refresh-pairing.json').exists() and worker.params.get_bool('IsOffroad'):
+          break
 
 
 if __name__ == '__main__':
