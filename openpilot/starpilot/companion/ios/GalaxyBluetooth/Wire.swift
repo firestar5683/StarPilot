@@ -2,6 +2,11 @@ import Foundation
 import CryptoKit
 import Compression
 
+struct BridgePhone: Codable {
+    let name: String
+    let replaces: String?
+}
+
 struct BridgeRequest: Codable {
     let id: String
     let session: String
@@ -10,6 +15,7 @@ struct BridgeRequest: Codable {
     let method: String
     let headers: [String: String]
     let body: String
+    var phone: BridgePhone? = nil
     var responseCodec: Int? = nil
     var responseFlow: String? = nil
 }

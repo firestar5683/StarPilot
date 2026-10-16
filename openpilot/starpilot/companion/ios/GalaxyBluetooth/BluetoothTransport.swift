@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import CoreBluetooth
 import CryptoKit
+import UIKit
 
 struct NearbyDevice: Identifiable {
     let id: UUID
@@ -71,6 +72,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         let method: String
         let headers: [String: String]
         let body: Data
+        let phone: BridgePhone?
         let enqueuedAt = ProcessInfo.processInfo.systemUptime
         let completion: CheckedContinuation<BridgeResponse, Error>
     }
@@ -191,6 +193,11 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     }
 
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
+        try await request(path: path, method: method, headers: headers, body: body, phone: nil)
+    }
+
+    private func request(path: String, method: String, headers: [String: String], body: Data,
+                         phone: BridgePhone?) async throws -> BridgeResponse {
         let id = UUID().uuidString
         return try await withTaskCancellationHandler(operation: {
             try Task.checkCancellation()
@@ -203,7 +210,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
                     continuation.resume(throwing: BridgeError.message("Bluetooth queue is full or upload exceeds 1 MiB."))
                     return
                 }
-                queue.append(Pending(id: id, path: path, method: method, headers: headers, body: body, completion: continuation))
+                queue.append(Pending(id: id, path: path, method: method, headers: headers, body: body, phone: phone, completion: continuation))
                 pump()
             }
         }, onCancel: { [weak self] in
@@ -275,7 +282,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
             notificationTag = try Wire.streamTag(session: session, counter: counter)
             let request = BridgeRequest(id: active.id, session: session, counter: counter, path: active.path,
                                         method: active.method, headers: active.headers, body: active.body.base64EncodedString(),
-                                        responseCodec: 2, responseFlow: activeNotifications ? "notify-window8" : activeReadStream ? "read-stream" : nil)
+                                        phone: active.phone, responseCodec: 2, responseFlow: activeNotifications ? "notify-window8" : activeReadStream ? "read-stream" : nil)
             outgoing = Wire.packets(try Wire.seal(request, key: key, direction: "request"),
                                     size: min(supportsNotifications ? 512 : 180, peripheral.maximumWriteValueLength(for: .withoutResponse)))
             timeoutTask = Task { @MainActor [weak self] in
@@ -432,7 +439,8 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
             Task { @MainActor [weak self, weak peripheral] in
                 guard let self, let peripheral else { return }
                 do {
-                    let response = try await self.request(path: "/_bridge/health", method: "GET", headers: [:], body: Data())
+                    let response = try await self.request(path: "/_bridge/health", method: "GET", headers: [:], body: Data(),
+                        phone: PairingKeyStore.phone(for: self.keyText, name: UIDevice.current.name))
                     guard peripheral == self.peripheral, self.session == handshakeSession else { return }
                     guard response.status == 200 else { throw BridgeError.message("Bridge verification failed.") }
                     let health = try JSONDecoder().decode(BridgeHealth.self, from: response.bodyData)

@@ -4,8 +4,9 @@ struct PairingCode: Decodable {
     let type: String
     let version: Int
     let key: String
+    let id: String?
 
-    static func parse(_ text: String) throws -> String {
+    static func parse(_ text: String) throws -> PairingCode {
         guard text.utf8.count <= 512, let data = text.data(using: .utf8),
               let value = try? JSONDecoder().decode(Self.self, from: data),
               value.type == "galaxy-bluetooth", value.version == 1,
@@ -14,7 +15,13 @@ struct PairingCode: Decodable {
             throw NSError(domain: "GalaxyPairing", code: 1, userInfo: [NSLocalizedDescriptionKey:
                 "This isn’t a Galaxy Bluetooth pairing code. Open Pair phone on your comma."])
         }
-        return value.key.lowercased()
+        return PairingCode(type: value.type, version: value.version, key: value.key.lowercased(),
+                           id: validID(value.id))
+    }
+    static func validID(_ value: String?) -> String? {
+        guard let value, value.utf8.count == 8,
+              value.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) else { return nil }
+        return value.lowercased()
     }
 }
 
@@ -30,7 +37,7 @@ private final class ScannerState: ObservableObject {
 }
 
 struct PairingScannerSheet: View {
-    let onKey: (String) -> Void
+    let onKey: (PairingCode) -> Void
     @Environment(\.dismiss) private var dismiss
     @StateObject private var state = ScannerState()
 
