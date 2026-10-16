@@ -25,6 +25,8 @@ jobs:
   app:
     name: Swift tests and iOS Simulator build
     runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     timeout-minutes: 25
     defaults:
       run:
@@ -38,6 +40,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Check Xcode version
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
       - name: Run companion regressions
         env:
           CI_PRIMARY_REPOSITORY_PATH: ${{ github.workspace }}/ios
