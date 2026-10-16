@@ -257,6 +257,13 @@ def refresh_lane_change_policy(preferences, desire_helper, carstate, now_ns, veh
   return policy
 
 
+def release_compile_pool() -> None:
+  from tinygrad.engine.worker import terminate_worker_pool
+  from tinygrad.helpers import PARALLEL
+  terminate_worker_pool()
+  PARALLEL.value = 0
+
+
 def main(demo=False):
   cloudlog.warning("modeld init")
 
@@ -385,6 +392,9 @@ def main(demo=False):
                          chestnut=CHESTNUT, recovery=recovery_small_only)
   params.put_bool("ChestnutLoading", False)
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
+  release_compile_pool()
+  # gc stays off for the realtime loop, so drop the load's cyclic garbage once now
+  gc.collect()
 
   config_realtime_process(7, 54)
 

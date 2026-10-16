@@ -184,7 +184,7 @@ def test_big_worker_waits_before_load_and_timeout_preserves_small_fallback(custo
          "params": params, "requested_model_id": "big", "ModelVariant": ModelVariant,
          "CP": SimpleNamespace(brand="mock"), "demo": False,
          "wait_for_chestnut_power": lambda CP, timeout: events.append("power"), "attach_jetlink": attach_jetlink,
-         "drop_chestnut": Mock()}
+         "drop_chestnut": Mock(), "release_compile_pool": Mock(), "gc": Mock()}
   wrapper = ast.parse("def startup():\n  pass").body[0]
   wrapper.body = body[start:end] + [ast.Return(value=ast.Call(func=ast.Name(id="locals", ctx=ast.Load()), args=[], keywords=[]))]
   execute([wrapper], env)
@@ -200,6 +200,8 @@ def test_big_worker_waits_before_load_and_timeout_preserves_small_fallback(custo
   if not timeout:
     assert events.index("wait") < events.index("power") < events.index("big")
   assert env["drop_chestnut"].call_count == int(timeout)
+  env["release_compile_pool"].assert_called_once_with()
+  env["gc"].collect.assert_called_once_with()
   params.put_bool.assert_any_call("ChestnutActive", not timeout)
   params.put_bool.assert_any_call("ChestnutLoading", False)
   assert receipt.loaded.call_args.args[1] == (ModelVariant.SMALL if timeout else ModelVariant.CHESTNUT)
