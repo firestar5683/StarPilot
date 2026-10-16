@@ -96,3 +96,30 @@ def test_native_poll_routes_experimental_and_speed_limit_requests(monkeypatch):
   monkeypatch.setattr(runtime_app, 'ui_state', NS(started=False, replay_clock=None))
   session._poll_projection_slc(0)
   session._projection_experimental.assert_not_called()
+
+
+def test_projected_wheel_tap_hits_the_drawn_wheel_on_a_1280x720_head_unit():
+  from dataclasses import replace
+  from openpilot.starpilot.system.android_auto.projection_geometry import projection_geometry
+  from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport, projection_customization
+  from openpilot.starpilot.ui.onroad_customization import default_document, offset, widget_size
+  from openpilot.starpilot.ui.onroad_state import OnroadInput, OnroadRequest, OnroadState, SpeedLimitObservation
+  geometry = projection_geometry(1280, 720)
+  width = geometry.logical_width
+  assert width == 1920
+  customization = projection_customization(default_layout_for_viewport((width, geometry.logical_height)), default_document())
+  state = replace(OnroadState(True, True, 15, 80, SpeedLimitObservation()), customization=customization,
+                  experimental_available=True, viewport_width=width)
+  # Where SteeringWheelWidget.render draws it on a canvas `width` wide.
+  dx, dy = offset(customization, 'large', 'steering_wheel')
+  size, _ = widget_size(customization, 'large', 'steering_wheel')
+  x, y = width - 146 - 96 + dx + size / 2, 45 + dy + size / 2
+  emitted = []
+  gesture = OnroadInput(emitted.append)
+  gesture.press(x, y, state)
+  assert gesture.claimed
+  gesture.release(x, y, state)
+  assert emitted == [OnroadRequest('set_experimental', True, '')]
+  # The comma's default width put the target off the drawn wheel.
+  gesture.press(x, y, replace(state, viewport_width=2160.0))
+  assert not gesture.claimed

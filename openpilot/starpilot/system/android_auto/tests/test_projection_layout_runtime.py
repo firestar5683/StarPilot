@@ -1,5 +1,6 @@
 """Saved projection layout loading, live reload after a Galaxy save, and frozen-state replacement regressions."""
 import copy
+from dataclasses import replace
 import fcntl
 import json
 import os
@@ -348,7 +349,8 @@ class TestProjectionLayoutRuntime(unittest.TestCase):
     self.addCleanup(view.close)
     view.onroad.render = rendered.append
     view.render()
-    self.assertIs(rendered[0], state)
+    # Only the canvas width changes: touch hit-tests must match where the view draws.
+    self.assertEqual(rendered[0], replace(state, viewport_width=2880))
 
 
 if __name__ == '__main__':

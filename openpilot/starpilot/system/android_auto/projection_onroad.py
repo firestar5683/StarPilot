@@ -403,6 +403,9 @@ class ProjectionOnroad:
           self._base_appearance = state.appearance
         state = replace(state, customization=self._projection_customization, appearance=self._projection_appearance,
                         reverse_driver_camera=False)
+      # Touch hit-tests read viewport_width; the view draws at the car canvas width (1920 for a 1280x720 head unit).
+      if state.viewport_width != self.width:
+        state = replace(state, viewport_width=self.width)
       self._state = self._with_certificate_notice(state, now_ns)
       self.onroad.render(self._state)
       self.fonts.draw('StarPilot', self.native.font_role.BRAND, 30, self.width - 210, self.height - 90)
