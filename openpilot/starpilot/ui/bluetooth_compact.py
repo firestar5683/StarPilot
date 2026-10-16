@@ -23,6 +23,7 @@ class BluetoothCompact(NavScroller):
 
   def __init__(self, connectivity_allowed: Callable[[], bool]):
     super().__init__()
+    self.phone_pairing_allowed = connectivity_allowed
     self.session: tuple | None = None
     self.active = False
     self.owner = BluetoothOwner(connectivity_allowed,
@@ -259,6 +260,8 @@ class BluetoothCompact(NavScroller):
         scan.set_click_callback(lambda: self._request("stop_scan" if scanning else "scan"))
         scan.set_enabled(lambda: self._ready() and bool(self.status and self.status.get("adapter")))
         cards.append(scan)
+    from openpilot.starpilot.galaxy_bluetooth.phone_ui import compact_phone_button
+    cards.append(compact_phone_button(self.phone_pairing_allowed))
     self._scroller.items.clear()
     self._scroller.add_widgets(cards)
 
