@@ -557,7 +557,8 @@ class Car:
         latched=self.aol_card_intent.allowed_latch, cancel_source_ns=cancel_source_ns,
         brake_source_ns=brake_source_ns,
         gm_withdrawal_source_ns=gm_withdrawal_source_ns,
-        intent_producer_session=getattr(self, 'slc_producer_session', ''))
+        intent_producer_session=getattr(self, 'slc_producer_session', ''),
+        main_arm_ns=getattr(self.aol_card_intent, 'main_arm_ns', 0))
       fault_active = True if transport_reset else None
       event_ns = int(self.sm.logMonoTime['onroadEvents'])
       if (getattr(self.aol_card_intent, 'requires_fault_observation', self.aol_card_intent.explicit_latch) and
@@ -819,7 +820,8 @@ class Car:
         latched=getattr(getattr(self, 'aol_card_intent', None), 'allowed_latch', True),
         cancel_source_ns=self.aol_cancel_source(CS, now_ns), brake_source_ns=self.aol_honda_brake_source(CS, now_ns),
         gm_withdrawal_source_ns=self.aol_gm_withdrawal_source(CS, now_ns),
-        intent_producer_session=getattr(self, 'slc_producer_session', '')):
+        intent_producer_session=getattr(self, 'slc_producer_session', ''),
+        main_arm_ns=getattr(self.aol_card_intent, 'main_arm_ns', 0)):
       return True
     events = self.sm['onroadEvents']
     if self.aol_transport_feedback.retention_qualified or self.aol_transport_feedback.retention_pending:
@@ -1324,20 +1326,31 @@ class Car:
              self.CP.carFingerprint == GM_CAR.CHEVROLET_VOLT_ASCM and self.CP.pcmCruise and
              not self.CP.openpilotLongitudinalControl and gm_lane_centering_supported(self.CP)))
 
+  def ev6_startup_keepalive(self):
+    from opendbc.car.hyundai.ev6_startup import EV6Startup, required
+    from opendbc.car.hyundai.ecu_startup import Outcome
+    owner = getattr(getattr(self, 'vehicle_startup', None), 'owner', None)
+    return (isinstance(owner, EV6Startup) and owner.outcome is Outcome.SENT_UNCONFIRMED and
+            owner.ready and owner.published and owner.ci is self.CI and not owner.closed and
+            required(self.CP))
+
   def controls_update(self, CS: car.CarState, CC: car.CarControl, *, initialize_only=False):
     """control update loop, driven by carControl"""
 
     if initialize_only:
+      ev6_startup = self.ev6_startup_keepalive()
       now_ns = time.monotonic_ns()
       source_ns = int(self.sm.logMonoTime['carControl'])
       receipt_ns = int(self.sm.recv_time['carControl'] * 1e9)
       # Disabled torque/accel are commands; inactive curvature is only telemetry.
-      if (not self.aol_replay or not native_bootstrap_supported(self.CP) or self.vehicle_startup.owner is not None or
+      if (not (ev6_startup or (self.aol_replay and native_bootstrap_supported(self.CP) and self.vehicle_startup.owner is None)) or
           not CS.canValid or CS.canTimeout or
           not (self.sm.seen['carControl'] and self.sm.valid['carControl'] and self.sm.alive['carControl']) or
           not (0 < source_ns <= now_ns and now_ns - source_ns <= 150_000_000 and
                0 < receipt_ns <= now_ns and now_ns - receipt_ns <= 150_000_000) or
           CC.enabled or CC.latActive or CC.longActive or CC.actuators.torque != 0.0 or CC.actuators.accel != 0.0):
+        return
+      if ev6_startup and not self.vehicle_startup.owner.prepared_for(self.CP):
         return
 
     if getattr(self, 'volt_cc_selected', False):
@@ -1405,11 +1418,16 @@ class Car:
       self.ci_initialized = True
 
     if initialize_only:
-      if (isinstance(self.CI, GMInterface) and self.volt_startup_keepalive() and
+      if ev6_startup and any(ps.faults for ps in self.sm['pandaStates']):
+        return
+      if (((isinstance(self.CI, GMInterface) and self.volt_startup_keepalive()) or ev6_startup) and
           self.startup_panda_configured(inactive_keepalive=True)):
         inactive = car.CarControl.new_message().as_reader()
-        self.last_actuators_output, can_sends = self.CI.apply(
-          inactive, time.clock_gettime_ns(time.CLOCK_BOOTTIME), startup_keepalive=True)
+        now_boot_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+        if ev6_startup:
+          self.last_actuators_output, can_sends = self.CI.apply(inactive, now_boot_ns)
+        else:
+          self.last_actuators_output, can_sends = self.CI.apply(inactive, now_boot_ns, startup_keepalive=True)
         self.publish_sendcan(can_sends, valid=CS.canValid)
       return
 
@@ -1482,9 +1500,9 @@ class Car:
                    self.sm.seen['onroadEvents'])
     if not self.CP.passive and initialized:
       self.controls_update(CS, self.sm['carControl'])
-    elif ((not self.ci_initialized or self.volt_startup_keepalive()) and self.sm.seen['onroadEvents'] and
+    elif ((not self.ci_initialized or self.volt_startup_keepalive() or self.ev6_startup_keepalive()) and self.sm.seen['onroadEvents'] and
           any(e.name == EventName.selfdriveInitializing for e in self.sm['onroadEvents']) and
-          self.aol_replay and native_bootstrap_supported(self.CP)):
+          ((self.aol_replay and native_bootstrap_supported(self.CP)) or self.ev6_startup_keepalive())):
       self.controls_update(CS, self.sm['carControl'], initialize_only=True)
 
     radar_can = self._deferred_radar_can

@@ -1,0 +1,30 @@
+{
+  "name": "StarPilot Galaxy",
+  "short_name": "Galaxy",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0e0a1a",
+  "theme_color": "#6f42a6",
+  "icons": [
+    {
+      "src": "./assets/galaxy-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./assets/galaxy-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./assets/galaxy-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

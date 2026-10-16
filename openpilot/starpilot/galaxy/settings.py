@@ -133,6 +133,7 @@ class LiveContextSource:
   """Samples registered Params and the two actual publisher clock domains."""
 
   MAX_CP_BYTES = 1_048_576
+  MAX_LIVE_CP_AGE_NS = 100_000_000_000  # Card republishes finalized parameters every 50 seconds.
 
   def __init__(self, params, messages=None, *, mono_clock=time.monotonic_ns, boot_clock=boot_time_ns,
                evidence_wait_ms=750, wait_clock=time.monotonic, borrowed_messages=False):
@@ -159,7 +160,7 @@ class LiveContextSource:
       return None
     if self.messages is None:
       from openpilot.cereal import messaging
-      self.messages = messaging.SubMaster(["deviceState", "pandaStates", "carState", "selfdriveState"])
+      self.messages = messaging.SubMaster(["deviceState", "pandaStates", "carState", "selfdriveState", "carParams"])
     return cast(Callable[[], object], self.messages.snapshot)() if hasattr(self.messages, "snapshot") else self.messages
 
   def close(self) -> None:
@@ -280,6 +281,30 @@ class LiveContextSource:
         return False
 
   def runtime_vehicle(self):
+    try:
+      with self.lock:
+        if self.closed:
+          return None, None
+        sm = self._messages() if self.messages is not None else None
+        if sm is not None:
+          if not self.borrowed_messages and not hasattr(self.messages, 'snapshot'):
+            sm.update(0)
+          now = self.mono_clock()
+          stamp = int(sm.logMonoTime.get('carParams', 0))
+          floor = max(self.device_after_mono_ns, getattr(sm, 'after_mono_ns', 0))
+          if (sm.seen.get('carParams', False) and sm.valid.get('carParams', False) and sm.alive.get('carParams', False) and
+              floor < stamp <= now and now - stamp <= self.MAX_LIVE_CP_AGE_NS):
+            from opendbc.car.values import PLATFORMS
+            from opendbc.car.mock.values import CAR as MOCK
+            from opendbc.car.structs import car
+            cp = sm['carParams']
+            if (cp.schema.node.id == car.CarParams.schema.node.id and not cp.notCar and
+                cp.carFingerprint in PLATFORMS and cp.carFingerprint != MOCK.MOCK):
+              raw = cp.as_builder().to_bytes()
+              if len(raw) <= self.MAX_CP_BYTES:
+                return cp, b'live-vehicle:' + raw
+    except (OSError, RuntimeError, AttributeError, KeyError, TypeError, ValueError, OverflowError):
+      pass
     cp_raw, readable = read_saved(self.params, "CarParamsPersistent", self.MAX_CP_BYTES)
     cp = None
     if readable and cp_raw is not None:

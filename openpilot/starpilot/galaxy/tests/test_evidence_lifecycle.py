@@ -27,7 +27,7 @@ class Messages:
     self.data = {'deviceState': NS(started=started),
                  'pandaStates': [NS(pandaType='uno', ignitionLine=ignition, ignitionCan=False, controlsAllowed=False, safetyModel='noOutput')],
                  'carState': NS(canValid=True, canTimeout=False, standstill=True, gearShifter='park'),
-                 'selfdriveState': NS(enabled=False, active=False)}
+                 'selfdriveState': NS(enabled=False, active=False), 'carParams': NS(notCar=True)}
     self.seen = self.alive = self.valid = dict.fromkeys(EvidenceSource.SERVICES, True)
     self.updated = dict(self.seen)
     self.logMonoTime = {name: boot if name == 'pandaStates' else mono for name in EvidenceSource.SERVICES}

@@ -35,11 +35,17 @@ class GmAolCardIntent(AolCardIntent):
     self.cp = cp
     self.requires_fault_observation = True
     self._main_cycle_required = False
+    self._main_available = False
+    self._main_arm_ns = 0
     self.startup_calibration_pending = True
     self._startup_incomplete = False
 
   def update(self, CS, *, consumed_buttons=frozenset(), fault_active=None,
              now_ns=0, native_rejection_ns=0, standard_enabled=False):
+    main_rise = False
+    if CS.canValid and not CS.canTimeout:
+      main_rise = bool(CS.cruiseState.available and not self._main_available)
+      self._main_available = bool(CS.cruiseState.available)
     fault = bool(fault_active or CS.steerFaultPermanent)
     if fault:
       self._main_cycle_required = True
@@ -51,6 +57,15 @@ class GmAolCardIntent(AolCardIntent):
     if self._main_cycle_required:
       self.allowed_latch = False
       self.startup_calibration_pending = False
+    if not self.allowed_latch:
+      self._main_arm_ns = 0
+    elif main_rise:
+      self._main_arm_ns = now_ns
+
+  @property
+  def main_arm_ns(self):
+    return (self._main_arm_ns if self.settings.enabled and self.settings.main_action != AOL_TOGGLE and
+            not self.pause_lateral and not self.pause_longitudinal else 0)
 
   def _arm_from_full_engagement(self, CS, *, source_ns):
     if not self._main_cycle_required:
@@ -91,6 +106,48 @@ class GmAolCardIntent(AolCardIntent):
 
 def create_intent(cp, settings):
   return GmAolCardIntent(settings, cp) if qualified_gm(cp) else None
+
+
+def prior_main_off_intent_current(feedback, sm, cp, cs, axis, now_ns, *, latched, main_arm_ns, producer):
+  """An older idle response cannot reject a newly armed cruise MAIN request."""
+  from opendbc.car.structs import car
+  from openpilot.cereal import log
+  from openpilot.starpilot.aol.runtime import AXIS_MAX_AGE_NS
+  from openpilot.starpilot.aol.transport_pause import _healthy_transport_native
+
+  if (not qualified_gm(cp) or not latched or not 0 < main_arm_ns <= now_ns or
+      now_ns - main_arm_ns > AXIS_MAX_AGE_NS or
+      feedback.failed or feedback.paused or feedback.pending_event or
+      feedback.retention_started_ns or feedback.source_retention_started_ns or
+      feedback.longitudinal_cancel_ns or feedback.honda_brake_ns or feedback.gm_withdrawal_ns or
+      not feedback.signature or not producer or
+      (str(axis.intentProducerSessionId), int(axis.intentIntegrityEpoch)) != feedback.signature[14:16] or
+      str(axis.intentProducerSessionId) != producer or
+      not cs.canValid or cs.canTimeout or not cs.cruiseState.available or cs.accFaulted or cs.doorOpen or
+      cs.steerFaultTemporary or cs.steerFaultPermanent or
+      cs.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.low,
+                            car.CarState.GearShifter.sport, car.CarState.GearShifter.brake) or
+      any(event.type == car.CarState.ButtonEvent.Type.cancel for event in cs.buttonEvents) or
+      str(axis.faultReason) != 'none' or axis.nativeAcknowledged or
+      axis.desiredLateral or axis.desiredLongitudinal or axis.lateralActive or axis.longitudinalActive or
+      not 0 < axis.sourceCarStateMonoTime <= axis.observedMonoTime or axis.sourceCarStateMonoTime >= main_arm_ns or
+      now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS or
+      not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
+      not 0 < sm.logMonoTime['onroadEvents'] <= now_ns or
+      now_ns - sm.logMonoTime['onroadEvents'] > 1_500_000_000):
+    return False
+  for event in sm['onroadEvents']:
+    if event.immediateDisable or event.softDisable:
+      return False
+    if event.userDisable and not (
+        event.name == log.OnroadEvent.EventName.pedalPressed and (cs.brakePressed or cs.regenBraking) or
+        event.name == log.OnroadEvent.EventName.pcmDisable and not cs.cruiseState.enabled or
+        event.name == log.OnroadEvent.EventName.wrongCarMode and sm.logMonoTime['onroadEvents'] < main_arm_ns):
+      return False
+  native = _healthy_transport_native(sm, cp, cs, str(axis.sessionId), now_ns)
+  return bool(native is not None and native.pandaInventory and
+              not native.requestedLateral and not native.requestedLongitudinal and
+              not native.lateralAllowed and not native.longitudinalAllowed)
 
 
 def configuration_settings_policy(cp):

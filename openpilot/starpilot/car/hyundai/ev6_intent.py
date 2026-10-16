@@ -4,6 +4,25 @@ from opendbc.car.hyundai.ev6_aol import Ev6PhysicalAuthorization
 from openpilot.starpilot.aol.intent import AolCardIntent, AOL_TOGGLE, ButtonType
 
 
+class StockEv6CardIntent(AolCardIntent):
+  def __init__(self, settings):
+    super().__init__(settings, explicit_latch=True)
+
+  def update(self, CS, *, consumed_buttons=frozenset(), fault_active=None, now_ns=0, native_rejection_ns=0,
+             standard_enabled=False):
+    if self.settings.main_action == 0 and self.settings.lkas_action == AOL_TOGGLE:
+      # An unassigned cruise MAIN owns stock ACC, not the separate LKAS latch.
+      for event in CS.buttonEvents:
+        if event.type == ButtonType.mainCruise:
+          self._main_held = bool(event.pressed)
+      ordinary = CS.as_reader().as_builder()
+      ordinary.buttonEvents = [event for event in CS.buttonEvents if event.type != ButtonType.mainCruise]
+    else:
+      ordinary = CS
+    super().update(ordinary, consumed_buttons=consumed_buttons, fault_active=fault_active, now_ns=now_ns,
+                   native_rejection_ns=native_rejection_ns, standard_enabled=standard_enabled)
+
+
 class Ev6CardIntent(AolCardIntent):
   observe_stock_engagement = True
 

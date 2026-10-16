@@ -851,7 +851,8 @@ class TransportPauseFeedback:
     self.awaiting = True
     return True
 
-  def observe(self, sm, cp, cs, now_ns, *, latched=True, cancel_source_ns=0, brake_source_ns=0, gm_withdrawal_source_ns=0, intent_producer_session=''):
+  def observe(self, sm, cp, cs, now_ns, *, latched=True, cancel_source_ns=0, brake_source_ns=0,
+              gm_withdrawal_source_ns=0, intent_producer_session='', main_arm_ns=0):
     self.temporary_host_qualified = False
     self.qualified = False
     self.awaiting = False
@@ -875,6 +876,14 @@ class TransportPauseFeedback:
                      cp_identity(cp) == self.cp)
       continuity = bool(not self.session or axis.sessionId == self.session and
                         (axis.sequence > self.sequence or axis.sequence == self.sequence and signature == self.signature))
+      if current and continuity and 0 < main_arm_ns <= now_ns <= main_arm_ns + AXIS_MAX_AGE_NS:
+        from openpilot.starpilot.car.gm.aol import prior_main_off_intent_current
+        if prior_main_off_intent_current(self, sm, cp, cs, axis, now_ns,
+            latched=latched, main_arm_ns=main_arm_ns, producer=intent_producer_session):
+          # This response predates the physical MAIN edge. It neither rejects
+          # the new request nor renews any command, native or healthy lease.
+          self.sequence, self.signature = int(axis.sequence), signature
+          return False
       if current and continuity and (reason == 'critical' or
           getattr(sm, 'updated', {}).get('onroadEvents', False)) and self._temporary_lag_intent_current(sm, cp, cs, axis, stamp, now_ns,
           latched=latched, producer=intent_producer_session, signature=signature):

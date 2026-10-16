@@ -20,6 +20,8 @@ from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ray_pedal import create_ray_pedal_command, ray_pedal_gas, ray_pedal_enabled
 from opendbc.car.hyundai.ioniq6_longitudinal import Ioniq6LongitudinalPolicy
 from opendbc.car.hyundai.canfd_dash_icons import CanFDDashIcons
+from opendbc.car.hyundai.canfd_stock_aol import qualified as qualified_canfd_stock_aol
+from opendbc.car.hyundai.ev6_aol import qualified as qualified_ev6_aol
 from opendbc.car.hyundai.g90_longitudinal import G90LongitudinalPolicy
 from opendbc.car.hyundai.gv70_longitudinal import is_gv70, scc_request, suppress_stock_cancel
 from opendbc.car.hyundai.g90_lead import G90LeadState, eligible as g90_lead_eligible
@@ -135,7 +137,8 @@ class CarController(CarControllerBase):
     ioniq6_status = (self.ioniq6_longitudinal is not None and
                      int(CP.safetyConfigs[-1].safetyParam) in (0x8015, 0x8095, 0x8815, 0x8895))
     self.ioniq6_bsm_enabled = ioniq6_status
-    self.canfd_dash_icons = CanFDDashIcons() if ioniq6_status or self.torque_ev_scc_enabled else None
+    self.ev6_aol_status = CP.carFingerprint == CAR.KIA_EV6 and (qualified_canfd_stock_aol(CP) or qualified_ev6_aol(CP))
+    self.canfd_dash_icons = CanFDDashIcons() if ioniq6_status or self.torque_ev_scc_enabled or self.ev6_aol_status else None
     self.ioniq6_bsm_counter = 0
     self.ioniq6_bsm_last_can_ns = 0
     self._ray_pedal = ray_pedal_enabled(CP)
@@ -456,7 +459,8 @@ class CarController(CarControllerBase):
         )
     else:
       steering_status_active = CC.enabled
-      if self.ioniq6_longitudinal is not None and self.CP.safetyConfigs[-1].safetyParam in (0x8815, 0x8895):
+      if self.ev6_aol_status or (self.ioniq6_longitudinal is not None and
+                                 self.CP.safetyConfigs[-1].safetyParam in (0x8815, 0x8895)):
         # AOL may steer while ordinary cruise engagement remains off.
         steering_status_active |= CC.latActive
       can_sends.extend(hyundaicanfd.create_steering_messages(self.packer, self.CP, self.CAN,

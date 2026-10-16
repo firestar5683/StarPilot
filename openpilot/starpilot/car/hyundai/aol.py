@@ -257,6 +257,9 @@ def native_latch_rejected(CP, native) -> bool:
 
 def create_intent(CP, settings):
   from opendbc.car.hyundai.ev6_aol import qualified as ev6_qualified
+  if CP.carFingerprint == HyundaiCAR.KIA_EV6 and qualified_canfd_stock(CP):
+    from openpilot.starpilot.car.hyundai.ev6_intent import StockEv6CardIntent
+    return StockEv6CardIntent(settings)
   if ev6_qualified(CP):
     from openpilot.starpilot.car.hyundai.ev6_intent import Ev6CardIntent
     return Ev6CardIntent(settings)
