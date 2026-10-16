@@ -31,4 +31,5 @@ charging over USB is optional and starts off.
 For a remote model switch, fully disengage cruise and any lateral control that
 stays on without cruise. Wait for Galaxy's fresh **Active · Jetlink remote model**
 status before engaging again. A lost or stalled link falls back to the local
-Small model; remain ready to take over while its behavior changes.
+Small model and stays engaged with a **Big Model Lost** warning; remain ready to
+take over while its behavior changes.

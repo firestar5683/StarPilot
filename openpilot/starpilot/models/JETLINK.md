@@ -69,10 +69,16 @@ prompt and benchmark sustained performance before use.
 ## Use and recovery
 
 Before changing the remote model, disengage cruise **and** any independent
-Always On Lateral steering. Wait for Galaxy's fresh **Active · Jetlink remote model**
-status before re-engaging. If the link stops or stalls, StarPilot falls back to
-the local Small model; be ready to take control as behavior changes. Set Jetlink
-to **Off** while parked to stop using the remote connection.
+Always On Lateral steering, armed or paused. Wait for Galaxy's fresh **Active · Jetlink remote model**
+status before re-engaging; engaging is refused for a second after the switch. If
+the link stops or stalls while engaged, StarPilot stays engaged on the local Small
+model and shows **Big Model Lost**; be ready to take control as behavior changes.
+Jetlink reconnects by itself and switches back at the next full disengagement. Set
+Jetlink to **Off** while parked to stop using the remote connection.
+
+With Jetlink on, the USB-C port belongs to its host: a downloaded Chestnut pick is
+used only when a Chestnut is detected, never because a cable is plugged in. When
+Jetlink is on but cannot run, an offroad alert says why.
 
 If a connection fails, check separate power, USB 3 support, host sleep, cooling,
 and the chosen StarPilot connection mode. An iPhone must stay unlocked with the
