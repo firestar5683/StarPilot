@@ -4,12 +4,12 @@ on:
   push:
     branches: [SecretGoodStarPilot, secretgood-ios-integration]
     paths:
-      - 'ios/**'
+      - 'openpilot/starpilot/companion/ios/**'
       - 'openpilot/starpilot/galaxy_bluetooth/**'
       - '.github/workflows/ios-companion.yaml'
   pull_request:
     paths:
-      - 'ios/**'
+      - 'openpilot/starpilot/companion/ios/**'
       - 'openpilot/starpilot/galaxy_bluetooth/**'
       - '.github/workflows/ios-companion.yaml'
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 25
     defaults:
       run:
-        working-directory: ios
+        working-directory: openpilot/starpilot/companion/ios
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,7 +40,7 @@ jobs:
           node-version: '22'
       - name: Run companion regressions
         env:
-          CI_PRIMARY_REPOSITORY_PATH: ${{ github.workspace }}/ios
+          CI_PRIMARY_REPOSITORY_PATH: ${{ github.workspace }}/openpilot/starpilot/companion/ios
         run: sh ci_scripts/ci_post_clone.sh
       - name: Build for iOS Simulator
         run: >-

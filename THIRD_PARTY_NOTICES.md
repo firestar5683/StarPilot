@@ -127,7 +127,7 @@ UI framework is bundled.
 
 The Galaxy Bluetooth phone bridge and iOS app from https://github.com/firestar5683/StarPilot
 (natehuby76, PRs #224/#225) are included under `openpilot/starpilot/galaxy_bluetooth/`
-and `ios/`, with their license files (`UPSTREAM-LICENSE`, `ios/UPSTREAM-GALAXY-LICENSE`).
+and `openpilot/starpilot/companion/ios/`, with their license files (`UPSTREAM-LICENSE`, `openpilot/starpilot/companion/ios/UPSTREAM-GALAXY-LICENSE`).
 Its isolated comma environment uses the pinned upstream requirements:
 dbus-next 0.2.3 (MIT), PyCryptodome 3.23.0 (BSD/public-domain components), and
 Zeroconf 0.151.3 (LGPL-2.1-or-later); those packages retain their distribution

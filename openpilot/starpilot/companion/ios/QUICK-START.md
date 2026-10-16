@@ -6,7 +6,7 @@ use the SecretGood version of the app with a comma running the matching Bluetoot
 
 open your TestFlight invitation on the iPhone and install the build offered there.
 
-to build it yourself, open `ios/GalaxyBluetooth.xcodeproj` from the repo in Xcode. choose your signing team, connect your iPhone, select it as the destination and press Run. Follow the phone's trust and Developer Mode prompts if shown.
+to build it yourself, open `openpilot/starpilot/companion/ios/GalaxyBluetooth.xcodeproj` from the repo in Xcode. choose your signing team, connect your iPhone, select it as the destination and press Run. Follow the phone's trust and Developer Mode prompts if shown.
 
 ## pair
 
