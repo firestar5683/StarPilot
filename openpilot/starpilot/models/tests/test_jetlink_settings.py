@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 import unittest
 
+from jetlink.openpilot import Status
 from openpilot.starpilot.models.jetlink_settings import JetlinkSettings
 from openpilot.starpilot.models.manager import ModelManager, preferences
 
@@ -30,11 +31,10 @@ class TestJetlinkSettings(unittest.TestCase):
     self.params = MemoryParams()
     self.chestnut = False
     self.device = "tizi"
-    self.runtime = {"state": "unavailable", "active": False}
-    self.status = SimpleNamespace(enabled=True, present=True, ready=True, reason=None,
-                                  progress={"stage": "ready"}, model="remote", transport="USB")
+    self.status = Status(enabled=True, mode="usb", transport="USB", present=True, port=None, ready=True, reason=None,
+                         progress={"stage": "ready"}, model="remote", default_model="remote")
     self.owner = JetlinkSettings(params=self.params, device_type=lambda: self.device,
-                                chestnut=lambda: self.chestnut, runtime=lambda: self.runtime, link=lambda: SimpleNamespace(status=lambda: self.status))
+                                chestnut=lambda: self.chestnut, link=lambda: SimpleNamespace(status=lambda: self.status))
 
   def test_prepared_is_not_execution(self):
     self.owner.configure({"mode": "usb"})
@@ -42,12 +42,20 @@ class TestJetlinkSettings(unittest.TestCase):
     self.assertEqual(view["state"], "prepared")
     self.assertTrue(view["prepared"])
     self.assertFalse(view["active"])
-    self.runtime = {"state": "running", "active": True}
-    self.assertEqual(self.owner.snapshot()["state"], "active")
-    self.runtime = {"state": "unavailable", "active": False}
-    self.status.ready = False
-    self.status.progress = {"stage": "joining", "msg": "Connecting"}
-    self.assertEqual(self.owner.snapshot()["state"], "joining")
+    self.assertIsNone(view["activeArtifactSha256"])
+    prepared = self.status
+    self.status = prepared._replace(running="running", active=True, running_sha256="b" * 64, running_checkpoint="ckpt")
+    view = self.owner.snapshot()
+    self.assertEqual((view["state"], view["runtimeState"], view["active"]), ("active", "running", True))
+    self.assertEqual((view["activeArtifactSha256"], view["activeCheckpoint"]), ("b" * 64, "ckpt"))
+    # jetlink's phases, in Galaxy's words where they differ
+    for running, state in (("ready", "waiting for disengagement"), ("retrying", "fallback / reconnecting")):
+      self.status = prepared._replace(running=running)
+      self.assertEqual(self.owner.snapshot()["state"], state)
+    self.status = prepared._replace(ready=False, progress={"stage": "download", "msg": "Downloading"})
+    self.assertEqual((self.owner.snapshot()["state"], self.owner.snapshot()["progress"]), ("preparing", "Downloading"))
+    self.status = prepared._replace(reason="no gadget")
+    self.assertEqual((self.owner.snapshot()["state"], self.owner.snapshot()["reason"]), ("unavailable", "no gadget"))
 
   def test_exact_choices_and_conflicts(self):
     for payload in ({"mode": 1}, {"mode": "other"}, {"chargePhone": 1}, {"unknown": True}):
