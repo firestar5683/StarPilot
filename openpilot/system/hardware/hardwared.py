@@ -19,7 +19,7 @@ from openpilot.cereal import log
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.common.utils import strip_deprecated_keys
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.common.params import Params
+from openpilot.common.params import Params, UnknownKeyName
 from openpilot.common.realtime import DT_HW
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.common.hardware import HARDWARE, COMMA_HARDWARE, PC
@@ -35,6 +35,7 @@ from openpilot.system.hardware.chestnut.monitoring import chestnut_state_thread
 from openpilot.system.hardware.chestnut.status import ChestnutStatus
 from openpilot.common.version import terms_version, training_version
 from openpilot.system.athena.registration import UNREGISTERED_DONGLE_ID
+from openpilot.starpilot.models import jetlink_adapter
 
 ThermalStatus = log.DeviceState.ThermalStatus
 NetworkType = log.DeviceState.NetworkType
@@ -124,6 +125,23 @@ def set_offroad_alert_if_changed(offroad_alert: str, show_alert: bool, extra_tex
     return
   prev_offroad_states[offroad_alert] = (show_alert, extra_text)
   set_offroad_alert(offroad_alert, show_alert, extra_text)
+
+# A prebuilt params library not yet regenerated lacks Offroad_JetlinkUnavailable: the alert is skipped rather than
+# taking hardwared down. The guard can go once the library knows the key.
+jetlink_alert_usable = True
+
+
+def update_jetlink_alert() -> None:
+  """Why the Jetlink the user turned on cannot run. Reads files only; with the link off, jetlink binds nothing."""
+  global jetlink_alert_usable
+  if not jetlink_alert_usable:
+    return
+  reason = jetlink_adapter.hooks().reason()
+  try:
+    set_offroad_alert_if_changed("Offroad_JetlinkUnavailable", reason is not None, extra_text=reason)
+  except UnknownKeyName:
+    jetlink_alert_usable = False
+    cloudlog.warning("Offroad_JetlinkUnavailable is not in this params library: Jetlink's offroad alert is off")
 
 def touch_thread(end_event):
   count = 0
@@ -397,6 +415,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     extra_text = f"{offroad_comp_temp:.1f}C"
     show_alert = (not onroad_conditions["device_temp_good"] or not startup_conditions["device_temp_engageable"]) and onroad_conditions["ignition"]
     set_offroad_alert_if_changed("Offroad_TemperatureTooHigh", show_alert, extra_text=extra_text)
+    update_jetlink_alert()
 
     if show_alert:
       msg.deviceState.fanSpeedPercentDesired = 100

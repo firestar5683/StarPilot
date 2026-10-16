@@ -25,7 +25,7 @@ def process_health(processes):
   return drive
 
 
-@pytest.mark.parametrize('name', ['android_autod', 'galaxy_hotspot'])
+@pytest.mark.parametrize('name', ['android_autod', 'galaxy_hotspot', 'jetlinkd'])
 @pytest.mark.parametrize('running,requested', [(False, False), (False, True), (True, True)])
 def test_optional_lifecycle_does_not_block_engagement(name, running, requested):
   drive = process_health([(name, running, requested)])

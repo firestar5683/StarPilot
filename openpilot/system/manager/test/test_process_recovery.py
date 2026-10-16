@@ -102,6 +102,21 @@ class TestProcessRecovery(unittest.TestCase):
     self.assertEqual(p.restart_failures, 0)
     self.assertEqual(p.restart_at, 0)
 
+  def test_a_crashed_jetlink_owner_restarts(self):
+    from openpilot.system.manager.process_config import managed_processes
+    configured = managed_processes["jetlinkd"]
+    self.assertTrue(configured.restart_on_exit)
+    p = type(configured)("jetlinkd", "unused", lambda started, params, cp: True, restart_on_exit=configured.restart_on_exit)
+    self.step(p)
+    old = p.proc
+    old.exitcode = 1
+    self.step(p)
+    self.assertIs(p.proc, old)
+    self.now += 1.01
+    self.step(p)
+    self.assertIsNot(p.proc, old)
+    self.assertTrue(old.joined)
+
   def test_boot_racing_processes_restart(self):
     from openpilot.system.manager.process_config import procs
     restarting = {p.name for p in procs if getattr(p, "restart_on_exit", False)}

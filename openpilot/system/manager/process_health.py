@@ -2,7 +2,8 @@
 
 # Projection and local phone access are optional even when requested.
 # Their lifecycles remain visible in managerState and their own status.
-ANCILLARY_PROCESSES = frozenset({'android_autod', 'galaxy_hotspot'})
+# A dead Jetlink owner sends the drive back to the small model.
+ANCILLARY_PROCESSES = frozenset({'android_autod', 'galaxy_hotspot', 'jetlinkd'})
 
 
 def driving_process_failures(processes) -> set[str]:
