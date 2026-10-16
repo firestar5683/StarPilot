@@ -1,7 +1,7 @@
 import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { requestJson } from "./startup.js"
-import { InstallApp } from "./install-app.js"
+import { InstallApp, isIosDevice } from "./install-app.js"
 import { GalaxyCompanion, newerCompanionVersion } from "./companion.js"
 import { GalaxyHotspot } from "./hotspot.js"
 import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
@@ -15,7 +15,8 @@ export const GalaxyPage = {
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ loading: true, paired: false, url: "", tunnelClientAvailable: false, legacyPassword: false,
     legacyPairingAvailable: false, password: "", busy: false, error: "", companionStatus: null,
-    bluetooth: bluetoothConnection(), nativeVersion: window.StarPilotApp?.version?.() || '', dismissedUpdateVersion: dismissedUpdate() }),
+    bluetooth: bluetoothConnection(), nativeVersion: window.StarPilotApp?.version?.() || '', dismissedUpdateVersion: dismissedUpdate(),
+    ios: isIosDevice() }),
   computed: {
     availableAppVersion() { return this.companionStatus?.appAvailable ? this.companionStatus.shippedVersion : '' },
     installedAppVersion() { return this.nativeVersion || this.companionStatus?.version || '' },
@@ -82,11 +83,11 @@ export const GalaxyPage = {
   template: `
     <div class="gx-settings gx-tunnel" :inert="busy" :aria-busy="busy || undefined"><header class="gx-settings__header gx-page-header"><div><h2>Galaxy Access & Install</h2>
       <p>Pair for remote access, install Galaxy, or set up a Wi-Fi hotspot.</p></div></header>
-      <BluetoothNotice v-if="showAppUpdate && bluetooth" :feature="'Android app update ' + availableAppVersion">
+      <BluetoothNotice v-if="showAppUpdate && bluetooth && !ios" :feature="'Android app update ' + availableAppVersion">
         Installed: {{ installedAppVersion }}.
         <button type="button" class="gx-btn gx-btn--tonal" aria-label="Dismiss app update notice" @click="dismissAppUpdate">Dismiss</button>
       </BluetoothNotice>
-      <GxNotice v-else-if="showAppUpdate" tone="warn" title="Android app update available">
+      <GxNotice v-else-if="showAppUpdate && !ios" tone="warn" title="Android app update available">
         Version {{ availableAppVersion }} is available. Installed: {{ installedAppVersion }}.
         <div class="gx-actions"><button v-if="nativeInstallerAvailable" type="button" class="gx-btn" @click="installAppUpdate">Update app</button>
           <a v-else class="gx-btn" href="./app.apk">Update app</a>
@@ -116,13 +117,14 @@ export const GalaxyPage = {
       </section>
       <section class="gx-card gx-info-card">
         <h3>Install Galaxy</h3><InstallApp :update-available="appUpdateAvailable" />
-        <p v-if="availableAppVersion">Android app version: <strong>{{ availableAppVersion }}</strong><span v-if="installedAppVersion"> · {{ nativeVersion ? 'Installed' : 'Connected phone' }}: {{ installedAppVersion }}</span></p>
-        <p>Install Galaxy to launch it from your home screen or desktop. Use your remote Galaxy link for app installation; the button shows installation instructions when your browser needs them.</p>
+        <p v-if="availableAppVersion && !ios">Android offline app version: <strong>{{ availableAppVersion }}</strong><span v-if="installedAppVersion"> · {{ nativeVersion ? 'Installed' : 'Connected phone' }}: {{ installedAppVersion }}</span></p>
+        <p><strong>Install as web app</strong> to launch Galaxy from your home screen or desktop. Use your remote Galaxy link for web app installation; the button shows installation instructions when your browser needs them.</p>
+        <p v-if="!ios"><strong>Install as offline app (Android)</strong> to use Galaxy over Galaxy Wi-Fi or your local network without Internet. Download it while connected locally from this page.</p>
         <ul class="gx-install-benefits"><li><i class="bi bi-window" aria-hidden="true"></i> Your own full-screen window</li><li><i class="bi bi-lightning-charge" aria-hidden="true"></i> Launch from your home screen</li><li><i class="bi bi-arrow-repeat" aria-hidden="true"></i> Automatic updates, no app store</li></ul>
-        <p class="gx-note">The public Galaxy link requires Internet and an active tunnel. Installing the app does not provide an offline connection to your comma. For local access without Internet, bookmark the hotspot address or a local address from Home.</p>
+        <p class="gx-note">The public Galaxy link and the web app require Internet and an active tunnel. Only the Android offline app connects locally without Internet. For local browser access without Internet, bookmark the hotspot address or a local address from Home.</p>
       </section>
       <GalaxyHotspot :mode="mode" :unauthorized="unauthorized" />
-      <GalaxyCompanion :mode="mode" :unauthorized="unauthorized" @status="companionStatus = $event" />
+      <GalaxyCompanion v-if="!ios" :mode="mode" :unauthorized="unauthorized" @status="companionStatus = $event" />
     </div>
   `,
 }

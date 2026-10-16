@@ -63,7 +63,7 @@ try {
   const root = host.children.find(item => item.type === 'div')
   assert.ok(root.children.indexOf(notice) < root.children.findIndex(item => item.type === 'section'), 'Notice precedes all page sections')
   const install = all(host).find(item => item.type === 'section' && text(item).includes('Install Galaxy'))
-  assert.match(text(install), /Android app version:.*1.1.5.*Installed.*1.1.4/s)
+  assert.match(text(install), /Android offline app version:.*1.1.5.*Installed.*1.1.4/s)
   const dismiss = all(notice).find(item => item.type === 'button' && item.props['aria-label'] === 'Dismiss app update notice')
   dismiss.props.onClick()
   await nextTick()
@@ -105,8 +105,26 @@ mounted = await mount()
 try {
   assert.equal(banner(mounted.host), undefined, 'A browser cannot infer an installed version without a connected phone')
   const install = all(mounted.host).find(item => item.type === 'section' && text(item).includes('Install Galaxy'))
-  assert.match(text(install), /Android app version:.*1.1.5/s)
+  assert.match(text(install), /Android offline app version:.*1.1.5/s)
   assert.doesNotMatch(text(install), /Installed:/)
 } finally { mounted.app.unmount() }
+
+// iPhone users never mount or poll the Android companion section.
+Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userAgent: 'iPhone' } })
+let companionMounts = 0
+const iosHost = node('host')
+const iosApp = renderer.createApp({ ...GalaxyPage, components: { ...GalaxyPage.components,
+  GalaxyHotspot: { template: '<div />' }, InstallApp: { template: '<div class="web-install">Install as web app</div>' },
+  GalaxyCompanion: { mounted() { companionMounts++ }, template: '<div>Android companion</div>' },
+} }, { mode: 'local', unauthorized() { assert.fail('Unexpected authentication failure') } })
+iosApp.config.compilerOptions.decodeEntities = raw => raw.replaceAll('&amp;', '&')
+const iosVm = iosApp.mount(iosHost)
+await new Promise(resolve => setImmediate(resolve))
+await nextTick()
+assert.equal(iosVm.ios, true)
+assert.equal(companionMounts, 0)
+assert.doesNotMatch(text(iosHost), /Android companion/)
+assert.match(text(iosHost), /Install as web app/)
+iosApp.unmount()
 
 console.log('Companion install version, in-app update, browser fallback, version ordering and persistent dismissal passed')
