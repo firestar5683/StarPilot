@@ -1,11 +1,17 @@
-"""Published large-model loss uses the same soft-disable event for either owner."""
+"""A native chestnut's loss soft-disables; a Jetlink hand-back keeps the small model driving."""
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 
 from openpilot.cereal import messaging
+from jetlink.openpilot.hooks import Hooks
+from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.selfdrived.events import Events, ET, EventName
+from openpilot.selfdrive.selfdrived.helpers import jetlink_in_control, update_jetlink_swaps
 from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
+from openpilot.starpilot.aol.runtime import AxisDecision
+from openpilot.starpilot.models import jetlink_adapter
+from openpilot.starpilot.models.tests.jetlink_fixture import ARMED_PAUSED, AXES_IDLE, rule
 
 
 class Sources:
@@ -31,7 +37,8 @@ def fixture(chestnut=None):
 
 class TestBigModelStatus(unittest.TestCase):
   def test_failure_edge_restarts_settling_once_until_recovery(self):
-    drive = fixture()
+    drive = fixture(True)
+    drive.sm['deviceState'].chestnutPresent = True
     drive.big_model_ready_t = -1.0
     drive.sm['modelV2'].big = True
     with patch('openpilot.selfdrive.selfdrived.helpers.time.monotonic', side_effect=[50.0, 70.0]) as clock:
@@ -52,12 +59,23 @@ class TestBigModelStatus(unittest.TestCase):
       self.assertEqual(drive.big_model_ready_t, 70.0)
       self.assertEqual(clock.call_count, 2)
 
-  def test_actual_remote_big_then_small_is_soft_disable_without_chestnut_claim(self):
+  def test_jetlink_hand_back_keeps_the_small_model_driving(self):
     drive = fixture()
     drive.sm['modelV2'].big = True
     self.assertFalse(drive.update_big_model_status())
     self.assertTrue(drive.big_model_active)
     self.assertFalse(drive.big_model_chestnut)
+    drive.sm['modelV2'].big = False
+    self.assertFalse(drive.update_big_model_status())
+    self.assertNotIn(EventName.bigModelFailed, drive.events.names)
+    self.assertFalse(drive.events.contains(ET.SOFT_DISABLE))
+
+  def test_native_chestnut_loss_still_soft_disables(self):
+    drive = fixture(True)
+    drive.sm['deviceState'].chestnutPresent = True
+    drive.sm['modelV2'].big = True
+    self.assertFalse(drive.update_big_model_status())
+    self.assertTrue(drive.big_model_chestnut)
     drive.sm['modelV2'].big = False
     self.assertTrue(drive.update_big_model_status())
     self.assertIn(EventName.bigModelFailed, drive.events.names)
@@ -103,8 +121,9 @@ class TestBigModelStatus(unittest.TestCase):
         self.assertFalse(drive.update_big_model_status())
         self.assertTrue(drive.big_model_active)
         drive.sm['modelV2'].big = False
-        self.assertTrue(drive.update_big_model_status())
-        self.assertTrue(drive.events.contains(ET.SOFT_DISABLE))
+        self.assertFalse(drive.update_big_model_status())
+        self.assertFalse(drive.events.contains(ET.SOFT_DISABLE))
+        self.assertTrue(drive.big_model_active)
         setattr(drive.sm['carControl'], axis, False)
         drive.update_big_model_status()
         self.assertFalse(drive.big_model_active)
@@ -179,3 +198,109 @@ class TestStatusParamThrottle(unittest.TestCase):
     for _ in range(3):
       throttled_param(owner, "ChestnutActive", lambda key: reads.append(key))
     self.assertEqual(len(reads), 3)
+
+
+DISARMED = SimpleNamespace(allowedLatch=False, lateralArmed=False)
+
+
+def jetlink_drive(chestnut=None, intent=None, axes=None):
+  """A drive with Jetlink's swap tracker, past AOL's grace, idle unless given AOL's intent (heard and alive) and
+  axis decision or engaged by the test."""
+  drive = fixture(chestnut)
+  drive.enabled = drive.active = False
+  drive.big_model_ready_t = 0.
+  drive.jetlink_settling = drive.jetlink_link_lost = False
+  drive.jetlink_swaps = Hooks(jetlink_adapter.API, jetlink_adapter.adapter).swap_events(DT_CTRL)
+  drive.aol_replay = drive.axis_transport_required = True
+  drive.aol_axis_decision = axes or AxisDecision()
+  drive.sm.frame = int(jetlink_adapter.AOL_GRACE_S / DT_CTRL)
+  drive.sm.data['aolIntentWire'] = intent
+  drive.sm.seen['aolIntentWire'] = drive.sm.alive['aolIntentWire'] = intent is not None
+  return drive
+
+
+def no_record(drive):
+  """modeld's runtime record unreadable or stale: the tracker's own read of it finds none."""
+  drive.jetlink_swaps._hooks.runtime = lambda: None
+
+
+class TestJetlinkSwaps(unittest.TestCase):
+  def swaps(self, drive, ticks, state, big):
+    # state None: the tracker reads modeld's runtime record itself
+    drive.sm['modelV2'].big = big
+    return [update_jetlink_swaps(drive, jetlink_in_control(drive), state=state) for _ in range(ticks)]
+
+  def test_swap_in_refuses_engaging_then_settles(self):
+    drive = jetlink_drive()
+    self.swaps(drive, 10, 'ready', False)
+    with patch('openpilot.selfdrive.selfdrived.helpers.time.monotonic', return_value=42.):
+      flags = self.swaps(drive, 1, 'running', True)
+    self.assertIn(EventName.bigModelLoading, drive.events.names)
+    self.assertEqual(drive.big_model_ready_t, 42.)
+    flags += self.swaps(drive, 149, 'running', True)
+    self.assertTrue(flags[0].no_entry and not flags[-1].no_entry)
+    self.assertEqual(drive.big_model_ready_t, 42.)  # once per switch
+    self.assertFalse(drive.jetlink_link_lost)
+
+  def test_hand_back_during_an_aol_pause_warns_and_never_disables(self):
+    # AOL armed but paused: its axes are idle and only its intent says so, as the swap itself reads it
+    drive = jetlink_drive(intent=b"intent")
+    with patch("openpilot.starpilot.aol.wire.decode_intent", return_value=ARMED_PAUSED):
+      self.swaps(drive, 200, 'running', True)
+      self.assertFalse(drive.update_big_model_status())
+      flags = self.swaps(drive, 600, 'retrying', False)
+    self.assertTrue(flags[0].link_lost and flags[0].settling)
+    self.assertTrue(drive.jetlink_link_lost is False and flags[-1].link_lost is False)
+    self.assertFalse(drive.update_big_model_status())
+    self.assertFalse(drive.events.contains(ET.SOFT_DISABLE))
+
+  def test_hand_back_with_nothing_in_control_is_no_warning(self):
+    drive = jetlink_drive()
+    self.swaps(drive, 200, 'running', True)
+    flags = self.swaps(drive, 10, 'retrying', False)
+    self.assertFalse(any(f.link_lost for f in flags))
+    self.assertFalse(drive.jetlink_link_lost)
+
+  def test_a_record_gap_is_not_a_switch(self):
+    # the big model still drives while modeld's record failed or went stale
+    drive = jetlink_drive()
+    drive.enabled = drive.active = True
+    self.swaps(drive, 200, 'running', True)
+    no_record(drive)
+    flags = self.swaps(drive, 50, None, True) + self.swaps(drive, 50, 'running', True)
+    self.assertFalse(any(f.no_entry or f.link_lost or f.settling for f in flags))
+
+  def test_a_native_chestnut_or_no_jetlink_is_no_swap(self):
+    drive = jetlink_drive(True)
+    drive.enabled = drive.active = True
+    no_record(drive)
+    flags = self.swaps(drive, 10, None, True) + self.swaps(drive, 10, None, False)
+    self.assertFalse(any(f.no_entry or f.link_lost or f.settling for f in flags))
+
+  def test_selfdrived_and_the_adapter_agree_on_in_control(self):
+    # one rule, aol_in_control(), over selfdrived's own state and over the adapter's reads of the same messages
+    lateral = SimpleNamespace(**{**vars(AXES_IDLE), "desiredLateral": True})
+    cases = [  # intent heard, alive, decoded, axes as published, the answer
+      (False, False, DISARMED, AXES_IDLE, False),
+      (False, False, DISARMED, lateral, True),
+      (True, False, DISARMED, AXES_IDLE, True),
+      (True, True, None, AXES_IDLE, True),
+      (True, True, ARMED_PAUSED, AXES_IDLE, True),
+      (True, True, SimpleNamespace(allowedLatch=True, lateralArmed=False), AXES_IDLE, True),
+      (True, True, DISARMED, AXES_IDLE, False),
+      (True, True, DISARMED, lateral, True),
+      (True, True, DISARMED, SimpleNamespace(**{**vars(AXES_IDLE), "longitudinalActive": True}), True),
+    ]
+    for heard, alive, decoded, published, expected in cases:
+      with self.subTest(heard=heard, alive=alive, decoded=decoded, axes=vars(published)):
+        drive = jetlink_drive(intent=b"intent" if heard else None,
+                              axes=AxisDecision(published.desiredLateral, published.desiredLongitudinal,
+                                                published.lateralActive, published.longitudinalActive))
+        drive.sm.alive['aolIntentWire'] = alive
+        op = rule(aol={"aolIntentWire": b"intent", "aolAxisState": published} if heard else {"aolAxisState": published})
+        op._aol.alive["aolIntentWire"] = alive
+        with patch("openpilot.starpilot.aol.wire.decode_intent", return_value=decoded):
+          self.assertEqual((jetlink_in_control(drive), op.in_control()), (expected, expected))
+    drive, op = jetlink_drive(), rule(core={"selfdriveState": SimpleNamespace(enabled=True, active=True)})
+    drive.enabled = drive.active = True
+    self.assertEqual((jetlink_in_control(drive), op.in_control()), (True, True))

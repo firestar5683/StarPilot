@@ -28,7 +28,9 @@ from openpilot.selfdrive.car.car_events import CarEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.selfdrive.selfdrived.events import Events, ET, Alert, Priority as AlertPriority
 from openpilot.starpilot.longitudinal.force_stop_alert import HoldAlertState, EVENT_TYPE as FORCE_STOP_HOLD
-from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck, throttled_param, update_big_model_status
+from openpilot.selfdrive.selfdrived.helpers import (ExcessiveActuationCheck, jetlink_in_control, jetlink_lost_alert, throttled_param,
+                                                    update_big_model_status, update_jetlink_swaps)
+from openpilot.starpilot.models import jetlink_adapter
 from openpilot.system.manager.process_health import driving_process_failures
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from opendbc.car.gm.aol import native_bootstrap_supported
@@ -150,6 +152,9 @@ class SelfdriveD:
     self.big_model_chestnut = False
     self.big_model_failed = False
     self.big_model_ready_t = 0.
+    # Jetlink's swap events: bookkeeping alone, so built link on or off; None without a usable jetlink
+    self.jetlink_swaps = jetlink_adapter.hooks().swap_events(DT_CTRL)
+    self.jetlink_settling = self.jetlink_link_lost = False
 
     # Setup sockets
     self.pm = messaging.PubMaster(['selfdriveState', 'onroadEvents'] +
@@ -353,6 +358,8 @@ class SelfdriveD:
       self.events.add(EventName.bigModelLoading)
 
     big_failed = self.update_big_model_status()
+    if self.jetlink_swaps is not None:
+      update_jetlink_swaps(self, jetlink_in_control(self))
 
     if self.sm.recv_frame['lateralManeuverPlan'] > 0:
       self.events.add(EventName.lateralManeuver)
@@ -1095,6 +1102,8 @@ class SelfdriveD:
          now_ns <= getattr(self, 'aol_availability_chime_until_ns', 0) else log.SelfdriveState.AudibleAlert.none), 0.)
       warning.alert_type, warning.event_type = 'aolAvailability/warning', ET.WARNING
       alerts.append(warning)
+    if getattr(self, 'jetlink_link_lost', False):
+      alerts.append(jetlink_lost_alert())
     self.AM.add_many(self.sm.frame, alerts)
     self.AM.process_alerts(self.sm.frame, clear_event_types)
     from openpilot.starpilot.audio.availability_warning import AvailabilityWarningDelivery

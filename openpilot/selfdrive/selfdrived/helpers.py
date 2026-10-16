@@ -9,6 +9,7 @@ from openpilot.selfdrive.locationd.helpers import Pose
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY
 from opendbc.car.lateral import ISO_LATERAL_ACCEL
 from opendbc.car.interfaces import ACCEL_MIN, ACCEL_MAX
+from openpilot.starpilot.models.jetlink_adapter import AOL_GRACE_S, aol_in_control
 
 MIN_EXCESSIVE_ACTUATION_COUNT = int(0.25 / DT_CTRL)
 MIN_LATERAL_ENGAGE_BUFFER = int(1 / DT_CTRL)
@@ -80,7 +81,9 @@ def update_big_model_status(owner) -> bool:
   if published_big and (big_active is True or owner.sm['deviceState'].chestnutPresent):
     owner.big_model_chestnut = True
   model_unavailable = owner.big_model_active and owner.sm.seen['modelV2'] and not fresh
-  demoted = owner.big_model_active and fresh and not published_big
+  # a big model Jetlink joined (no chestnut this drive) hands back to the small model, which drives on
+  jetlink = big_active is None and not owner.big_model_chestnut
+  demoted = owner.big_model_active and fresh and not published_big and not jetlink
   chestnut_lost = owner.big_model_active and owner.big_model_chestnut and not owner.sm['deviceState'].chestnutPresent
   load_mismatch = big_active is True and fresh and not published_big
   big_failed = (big_active is False and not published_big) or load_mismatch or model_unavailable or demoted or chestnut_lost
@@ -97,3 +100,40 @@ def update_big_model_status(owner) -> bool:
     owner.big_model_active = False
     owner.big_model_chestnut = False
   return big_failed
+
+
+def jetlink_in_control(owner) -> bool:
+  """The rule the swap itself waits on, over selfdrived's own state: openpilot enabled or active, or the adapter's
+  AOL rule over the intent as heard on aolIntentWire and the axis decision selfdrived publishes as aolAxisState."""
+  if owner.enabled or owner.active:
+    return True
+  sm, axes = owner.sm, owner.aol_axis_decision
+  heard = owner.aol_replay and sm.seen['aolIntentWire']
+  return aol_in_control(sm['aolIntentWire'] if heard else None, heard and sm.alive['aolIntentWire'],
+                        (axes.desired_lateral, axes.desired_longitudinal, axes.lateral_active, axes.longitudinal_active)
+                        if owner.axis_transport_required else (),
+                        waiting=sm.frame * DT_CTRL < AOL_GRACE_S)
+
+
+def update_jetlink_swaps(owner, in_control, state=None):
+  """One tick of Jetlink's swap events (a big model that joins mid-drive and can hand back), onto selfdrived's
+  events. `state` is the joining model's; without it jetlink reads modeld's runtime record, and a gap in it holds
+  the last state rather than reading as a switch."""
+  model_ok = owner.sm.seen['modelV2'] and owner.sm.alive['modelV2'] and owner.sm.valid['modelV2']
+  swap = owner.jetlink_swaps.update(model_ok, model_ok and owner.sm['modelV2'].big, in_control, state=state)
+  if swap.no_entry:
+    owner.events.add(log.OnroadEvent.EventName.bigModelLoading)  # no engaging for the second after a swap
+  if swap.settling and not owner.jetlink_settling:
+    owner.big_model_ready_t = time.monotonic()  # a swap drops a frame: hold its comm and localizer errors
+  owner.jetlink_settling, owner.jetlink_link_lost = swap.settling, swap.link_lost
+  return swap
+
+
+def jetlink_lost_alert():
+  """The Jetlink big model left while in control: the small model drives on and nothing disengages."""
+  from openpilot.selfdrive.selfdrived.events import ET, Alert, Priority
+  alert = Alert("Big Model Lost", "Using small model", log.SelfdriveState.AlertStatus.userPrompt,
+                log.SelfdriveState.AlertSize.mid, Priority.MID, car.CarControl.HUDControl.VisualAlert.steerRequired,
+                log.SelfdriveState.AudibleAlert.warningSoft, .2)
+  alert.alert_type, alert.event_type = 'jetlinkLinkLost/warning', ET.WARNING
+  return alert

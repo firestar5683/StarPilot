@@ -194,3 +194,13 @@ class TestForceStopAlert(unittest.TestCase):
     warning.alert_type, warning.event_type = 'existing/warning', ET.WARNING
     drive.AM.add_many(drive.sm.frame, [warning])
     self.assertEqual(self.update(drive, cs).alert_text_1, 'Existing warning')
+
+
+class TestJetlinkLinkLostAlert(unittest.TestCase):
+  def test_a_jetlink_hand_back_shows_big_model_lost(self):
+    drive, cs = fixture()
+    drive.jetlink_link_lost = True
+    with patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=NOW):
+      drive.update_alerts(cs)
+    self.assertEqual(drive.AM.current_alert.alert_type, 'jetlinkLinkLost/warning')
+    self.assertEqual(drive.AM.current_alert.alert_text_1, 'Big Model Lost')
