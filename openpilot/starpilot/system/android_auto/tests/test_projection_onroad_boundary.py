@@ -414,6 +414,46 @@ class TestProjectionOnroad(unittest.TestCase):
     self.assertIs(view._with_bookmark_notice(quiet, 1_000 + projection.BOOKMARK_NOTICE_NS), quiet)
     view.close()
 
+  def test_mode_change_shows_a_brief_banner(self):
+    from openpilot.starpilot.conditional_mode.policy import ModeChoice
+    native, _ = self.dependencies()
+
+    @dataclass(frozen=True)
+    class Alert:
+      size: str = 'none'
+      text1: str = ''
+      alert_type: str = ''
+
+    @dataclass(frozen=True)
+    class State:
+      alert: Alert = Alert()
+      experimental_enabled: bool = False
+      conditional_configured: object = None
+      conditional_effective: object = None
+
+    native.alert, native.alert_size = Alert, SimpleNamespace(NONE='none', SMALL='small')
+    view = projection.ProjectionOnroad(dependencies=native)
+    chill, experimental = State(), State(experimental_enabled=True)
+    self.assertIs(view._with_mode_notice(chill, 0), chill, "the drive's starting mode is not announced")
+    shown = view._with_mode_notice(experimental, 1_000)
+    self.assertEqual((shown.alert.size, shown.alert.text1), ('small', 'Experimental Mode'))
+    real = State(Alert(size='full', text1='Take Control'), experimental_enabled=True)
+    self.assertIs(view._with_mode_notice(real, 2_000), real, 'a real alert wins')
+    self.assertIs(view._with_mode_notice(experimental, 1_000 + projection.MODE_NOTICE_NS), experimental)
+    self.assertEqual(view._with_mode_notice(chill, 5_000_000_000).alert.text1, 'Chill Mode')
+
+    # Conditional mode: automatic switching and unreported frames stay quiet; a driver override is announced.
+    view = projection.ProjectionOnroad(dependencies=native)
+    def conditional(reason, effective=True):
+      return State(experimental_enabled=effective, conditional_configured=ModeChoice.CEM,
+                   conditional_effective=SimpleNamespace(reason=reason, effective_experimental=effective))
+    view._with_mode_notice(conditional('lead', True), 0)
+    for now, frame in enumerate((conditional('cruising', False), State(conditional_configured=ModeChoice.CEM),
+                                 conditional('lead', True)), start=1):
+      self.assertIs(view._with_mode_notice(frame, now), frame)
+    self.assertEqual(view._with_mode_notice(conditional('manual_chill', False), 10).alert.text1, 'Chill Mode')
+    view.close()
+
   def test_negotiated_viewport_overrides_landscape_fallback(self):
     native, _ = self.dependencies()
     view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080))

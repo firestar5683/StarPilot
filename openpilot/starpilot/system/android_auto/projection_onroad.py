@@ -12,10 +12,33 @@ from openpilot.starpilot.system.android_auto.projection_geometry import FALLBACK
 
 CERTIFICATE_NOTICE_NS = 10_000_000_000  # how long the expiry heads-up stays at the start of a drive
 BOOKMARK_NOTICE_NS = 2_000_000_000  # how long "Bookmark Saved" stays after the drive is bookmarked
+MODE_NOTICE_NS = 2_000_000_000  # how long the driving-mode banner stays after the mode changes
 DRIVER_MONITOR_HOLD_NS = 350_000_000
 STANDBY_LOGO = Path(__file__).parents[3] / 'selfdrive/assets/images/starpilot_logo.png'
 BUBBLE_REDUNDANT_ALERTS = frozenset(('preLaneChangeLeft', 'preLaneChangeRight', 'laneChange',
                                      'laneChangeBlocked', 'laneChangeBlockedLoud'))
+
+
+def driving_mode_label(state) -> str | None:
+  """The driving mode the driver chose, or None while it cannot be read.
+
+  Conditional mode's own automatic switching is not a change of mode, so it all reads as one label;
+  only a driver override (a wheel or screen tap) changes it."""
+  from openpilot.starpilot.conditional_mode.policy import ModeChoice
+  choice = getattr(state, 'conditional_configured', None)
+  if choice in (ModeChoice.CEM, ModeChoice.CCM):
+    effective = getattr(state, 'conditional_effective', None)
+    if effective is None:
+      return None  # not reported while disengaged or between planner updates
+    if effective.reason == 'manual_experimental':
+      return 'Experimental Mode'
+    if effective.reason == 'manual_chill':
+      return 'Chill Mode'
+    return 'Conditional Experimental' if choice is ModeChoice.CEM else 'Conditional Chill'
+  experimental = getattr(state, 'experimental_enabled', None)
+  if not isinstance(experimental, bool):
+    return None
+  return 'Experimental Mode' if experimental else 'Chill Mode'
 
 
 def certificate_notice(days_left: int | None) -> str:
@@ -120,6 +143,8 @@ class ProjectionOnroad:
     self._certificate_notice = certificate_notice(certificate_days)
     self._certificate_notice_until_ns: int | None = None
     self._bookmark_notice_until_ns: int | None = None
+    self._mode_label: str | None = None  # the drive's last known driving mode
+    self._mode_notice: tuple[str, int] | None = None  # (banner text, shown until)
     self._base_customization = None
     self._projection_customization = None
     self._base_appearance = None
@@ -372,6 +397,21 @@ class ProjectionOnroad:
     return replace(state, alert=self.native.alert(size=sizes.SMALL, text1='Bookmark Saved',
                                                   alert_type='androidAutoBookmark/saved'))
 
+  def _with_mode_notice(self, state, now_ns):
+    """Show the new driving mode briefly when it changes during a drive; a real alert always wins."""
+    label = driving_mode_label(state)
+    if label is not None:
+      if self._mode_label is not None and label != self._mode_label:
+        self._mode_notice = (label, now_ns + MODE_NOTICE_NS)
+      self._mode_label = label
+    if self._mode_notice is None or now_ns >= self._mode_notice[1]:
+      return state
+    sizes = self.native.alert_size
+    if state.alert.size != sizes.NONE:
+      return state
+    return replace(state, alert=self.native.alert(size=sizes.SMALL, text1=self._mode_notice[0],
+                                                  alert_type='androidAutoDrivingMode/changed'))
+
   def _standby(self):
     rl = self.native.rl
     purple = rl.Color(188, 132, 255, 255)  # StarPilot purple, as on the comma's moon
@@ -429,7 +469,11 @@ class ProjectionOnroad:
           self._base_appearance = state.appearance
         state = replace(state, customization=self._projection_customization, appearance=self._projection_appearance,
                         reverse_driver_camera=False)
-      self._state = self._with_bookmark_notice(self._with_certificate_notice(state, now_ns), now_ns)
+      # Touch hit-tests read viewport_width; the view draws at the car canvas width (1920 for a 1280x720 head unit).
+      if state.viewport_width != self.width:
+        state = replace(state, viewport_width=self.width)
+      state = self._with_bookmark_notice(self._with_certificate_notice(state, now_ns), now_ns)
+      self._state = self._with_mode_notice(state, now_ns)
       self.onroad.render(self._state)
       self.fonts.draw('StarPilot', self.native.font_role.BRAND, 30, self.width - 210, self.height - 90)
     else:
@@ -437,6 +481,7 @@ class ProjectionOnroad:
       if self.favorites is not None:
         self.favorites.cancel()
       self._certificate_notice_until_ns = None  # the next drive shows the heads-up again
+      self._mode_label = self._mode_notice = None  # a drive's starting mode is not a change
       self._monitor_pair = None
       self._monitor_pair_ns = None
       if self.pip is not None:
