@@ -13,7 +13,8 @@ from proxy import GalaxyProxy, validate_target
 
 
 class Fixture(BaseHTTPRequestHandler):
-  def log_message(self, *_): pass
+  def log_message(self, format: str, *args: object) -> None:  # noqa: A002  # stdlib override
+    pass
 
   def do_GET(self):
     if self.path == '/api/auth/session':
@@ -44,7 +45,8 @@ class Fixture(BaseHTTPRequestHandler):
     self.send_response(status)
     self.send_header('Content-Type', 'application/json')
     self.send_header('Content-Length', str(len(raw)))
-    for key, value in (headers or {}).items(): self.send_header(key, value)
+    for key, value in (headers or {}).items():
+      self.send_header(key, value)
     self.end_headers()
     self.wfile.write(raw)
 
@@ -108,8 +110,11 @@ class ProxyTest(unittest.TestCase):
     self.assertEqual(self.server.auths, 2)
 
   def test_rejects_path_traversal(self):
-    for path in ('https://evil/api/x', '//evil/api/x', '/api/../x', '/api/%252e%252e/x', '/api/%2e%2e/x', '/index.html', '/data/catalog.json', '/api/x#secret', '/api/%0a'):
-      with self.assertRaises(ValueError, msg=path): validate_target(path)
+    for path in ('https://evil/api/x', '//evil/api/x', '/api/../x', '/api/%252e%252e/x', '/api/%2e%2e/x', '/index.html',
+                 '/data/catalog.json', '/api/x#secret', '/api/%0a'):
+      with self.assertRaises(ValueError, msg=path):
+        validate_target(path)
 
 
-if __name__ == '__main__': unittest.main()
+if __name__ == '__main__':
+  unittest.main()

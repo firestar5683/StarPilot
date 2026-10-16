@@ -2,18 +2,21 @@ from pathlib import Path
 import sys
 
 def method(path, name):
-    source = Path(path).read_text()
-    start = source.index("    static func " + name + "(")
-    end = source.index("{", start) + 1
-    depth = 1
-    while depth:
-        if source[end] == "{": depth += 1
-        if source[end] == "}": depth -= 1
-        end += 1
-    return source[start:end]
+  source = Path(path).read_text()
+  start = source.index("    static func " + name + "(")
+  end = source.index("{", start) + 1
+  depth = 1
+  while depth:
+    if source[end] == "{":
+      depth += 1
+    if source[end] == "}":
+      depth -= 1
+    end += 1
+  return source[start:end]
 
 methods = method("GalaxyBluetooth/BluetoothTransport.swift", "useNotifications")
-methods += "\n" + method("GalaxyBluetooth/BluetoothTransport.swift", "backgroundRead") + "\n" + method("GalaxyBluetooth/BluetoothTransport.swift", "nextRequestIndex")
+methods += "\n" + method("GalaxyBluetooth/BluetoothTransport.swift", "backgroundRead")
+methods += "\n" + method("GalaxyBluetooth/BluetoothTransport.swift", "nextRequestIndex")
 methods += "\n" + method("GalaxyBluetooth/BluetoothTransport.swift", "shouldPauseFastReads")
 methods += "\n" + method("GalaxyBluetooth/BluetoothTransport.swift", "canDrainCancellation")
 tests = r'''

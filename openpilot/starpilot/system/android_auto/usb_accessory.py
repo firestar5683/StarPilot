@@ -14,7 +14,7 @@ Two ways in, as head units differ:
   answers and reports as an ``ACCESSORY=START`` uevent; the comma then
   re-enumerates as Google's accessory (18d1:2d00), as a phone does.
 * direct: present as Google's accessory from the start, for head units that
-  never send START to a device they do not recognise as a phone.
+  never send START to a device they do not recognize as a phone.
 
 Either way the car then opens bulk endpoints carrying the same Android Auto
 protocol as the Wi-Fi link. ``/dev/usb_accessory`` has no poll() and each

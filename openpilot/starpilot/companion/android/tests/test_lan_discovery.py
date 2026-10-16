@@ -10,6 +10,7 @@ from zeroconf._utils.name import service_type_name
 
 ANDROID = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('lan_discovery', ANDROID.parents[1] / 'galaxy_bluetooth/bridge/lan_discovery.py')
+assert spec is not None and spec.loader is not None
 lan_discovery = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(lan_discovery)
 

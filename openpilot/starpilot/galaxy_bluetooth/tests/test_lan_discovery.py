@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('lan_discovery', ROOT / 'bridge/lan_discovery.py')
+assert spec is not None and spec.loader is not None
 discovery = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(discovery)
 

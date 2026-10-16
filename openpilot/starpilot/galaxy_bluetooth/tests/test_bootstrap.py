@@ -51,7 +51,7 @@ class BootstrapTest(unittest.TestCase):
 
   def test_stale_pairing_refresh_is_dropped(self):
     self.installed()
-    (self.data / 'refresh-pairing.json').write_text(json.dumps({'requested': 1}))
+    (self.data / 'refresh-pairing.json').write_text(json.dumps({'requested': -1000}))
     with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=True):
       self.worker.step()
     self.assertFalse(any('restart' in call for call in self.calls))
@@ -120,4 +120,5 @@ class BootstrapTest(unittest.TestCase):
     self.assertFalse(any('restart' in call for call in self.calls))
 
 
-if __name__ == '__main__': unittest.main()
+if __name__ == '__main__':
+  unittest.main()

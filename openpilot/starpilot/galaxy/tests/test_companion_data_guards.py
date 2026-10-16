@@ -23,7 +23,7 @@ def test_uploader_ignores_unmetered_override():
 
 def test_athena_allow_cellular_is_still_deferred():
   stop = threading.Event()
-  item = athenad.UploadItem(path='/unused', url='https://upload.test', headers={}, created_at=athenad.datetime.now().timestamp() * 1000,
+  item = athenad.UploadItem(path='/unused', url='https://upload.test', headers={}, created_at=int(athenad.datetime.now().timestamp() * 1000),
                            id='phone-test', allow_cellular=True)
   queue = Mock()
   queue.get.return_value = item

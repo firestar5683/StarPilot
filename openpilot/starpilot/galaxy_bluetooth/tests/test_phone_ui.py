@@ -30,4 +30,5 @@ class PhoneUITest(unittest.TestCase):
         self.assertNotEqual(load_key(key_path), original)
 
 
-if __name__ == '__main__': unittest.main()
+if __name__ == '__main__':
+  unittest.main()

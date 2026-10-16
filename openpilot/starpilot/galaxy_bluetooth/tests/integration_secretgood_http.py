@@ -4,7 +4,6 @@ All settings and access credentials are in a temporary directory. No device
 Params, vehicle behavior, radio or hardware connections are changed.
 """
 import base64
-from dataclasses import replace
 import json
 from pathlib import Path
 import sys
@@ -87,4 +86,5 @@ class SecretGoodHTTPTest(unittest.TestCase):
     self.assertFalse(self.params.get_bool('StarPilotDisplayPreferencesEnabled'))
 
 
-if __name__ == '__main__': unittest.main()
+if __name__ == '__main__':
+  unittest.main()

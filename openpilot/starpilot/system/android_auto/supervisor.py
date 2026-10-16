@@ -1080,7 +1080,7 @@ class Supervisor:
     """Wait for the car's AOA START; True when it never came and the comma should present as an accessory itself.
 
     The wait starts when the car first connects, not when it configures the comma: a head unit
-    that reads the descriptors of a device it does not recognise may never configure it at all.
+    that reads the descriptors of a device it does not recognize may never configure it at all.
     """
     connected_at = None
     while True:
@@ -1099,7 +1099,7 @@ class Supervisor:
       elif state == "DISCONNECTED":
         connected_at = None
       if fallback and connected_at is not None and time.monotonic() - connected_at >= USB_HANDSHAKE_WAIT:
-        # Some head units only send the handshake to devices they recognise as phones.
+        # Some head units only send the handshake to devices they recognize as phones.
         self.log("usb_no_accessory_start", waited=USB_HANDSHAKE_WAIT)
         return True
 

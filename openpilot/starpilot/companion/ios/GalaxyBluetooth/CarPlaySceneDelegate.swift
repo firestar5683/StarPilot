@@ -24,7 +24,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private var temperatures: CPGridTemplate?
     private var rates: CPGridTemplate?
     private var toggles: CPGridTemplate?
-    private var catalogue: [[String: Any]] = []
+    private var catalog: [[String: Any]] = []
     private var values: [String: Any] = [:]
     private var valuesSession = ""
     private var valuesAt = Date.distantPast
@@ -52,7 +52,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let model = AppModel.shared
         model.setCarPlayActive(true)
         refreshTelemetry()
-        catalogue = localCatalogue()
+        catalog = localCatalogue()
         toggles = grid("Toggles", icon: "switch.2", buttons: categoryButtons())
         guard let overview, let temperatures, let rates, let toggles else { return }
         let tabs = CPTabBarTemplate(templates: [overview, temperatures, rates, toggles])
@@ -71,7 +71,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         controller = nil
         sessionConfiguration?.delegate = nil; sessionConfiguration = nil
         overview = nil; temperatures = nil; rates = nil; toggles = nil
-        catalogue = []; values = [:]; busy = false; categoryPage = 0; valuesSession = ""; valuesAt = .distantPast
+        catalog = []; values = [:]; busy = false; categoryPage = 0; valuesSession = ""; valuesAt = .distantPast
         gridActions.removeAllObjects(); gridSizes.removeAllObjects(); overflowParents.removeAllObjects(); settingsRefresh.removeAllObjects(); navigating = false
         AppModel.shared.setCarPlayActive(false)
     }

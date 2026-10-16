@@ -279,7 +279,7 @@ def test_gadget_detach_settles_for_switch_restore_and_crash_recovery(tmp_path, m
   recovered = usb.AccessoryGadget(lambda *a, **k: None, configfs=configfs, run=run, adb_wanted=lambda: None)
   before = len(calls)
   recovered.prepare()
-  assert calls[before:before + 2] == [("tee", str(root / "UDC"), ""), ("sleep", usb.UDC_SETTLE_SECONDS)]
+  assert calls[before:before + 2] == [("tee", str(root / "UDC"), ""), ("sleep", usb.UDC_SETTLE_SECONDS)]  # ty: ignore[unsupported-operator]
   gadget.restore()
   after = len(calls)
   gadget.restore()
@@ -361,7 +361,7 @@ def test_recover_after_a_crash_follows_the_adb_setting(tmp_path, monkeypatch):
 def test_recover_never_mounts_configfs(tmp_path, monkeypatch):
   monkeypatch.setattr(usb, "configfs_mount", lambda: None)
   calls = []
-  gadget = usb.AccessoryGadget(lambda *a, **k: None, run=lambda args, **k: calls.append(args), adb_wanted=lambda: True)
+  gadget = usb.AccessoryGadget(lambda *a, **k: None, run=lambda args, **k: calls.append(args), adb_wanted=lambda: True)  # ty: ignore[invalid-argument-type]
   assert not gadget.recover()
   assert calls == []
 
@@ -389,7 +389,7 @@ def test_prepare_without_adb_mounts_configfs_itself(tmp_path, monkeypatch):
   gadget.prepare()
   assert ("mount", "-t", "configfs", "none", str(fallback), "") in calls
   assert gadget.root == fallback / "usb_gadget" / usb.GADGET_NAME
-  assert (gadget.root / "UDC").read_text().strip() == usb.UDC_NAME
+  assert (gadget.root / "UDC").read_text().strip() == usb.UDC_NAME  # ty: ignore[unsupported-operator]
   assert "usb_configfs_mounted" in events
   gadget.restore()
   assert gadget.root is None
@@ -398,7 +398,7 @@ def test_prepare_without_adb_mounts_configfs_itself(tmp_path, monkeypatch):
 def test_prepare_explains_missing_kernel_support(tmp_path, monkeypatch):
   configfs = tmp_path / "config"
   configfs.mkdir()  # configfs mounted, but no usb_gadget directory: no libcomposite
-  gadget = usb.AccessoryGadget(lambda *a, **k: None, configfs=configfs, run=lambda *a, **k: None, adb_wanted=lambda: None)
+  gadget = usb.AccessoryGadget(lambda *a, **k: None, configfs=configfs, run=lambda *a, **k: None, adb_wanted=lambda: None)  # ty: ignore[invalid-argument-type]
   with pytest.raises(RuntimeError, match="no USB gadget support"):
     gadget.prepare()
 
@@ -418,7 +418,7 @@ def test_usb_cleanup_error_never_hides_why_the_session_ended():
   from openpilot.starpilot.system.android_auto import supervisor as supervisor_module
   sup = supervisor_module.Supervisor.__new__(supervisor_module.Supervisor)
   events, steps = [], []
-  sup.log = lambda name, **values: events.append((name, values))
+  sup.log = lambda name, **values: events.append((name, values))  # ty: ignore[invalid-assignment]
 
   class Part:
     def __init__(self, name, fails=False):
@@ -448,10 +448,10 @@ def test_usb_attempt_keeps_a_car_requested_stop(monkeypatch):
   from openpilot.starpilot.system.android_auto import identity as identity_store, supervisor as supervisor_module
   from openpilot.starpilot.system.android_auto.session import PeerRequestedStop
   sup = supervisor_module.Supervisor.__new__(supervisor_module.Supervisor)
-  sup.log = lambda *a, **k: None
+  sup.log = lambda *a, **k: None  # ty: ignore[invalid-assignment]
   sup.config = {"usb_mode": "direct"}
-  sup._stage = lambda *a, **k: None
-  sup._await_usb_configured = lambda *a, **k: True
+  sup._stage = lambda *a, **k: None  # ty: ignore[invalid-assignment]
+  sup._await_usb_configured = lambda *a, **k: True  # ty: ignore[invalid-assignment]
   monkeypatch.setattr(identity_store, "load_identity", lambda: None)
 
   class Gadget:
@@ -472,7 +472,7 @@ def test_usb_attempt_keeps_a_car_requested_stop(monkeypatch):
 
   def project(*args, **kwargs):
     raise PeerRequestedStop("Head unit ended projection (reason 1)")
-  sup._project = project
+  sup._project = project  # ty: ignore[invalid-assignment]
   with pytest.raises(PeerRequestedStop):
     sup._attempt_usb()
 

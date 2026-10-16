@@ -34,7 +34,8 @@ def write_json(path, value):
 def setup_status(data=DATA):
   try:
     value = json.loads((data / 'setup-status.json').read_text())
-    if time.time() - value['updated'] > STATUS_STALE:
+    # Monotonic timestamps: a file left from a previous boot reads as stale.
+    if not 0 <= time.monotonic() - value['updated'] <= STATUS_STALE:
       return 'Bridge startup pending'
     return value['message']
   except (OSError, ValueError, KeyError, TypeError):
@@ -42,12 +43,12 @@ def setup_status(data=DATA):
 
 
 def retry_setup(data=DATA):
-  write_json(data / 'retry-setup.json', {'requested': time.time()})
+  write_json(data / 'retry-setup.json', {'requested': time.monotonic()})
 
 
 def refresh_pairing(data=DATA):
   # Explicit user action only; credentials and the shared radio stay unchanged.
-  write_json(data / 'refresh-pairing.json', {'requested': time.time()})
+  write_json(data / 'refresh-pairing.json', {'requested': time.monotonic()})
 
 
 def phone_uplink_active():
@@ -73,7 +74,7 @@ class Bootstrap:
     now = time.monotonic()
     if (state, message) == self.last_status and now - self.last_write < STATUS_HEARTBEAT:
       return
-    write_json(self.data / 'setup-status.json', {'state': state, 'message': message, 'updated': time.time()})
+    write_json(self.data / 'setup-status.json', {'state': state, 'message': message, 'updated': time.monotonic()})
     self.last_status, self.last_write = (state, message), now
 
   def refresh_requested(self):
@@ -84,7 +85,7 @@ class Bootstrap:
       return False
     except (OSError, ValueError, KeyError, TypeError):
       requested = None
-    if type(requested) not in (int, float) or not 0 <= time.time() - requested < PAIRING_WINDOW:
+    if not isinstance(requested, (int, float)) or isinstance(requested, bool) or not 0 <= time.monotonic() - requested < PAIRING_WINDOW:
       # The pairing code has closed; never restart the bridge later without the user watching.
       path.unlink(missing_ok=True)
       return False
@@ -190,7 +191,7 @@ class Bootstrap:
         running = False
       self.status('ready' if running else 'waiting', 'Ready to pair' if running else 'Waiting for Bluetooth. Enable Bluetooth on comma.')
     except (OSError, subprocess.SubprocessError, ValueError) as error:
-      LOG.error('Phone bridge setup failed: %s', type(error).__name__)
+      LOG.error('Phone bridge setup failed: %s', type(error).__name__)  # noqa: TRY400 -- setup.log has the detail
       self.next_attempt = time.monotonic() + 60
       self.status('error', 'Setup failed. Connect comma to internet, then Retry setup. See setup.log.')
 

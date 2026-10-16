@@ -369,7 +369,7 @@ class MainActivity : Activity() {
         if (prefs.getString("transport", "auto") != "auto" || pairing.load() == null) return false
         connectBluetooth(automatic = true); return true
     }
-    /** [fromMenu] keeps the old menu behaviour: always confirm the address, then stay on Wi-Fi/LAN. */
+    /** [fromMenu] keeps the old menu behavior: always confirm the address, then stay on Wi-Fi/LAN. */
     private fun discoverLan(automatic: Boolean = false, fromMenu: Boolean = false) {
         val wifi = Networks.wifi(this, false)
         if (wifi == null) {

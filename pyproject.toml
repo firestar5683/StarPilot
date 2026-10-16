@@ -122,7 +122,7 @@ quiet-level = 3
 # if you've got a short variable name that's getting flagged, add it here
 ignore-words-list = "bu,ro,te,ue,alo,hda,ois,nam,nams,ned,som,parm,setts,inout,warmup,bumb,nd,sie,preints,whit,indexIn,ws,uint,grey,deque,stdio,amin,BA,LITE,atEnd,UIs,errorString,arange,FocusIn,od,tim,relA,hist,copyable,jupyter,thead,TGE,abl,lite,ser,assertIn,HomeState,cancelled,CAS,acknowledgement,writeable,noice,FoF,waitFor"
 builtin = "clear,rare,informal,code,names,en-GB_to_en-US"
-skip = "openpilot/cereal/gen/cpp/*.capnp.c++, openpilot/cereal/gen/cpp/*.capnp.h, *.po, uv.lock, *.onnx, *.pem, */c_generated_code/*, docs/assets/*, openpilot/tools/plotjuggler/layouts/*, openpilot/selfdrive/assets/offroad/mici_fcc.html, openpilot/starpilot/galaxy/web/vendor/vue/vue.esm-browser.js, openpilot/starpilot/ui/assets/fonts/notices/Unifont-COPYING.txt"
+skip = "openpilot/cereal/gen/cpp/*.capnp.c++, openpilot/cereal/gen/cpp/*.capnp.h, *.po, uv.lock, *.onnx, *.pem, */c_generated_code/*, docs/assets/*, openpilot/tools/plotjuggler/layouts/*, openpilot/selfdrive/assets/offroad/mici_fcc.html, openpilot/starpilot/galaxy/web/vendor/vue/vue.esm-browser.js, openpilot/starpilot/companion/ios/GalaxyBluetooth/Resources/Web/vendor/vue/vue.esm-browser.js, openpilot/starpilot/companion/android/LICENSE.gradle, openpilot/starpilot/ui/assets/fonts/notices/Unifont-COPYING.txt"
 ignore-regex = "scale\\.numer"
 
 # https://docs.astral.sh/ruff/configuration/#using-pyprojecttoml
@@ -149,6 +149,12 @@ lint.ignore = [
 line-length = 160
 lint.flake8-implicit-str-concat.allow-multiline = false
 
+[tool.ruff.lint.per-file-ignores]
+# dbus-next declares D-Bus signatures as string annotations ('s', 'ay', 'a{sv}').
+"openpilot/starpilot/galaxy_bluetooth/bridge/server.py" = ["F722", "F821"]
+# These scripts embed Swift test sources verbatim.
+"openpilot/starpilot/companion/ios/tests/*.py" = ["E501"]
+
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "time.time".msg = "Use time.monotonic. time.time can skip due to its reference clock, you probably want a monotonic clock"
 "pyray.measure_text_ex".msg = "Use openpilot.system.ui.lib.text_measure"
@@ -166,6 +172,11 @@ extra-paths = ["opendbc_repo", "msgq_repo", "rednose_repo", "tinygrad_repo", "te
 [tool.ty.rules]
 unresolved-import = "ignore"  # Cython-compiled modules (.pyx)
 unresolved-attribute = "ignore"  # many from capnp and Cython modules
+
+[[tool.ty.overrides]]
+# dbus-next declares D-Bus signatures as string annotations ('s', 'ay', 'a{sv}').
+include = ["openpilot/starpilot/galaxy_bluetooth/bridge/server.py"]
+rules = { unresolved-reference = "ignore", invalid-syntax-in-forward-annotation = "ignore" }
 
 [tool.uv]
 python-preference = "only-managed"

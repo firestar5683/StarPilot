@@ -5,15 +5,17 @@ from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup, setup_st
 from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import ensure_key, load_key, rotate_key, qr_payload
 
 
-_status_cache = [0., '']
+_status_read_at = -1e9
+_status_text = ''
 
 
 def cached_setup_status(ttl=2.):
   # Widgets poll every frame; the status file changes at most every few seconds.
+  global _status_read_at, _status_text
   now = time.monotonic()
-  if now - _status_cache[0] >= ttl:
-    _status_cache[:] = [now, setup_status()]
-  return _status_cache[1]
+  if now - _status_read_at >= ttl:
+    _status_read_at, _status_text = now, setup_status()
+  return _status_text
 
 
 def permitted(allowed):
@@ -142,7 +144,7 @@ def large_phone_rows(allowed):
   from openpilot.system.ui.lib.application import gui_app
   from openpilot.system.ui.widgets import DialogResult
   from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
-  from openpilot.system.ui.widgets.list_view import button_item, text_item
+  from openpilot.system.ui.widgets.list_view import button_item
 
   def forget():
     gui_app.push_widget(ConfirmDialog('Forget all StarPilot app links? Phones must scan a new code.', 'Forget',

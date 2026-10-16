@@ -34,4 +34,4 @@ check an update while online, then reopen with phone Wi-Fi and cellular off and 
 
 ## feedback
 
-enable Developer Mode in Settings and use **Dev / Logs → Copy all reports** after a failure. include the connection mode, device versions, what you tried and any error you recieved. keep pairing codes and passwords out of screenshots.
+enable Developer Mode in Settings and use **Dev / Logs → Copy all reports** after a failure. include the connection mode, device versions, what you tried and any error you received. keep pairing codes and passwords out of screenshots.

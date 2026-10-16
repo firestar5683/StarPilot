@@ -51,7 +51,7 @@ object Palette {
     val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 }
 
-/** comma at the centre, one tilted orbit per connection. The orbit being tried carries a moving comet. */
+/** comma at the center, one tilted orbit per connection. The orbit being tried carries a moving comet. */
 class OrbitView(context: Context) : View(context) {
     private val dp = resources.displayMetrics.density
     private val states = Array(Route.entries.size) { RouteState.IDLE }

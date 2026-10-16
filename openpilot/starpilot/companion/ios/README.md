@@ -15,4 +15,4 @@ github Actions runs the app tests, simulator build and bridge tests. bluetooth a
 
 see [Quick start](QUICK-START.md) for pairing and [Tester guide](TESTER-GUIDE.md) for connection checks.
 
-app source: `natehuby76/ios-clone`, branch `codex/secretgood-galaxy`, commit `081aa0e`. the bundled Galaxy UI keeps its upstream license in `UPSTREAM-GALAXY-LICENSE`. app store ownership and signing are seperate from this repo.
+app source: `natehuby76/ios-clone`, branch `codex/secretgood-galaxy`, commit `081aa0e`. the bundled Galaxy UI keeps its upstream license in `UPSTREAM-GALAXY-LICENSE`. app store ownership and signing are separate from this repo.

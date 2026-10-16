@@ -54,7 +54,7 @@ def main() -> int:
       supervisor.config[config_key] = getattr(args, key)
   ident = identity_store.load_identity()
   print(f"identity ok, expires {ident.expires} ({ident.days_left} days)", flush=True)
-  supervisor.log = EchoLog(supervisor.log)
+  supervisor.log = EchoLog(supervisor.log)  # ty: ignore[invalid-assignment]
 
   def stop(*_):
     supervisor._stop.set()
