@@ -71,6 +71,8 @@ GADGET_SETUP_BACKOFF = 60.0
 GADGET_HELD_RETRY = 2.0
 # between attempts to bring the gadget's network interface up after a bind
 NET_BACKOFF = 5.0
+# jetlink-root.sh rps attempts a bind before the owner stops asking (ensure_steered)
+STEER_TRIES = 6
 # between attempts to listen for borrowers after one failed
 LENDER_BACKOFF = 30.0
 # between runs of the worker that found nothing to do. It costs a couple of
@@ -100,8 +102,8 @@ LOG_BYTES = 1 << 20
 
 def logger(path: Path) -> logging.Logger:
   """The owner's log, to stderr and `path`: swaglog costs 28 MB, so the owner
-  keeps its own. The worker's lines go to the drive; these are for a bench
-  session, which wants them after the drive."""
+  keeps its own. The worker's lines go to the drive's log; these stay for
+  reading afterwards."""
   log = logging.getLogger('jetlink.owner')
   log.setLevel(logging.INFO)
   handlers: list[logging.Handler] = [logging.StreamHandler()]
@@ -174,11 +176,17 @@ class Owner:
     self.dormant = False
     # the link mode the root tuning was applied for, None while stock
     self.tuned: str | None = None
+    # the tuning put back since the link was last on: None not yet asked,
+    # False a restore failed (release_tuning)
+    self.released: bool | None = None
+    # the draw from the USB-C port: cut by this owner, and whether it was last
+    # settled for the link on (steer_draw)
+    self.cut = False
+    self.draw_for: bool | None = None
     # when there was last something to do. The hold runs from here, not from
-    # process start: this daemon is not restarted at ignition any more, so a
-    # hold measured from its birth expires once and never applies again, and
-    # every wake released the gadget a second later with the jetson still
-    # coming up
+    # process start: this daemon lives across ignitions, so a hold measured
+    # from its birth would expire once and then release the gadget on every
+    # wake with the jetson still coming up
     self.idle_since = time.monotonic()
     self.next_attempt = 0.0
     self.next_gadget_attempt = 0.0
@@ -194,6 +202,9 @@ class Owner:
     self._peer: str | None = None       # the phone published as dialed in
     self.net_ready = False              # usb0 configured for this bind
     self.next_net_attempt = 0.0
+    self.steered = False                # usb0's receive work read back on core 6, since the drive started
+    self.next_steer = 0.0
+    self.steer_tries = 0                # this bind's, up to STEER_TRIES
     self.lender_failed = False          # said once, until it listens again
     self.next_lender = 0.0
     self.worker: subprocess.Popen | None = None
@@ -355,6 +366,26 @@ class Owner:
       return
     self.next_net_attempt = now + NET_BACKOFF
     self.net_ready = gadget.net_up()
+    self.steered, self.next_steer, self.steer_tries = False, 0.0, 0
+
+  def ensure_steered(self, offroad: bool) -> None:
+    """The cable's receive work onto core 6 (jetlink-root.sh rps), once a
+    drive has started: net's own steer, at the bind, reads back 00 while
+    hardwared has the big cores parked, and the kernel never adds them later.
+    Retried on NET_BACKOFF, STEER_TRIES times a bind: a core 6 that stays
+    offline is no reason to run sudo every few seconds for a whole drive."""
+    if offroad or self.steered or not self.net_ready or self.steer_tries >= STEER_TRIES:
+      return
+    now = time.monotonic()
+    if now < self.next_steer:
+      return
+    self.next_steer = now + NET_BACKOFF
+    self.steer_tries += 1
+    self.steered = root.run('rps')
+    if self.steered:
+      gadget.log.warning("jetlink: the cable's receive work is on core 6")
+    elif self.steer_tries == STEER_TRIES:
+      gadget.log.warning("jetlink: the cable's receive work stays where the kernel puts it until the next bind")
 
   def settle(self) -> None:
     """Put the gadget back to bound with nothing open on it.
@@ -444,8 +475,8 @@ class Owner:
     # the far end may still be waking; give it the hold before letting go
     self.idle_since = time.monotonic()
     # after the run, not before it: a run writes JetlinkSpec itself, so a mark
-    # taken at spawn always differs by the time it exits and every successful
-    # provision started a second one
+    # taken at spawn would always differ by the time it exits and every
+    # successful provision would start a second one
     self.note_marks()
     return False
 
@@ -602,34 +633,87 @@ class Owner:
         self.close_link()
       self.stop_worker()
       self.wake()
-      if self.tuned:
-        root.run('vm', 'restore')
-        root.run('udc', 'restore')
-        if self.tuned == 'ios':
-          root.run('draw', 'on', timeout=root.PORT_TIMEOUT)
-        self.tuned = None
-      self.port.off()
+      self.release_tuning()
       return
+    # before the gadget: a host is never drawn from while the link comes up
+    self.steer_draw(True)
     self.link_step(mode == 'ios')
+    self.released = None
     if self.tuned != mode:
       # jetlink-root.sh vm: the recording VM tuning the gadget's reads need;
       # udc: the USB device side kept on for a host that powers the port
-      # (port.py); draw, iOS only: no current drawn from the port, which an
-      # iPhone cannot supply. While the link is on. After the step, so the
-      # first gadget does not wait on them. Put back only when the link is
-      # turned off or leaves iOS, never on exit: manager stops this at
-      # ignition, just as the contention starts, and a phone plugged in before
-      # it is back should still come up. A start assumes the draw stock, so a
-      # cut a dead iOS owner left lasts until the reboot that clears it
+      # (port.py). While the link is on. After the step, so the first gadget
+      # does not wait on them. Put back only when the link is not wanted
+      # (release_tuning)
       if self.tuned is None:
         root.run('vm', 'apply')
         root.run('udc', 'apply')
-      if mode == 'ios':
-        if root.run('draw', 'off', timeout=root.PORT_TIMEOUT):
-          gadget.log.info("jetlink: drawing no current from the USB-C port, for an iPhone")
-      elif self.tuned == 'ios':
-        root.run('draw', 'on', timeout=root.PORT_TIMEOUT)
       self.tuned = mode
+
+  def link_wanted(self) -> bool:
+    """Is the link still wanted at a stop: set on, and no chestnut on the
+    port? Settings.mode() reads an unreadable param as 'off', as manager
+    does, so that is not wanted. The except only guards a bug: anything
+    raised in the stop's finally would skip the teardown after it. manager's
+    own chestnut test is chestnut_present(), cached 2 s, and this walks the
+    USB ids itself, so a chestnut mid-re-enumeration can read as absent here
+    and keep the tuning for that drive; accepted."""
+    try:
+      return self.settings.mode() != 'off' and not port.chestnut_attached(self.port.chestnut_ids)
+    except Exception:
+      gadget.log.exception("jetlink: could not tell whether the link is still wanted; keeping its tuning")
+      return True
+
+  def release_tuning(self, final: bool = False) -> bool:
+    """The link is not wanted, turned off or a chestnut on the port: the
+    port, its draw and the root tuning go back as AGNOS boots them, at a step
+    and at the stop manager makes of it, which often comes before a step has
+    seen the setting. Any other stop keeps them for the owner manager starts
+    next, which applies them again; a reboot clears them.
+
+    The draw first, while a hold still keeps the far end on the port: letting
+    go of one can drop it for a DRP toggle, and an empty port read in that
+    moment would give the draw back with a host still in. It is given back
+    only on an empty port, so it stays cut with a chestnut on, which the
+    comma powers and where the cut does nothing. The tuning is restored
+    whatever `tuned` says, since an owner before this one may have applied
+    it: once when the link goes, and again at the stop (final) if that
+    failed. On the port's short timeout, since at a stop it comes before the
+    FunctionFS close, inside manager's 5 s. True when the draw is still cut."""
+    self.steer_draw(False)
+    self.port.off()
+    if self.released is None or (final and not self.released):
+      vm = root.run('vm', 'restore', timeout=root.PORT_TIMEOUT)
+      self.released = root.run('udc', 'restore', timeout=root.PORT_TIMEOUT) and vm
+      if self.released:
+        self.tuned = None
+    return self.cut
+
+  def steer_draw(self, want: bool) -> None:
+    """jetlink-root.sh draw: with the link on, no current drawn from the USB-C
+    port, whatever is on it. The comma runs off its own power port, and drawing
+    from the host's only costs it: a 3X browns out the instant it draws from a
+    laptop (PMIC power-off reason UVLO), and an iPhone sags under the draw and
+    never sees a device. The launch script cuts it at boot (jetlink-root.sh
+    boot); this keeps it cut. A forced voter, so it holds for every plug after.
+    Given back only on an empty port, so the link turned off with a host still
+    in never lets the charger draw from it. Kept on a stop with the link
+    wanted, like the tuning (release_tuning). A start assumes the draw stock,
+    so the link off gives it back on an empty port even uncut here: an owner
+    before this one may have cut it, and letting go is safe to repeat."""
+    if want == self.draw_for:
+      return
+    if want:
+      self.cut = root.run('draw', 'off', timeout=root.PORT_TIMEOUT)
+      if self.cut:
+        gadget.log.info("jetlink: drawing no current from the USB-C port")
+    else:
+      if port.power_role() != 'none':
+        return   # a host is still in; looked at again next step
+      root.run('draw', 'on', timeout=root.PORT_TIMEOUT)
+      self.cut = False
+    # settled, or failed, which is not retried every step
+    self.draw_for = want
 
   def ensure_lender(self) -> None:
     """Listen for borrowers, or say why not and try again later.
@@ -670,6 +754,7 @@ class Owner:
       return
     self.attached = gadget.host_attached()
     self.watch_the_port()
+    self.ensure_steered(offroad)
 
     # before the worker gate: hardwared waits 25 s for this and a build in
     # flight takes minutes, so a shutdown request cannot queue behind one
@@ -677,9 +762,9 @@ class Owner:
     if reason is not None and not self.lender.lent:
       if self.worker_running():
         if self.shutting_down:
-          # the run asking the jetson. Stopping it here restarted it every
-          # step, half a second, less than it takes to start: on the bench
-          # nothing ever asked, and hardwared gave up after its 25 s
+          # the run asking the jetson. Stopping it here would restart it every
+          # half-second step, less than it takes to start, so nothing would
+          # ever ask and hardwared would give up after its 25 s
           return
         self.stop_worker()
       if time.monotonic() < self.next_shutdown_run:
@@ -861,7 +946,7 @@ class Owner:
 
     A power-off request ends it: hardwared waits 25 s for the owner to take
     one, and the Jetson on its own supply stays on otherwise."""
-    self.backing_off = (f"the service keeps stopping ({died} times in {CRASH_WINDOW / 60:.0f} min), "
+    self.backing_off = (f"{gadget.BACKING_OFF} ({died} times in {CRASH_WINDOW / 60:.0f} min), "
                         f"waiting {until - time.monotonic():.0f} s before starting it again")
     gadget.log.warning("jetlink: %s", self.backing_off)
     self.publish_status()
@@ -881,7 +966,7 @@ class Owner:
     still holds the gadget) would clear that owner's records, overwrite its
     status record and release its port hold. The kernel lets an flock go with
     the process however it dies, and the fd is not inherited by a run.
-    Without a /dev/shm to lock in, the owner runs as it did before."""
+    Without a /dev/shm to lock in, the owner runs unlocked."""
     try:
       gadget.OWNER_LOCK.parent.mkdir(parents=True, exist_ok=True)
       fd = os.open(gadget.OWNER_LOCK, os.O_RDWR | os.O_CREAT, 0o644)
@@ -937,9 +1022,17 @@ class Owner:
         time.sleep(max(0.0, POLL - (time.monotonic() - started)))
     finally:
       # first, inside manager's 5 s: it stops this when a chestnut turns up,
-      # and the comma has to host that. The sysctls stay: a stop here is where
-      # a drive begins
-      self.port.off()
+      # and the comma has to host that. The tuning and the draw go with the
+      # port when the link is not wanted (release_tuning)
+      if self.link_wanted():
+        self.port.off()
+      elif self.release_tuning(final=True):
+        if port.power_role() == 'source':
+          gadget.log.info("jetlink: the comma powers what is on the USB-C port; its draw stays cut, "
+                          "which does nothing there, until a reboot")
+        else:
+          gadget.log.warning("jetlink: a host is still on the USB-C port; the comma draws nothing from it "
+                             "until a reboot")
       self.lender.stop()
       # about this process's lender; with no owner there is nothing to borrow
       # anyway, and a chestnut may be why it stopped

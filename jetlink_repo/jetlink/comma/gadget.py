@@ -12,8 +12,8 @@ Holding ep0 needs sysfs and a unix socket; `openpilot.common.swaglog` costs
 28 MB because it drags numpy, capnp and zmq in to publish a log line, and
 `openpilot.common.params` imports swaglog, so a module that touches either
 prices the owner out of being minimal. Measured on the comma: python plus this
-plus the FunctionFS transport is 10.4 MB against 47.5 MB for the daemon that
-imported the world.
+plus the FunctionFS transport is 10.4 MB against 47.5 MB with openpilot's
+modules imported.
 
 Nothing in jetlink.comma may import openpilot or knows a param: the settings
 come from jetlink.openpilot.settings, over the directory and the keys the
@@ -146,7 +146,7 @@ UDC_PATH = Path(UDC_SYSFS)
 # the network function jetlink-root.sh gadget --ios adds after ffs.jetlink. Its
 # netdev is not usb0, which the modem holds, but whatever the kernel names it
 NET_FUNCTION = 'ncm.usb0'
-# written by scripts/comma/jetlink-root.sh gadget, which the owner runs when the
+# written by jetlink/comma/jetlink-root.sh gadget, which the owner runs when the
 # link is on and there is no gadget: "ok", or "error: <reason>"
 GADGET_STATUS = Path("/dev/shm/jetlink-gadget")
 # the owner's own: "error: the lender could not listen: <reason>" while nothing
@@ -158,15 +158,17 @@ CC_ORIENTATION = Path('/sys/class/power_supply/usb/typec_cc_orientation')
 # sleep. Presence comes from this, not the UDC; a marker whose writer is dead is
 # a leftover from a kill
 DORMANT = Path("/dev/shm/jetlink-dormant")
-# hardwared's request to power the Jetson off; see backend.shutdown
+# hardwared's request to power the Jetson off; see request_shutdown
 SHUTDOWN_REQUEST = Path("/dev/shm/jetlink-shutdown")
-# the owner's status record: everything the readers used to take from the
-# files above one by one, rewritten whole every step, which makes it the
-# owner's heartbeat too. A clean stop removes it
+# the owner's status record: the owner's state in one file, rewritten whole
+# every step, which makes it the owner's heartbeat too. A clean stop removes it
 STATUS = Path("/dev/shm/jetlink/status.json")
 # how old that record may be before a reader takes its owner for gone: six of
 # its 0.5 s steps. A wait inside a step renews it (Owner.beat)
 HEARTBEAT_TIMEOUT = 3.0
+# how the owner's crash-loop backoff starts its record's error, which
+# status.Status.reason_code reads it by
+BACKING_OFF = "the service keeps stopping"
 # the owner's start times, for its crash-loop backoff (see the owner)
 STARTS = Path("/dev/shm/jetlink/starts.json")
 # held with flock by the owner for its whole life, so there is only ever one
@@ -174,11 +176,15 @@ OWNER_LOCK = Path("/dev/shm/jetlink/owner.lock")
 # what the server's last hello said (lending.SERVER_FIELDS), kept apart from
 # the status record so a clean stop leaves it for the next owner
 SERVER = Path("/dev/shm/jetlink/server.json")
-# how long a host that stopped reading configured still counts as there. The
-# owner holds the gadget for as long as the link is enabled, so presence no
-# longer blinks at every handover; what is left to bridge is a USB3 link
-# recovery passing through "addressed", and a bounce made on purpose when a
-# host will not enumerate (wait_for_host)
+# the joining model's runtime record, rewritten by a thread in modeld once a
+# second and on every handover: whether the big model drives, for a reader
+# with no modelV2 (status.runtime). modeld's close() leaves it stopping
+MODELD = Path("/dev/shm/jetlink/modeld.json")
+# how often modeld rewrites that record without a handover
+RECORD_PERIOD = 1.0
+# how long a host that stopped reading configured still counts as there: long
+# enough to bridge a USB3 link recovery passing through "addressed", and a
+# bounce made on purpose when a host will not enumerate (wait_for_host)
 PRESENCE_HOLD = 5.0
 
 
@@ -199,22 +205,31 @@ def write_record(path: Path, record) -> None:
 
 def clear_leftovers(directory: Path) -> None:
   """The temporaries a writer killed between its write and its rename left
-  in `directory`. For the owner's start, when nothing else writes there."""
+  in `directory`, for the owner's start. Only a dead writer's (write_record
+  names them by pid): modeld writes its runtime record there too, and a
+  live one's is mid-write."""
   try:
     for leftover in directory.glob('.*.json.*'):
-      leftover.unlink(missing_ok=True)
+      pid = leftover.name.rsplit('.', 1)[-1]
+      if not (pid.isdigit() and pid_alive(int(pid))):
+        leftover.unlink(missing_ok=True)
   except OSError:
     pass
+
+
+def read_record(path: Path) -> dict | None:
+  """A JSON record write_record wrote, or None: missing, or not a record."""
+  try:
+    record = json.loads(read(path))
+  except ValueError:
+    return None
+  return record if isinstance(record, dict) else None
 
 
 def owner_status() -> dict | None:
   """The owner's status record, or None without one: no owner has run since
   boot, the last one stopped cleanly, or it is one too old to write it."""
-  try:
-    record = json.loads(read(STATUS))
-  except ValueError:
-    return None
-  return record if isinstance(record, dict) else None
+  return read_record(STATUS)
 
 
 def owner_alive(record: dict) -> bool:
@@ -316,8 +331,8 @@ def wait_for_host(timeout: float, bounce=None, should_stop=None, report=None, mo
   """Wait for the Jetson to enumerate us, bouncing a bus that stalled.
 
   The gadget stays bound throughout. An unbind is an unplug as the far end sees
-  it, and while one boots it takes ~50 s a cycle: doing that on a timer landed
-  an unplug on a box that was seconds from enumerating.
+  it, and while one boots it takes ~50 s a cycle, so an unbind on a timer can
+  land on a box seconds from enumerating.
 
   The one case that needs an edge is a host that took the bind as a wake, reset
   the bus and stopped. The UDC then sits in default or addressed with the CC
@@ -420,9 +435,15 @@ def dormant() -> bool:
     pid = int(read(DORMANT))
   except ValueError:
     return False
+  return pid_alive(pid)
+
+
+def pid_alive(pid) -> bool:
+  if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+    return False   # 0 and below name process groups, never one process
   try:
     os.kill(pid, 0)
-  except ProcessLookupError:
+  except (ProcessLookupError, OverflowError, ValueError):
     return False
   except PermissionError:
     pass  # alive, just not ours to signal
@@ -430,7 +451,15 @@ def dormant() -> bool:
 
 
 def request_shutdown(reason: str) -> bool:
-  return _write(SHUTDOWN_REQUEST, json.dumps({'reason': reason}), "write the shutdown request")
+  """Hand the owner a power-off request, whole or not at all: a partial one (a
+  full /dev/shm) is one the owner cannot read, so it never takes it. False,
+  and logged, when it cannot be written."""
+  try:
+    write_record(SHUTDOWN_REQUEST, {'reason': reason})
+    return True
+  except OSError:
+    log.exception("jetlink: could not write the shutdown request")
+    return False
 
 
 def pending_shutdown() -> str | None:
@@ -441,22 +470,8 @@ def pending_shutdown() -> str | None:
   """
   if not SHUTDOWN_REQUEST.exists():
     return None
-  try:
-    return str(json.loads(read(SHUTDOWN_REQUEST)).get('reason', ''))
-  except ValueError:
-    return None
-
-
-def await_shutdown(timeout: float, poll: float = 0.25) -> bool:
-  """Wait for the owner's run to take a shutdown request. False if nobody did
-  within `timeout`, and then the request is withdrawn."""
-  deadline = time.monotonic() + timeout
-  while time.monotonic() < deadline:
-    if not SHUTDOWN_REQUEST.exists():
-      return True
-    time.sleep(poll)
-  finish_shutdown()
-  return False
+  record = read_record(SHUTDOWN_REQUEST)
+  return None if record is None else str(record.get('reason', ''))
 
 
 def finish_shutdown() -> None:

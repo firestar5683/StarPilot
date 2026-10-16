@@ -22,12 +22,23 @@ from jetlink.comma import gadget
 
 # -- progress -----------------------------------------------------------------
 # Written by the provisioning run and the joining state, read by the UI: a
-# param today (Keys.progress), because the writer is another process.
+# param (Keys.progress), because the writer is another process.
 
 # Each report is a file write, and the UI reads it at 5 Hz. An upload reports
 # once per 4 MB chunk, 440 of them for a 1.7 GB model, and onroad that is IO a
 # recording would have to share the disk with.
 PROGRESS_MIN_INTERVAL = 0.25
+
+# what a progress record's `code` may be, for a fork that words the line
+# itself; `msg` stays the English one. `args`, where a code has them:
+# downloading and upload {got_mb, total_mb}, download_stalled {retry_s},
+# reconnecting {why: lost, behind, load_failed or bad_output}, build {eta_s}.
+# From upload on they are stage names, and the server's stages are its own:
+# a server can add one, so a fork falls back to `msg` for a code it does not
+# know. A server message with no stage has no code
+PROGRESS_CODES = ('waiting_for_host', 'finding_model', 'model_missing', 'ready_waiting_window', 'reconnecting',
+                  'connecting', 'downloading', 'download_stalled', 'download_failed', 'downloaded_waiting_host',
+                  'engine_ready', 'failed', 'upload', 'patch', 'parse', 'convert', 'compile', 'build', 'load', 'warm')
 
 
 def estimated_build_seconds(size: int) -> int:
@@ -57,21 +68,28 @@ class Progress:
       return None
     return value if isinstance(value, dict) else None
 
-  def report(self, stage: str, frac: float, msg: str = '', drops: int = 0) -> None:
+  def report(self, stage: str, frac: float, msg: str = '', drops: int = 0, code: str | None = None,
+             args: dict | None = None) -> None:
     """Never raises: called from except handlers. A fraction's ticks are held to
     4 Hz within a stage; a report with no fraction (a join's state) and the end
     of a stage always go through, so the panel's last word is never dropped. A
-    join says 'waiting for jetlink' and 'checking the link keeps up' 50 ms apart;
+    join says 'waiting for jetlink' and 're-engage to switch' moments apart;
     holding the second left the first on the panel for the rest of the drive.
     `msg` is the panel's one short line; `drops`, once the link has dropped often
-    enough to blame the cable, is the panel's to word."""
+    enough to blame the cable, is the panel's to word; `code` and `args` say
+    `msg` for a fork with its own words (PROGRESS_CODES)."""
     last_stage, last_at = self._last
     now = time.monotonic()
     if 0.0 < frac < 1.0 and stage == last_stage and now - last_at < PROGRESS_MIN_INTERVAL:
       return
     self._last = (stage, now)
+    record = {'stage': stage, 'frac': round(frac, 4), 'msg': msg, 'drops': drops}
+    if code is not None:
+      record['code'] = code
+    if args:
+      record['args'] = args
     try:
-      self.op.put(self.op.keys.progress, {'stage': stage, 'frac': round(frac, 4), 'msg': msg, 'drops': drops})
+      self.op.put(self.op.keys.progress, record)
     except Exception:
       self.op.log.exception("jetlink: could not report progress")
 
@@ -85,11 +103,14 @@ class Progress:
     """Progress, with how long the build still has to run, from the model's
     size. Only the build: the upload reports MB of MB and a connect has nothing
     to predict."""
-    if stage == 'build':
-      size = self._size() if self._size is not None else None
-      if size:
-        msg = _eta(estimated_build_seconds(size) * max(0.0, 1.0 - frac))
-    self.report(stage, frac, msg)
+    args = None
+    size = self._size() if self._size is not None and stage in ('build', 'upload') else None
+    if size and stage == 'build':
+      left = estimated_build_seconds(size) * max(0.0, 1.0 - frac)
+      msg, args = _eta(left), {'eta_s': round(left)}
+    elif size:
+      args = {'got_mb': int(frac * size) >> 20, 'total_mb': size >> 20}
+    self.report(stage, frac, msg, code=stage or None, args=args)
 
 
 # -- what is on the other end -------------------------------------------------
@@ -168,8 +189,13 @@ def usb_port() -> str | None:
 
 # -- whether the link can run --------------------------------------------------
 
-# the offroad alert's text for a device whose build made no warp for its camera
+# the offroad alert's text for a device whose checkout has no warp for its camera
 NO_WARP = "no warp built for this camera"
+# how a failed snapshot starts its reason (the owner's backoff: gadget.BACKING_OFF)
+STATUS_FAILED = "jetlink status failed"
+# Status.reason_code: the reason's kind, for a fork with its own words. Any
+# reason that is none of the others is the gadget's, its text the detail
+REASON_CODES = ('no_warp', 'service_stopped', 'backing_off', 'status_failed', 'gadget')
 
 
 def unavailable(parts, record: dict | None) -> str | None:
@@ -187,20 +213,60 @@ def unavailable(parts, record: dict | None) -> str | None:
   return None if parts.warps.built() else NO_WARP
 
 
-def _built_for_the_pick(parts) -> bool:
-  spec = parts.spec.load()
-  selected = parts.models.selected_model()
-  return (spec is not None and selected is not None and spec.sha256 == selected['oid']
-          and parts.spec.engine_ready_for(spec.sha256))
-
-
 def reason(parts, mode: str) -> str | None:
   """Why the link cannot run, for someone who asked for it only: with it off,
   a device that cannot present the gadget simply does not offer the feature."""
   return unavailable(parts, owner_record()[0]) if parts.enabled(mode) else None
 
 
+# -- what modeld runs ------------------------------------------------------------
+
+# a big model drives while its last answer was this recent when the record
+# was written: five frames at 20 Hz, so a held frame or two still counts
+OUTPUT_FRESH = 0.25
+# and while the record itself is this recent: a modeld that froze stops
+# reading as driving within it. Two writer periods, since the writer runs at
+# background priority and a late write must not read as a hand-back; below the
+# owner's HEARTBEAT_TIMEOUT, which `running` keeps
+ACTIVE_FRESH = 2 * gadget.RECORD_PERIOD
+
+
+class Runtime(NamedTuple):
+  state: str | None = None        # the joining model's state (STATES)
+  active: bool = False            # the big model drives modeld's frames now
+  sha256: str | None = None       # and which model it is, while it does
+  checkpoint: str | None = None
+
+
+def runtime() -> Runtime:
+  """The joining model's state, whether the big model drives now and which
+  model it is, from modeld's runtime record (gadget.MODELD); Runtime() without
+  a live one: no modeld with the link since boot, or one that stopped, died
+  or stopped writing (gadget.HEARTBEAT_TIMEOUT, as the owner's). Never raises."""
+  record = gadget.read_record(gadget.MODELD)
+  try:
+    if record is None or record.get('stopping') or not gadget.owner_alive(record) \
+       or not gadget.pid_alive(record.get('pid')):
+      return Runtime()
+    # the answer's age when written: the writer wakes once a second, the frames 20 times
+    answered = record['at'] - record.get('last_output_at', 0.0) < OUTPUT_FRESH
+    active = bool(record.get('active')) and answered and time.monotonic() - record['at'] < ACTIVE_FRESH
+
+    def text(key: str, shown: bool = True) -> str | None:
+      value = record.get(key)
+      return value if shown and isinstance(value, str) else None
+    return Runtime(text('state'), active, text('sha256', active), text('checkpoint', active))
+  except (TypeError, KeyError):
+    return Runtime()
+
+
 # -- the snapshot ----------------------------------------------------------------
+
+# Status.phase, in the order it is decided (see there). Plain strings, and
+# like the codes only ever added to: a fork maps one it does not know to its
+# own default
+PHASES = ('unavailable', 'off', 'active', 'waiting', 'reconnecting', 'failed', 'preparing', 'connecting', 'prepared')
+
 
 class Status(NamedTuple):
   """Everything a reader shows, taken at once. Fields are only ever added."""
@@ -214,11 +280,87 @@ class Status(NamedTuple):
   progress: dict | None         # {stage, frac, msg} while provisioning or joining
   model: str | None             # the big model it will run: the pick, else jetlink's default
   default_model: str | None     # jetlink's default, named like the chestnut's (no build date)
+  standin: str | None = None    # the last model built, which drives while the pick is not ready
+  running: str | None = None    # the joining model's state (STATES) in a live modeld, by its record (runtime)
+  active: bool = False          # the big model drives modeld's frames now, by the same record
+  running_sha256: str | None = None      # the model it drives with, while active
+  running_checkpoint: str | None = None
+
+  @property
+  def runnable(self) -> bool:
+    """Is a big model built to run: the pick, or the stand-in for it?"""
+    return self.ready or self.standin is not None
 
   @property
   def active_model(self) -> str | None:
-    """model, once it can run."""
-    return self.model if self.ready else None
+    """The big model that runs: the pick once it is built, else the stand-in."""
+    return self.model if self.ready else self.standin
+
+  @property
+  def shown(self) -> bool:
+    """Anything of the link's to show: it is on, a host is there, or progress."""
+    return self.enabled or self.present or self.progress is not None
+
+  @property
+  def holds_port(self) -> bool:
+    """The link holds the comma's USB port, so ADB cannot have it."""
+    return self.enabled
+
+  @property
+  def port_state(self) -> str | None:
+    """The port line's: 'connected' with a host on the link, else the CC
+    pin's 'empty' or 'device' (a cable with something live behind it, it
+    cannot say what); None where the kernel does not say."""
+    if self.present:
+      return 'connected'
+    if self.port is None:
+      return None
+    return 'empty' if self.port == 'empty' else 'device'
+
+  @property
+  def reason_code(self) -> str | None:
+    """`reason` as one of REASON_CODES, None without one."""
+    reason = self.reason
+    if reason is None:
+      return None
+    if reason == NO_WARP:
+      return 'no_warp'
+    if reason == STOPPED:
+      return 'service_stopped'
+    if reason.startswith(gadget.BACKING_OFF):
+      return 'backing_off'
+    return 'status_failed' if reason.startswith(STATUS_FAILED) else 'gadget'
+
+  @property
+  def phase(self) -> str:
+    """One of PHASES, what a panel's state chip says, decided in that order.
+    Why the link cannot run comes first (a failed snapshot has the reason
+    with enabled False), then the setting, then what a live modeld says it
+    runs, then the progress stage, then the records. Without a live record
+    the progress line decides, and it can be a drive old: a modeld that is
+    never closed leaves its join's last 'connect' line, which reads
+    connecting offroad, as the icon reads loading. A big model that stopped
+    answering while it drives is reconnecting: it is about to hand back. A
+    build inside a join is preparing; a connect is connecting, a join's or a
+    provisioning run's."""
+    if self.reason is not None:
+      return 'unavailable'
+    if not self.enabled:
+      return 'off'
+    if self.active:
+      return 'active'
+    if self.running == 'ready':
+      return 'waiting'
+    if self.running in ('retrying', 'running'):
+      return 'reconnecting'
+    stage = str((self.progress or {}).get('stage') or '')
+    if stage == 'failed':
+      return 'failed'
+    if stage not in ('', 'ready', 'connect'):
+      return 'preparing'
+    if self.running == 'joining' or stage == 'connect':
+      return 'connecting'
+    return 'prepared' if self.runnable else 'preparing'
 
   def icon(self, started: bool, model_seen: bool, running_big: bool, state: str) -> str:
     """The chestnut icon's state for the link: a ChestnutState value.
@@ -234,7 +376,7 @@ class Status(NamedTuple):
         return 'disconnected'
       if stage and stage != 'ready':
         return 'failed' if stage == 'failed' else 'loading'
-      return 'ready' if self.ready else 'uncompiled'
+      return 'ready' if self.runnable else 'uncompiled'
 
     if model_seen and running_big:
       return 'active'
@@ -247,7 +389,7 @@ class Status(NamedTuple):
     # nothing is in control, so a driver who stays engaged keeps the small model
     if state == 'ready':
       return 'waiting'
-    if not self.ready:
+    if not self.runnable:
       return 'uncompiled'
     if state == 'running':
       return 'active'
@@ -258,19 +400,42 @@ def read(parts, mode: str) -> Status:
   """Everything at once, over the link setting the caller read: each file once."""
   record, live = owner_record()
   enabled = parts.enabled(mode)
+  live_model = runtime() if enabled else Runtime()
   reason = unavailable(parts, record) if enabled else None
+  # the last model the server built; the pick's, or the stand-in that drives
+  # until the pick is built (link.open_link)
+  built = parts.spec.built_sha() if enabled and reason is None else None
+  selected = parts.models.selected_model() if built is not None else None
+  ready = built is not None and selected is not None and built == selected['oid']
   return Status(
     enabled=enabled,
     mode=mode,
     transport=link_transport(mode, live),
     present=bool(live.get('present')) if live is not None else parts.presence.present(),
     port=usb_port(),
-    ready=enabled and reason is None and _built_for_the_pick(parts),
+    ready=ready,
     reason=reason,
     progress=parts.progress.read(),
     model=parts.models.selected_model_name(),
     default_model=parts.models.default_model_name(),
+    standin=parts.models.name_for(built) if built is not None and not ready else None,
+    running=live_model.state,
+    active=live_model.active,
+    running_sha256=live_model.sha256,
+    running_checkpoint=live_model.checkpoint,
   )
+
+
+def model_state(parts, ref: str) -> str | None:
+  """One catalog model, for the picker's list: 'ready' when the Jetson has
+  built it (the spec record), 'downloaded' when the comma has its file, else
+  None. Records and one stat; a model never resolved has neither."""
+  model = next((m for m in parts.models.model_index() if m['ref'] == ref), None)
+  if model is None or not model.get('oid'):
+    return None
+  if parts.spec.engine_ready_for(model['oid']):
+    return 'ready'
+  return 'downloaded' if parts.models.has_file(model) else None
 
 
 def failed(error: str, mode: str) -> Status:
@@ -282,4 +447,4 @@ def failed(error: str, mode: str) -> Status:
 
 
 def failure(error: str, mode: str) -> str | None:
-  return f"jetlink status failed: {error}" if mode != 'off' else None
+  return f"{STATUS_FAILED}: {error}" if mode != 'off' else None

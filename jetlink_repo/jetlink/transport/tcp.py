@@ -12,13 +12,19 @@ the vendor interface instead. See docs/transport.md.
 
 One sendmsg per message (header and body in one segment train, NODELAY set)
 and reads straight into the reusable receive buffer, so the steady state does
-not allocate on the wire.
+not allocate on the wire. Over the cable, frames can go as UDP datagrams
+instead (use_datagrams, protocol.DATAGRAM_MAGIC); everything else stays here.
 """
 from __future__ import annotations
 
+import logging
 import socket
+from collections.abc import Iterator
 
-from jetlink.transport.base import LinkError, StreamTransport, udc_speed, usb_link_info
+from jetlink import protocol as P
+from jetlink.transport.base import LinkError, StreamTransport, advance, take, udc_speed, usb_link_info
+
+log = logging.getLogger('jetlink.tcp')
 
 DEFAULT_PORT = 5599
 # The comma's end of the USB network link a phone dials (jetlink-root.sh gadget --ios).
@@ -32,6 +38,9 @@ class TcpTransport(StreamTransport):
     self.sock = sock
     self._timeout: float | None = -1.0  # force the first settimeout
     _tune(sock)
+    # (socket connected to the server's frame port, its token); see use_datagrams
+    self._udp: tuple[socket.socket, int] | None = None
+    self._drops_at = _softnet_dropped()
 
   def on_the_cable(self) -> bool:
     """Is either end the comma's cable address? Then this is a phone's USB
@@ -44,6 +53,54 @@ class TcpTransport(StreamTransport):
 
   def link_info(self) -> dict:
     return usb_link_info('cable', udc_speed()) if self.on_the_cable() else {'kind': 'tcp'}
+
+  def net_drops(self) -> int:
+    """Every CPU's receive backlog drops since this link came up
+    (/proc/net/softnet_stat): a receive core starved of time shows here
+    before anywhere else. -1 where it cannot be read."""
+    now = _softnet_dropped()
+    return -1 if now < 0 or self._drops_at < 0 else now - self._drops_at
+
+  # -- frames as datagrams ---------------------------------------------------
+
+  def use_datagrams(self, port: int, token: int) -> bool:
+    """Send frames the caller can do without (send_datagrams) to the peer's
+    UDP `port` from now on, behind the server's `token`: what its HELLO_RESP
+    offers over the cable. False, and nothing changes, anywhere else: off the
+    cable a lost datagram has more than a USB link between it and the phone.
+    Blocking: the 4 MB send buffer takes a frame whole."""
+    self.stop_datagrams()
+    if not self.on_the_cable():
+      return False
+    try:
+      udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+      udp.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 << 20)
+      udp.connect((self.sock.getpeername()[0], port))
+    except OSError as e:
+      log.warning("jetlink: no frame datagrams to port %d (%s); frames stay on TCP", port, e)
+      return False
+    self._udp = (udp, token)
+    return True
+
+  def stop_datagrams(self) -> None:
+    udp, self._udp = self._udp, None
+    if udp is not None:
+      udp[0].close()
+
+  @property
+  def datagrams(self) -> bool:
+    return self._udp is not None
+
+  def send_datagrams(self, msg_type: int, seq: int, parts=(), flags: int = 0) -> None:
+    """The message as `datagrams`, one sendmsg each, once use_datagrams took
+    an offer. A send the kernel refuses (the phone's server gone) fails the
+    link, as a refused send on the stream does."""
+    udp, token = self._udp
+    try:
+      for piece in datagrams(self._frame(msg_type, seq, parts, flags), token, seq):
+        udp.sendmsg(piece)
+    except OSError as e:
+      raise LinkError(f"frame datagrams failed: {e}") from e
 
   @classmethod
   def connect(cls, host: str, port: int = DEFAULT_PORT, timeout: float = 5.0) -> TcpTransport:
@@ -58,15 +115,10 @@ class TcpTransport(StreamTransport):
     return srv
 
   @classmethod
-  def accept(cls, srv: socket.socket) -> tuple[TcpTransport, tuple]:
-    conn, addr = srv.accept()
-    return cls(conn), addr
-
-  @classmethod
   def listen_once(cls, host: str = '0.0.0.0', port: int = DEFAULT_PORT,
                   timeout: float | None = None) -> tuple[TcpTransport, tuple]:
     """Take exactly one incoming connection and stop listening: a phone that
-    dials us, for the bench and parity scripts run from a Mac."""
+    dials us, for the benchmark and parity scripts run from a Mac."""
     srv = cls.listen(host, port)
     try:
       srv.settimeout(timeout)
@@ -109,6 +161,7 @@ class TcpTransport(StreamTransport):
     return n
 
   def close(self) -> None:
+    self.stop_datagrams()
     # shut down first: a close alone keeps the connection up while another
     # process holds a copy of the socket (the comma's gadget owner holds the
     # phone's dial), and the peer hears nothing until that copy goes too
@@ -117,6 +170,26 @@ class TcpTransport(StreamTransport):
         let_go()
       except OSError:
         pass
+
+
+def _softnet_dropped(path: str = '/proc/net/softnet_stat') -> int:
+  """The kernel's receive backlog drops, all CPUs: the second column, in hex."""
+  try:
+    with open(path) as f:
+      return sum(int(line.split()[1], 16) for line in f if line.strip())
+  except (OSError, ValueError, IndexError):
+    return -1
+
+
+def datagrams(bufs: list[memoryview], token: int, seq: int) -> Iterator[list]:
+  """A message's stream bytes `bufs` as protocol.datagram_pieces, each its
+  header and views into `bufs`. The header's buffer is reused: send or copy
+  each datagram before taking the next."""
+  total = sum(b.nbytes for b in bufs)
+  header = bytearray(P.DATAGRAM_HEADER_SIZE)
+  for offset, size in P.datagram_pieces(total):
+    P.pack_datagram_header_into(header, token, seq, offset, total)
+    yield [header, *take(advance(bufs, offset), size)]
 
 
 def _tune(sock: socket.socket) -> None:

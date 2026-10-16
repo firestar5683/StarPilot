@@ -14,14 +14,14 @@ openpilot #38916. feat_dim is prod(fb[2:]); older forks use fb[2], which gives
 32 rather than 16384 for the big model's (1,32,32,512) features_buffer.
 tests/test_queues.py catches the drift.
 
-The stateful one (openpilot #38916, 2026-09-15; Cinque Terre V3 onwards)
+The stateful one (openpilot #38916; Cinque Terre V3 onwards)
 carries its history in the graph: the newest warped frame goes in as new_img,
 each queue goes in as state_<q> and comes back advanced as next_state_<q>, and
 the hidden state never leaves the graph.
 
 Either way the wire carries the newest frame and three scalars, and the reply
 the outputs less hidden_state (protocol 3): the queued graph's server feeds its
-own hidden state back, which modeld did through prev_feat until then.
+own hidden state back, where an older modeld sends prev_feat.
 """
 from __future__ import annotations
 
@@ -32,7 +32,6 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
-from jetlink.onnx_meta import parse_file
 from jetlink.protocol import INFER_REQ_SIZE, INFER_RESP_SIZE
 
 # openpilot ModelConstants; duplicated so the server needs no openpilot import
@@ -141,10 +140,6 @@ class ModelSpec:
   def packed_nelem(self) -> int:
     return sum(math.prod(s) for s in self.packed_shapes.values())
 
-  def feed_back(self, packed, output) -> None:
-    """Nothing: the server feeds the hidden state back itself (protocol 3).
-    Kept for the modeld glue that still calls it after every frame."""
-
   @property
   def packed_nbytes(self) -> int:
     return self.packed_nelem * 4  # float32
@@ -243,6 +238,7 @@ def sha256_file(path: str, bufsize: int = 1 << 20) -> tuple[str, int]:
 
 def spec_from_onnx(path: str, frame_skip: int = DEFAULT_FRAME_SKIP,
                    sha256: str | None = None, nbytes: int | None = None) -> ModelSpec:
+  from jetlink.onnx_meta import parse_file   # the scripts' and fixtures': modeld and the owner never parse a graph
   meta = parse_file(path)
   if sha256 is None or nbytes is None:
     sha256, nbytes = sha256_file(path)

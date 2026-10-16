@@ -2,7 +2,7 @@
 
 ## Jetlink external inference
 
-The comma-side Jetlink client and USB transport in `jetlink_repo` are by Zeph Leggett and the [Jetlink contributors](https://github.com/zoompilot/jetlink). They are vendored from revision `c17cd5c52be0ee83b9a6265b7da69d24ad6c5d02` under the MIT license, retained in [jetlink_repo/LICENSE](jetlink_repo/LICENSE). StarPilot owns the adapter to its model runner, settings and process lifecycle. Companion applications and inference servers remain distributed by Jetlink.
+The comma-side Jetlink client and USB transport in `jetlink_repo` are by Zeph Leggett and the [Jetlink contributors](https://github.com/zoompilot/jetlink). They are vendored from revision `d24328d849b0e5154b55f149dc18c5dfe8bd79cc` under the MIT license, retained in [jetlink_repo/LICENSE](jetlink_repo/LICENSE). StarPilot owns the adapter to its model runner, settings and process lifecycle. Companion applications and inference servers remain distributed by Jetlink.
 
 ## MRR35 Hyundai angle and radar
 

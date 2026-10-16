@@ -102,12 +102,16 @@ class JetlinkClient:
     # the newest model output read off the link, whichever call read it: what
     # a frame whose own reply is late publishes again (JetlinkModelState.end)
     self.last_output: np.ndarray | None = None
-    # frames sent and not yet answered, oldest first. More than one while
-    # frames go out without being waited for (drain), or after a reply a
-    # frame gave up on (infer_end with hold)
+    # frames sent and not yet answered, oldest first. More than one after a
+    # reply a frame gave up on (infer_end with hold)
     self._in_flight: deque[Sent] = deque()
     # seqs sent with no reply wanted (leave): an ERROR to one is not this link's
     self._no_reply_wanted: set[int] = set()
+    # frames the server never answered this session, for the log: a lost
+    # datagram is one, and to the caller a held frame like any late reply
+    self.frames_lost = 0
+    # take a server's offer of frame datagrams (_take_datagrams); False keeps frames on the stream, for A/B runs
+    self.allow_datagrams = True
 
   # -- construction ---------------------------------------------------------
 
@@ -128,8 +132,8 @@ class JetlinkClient:
     """This end is the USB gadget, over a gadget another process owns.
 
     The owner holds ep0 and the UDC bind for as long as the link is enabled,
-    so a drive starting or ending is no longer an unplug the host has to
-    recover from. See FfsTransport.borrowed.
+    so a drive starting or ending is not an unplug the host has to recover
+    from. See FfsTransport.borrowed.
     """
     from jetlink.transport.ffs import FfsTransport
     return cls(FfsTransport.borrowed(mount, udc, bounce=bounce, owner_gadget=owner_gadget), **kw)
@@ -210,8 +214,8 @@ class JetlinkClient:
         self._dispatch(msg)
         continue
       if msg.msg_type == P.Msg.INFER_RESP and any(f.seq == msg.seq for f in self._in_flight):
-        # the answer to a frame nobody waited for, or one a frame gave up
-        # waiting for: read like any other, then on to what is wanted
+        # the answer to a frame that gave up waiting for it (a held frame):
+        # read like any other, then on to what is wanted
         self._take_reply(msg)
         continue
       # A reply a caller gave up on. Drop it, or every frame reads one behind.
@@ -238,8 +242,20 @@ class JetlinkClient:
     # its last output is nothing the new model may publish
     self._in_flight.clear()
     self.last_output = None
+    self.frames_lost = 0
     self.t.send_json(P.Msg.HELLO_REQ, seq, {'client': client})
-    return json.loads(bytes(self._expect(P.Msg.HELLO_RESP, seq, timeout).payload))
+    resp = json.loads(bytes(self._expect(P.Msg.HELLO_RESP, seq, timeout).payload))
+    self._take_datagrams(resp)
+    return resp
+
+  def _take_datagrams(self, hello: dict) -> None:
+    """Frames as datagrams when the server offers them (only a phone's server,
+    over the cable). A session that offers none puts frames back on the link."""
+    port, token = hello.get('frame_port'), hello.get('frame_token')
+    if port and token is not None and self.allow_datagrams and self.t.use_datagrams(int(port), int(token)):
+      log.info("frames go to the server as datagrams (port %d)", int(port))
+    else:
+      self.t.stop_datagrams()
 
   def state(self, timeout: float = 2.0) -> dict:
     seq = self._next_seq()
@@ -379,36 +395,51 @@ class JetlinkClient:
 
   def infer_begin(self, warped: np.ndarray, packed: np.ndarray, frame_id: int = 0,
                   reset: bool = False, want_state: bool = False, deadline: float | None = None,
-                  silence: float | None = None) -> int:
+                  skip_if_busy: bool = False) -> int | None:
     """Send a frame and return immediately with its sequence number.
 
     Split from infer_end so the caller can work while the Jetson is busy;
-    openpilot publishes chestnutState in that window. A frame nobody calls
-    infer_end for is read by the next drain or infer_end. A host that has
-    answered none of them for `silence` (the client's deadline by default)
-    is gone, not slow, and the link is done here, before another frame goes
-    out to it. `deadline` bounds this frame's send.
+    openpilot publishes chestnutState in that window. A frame whose reply
+    infer_end stopped waiting for is read by the next drain or infer_end. A
+    host that has answered none of them for the client's deadline is gone,
+    not slow, and the link is done here, before another frame goes out to
+    it. `deadline` bounds this frame's send.
+
+    `skip_if_busy` says the caller can do without this frame's reply: it
+    holds the last output, as JetlinkModelState.end does. A frame the link
+    cannot take without waiting for the host to drain earlier ones is then
+    not sent, and None comes back: the link is as good as it was
+    (Transport.try_send). Over a phone's cable it goes as datagrams instead,
+    where a lost one is a frame the server never answers, and the next reply
+    takes it out of flight (_take_reply).
     """
     if self.spec is None:
       raise LinkError("ensure_engine() first")
     if self.dead:
       raise LinkError("link previously failed")
-    silence = self.deadline if silence is None else silence
-    if self.waiting_for() > silence:
+    if self.waiting_for() > self.deadline:
       self.dead = True
-      raise LinkError(f"no answer to {len(self._in_flight)} frames in {silence:.1f}s; link abandoned")
+      raise LinkError(f"no answer to {len(self._in_flight)} frames in {self.deadline:.1f}s; link abandoned")
     warped = _as_bytes(warped, self.spec.warped_nbytes, 'warped')
     packed = _as_bytes(packed, self.spec.packed_nbytes, 'packed')
     seq = self._next_seq()
     flags = ((P.Flag.RESET_QUEUES if reset else 0) | (P.Flag.WANT_STATE if want_state else 0)
              | (P.Flag.WANT_HIDDEN if self.want_hidden else 0))
+    parts = (P.pack_infer_req(frame_id, flags), warped, packed)
+    sent = Sent(seq, frame_id, flags, time.monotonic())
+    timeout = self.deadline if deadline is None else deadline
     try:
-      self._in_flight.append(Sent(seq, frame_id, flags, time.monotonic()))
-      self.t.send(P.Msg.INFER_REQ, seq, (P.pack_infer_req(frame_id, flags), warped, packed),
-                  timeout=self.deadline if deadline is None else deadline)
+      if skip_if_busy and self.t.datagrams:
+        self.t.send_datagrams(P.Msg.INFER_REQ, seq, parts)
+      elif skip_if_busy:
+        if not self.t.try_send(P.Msg.INFER_REQ, seq, parts, timeout=timeout):
+          return None   # the seq is skipped; replies are matched by seq, not counted
+      else:
+        self.t.send(P.Msg.INFER_REQ, seq, parts, timeout=timeout)
     except LinkError:
       self.dead = True
       raise
+    self._in_flight.append(sent)
     return seq
 
   def infer_end(self, seq: int, deadline: float | None = None, hold: float | None = None) -> np.ndarray | None:
@@ -476,12 +507,15 @@ class JetlinkClient:
   def _take_reply(self, msg: Message) -> np.ndarray:
     """One INFER_RESP off the stream: checked against the frame it answers,
     its timings and telemetry kept, the frame and any older one taken out of
-    flight. Raises, with the link dead, on anything but a good answer."""
+    flight. Raises NotFinite on Status.NOT_FINITE, the link kept, and with
+    the link dead on anything else but a good answer."""
     while self._in_flight and self._in_flight[0].seq != msg.seq:
-      # an older frame the server never answered: it answers in order, and a
-      # frame that fell out of its session (a hello between) is not coming
+      # an older frame the server never answered: it answers in order, so a
+      # frame that fell out of its session (a hello between), or whose
+      # datagrams did not all arrive, is not coming
       skipped = self._in_flight.popleft()
       log.warning('frame %d (seq %d) was never answered', skipped.frame_id, skipped.seq)
+      self.frames_lost += 1
     if not self._in_flight:
       self.dead = True
       raise LinkError(f'inference response seq {msg.seq} answers no frame sent')
@@ -491,6 +525,10 @@ class JetlinkClient:
       raise LinkError('inference response is missing its header')
     fid, status, gpu_us, queue_us, total_us = P.unpack_infer_resp(msg.payload)
     self.last_timings = (gpu_us, queue_us, total_us)
+    if status == P.Status.NOT_FINITE and fid == frame_id:
+      # the server's session goes on, keeping nothing of the frame
+      # (Session.infer), so the link stays and last_output is the one before
+      raise P.NotFinite(f"inference output is not finite: NOT_FINITE (frame {fid})")
     if status != P.Status.OK:
       self.dead = True
       raise LinkError(f"inference failed: {_name(P.Status, status)} (frame {fid})")

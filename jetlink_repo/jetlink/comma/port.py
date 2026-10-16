@@ -11,8 +11,8 @@ host. An A-to-C cable settles which by construction: the A end only pulls CC
 up, so the comma can only be the sink and the device. A C-to-C cable does not.
 Both ends are dual role, and the comma can come out the source and the host:
 facing a Mac, nothing enumerates; facing an iPhone or a Jetson's own USB-C
-port, the far end enumerates as a device. Carrot's Jetson on C-to-C read
-"Powered cable w/ sink" and enumerated as 0955:7020.
+port, the far end enumerates as a device (a Jetson on C-to-C reads
+"Powered cable w/ sink" and enumerates as 0955:7020).
 
 While the link is on, a chestnut is the only thing the comma should host on
 this port. So once the comma has been the source for a few seconds with no

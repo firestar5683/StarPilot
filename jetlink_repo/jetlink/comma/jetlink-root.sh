@@ -6,23 +6,25 @@
 # Everything jetlink does as root on the comma, in one place. The owner runs it
 # through jetlink/comma/root.py, which is sudo -n and a timeout:
 #
-#   sudo scripts/comma/jetlink-root.sh gadget            # the gadget for a Jetson or a Mac
-#   sudo scripts/comma/jetlink-root.sh gadget --ios      # the gadget for an iPhone
-#   sudo scripts/comma/jetlink-root.sh net               # after a bind, iOS only: address, DHCP
-#   sudo scripts/comma/jetlink-root.sh check             # what is there now
-#   sudo scripts/comma/jetlink-root.sh teardown
-#   sudo scripts/comma/jetlink-root.sh port hold|off     # the USB-C port held as the device, or let go
-#   sudo scripts/comma/jetlink-root.sh port device|reset # ask the far end to host over USB PD, or reset PD
-#   sudo scripts/comma/jetlink-root.sh port source       # ask the far end for the source role: the comma charges it
-#   sudo scripts/comma/jetlink-root.sh udc apply|restore # the USB device controller kept a device, or stock
-#   sudo scripts/comma/jetlink-root.sh udc start|stop    # its device side turned on, or off
-#   sudo scripts/comma/jetlink-root.sh vm apply|restore  # the link's VM tuning, or the stock values
-#   sudo scripts/comma/jetlink-root.sh draw off|on       # no current drawn from the port (iOS), or the charger's own
+#   sudo jetlink/comma/jetlink-root.sh gadget            # the gadget for a Jetson or a Mac
+#   sudo jetlink/comma/jetlink-root.sh gadget --ios      # the gadget for an iPhone
+#   sudo jetlink/comma/jetlink-root.sh net               # after a bind, iOS only: address, DHCP
+#   sudo jetlink/comma/jetlink-root.sh rps               # the cable's receive work onto core 6, read back
+#   sudo jetlink/comma/jetlink-root.sh check             # what is there now
+#   sudo jetlink/comma/jetlink-root.sh teardown
+#   sudo jetlink/comma/jetlink-root.sh port hold|off     # the USB-C port held as the device, or let go
+#   sudo jetlink/comma/jetlink-root.sh port device|reset # ask the far end to host over USB PD, or reset PD
+#   sudo jetlink/comma/jetlink-root.sh port source       # ask the far end for the source role: the comma charges it
+#   sudo jetlink/comma/jetlink-root.sh udc apply|restore # the USB device controller kept a device and its debug log off, or stock
+#   sudo jetlink/comma/jetlink-root.sh udc start|stop    # its device side turned on, or off
+#   sudo jetlink/comma/jetlink-root.sh vm apply|restore  # the link's VM tuning, or the stock values
+#   sudo jetlink/comma/jetlink-root.sh draw off|on       # no current drawn from the port, or the charger's own
+#   sudo jetlink/comma/jetlink-root.sh boot SETTING      # at boot: draw off while the Jetlink setting's file is not 0
 #
 # For the comma four and the comma 3X only. Both are SDM845 on the same AGNOS
 # kernel (4.9, dwc3 at a600000.dwc3), with configfs, FunctionFS and NCM built
 # in and no modules to load.
-# The 3X is assumed from the kernel it shares with the four; only the four has been on the bench.
+# The 3X is assumed from the kernel it shares with the four; only the four is tested.
 #
 # gadget: the USB gadget, chosen by the comma's Jetlink setting. The
 # comma is the USB device and the host runs the model; docs/transport.md says
@@ -44,7 +46,7 @@
 # $NET_STATUS_FILE; it never fails the gadget.
 set -euo pipefail
 
-GADGET=/sys/kernel/config/usb_gadget/jetlink
+GADGET=${JETLINK_GADGET:-/sys/kernel/config/usb_gadget/jetlink}
 FFS_MOUNT=/dev/ffs-jetlink
 FFS_NAME=jetlink
 CONFIGFS=/sys/kernel/config
@@ -68,6 +70,25 @@ DHCP_RANGE=192.168.60.2,192.168.60.254,10m
 DNSMASQ_PID=/dev/shm/jetlink-dnsmasq.pid
 DNSMASQ_IF=/dev/shm/jetlink-dnsmasq.if
 DNSMASQ_LEASES=/dev/shm/jetlink-usb0.leases
+SYS_NET=${JETLINK_SYS_NET:-/sys/class/net}
+# The cable's receive work (RPS): core 6, the one big core openpilot runs no
+# real-time thread on. It clocks out the rest of each frame and takes the
+# phone's reply, and under load 4.9 hands it to ksoftirqd, which waits behind
+# any SCHED_FIFO thread on its core. With f0 (cores 4-7) each connection hashed
+# to one of them: 4 is card/controlsd/selfdrived, 5 the ui, 87 and 77 % busy on
+# a drive. A ui-like FIFO 53 load on the receive core took the link from 7.6 to
+# 12.4 ms (p90 36 to 47 ms round trip); on core 6, 7.7.
+# The kernel keeps only the cores online at the write, so with the big cores
+# parked it reads 00: the owner steers again once a drive starts.
+RPS_CPUS=40
+# No connection tracking on the cable. AGNOS builds conntrack and the legacy
+# tables in, so every packet to and from the phone would be tracked and walk four
+# empty tables: NOTRACK in raw for the cable's netdev takes 0.37 ms off a TCP
+# frame's send, and covers the TCP that frame
+# datagrams fall back to. The rules carry a comment and are replaced as a set:
+# the netdev's name moves between binds, and usb0 is the modem's when it has one.
+IPTABLES=${JETLINK_IPTABLES:-iptables-legacy}
+TRACK_TAG=jetlink
 
 # port: the charger's DISABLE_POWER_ROLE_SWITCH voter on the PMI8998, the one
 # role lever that holds across plugs, and the policy engine's own USB PD
@@ -85,11 +106,18 @@ DUAL_ROLE=${JETLINK_DUAL_ROLE:-/sys/class/dual_role_usb/otg_default}
 # its data lines only after USB PD, and at boot no gadget is bound for 10 s.
 UDC_GLUE=${JETLINK_UDC_GLUE:-/sys/devices/platform/soc/a600000.ssusb}
 PE_PARAMS=${JETLINK_PE_PARAMS:-/sys/module/policy_engine/parameters}
+# And Qualcomm's FunctionFS logs four lines to an IPC debug ring for every USB
+# request, inside io_submit on modeld's frame thread: about 200 a frame, into
+# a buffer only debugfs reads. Turned off while recording, the frame's
+# io_submit goes from 1.20 to 0.88 ms and frames from 21.14 to 20.86 ms at
+# p50. 1 turns it off; stock is 0.
+FFS_LOG_OFF=${JETLINK_FFS_LOG_OFF:-/sys/kernel/debug/ipc_logging/f_fs/log_disable}
 USB_PSY=${JETLINK_USB_PSY:-/sys/class/power_supply/usb}
 
 # draw: the charger's USB_ICL voter, the input current limit on the port. As
 # the sink the charger draws up to 900 mA from whatever powers the port, though
-# the comma runs on its own supply. An iPhone powers what it plugs into with
+# the comma runs on its own supply. A 3X browns out the moment it draws from a
+# laptop (PMIC power-off reason UVLO). An iPhone powers what it plugs into with
 # little current; under that draw its supply sags, the charger's weak-charger
 # and reverse-boost handlers cut and restore the input in a loop, and the phone
 # never sees a device. Forced to 0 the input is suspended: the port still reads
@@ -99,21 +127,24 @@ USB_ICL_VOTER=${JETLINK_USB_ICL_VOTER:-/sys/kernel/debug/pmic-votable/USB_ICL}
 
 # vm: loggerd's dirty pages pile up until the kernel reclaims them
 # synchronously, right while a FunctionFS transfer allocates its buffer: gadget
-# reads stalled 200-350 ms and the big model fell back. Capping dirty memory
+# reads stall 200-350 ms and the big model falls back. Capping dirty memory
 # keeps that reclaim cheap. System-wide, since the gadget read shares the
 # kernel with every writer.
 # Not vm.min_free_kbytes: a 128 MB floor takes about three times that out of
 # MemAvailable, 360 MB on a 3.6 GB comma, and openpilot's LOW MEMORY alert
-# reads MemTotal-MemAvailable against 90 %. Drives at 80 % showed 90 and
-# alerted. The caps alone are not yet re-measured against the stall.
+# reads MemTotal-MemAvailable against 90 %, so a drive at 80 % would alert. vm.extra_free_kbytes (Android's) instead has kswapd keep that much
+# more free ahead of the allocators, leaving the direct-reclaim floor where it
+# is: 32 MB took 3 minutes of recording from 49 direct-reclaim stalls (the
+# longest 148 ms) to none, for 2.7 points on that gauge, as the kernel takes
+# it out of MemAvailable about 2.5 times; 64 MB adds nothing but costs 4.5.
+# A drive sits near 71 %.
 # And the socket buffer caps, for the iPhone's TCP link: transport/tcp.py asks
 # for 4 MB, which turns autotuning off, and the kernel clamps it to these, 224
 # KB on AGNOS and so 448 KB of buffer. A 393 KB frame in 1448-byte segments does
-# not fit, so the send waited on the phone's ACKs: 6 to 50 ms, following its
-# round trip. With 4 MB the frame goes in one write and the send took ~4 ms
-# (a tester's comma, 2026-10-04). Only a socket that asks gets more; one set up
+# not fit, so the send waits on the phone's ACKs: 6 to 50 ms, following its
+# round trip. With 4 MB the frame goes in one write and the send takes ~4 ms. Only a socket that asks gets more; one set up
 # before the apply keeps the old cap until the phone reconnects.
-VM_SYSCTLS=(vm.dirty_bytes=16777216 vm.dirty_background_bytes=8388608
+VM_SYSCTLS=(vm.dirty_bytes=16777216 vm.dirty_background_bytes=8388608 vm.extra_free_kbytes=32768
             net.core.wmem_max=4194304 net.core.rmem_max=4194304)
 PROC_SYS=${JETLINK_PROC_SYS:-/proc/sys}
 # the stock values to write back, one key=value a line, recorded by the first
@@ -121,7 +152,7 @@ PROC_SYS=${JETLINK_PROC_SYS:-/proc/sys}
 SYSCTL_PREV=${JETLINK_SYSCTL_PREV:-/dev/shm/jetlink-sysctl-prev}
 
 usage() {
-  echo "usage: $0 gadget [--ios] | net | check | teardown | port hold|off|device|reset|source|sink | udc apply|restore|start|stop | vm apply|restore | draw off|on" >&2
+  echo "usage: $0 gadget [--ios] | net | rps | check | teardown | port hold|off|device|reset|source|sink | udc apply|restore|start|stop | vm apply|restore | draw off|on | boot SETTING" >&2
   exit 2
 }
 
@@ -160,8 +191,43 @@ dnsmasq_alive() {
 net_ifname() {
   local name
   name=$(cat "$GADGET/functions/$NET_FN/ifname" 2>/dev/null || true)
-  [[ -n "$name" && -d "/sys/class/net/$name" ]] || return 1
+  [[ -n "$name" && -d "$SYS_NET/$name" ]] || return 1
   echo "$name"
+}
+
+# The cable's receive work onto RPS_CPUS; 0 only when the mask reads it back.
+steer() {
+  local dev=$1 mask got
+  mask="$SYS_NET/$dev/queues/rx-0/rps_cpus"
+  [[ -w "$mask" ]] || { echo "jetlink: $dev has no receive steering to set" >&2; return 1; }
+  put "$RPS_CPUS" "$mask" "could not steer $dev's receive work" || return 1
+  got=$(cat "$mask" 2>/dev/null || true)
+  if [[ -z "$got" ]] || (( 16#$got != 16#$RPS_CPUS )); then
+    echo "jetlink: $dev's receive steering reads ${got:-nothing}, not $RPS_CPUS (core 6 offline?)" >&2
+    return 1
+  fi
+}
+
+# Every raw-table rule of ours gone, each found by its comment. Never fatal;
+# fails only without the tool, which untrack reads as nothing to do.
+retrack() {
+  local rule
+  command -v "$IPTABLES" >/dev/null 2>&1 || return 1
+  while read -r rule; do
+    [[ -n "$rule" ]] || continue
+    # word splitting is the point: one rule's arguments
+    # shellcheck disable=SC2086
+    "$IPTABLES" -w -t raw $rule 2>/dev/null || true
+  done < <("$IPTABLES" -w -t raw -S 2>/dev/null | sed -n "/--comment $TRACK_TAG /s/^-A /-D /p")
+  return 0
+}
+
+# The cable's traffic, both ways, out of conntrack: ours replaced by these two.
+untrack() {
+  local dev=$1
+  retrack || return 0
+  "$IPTABLES" -w -t raw -I PREROUTING -i "$dev" -m comment --comment "$TRACK_TAG" -j CT --notrack 2>/dev/null || true
+  "$IPTABLES" -w -t raw -I OUTPUT -o "$dev" -m comment --comment "$TRACK_TAG" -j CT --notrack 2>/dev/null || true
 }
 
 # The comma's end of the cable network. Idempotent, and never fatal. The owner
@@ -185,11 +251,9 @@ net_up() {
     net_status "error: $why"; echo "jetlink: $why" >&2
     return 0
   fi
-  # Steer receive processing onto the big cores: the comma's little cores add
-  # milliseconds to a 460 KB frame.
-  if [[ -w "/sys/class/net/$dev/queues/rx-0/rps_cpus" ]]; then
-    echo f0 > "/sys/class/net/$dev/queues/rx-0/rps_cpus" 2>/dev/null || true
-  fi
+  # parked big cores read back 00 here; the owner steers again onroad
+  steer "$dev" 2>/dev/null || true
+  untrack "$dev"
   # DHCP for the phone, and only that: no router (option 3) and no DNS (option 6),
   # so the phone keeps its default route over Wi-Fi. No DNS service (--port=0).
   # dnsmasq binds the interface by name, so a netdev that came back under a new
@@ -222,6 +286,7 @@ net_down() {
     kill "$pid" 2>/dev/null || true
   fi
   rm -f "$DNSMASQ_PID" 2>/dev/null || true
+  retrack || true
 }
 
 # The network function and its DHCP server, gone: for teardown, and for a USB
@@ -297,7 +362,7 @@ cmd_gadget() {
     echo 0x02   > bDeviceSubClass
     echo 0x01   > bDeviceProtocol
   else
-    # the plain gadget, as it has always been: class per interface
+    # the plain gadget: class per interface
     echo 0x0100 > bcdDevice
     echo 0x00   > bDeviceClass
     echo 0x00   > bDeviceSubClass
@@ -379,6 +444,13 @@ cmd_net() {
   [[ $EUID -eq 0 ]] || fail "jetlink-root.sh net must run as root"
   [[ -d "$GADGET" ]] || { net_status "error: no gadget"; fail "no gadget at $GADGET; run gadget first"; }
   net_up
+}
+
+# Not fail(): that is the gadget's record.
+cmd_rps() {
+  local dev
+  dev=$(net_ifname) || { echo "jetlink: no cable network interface to steer" >&2; exit 1; }
+  steer "$dev" || exit 1
 }
 
 cmd_teardown() {
@@ -499,20 +571,22 @@ cmd_port() {
 # it off again once that host is gone.
 cmd_udc() {
   case "${1:-}" in
-    apply) udc_compliance Y || exit 1 ;;
-    restore) udc_compliance N || exit 1 ;;
+    apply) udc_set Y 1 || exit 1 ;;
+    restore) udc_set N 0 || exit 1 ;;
     start) put peripheral "$UDC_GLUE/mode" "could not start the USB device controller ($UDC_GLUE/mode)" || exit 1 ;;
     stop) put none "$UDC_GLUE/mode" "could not stop the USB device controller ($UDC_GLUE/mode)" || exit 1 ;;
     *) usage ;;
   esac
 }
 
-# Both knobs, each on its own, so one the kernel lacks does not keep the other.
-udc_compliance() {
+# The compliance modes to $1 and FunctionFS's debug log switch to $2, each on
+# its own, so one the kernel lacks does not keep the others.
+udc_set() {
   local failed=0 knob
   for knob in "$PE_PARAMS/usb_compliance_mode" "$UDC_GLUE/usb_compliance_mode"; do
     put "$1" "$knob" "could not set $knob" || failed=1
   done
+  put "$2" "$FFS_LOG_OFF" "could not set $FFS_LOG_OFF" || failed=1
   return $failed
 }
 
@@ -538,41 +612,50 @@ release_voter() {
     { echo "jetlink: could not release $1" >&2; return 1; }
 }
 
+# A key's value, or nothing when it cannot be read.
+sysctl_read() {
+  local value=""
+  { read -r value < "$PROC_SYS/${1//.//}"; } 2>/dev/null || true
+  echo "$value"
+}
+
 # One key per write, so a value the kernel rejects does not take the rest with it.
 sysctl_write() {
   put "$2" "$PROC_SYS/${1//.//}" "could not set $1=$2"
 }
 
-# Applied while the link is on, so a device with the link off runs stock
-# values. Only restore undoes them, never an exit: a process that restored on
-# exit and stopped at ignition would hand every drive the stock values. A
-# reboot resets them.
+# apply records the stock values, once a boot, and writes the link's; restore
+# writes the record back and drops it, and without one does nothing. Either
+# is safe to repeat. A reboot resets them.
 vm_apply() {
-  local pair key value rec="" failed=0
-  if [[ ! -e "$SYSCTL_PREV" ]]; then
-    for pair in "${VM_SYSCTLS[@]}"; do
-      key=${pair%%=*}
-      value=""
-      { read -r value < "$PROC_SYS/${key//.//}"; } 2>/dev/null || true
-      if [[ "$value" == 0 && "$key" == *_bytes ]]; then
-        # Stock AGNOS runs the dirty limits in ratio mode, so the *_bytes keys
-        # read 0, and the kernel silently drops a 0 written back to one.
-        # Writing the ratio key is what zeroes the bytes key, so that is the
-        # one to put back.
-        key=${key%_bytes}_ratio
-        value=""
-        { read -r value < "$PROC_SYS/${key//.//}"; } 2>/dev/null || true
-      fi
-      if [[ -n "$value" ]]; then
-        rec+="$key=$value"$'\n'
-      else
-        echo "jetlink: could not read $key" >&2
-      fi
-    done
-    if [[ -n "$rec" ]]; then
-      { printf '%s' "$rec" > "$SYSCTL_PREV" && chmod 0644 "$SYSCTL_PREV"; } 2>/dev/null ||
-        echo "jetlink: could not record the previous sysctls in $SYSCTL_PREV" >&2
+  local pair key value had="" rec="" failed=0
+  # A key already in the record keeps its first value: a second apply must
+  # not record our own. One missing from it (added by a newer jetlink
+  # since this boot's first apply) is recorded now, while it is stock.
+  [[ -e "$SYSCTL_PREV" ]] && had=$(cat "$SYSCTL_PREV" 2>/dev/null)
+  for pair in "${VM_SYSCTLS[@]}"; do
+    key=${pair%%=*}
+    if [[ $'\n'"$had" == *$'\n'"$key="* || $'\n'"$had" == *$'\n'"${key%_bytes}_ratio="* ]]; then
+      continue
     fi
+    value=$(sysctl_read "$key")
+    if [[ "$value" == 0 && "$key" == *_bytes ]]; then
+      # Stock AGNOS runs the dirty limits in ratio mode, so the *_bytes keys
+      # read 0, and the kernel silently drops a 0 written back to one.
+      # Writing the ratio key is what zeroes the bytes key, so that is the
+      # one to put back.
+      key=${key%_bytes}_ratio
+      value=$(sysctl_read "$key")
+    fi
+    if [[ -n "$value" ]]; then
+      rec+="$key=$value"$'\n'
+    else
+      echo "jetlink: could not read $key" >&2
+    fi
+  done
+  if [[ -n "$rec" ]]; then
+    { printf '%s' "$rec" >> "$SYSCTL_PREV" && chmod 0644 "$SYSCTL_PREV"; } 2>/dev/null ||
+      echo "jetlink: could not record the previous sysctls in $SYSCTL_PREV" >&2
   fi
   for pair in "${VM_SYSCTLS[@]}"; do
     sysctl_write "${pair%%=*}" "${pair#*=}" || failed=1
@@ -605,9 +688,9 @@ cmd_vm() {
   esac
 }
 
-# The port's input current while the link is iOS; see USB_ICL_VOTER. off forces
-# the limit to 0 and on gives the charger its own limit back. Like udc and vm,
-# undone only by on, never at an exit; a reboot clears it.
+# The port's input current while the link is on; see USB_ICL_VOTER. off forces
+# the limit to 0 and on gives the charger its own limit back; either is safe
+# to repeat. A reboot clears it.
 cmd_draw() {
   case "${1:-}" in
     off) force_voter "$USB_ICL_VOTER" 0 "to stop drawing from the port" || exit 1 ;;
@@ -616,16 +699,30 @@ cmd_draw() {
   esac
 }
 
+# The fork's launch script, before manager: with the link on, draw nothing from
+# the port from boot rather than from the owner's first step, ~20 s later. The
+# comma runs off its own power port. SETTING is the Jetlink setting's params
+# file; anything but 0 is on, a missing file is off.
+cmd_boot() {
+  [[ $# -eq 1 ]] || usage
+  local mode
+  mode=$(cat "$1" 2>/dev/null) || return 0
+  [[ -n "$mode" && "$mode" != 0 ]] || return 0
+  cmd_draw off
+}
+
 cmd=${1:-}
 if [[ $# -gt 0 ]]; then shift; fi
 case "$cmd" in
   gadget) cmd_gadget "$@" ;;
   net) cmd_net ;;
+  rps) cmd_rps ;;
   check) cmd_check ;;
   teardown) cmd_teardown ;;
   port) cmd_port "$@" ;;
   udc) cmd_udc "$@" ;;
   vm) cmd_vm "$@" ;;
   draw) cmd_draw "$@" ;;
+  boot) cmd_boot "$@" ;;
   *) usage ;;
 esac

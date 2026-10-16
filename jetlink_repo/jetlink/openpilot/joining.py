@@ -15,18 +15,20 @@ So modeld is handed the small model it already loaded, and the Jetson is
 swapped in underneath once the link, the engine and the warp are all there.
 modeld re-reads `model` every frame, and `modelV2.big` keeps its meaning.
 
-From the join on, every frame goes to the Jetson whether or not it drives:
-the small model drives on, and the large model's history and hidden state are
-current and warm when the swap comes, so its first driving frame costs what
-every frame costs. Those shadow frames are also the proof: the large model
-is offered only once the host has answered the last PROVING_FRAMES of them
-in time (model_state.keeping_up), so a host cold from a reconnect, or one
-that is simply too slow, proves itself with the small model driving and not
-at the wheel. The swap itself changes which model's output is published and
-nothing else. While it drives, a reply that is not back in time is not
-waited for: the previous frame's output is published again (a held frame,
+Until the swap the comma runs its own model and nothing else; the link idles
+on a keepalive ping. The large model is built on the swap frame and starts
+from a reset history, as at every modeld start. The second after the swap is
+its proof: the fork holds engagement off for it, and a large model that holds
+a frame in it (model_state.PROVING_FRAMES) hands back before anyone can
+engage. While it drives, a reply that is not back in time is not waited for:
+the previous frame's output is published again (a held frame,
 model_state.HOLD_FRAME) and the camera frame is not dropped. Too many holds
 hand the drive back to the small model, as a lost link does.
+
+No frames go to the host while the small model drives. Sending them costs
+the comma ~9 ms of every frame for as long as the window stays shut (a whole
+drive with MADS on), which starves the driver monitoring model under
+selfdrived's frequency floor (commIssue).
 
 Two rules the swap keeps:
 
@@ -34,17 +36,20 @@ Two rules the swap keeps:
   only; building the JetlinkModelState unpickles a TinyJit, and doing that
   next to the small model running frames on the same device is not safe.
 - never swap while the plan is steering. The two models disagree by ~195 m of
-  planned path, and the swap costs a frame or two. Require fresh, fully
-  disengaged controls; standstill alone is not enough, longitudinal control
-  may still hold the brake.
+  planned path, and the swap costs a frame or two. The adapter says before
+  every frame whether anything is in control (in_control), from openpilot's
+  own messages; standstill alone is not enough, longitudinal control may still
+  hold the brake.
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 
 from jetlink import protocol as P
 from jetlink.comma import gadget
+from jetlink.openpilot.model_state import JetlinkModelState
 from jetlink.transport.priority import background_thread
 
 # after a join fails or the large model dies mid-drive. Long enough not to
@@ -56,39 +61,25 @@ REJOIN_DELAY = 5.0
 REJOIN_DELAY_MAX = 60.0
 STABLE_SECONDS = 60.0
 # after a join that held: a link that ran for minutes and then went is a USB
-# drop, and the host re-enumerates a rebound gadget in under a second. The
-# rest of the old delay was the driver's time, not the Jetson's
+# drop, and the host re-enumerates a rebound gadget in under a second
 REJOIN_DELAY_QUICK = 1.0
 # failures in a streak retried that quickly before the doubling starts. A
 # demote is mostly one late frame, a tail of the link or the host and not a
-# dead one: on a phone's cable each one cost 5 to 60 s on the small model,
-# five times in nine minutes on an iPad (2026-10-03). A link that fails on
-# its heels this many times is backed off as before
+# dead one, and a full backoff costs 5 to 60 s on the small model. A link
+# that fails on its heels this many times is backed off as usual
 QUICK_RETRIES = 3
-# after a link lost while it only shadowed: no swap, demote or alert to pay
-# for, so no doubling. A phone that dropped its first frames again and again
-# pulsed the icon for 1 to 60 s between tries (2026-10-04)
-SHADOW_REJOIN_DELAY = 2.0
+# how often a link that is ready but has nowhere to land gets checked, and
+# how long the check may take; both off the frame loop
+KEEPALIVE_PERIOD = 10.0
+PING_TIMEOUT = 2.0
 # how often a backoff looks at the gadget. A host that configures it again
-# after it went away is a replug, which the backoff is not for: one waited 16 s
-# for a Jetson that was back in 0.4 (2026-09-29)
+# after it went away is a replug, which the backoff is not for: a replugged
+# Jetson is back in under half a second
 REPLUG_POLL = 0.25
-# link drops in one drive before the status names the cable. One is weather;
-# the 2026-09-07 evening drive had six in twelve minutes, every one the
-# USB-C port losing its host, and nothing the driver could see said so
+# link drops in one drive before the status names the cable. One is chance;
+# repeated drops are almost always the USB-C port losing its host, and nothing
+# else the driver can see says so
 DROPS_TO_BLAME_CABLE = 2
-ENGAGEMENT_POLL_MS = 100
-ENGAGEMENT_MAX_AGE = 0.25
-# a large-model frame is ~30 ms and the worst seen on the current stack ~55.
-# One that took LATE_FRAME, or a second past SLOW_FRAME within LAG_WINDOW of
-# the last, is a fault and is handled as a loss: modeld would otherwise count
-# the dropped camera frames into modeldLagging with the slow model still
-# steering. With a late reply held rather than waited for (model_state), a
-# frame this long is the comma's own stall, a warp or a send, or a frame with
-# nothing to hold yet. A frame past link.INFERENCE_TIMEOUT never returns; it fails
-LATE_FRAME = 0.1
-SLOW_FRAME = 0.075
-LAG_WINDOW = 10.0
 # A host slower than the camera but never that slow (an iPhone that has warmed
 # up: 55 ms a frame drops one camera frame in ten) still has modeld skipping
 # frames, and selfdrived soft-disables on modeldLagging once modeld's filtered
@@ -98,54 +89,58 @@ LAG_WINDOW = 10.0
 # a second within about 6.5 s is not. modeld forgives the frame of a handover
 # too, so the drops that decided it never reach selfdrived
 DROP_LIMIT = 0.0075
-# the first frames after every swap are never counted as slow: the first after
-# a join carries the history reset, and a Mac's is ~100 ms of CoreML warm-up
-SETTLING_FRAMES = 3
 # the small model drives the first frames of every modeld start, even with the
 # large model ready: its first run in a process costs ~1.3 s, which the first
-# fallback frame paid (25 dropped frames, commIssue) when the large model had
-# driven from frame one. Nothing is in control at a modeld start
+# fallback frame would pay (25 dropped frames, commIssue) if the large model
+# drove from frame one. Nothing is in control at a modeld start
 SMALL_WARMUP_FRAMES = 3
-# shadowing this long without keeping up, the panel says the link is too slow
-# to drive rather than 'checking' for the drive. The proof goes on: a host
-# that warms up late still gets offered
-SLOW_LINK_AFTER = 10.0
-# the panel's line while the large model shadows: once it is built, once it
-# keeps up, and once it has not for SLOW_LINK_AFTER
-CHECKING = 'checking the link keeps up'
-PROVEN = 're-engage to switch'
-SLOW = 'too slow to drive'
+# the panel's line while a ready link waits for the window
+READY = 're-engage to switch'
 # why a demote happened, as the log says it
 LOST = 'lost jetlink'
 BEHIND = 'jetlink fell behind'
+# a NaN or an inf in an output: a host that answers, wrongly. A lag and not a
+# drop, the link is kept, and the next swap starts the host from a reset
+BAD_OUTPUT = 'jetlink output not finite'
+# what modeld_v2 builds the frame's inputs from: the small bundle's desire
+# name and optional slots, read off the small model whichever drives
+SMALL_READS = ('desire_key', 'numpy_inputs')
 # why a built model was let go before it drove
 NOT_UP = 'could not bring up the large model'
 # and as the leave says it to the server (protocol.Msg.LEAVE)
 LEAVING = {LOST: P.LEAVE_LOST, BEHIND: P.LEAVE_BEHIND}
-# and as the panel's one line says it while the join tries again
-RECONNECTING = {LOST: 'reconnecting', BEHIND: 'fell behind, reconnecting', NOT_UP: 'load failed, reconnecting'}
+# the demotes that count as lag, which says nothing about the cable
+LAGS = (BEHIND, BAD_OUTPUT)
+# and as the panel's one line says it while the join tries again, with the
+# `why` of its progress code (status.PROGRESS_CODES 'reconnecting')
+RECONNECTING = {LOST: ('reconnecting', 'lost'), BEHIND: ('fell behind, reconnecting', 'behind'),
+                NOT_UP: ('load failed, reconnecting', 'load_failed'),
+                BAD_OUTPUT: ('bad output, reconnecting', 'bad_output')}
+# how long a model name the catalog had not resolved stays the sha's
+NAME_RETRY = 30.0
 
 
 class JoiningModelState:
   """Duck-types openpilot's modeld ModelState, with a second one inside.
 
   `progress` is where the join says what it is waiting on (status.Progress),
-  `engagement` makes the poller the swap window reads (the adapter's), and
-  `log` is cloudlog on a comma.
+  `log` is cloudlog on a comma, and `in_control` the adapter's, asked before
+  every frame; without one, the in_control last written stands. `name` is
+  the catalog's name for a model's sha256, for the runtime record.
   """
 
-  def __init__(self, small, connect, build, prepare=None, reset_small=None, *, progress, engagement, log):
+  def __init__(self, small, connect, build, prepare=None, reset_small=None, *, progress, log, in_control=None,
+               name=None):
     self._small = small
     self._active = small
     self._connect = connect
     self._build = build
     self._reset_small = reset_small
     self._progress = progress
-    self._engagement = engagement
     self._log = log
 
     # whatever the swap would otherwise do on the frame loop, done now on
-    # modeld's main thread before the frame loop exists; at the swap it cost
+    # modeld's main thread before the frame loop exists; at the swap it costs
     # a 1.5 s frame
     if prepare is not None:
       try:
@@ -156,14 +151,17 @@ class JoiningModelState:
         log.exception("jetlink: could not prepare the large model ahead of the swap")
         raise
 
-    # handed over by the joining thread, consumed by the next frame, which
+    # handed over by the joining thread, consumed by the swap frame, which
     # builds the large model state from it. Only ever assigned under the lock
     self._joined: tuple[object, object] | None = None
-    # the large model state once built: fed every frame, driving when it is
-    # _active. Only the frame thread assigns it
+    # a link is ready and waiting for the window. Kept true while a keepalive
+    # ping has _joined out for a moment
+    self._available = False
+    # the large model state, from the swap until it hands back: always _active.
+    # Only the frame thread assigns it
     self._big = None
-    # what the frame thread let go of and why (LOST, BEHIND, or a build that
-    # failed), for the join thread to say goodbye to and close or keep.
+    # what the frame thread let go of and why (LOST, BEHIND, BAD_OUTPUT, or a
+    # build that failed), for the join thread to say goodbye to and close or keep.
     # Assigned under the lock
     self._retired: tuple[object, str] | None = None
     self._lock = threading.Lock()
@@ -182,29 +180,24 @@ class JoiningModelState:
     # changes of the model that drives, and decisions to change it: modeld
     # compares it across run() (handovers)
     self._handovers = 0
-    # set on a frame the large model fell behind on; the next frame demotes.
-    # _slow_at is when the last slow frame was, for the second strike
+    # set on a frame the large model fell behind on; the next frame demotes
     self._lagging = False
-    self._slow_at: float | None = None
     # modeld's share of dropped camera frames, for the frame about to run
     self._frame_drop_ratio = 0.0
-    # frames each model has run: the small one's since start, the large one's
-    # since it swapped in
+    # set by the large model's first frame: the join thread clears the
+    # progress, which is params IO and not the frame thread's
+    self._announce = False
+    # frames the small model has run since start
     self._small_frames = 0
-    self._big_frames = 0
-    # the panel's last line about the large model shadowing (CHECKING, PROVEN
-    # or SLOW). A report is a param write on the frame thread, so only a
-    # change is reported
-    self._proving = CHECKING
     # whether the host had let go of the gadget when the last link was lost,
     # and whether this failure streak has already skipped a backoff for a replug
     self._host_left = False
     self._replugged = False
 
-    # assume engaged and moving until a message says otherwise, so a swap can
-    # never happen on no information
-    self._engaged = True
-    self._engagement_updated = 0.0
+    # in control until the adapter says otherwise, so a swap can never happen
+    # on no information
+    self._in_control = True
+    self._ask_in_control = in_control
     self._stop = threading.Event()
 
     # whether the large model has produced a frame; a first inference that
@@ -212,10 +205,20 @@ class JoiningModelState:
     # modelDataV2SP, not a param: a chestnut's load is over once, this never is
     self._loading = True
 
-    self._threads = [threading.Thread(target=self._join_loop, daemon=True),
-                     threading.Thread(target=self._watch_engagement, daemon=True)]
-    for t in self._threads:
-      t.start()
+    # the runtime record's: when the large model's last answer (not a held
+    # frame) came, and a wake for its writer on a hand-back and the first
+    # answer. The frame thread assigns them and nothing else; the writer
+    # thread reads the rest itself. The path is taken now, so a test's stays
+    # its own
+    self._output_at = 0.0
+    self._record = threading.Event()
+    self._record_path = gadget.MODELD
+    self._name = name
+
+    self._thread = threading.Thread(target=self._join_loop, daemon=True)
+    self._thread.start()
+    self._writer = threading.Thread(target=self._write_loop, daemon=True)
+    self._writer.start()
 
   # -- what modeld reads ------------------------------------------------------
   # A read not defined here follows the model that is driving (__getattr__):
@@ -223,21 +226,16 @@ class JoiningModelState:
   # function, which sunnypilot keeps on the ModelState so a custom small bundle
   # can carry its own. Swaps and demotes happen inside run(), so what is read
   # after it belongs to the model whose output it is. What the loop writes
-  # lands on both. The frame's inputs are built for the small bundle (its
-  # desire name, its optional slots); the large model reads the desire under
-  # any name and the loop always supplies what it needs, so a swap can land on
-  # any frame
+  # lands on both, but for what only this reads. The frame's inputs are built
+  # for the small bundle (SMALL_READS, off the small model whichever drives);
+  # the large model reads the desire under any name and the loop always
+  # supplies what it needs, so a swap can land on any frame
 
   @property
   def big_model_available(self) -> bool:
-    """Built, keeping up with the frames it shadows, and waiting to switch:
-    what big_model_state calls ready, and what the driver is offered."""
-    return not self._stop.is_set() and self._shadowing and self._big.keeping_up
-
-  @property
-  def _shadowing(self) -> bool:
-    # a large model built and fed every frame, with the small model driving
-    return self._big is not None and self._active is self._small
+    """Connected and waiting to switch: what big_model_state calls ready, and
+    what the driver is offered."""
+    return not self._stop.is_set() and self._available and self._active is self._small
 
   @property
   def chestnut(self) -> bool:
@@ -272,14 +270,6 @@ class JoiningModelState:
     return getattr(self._active, 'client', None)
 
   @property
-  def desire_key(self) -> str:
-    return self._small.desire_key
-
-  @property
-  def numpy_inputs(self):
-    return self._small.numpy_inputs
-
-  @property
   def lat_delay(self):
     return self._active.lat_delay
 
@@ -308,25 +298,36 @@ class JoiningModelState:
   @frame_drop_ratio.setter
   def frame_drop_ratio(self, value):
     # modeld's frameDropPerc / 100, written before every run(). Read here, by
-    # the lag rule; it lands on the small model too, as every write does
+    # the lag rule; no small model reads it
     self._frame_drop_ratio = value
-    self._small.frame_drop_ratio = value
+
+  @property
+  def in_control(self) -> bool:
+    return self._in_control
+
+  @in_control.setter
+  def in_control(self, value):
+    # openpilot or MADS in control, by openpilot's own messages, asked before
+    # every run(): the swap waits for False. Not a thread polling selfdrived:
+    # that wakes ~300 times a second and takes 6 to 11 % of a core inside modeld
+    self._in_control = value
 
   def __getattr__(self, name):
-    # Only for names this class does not define. Without it, a comma or
-    # sunnypilot sync that adds one read was an AttributeError on the frame
-    # thread, which modeld re-raises: modeld dead for the drive, on jetlink
-    # devices only. Reads only; a new write lands here and nowhere else, so
-    # each one modeld makes has its own setter above
+    # Only for names this class does not define, so a read that a comma or
+    # sunnypilot sync adds is not an AttributeError on the frame thread (modeld
+    # re-raises it and is dead for the drive). Reads only; a write lands on
+    # this object alone, so each one modeld makes has its own setter above
     if name.startswith('_'):
       # also what keeps __init__ from recursing before _active exists
       raise AttributeError(name)
-    return getattr(self._active, name)
+    # a small model without one of SMALL_READS has none, whichever drives
+    return getattr(self._small if name in SMALL_READS else self._active, name)
 
   # -- the frame path ---------------------------------------------------------
 
   def run(self, bufs, transforms, inputs, after_enqueue=None):
-    self._adopt()
+    if self._ask_in_control is not None:
+      self.in_control = self._ask_in_control()
     if self._lagging:
       # the last frame was the large model's last, published as it came
       self._lagging = False
@@ -336,132 +337,71 @@ class JoiningModelState:
       self._log.warning("jetlink: modeld dropped %.2f %% of camera frames behind the large model, "
                         "the small model drives from this one", self._frame_drop_ratio * 100)
       self._demote(BEHIND)
-    self._note_proving()
     self._maybe_swap()
     if self._active is self._small:
       self._small_frames += 1
-      return self._run_small(bufs, transforms, inputs, after_enqueue)
+      return self._small.run(bufs, transforms, inputs, after_enqueue)
     return self._run_big(bufs, transforms, inputs, after_enqueue)
-
-  def _run_small(self, bufs, transforms, inputs, after_enqueue):
-    """The small model's frame, and the large model's too when there is one:
-    warped now, sent once the small model's own work is on the GPU (its
-    after_enqueue), so the send overlaps it. A link that fails here is lost
-    before it drove: let go and reopened, with the small model's frame
-    unharmed."""
-    big = self._big
-    if big is None:
-      return self._small.run(bufs, transforms, inputs, after_enqueue)
-    try:
-      big.prepare(bufs, transforms, inputs)
-    except Exception:
-      self._log.exception("jetlink: the large model's link failed with the small model driving, reopening")
-      self._retire(LOST)
-      return self._small.run(bufs, transforms, inputs, after_enqueue)
-    failed: list[BaseException] = []
-
-    def enqueued():
-      try:
-        big.send()
-      except Exception as e:   # never through the small model's run: modeld would make it fatal
-        failed.append(e)
-      if after_enqueue is not None:
-        after_enqueue()
-
-    result = self._small.run(bufs, transforms, inputs, enqueued)
-    if not failed and not big.sent:
-      # a small model that did not call back; send now
-      try:
-        big.send()
-      except Exception as e:
-        failed.append(e)
-    if not failed:
-      # the proof: would this frame have been held? (model_state.check_shadow)
-      try:
-        big.check_shadow()
-      except Exception as e:
-        failed.append(e)
-    if failed:
-      self._log.error("jetlink: the large model's link failed with the small model driving, reopening",
-                      exc_info=failed[0])
-      self._retire(LOST)
-    return result
 
   def _run_big(self, bufs, transforms, inputs, after_enqueue):
     big = self._big
     started = time.monotonic()
     try:
       result = big.run(bufs, transforms, inputs, after_enqueue)
-    except Exception:
+    except Exception as e:
       failed = time.monotonic()
       self._log.exception("jetlink: large model failed mid-drive, back to the small model")
-      self._demote(LOST)
+      self._demote(BAD_OUTPUT if isinstance(e, P.NotFinite) else LOST)
       demoted = time.monotonic()
       # re-run the frame rather than propagate: modeld's fallback is permanent,
       # this one is retryable. after_enqueue is dropped, the large model may
       # already have called it
       result = self._small.run(bufs, transforms, inputs, None)
-      # all of it is one modeld frame, 42 to 107 ms on the 2026-09-29 drives
-      # with the small model warm. The dropped camera frames are forgiven
+      # all of it is one modeld frame, 42 to 107 ms measured with the small
+      # model warm. The dropped camera frames are forgiven
       # (modeld sees the model change), but the log should say which part it was
       done = time.monotonic()
       self._log.warning("jetlink: fallback frame %.0f ms: link %.0f, demote %.0f, small model %.0f",
                         (done - started) * 1e3, (failed - started) * 1e3,
                         (demoted - failed) * 1e3, (done - demoted) * 1e3)
       return result
-    took = time.monotonic() - started
-    self._big_frames += 1
+    if not getattr(big, 'held', False):
+      self._output_at = time.monotonic()
     if self._loading:
       # a connected engine can still fail its first inference; only announce
       # readiness after a frame the caller can publish
       self._loading = False
-      self._progress.clear()
+      self._announce = True
+      self._rejoin.set()
+      self._record.set()
       self._log.warning("jetlink: large model joined mid-drive, modelV2.big is now true")
-    if self._big_frames > SETTLING_FRAMES:
-      why = getattr(big, 'behind', None) or (f'took {took * 1e3:.0f} ms' if self._fell_behind(took) else None)
-      if why:
-        # this frame's output is published as it came; its stall is forgiven now
-        self._lagging = True
-        self._handovers += 1
-        self._log.warning("jetlink: large model %s, the small model drives from the next", why)
+    if big.behind:
+      # this frame's output is published as it came; its stall is forgiven now
+      self._lagging = True
+      self._handed_over()
+      self._log.warning("jetlink: large model %s, the small model drives from the next", big.behind)
     return result
 
-  def _fell_behind(self, took: float) -> bool:
-    if took > LATE_FRAME:
-      return True
-    if took <= SLOW_FRAME:
-      return False
-    now = time.monotonic()
-    second = self._slow_at is not None and now - self._slow_at <= LAG_WINDOW
-    self._slow_at = now
-    return second
-
-  @property
-  def _window_open(self) -> bool:
-    # standstill does not make an active longitudinal controller safe to swap
-    fresh = 0 <= time.monotonic() - self._engagement_updated < ENGAGEMENT_MAX_AGE
-    return fresh and not self._engaged
-
-  def _adopt(self) -> None:
-    """Build the large model state from a join that has landed, on this
-    thread, which is where everything tinygrad touches must happen. From the
-    next frame on it is fed every frame (_run_small) and swapped in when the
-    window opens. A build that fails is backed off like a demote, or one that
-    fails the same way every time is a connect and a build per second for
-    the drive."""
-    if self._joined is None:
+  def _maybe_swap(self) -> None:
+    """Build the large model state from a join that has landed and swap it in,
+    on this thread, which is where everything tinygrad touches must happen.
+    Its first frame resets the host's history. A build that fails is backed
+    off like a demote, or one that fails the same way every time is a connect
+    and a build per second for the drive."""
+    if self._joined is None or self._in_control or self._small_frames < SMALL_WARMUP_FRAMES:
       return
     with self._lock:
       joined, self._joined = self._joined, None
+      if joined is not None:
+        self._available = False
     if joined is None:
       return
     client, spec = joined
     try:
       t0 = time.monotonic()
       big = self._build(client, spec)
-      big.lat_delay = self._small.lat_delay
-      self._log.warning("jetlink: built the large model state in %.0f ms; it runs every frame from here",
-                        (time.monotonic() - t0) * 1000)
+      big.lat_delay = getattr(self._small, 'lat_delay', big.lat_delay)
+      self._log.warning("jetlink: built the large model state in %.0f ms", (time.monotonic() - t0) * 1000)
     except Exception:
       self._log.exception("jetlink: could not bring up the large model, staying small")
       with self._lock:
@@ -469,63 +409,33 @@ class JoiningModelState:
       self._back_off()
       return
     self._big = big
-    self._proving = CHECKING   # the join thread said so at link ready
-    # the link is held from here, shadowing or driving: a shadow that ran for
-    # minutes and then went starts a new streak, as a drive that did
     self._joined_at = time.monotonic()
-
-  def _note_proving(self) -> None:
-    """The panel's line while the large model shadows, on a change only:
-    PROVEN once it keeps up, SLOW once it has not for SLOW_LINK_AFTER, and
-    CHECKING again after a hand-back. The first driven frame clears it."""
-    if not self._shadowing:
-      return
-    if self._big.keeping_up:
-      line = PROVEN
-    elif time.monotonic() - self._joined_at > SLOW_LINK_AFTER:
-      line = SLOW
-    else:
-      line = CHECKING
-    if line != self._proving:
-      self._proving = line
-      self._log.warning("jetlink: large model %s", line)
-      self._report('connect', line)
-
-  def _maybe_swap(self) -> None:
-    if not self._shadowing:
-      return
-    if not self._big.keeping_up or not self._window_open or self._small_frames < SMALL_WARMUP_FRAMES:
-      return
-    # nothing to build and nothing to reset (the module docstring says why)
-    self._big_frames = 0
-    self._slow_at = None
+    # no wake: the record says the swap with the first answer, which wakes it
     self._handovers += 1
-    self._active = self._big
+    self._active = big
 
   def _demote(self, why: str) -> None:
     """Back to the small model, from a reset history. On the frame thread, so
     nothing here waits: the join thread reads the port, reports and closes
-    the link, moments later."""
-    self._retire(why)   # while _shadowing still tells a drive from a shadow
-    self._active = self._small
-    self._handovers += 1
-    self._loading = True
-    if self._reset_small is not None:
-      self._reset_small()
-
-  def _retire(self, why: str) -> None:
-    """Let the large model go, driving or not, for the join thread to say
-    goodbye to and close or keep (_close_retired). Counted as a lost link or
-    a hand-back for lag, and backed off."""
-    shadow = self._shadowing
+    the link, moments later. Counted as a lost link or a hand-back for lag,
+    and backed off."""
     big, self._big = self._big, None
-    if why == BEHIND:
+    if why in LAGS:
       self._lags += 1
     else:
       self._drops += 1
     with self._lock:
       self._retired = (big, why)
-    self._back_off(shadow)
+    self._back_off()
+    self._active = self._small
+    self._handed_over()
+    self._loading = True
+    if self._reset_small is not None:
+      self._reset_small()
+
+  def _handed_over(self) -> None:
+    self._handovers += 1
+    self._record.set()
 
   def _close_retired(self, retired, why: str) -> None:
     """Say goodbye over the retired large model's link, then close it if it
@@ -557,14 +467,13 @@ class JoiningModelState:
     except Exception:
       self._log.exception("jetlink: could not say why the link is left")
 
-  def _back_off(self, shadow: bool = False) -> None:
+  def _back_off(self) -> None:
     """Push the next attempt out, further each time one fails on its heels.
 
     Each failed cycle is a swap frame, a demote frame and the alerts that go
     with them. The first QUICK_RETRIES failures of a streak are retried in
     REJOIN_DELAY_QUICK; the ones after double from REJOIN_DELAY. A join that
-    held for STABLE_SECONDS starts a new streak. A link lost while it only
-    shadowed waits SHADOW_REJOIN_DELAY.
+    held for STABLE_SECONDS starts a new streak.
     """
     held = time.monotonic() - self._joined_at if self._joined_at else 0.0
     stable = bool(self._joined_at) and held > STABLE_SECONDS
@@ -572,9 +481,7 @@ class JoiningModelState:
     if stable:
       self._replugged = False   # a new streak may skip a backoff for a replug again
     self._joined_at = 0.0
-    if shadow:
-      delay = SHADOW_REJOIN_DELAY
-    elif self._failures <= QUICK_RETRIES:
+    if self._failures <= QUICK_RETRIES:
       delay = REJOIN_DELAY_QUICK
     else:
       delay = min(REJOIN_DELAY * 2 ** (self._failures - QUICK_RETRIES - 1), REJOIN_DELAY_MAX)
@@ -585,17 +492,18 @@ class JoiningModelState:
 
   # -- background -------------------------------------------------------------
 
-  def _report(self, stage: str, msg: str) -> None:
+  def _report(self, stage: str, msg: str, code: str | None, args: dict | None = None) -> None:
     """Tell the UI what the join is waiting on.
 
     Offroad the record carries a provisioning run's progress; without this, a
-    Jetson that is not plugged in looked like one six seconds from loading. No
-    fraction to give, and the panel does not invent one.
+    Jetson that is not plugged in looks like one about to load. No fraction to
+    give, and the panel does not invent one.
     """
     # the count is the diagnosis. A link that runs for minutes and then goes,
     # again and again, is the cable, and the cable is the one thing the
     # driver can do something about
-    self._progress.report(stage, 0.0, msg, drops=self._drops if self._drops >= DROPS_TO_BLAME_CABLE else 0)
+    self._progress.report(stage, 0.0, msg, drops=self._drops if self._drops >= DROPS_TO_BLAME_CABLE else 0,
+                          code=code, args=args)
 
   def _note_link_loss(self, why: str) -> None:
     """Off the frame thread: what the comma's USB-C port sees now, next to the
@@ -610,7 +518,8 @@ class JoiningModelState:
     # has still been replugged
     self._host_left = not gadget.host_attached()
     self._log.warning("jetlink: %s, %s; drop %d, lag %d this drive", why, port, self._drops, self._lags)
-    self._report('connect', RECONNECTING[why])
+    msg, code = RECONNECTING[why]
+    self._report('connect', msg, 'reconnecting', {'why': code})
 
   def _join_loop(self) -> None:
     """Open the link and get the engine ready. No tinygrad in here."""
@@ -625,6 +534,16 @@ class JoiningModelState:
       # a dead link, and close() sets this. An idle wake per second is not
       # free on modeld's core
       self._rejoin.wait()
+      if self._announce:
+        # the large model's first frame is out. Before the retired one below,
+        # whose reconnecting line is newer; woken for this alone, wait again.
+        # A demote or close sets its own flag before the event, so clearing
+        # the event and then looking misses neither
+        self._announce = False
+        self._progress.clear()
+        self._rejoin.clear()
+        if self._retired is None and not self._stop.is_set():
+          continue
       with self._lock:
         retired, self._retired = self._retired, None
       if retired is not None:
@@ -641,16 +560,20 @@ class JoiningModelState:
       self._rejoin.clear()
       if self._wait_out_back_off():
         return
-      self._report('connect', 'waiting for jetlink')
+      self._report('connect', 'waiting for jetlink', 'waiting_for_host')
       try:
         # the connect can take minutes when the picked model still has to be
         # built, so it is handed the flag close() sets rather than polled
         client, spec = self._connect(self._stop.is_set)
       except Exception as e:
-        # expected while the Jetson boots. Not exception(): a stack trace every
-        # 5 s for the first minute of every drive is noise
-        self._log.warning("jetlink: not joined yet (%s), retrying in %.0fs", e, REJOIN_DELAY)
-        if self._stop.wait(REJOIN_DELAY):
+        # expected while the Jetson boots, so no stack trace. A failure that
+        # knows when it is worth asking again says so (link.ModelMissing), and
+        # what the panel should show meanwhile
+        delay = getattr(e, 'retry_after', REJOIN_DELAY)
+        if waiting := getattr(e, 'waiting', None):
+          self._report('connect', waiting, getattr(e, 'code', None))
+        self._log.warning("jetlink: not joined yet (%s), retrying in %.0fs", e, delay)
+        if self._stop.wait(delay):
           return
         self._rejoin.set()
         continue
@@ -658,9 +581,11 @@ class JoiningModelState:
         if self._stop.is_set():
           client.close()
           return
+        self._available = True
         self._joined = (client, spec)
-      self._log.warning("jetlink: link ready, the large model shadows from the next frame")
-      self._report('connect', CHECKING)
+      self._log.warning("jetlink: link ready, waiting for a window to swap")
+      self._report('connect', READY, 'ready_waiting_window')
+      self._keep_alive()
 
   def _wait_out_back_off(self) -> bool:
     """Until the next attempt is due, or a host configures the gadget again
@@ -679,21 +604,117 @@ class JoiningModelState:
       host_left = host_left or not attached
     return self._stop.is_set()
 
-  def _watch_engagement(self) -> None:
-    background_thread()   # off modeld's realtime core; see _join_loop
-    # made on this thread: the poller's sockets (a SubMaster) belong to the
-    # thread that made them
-    engaged = self._engagement()
+  def _keep_alive(self) -> None:
+    """Ping a link that is waiting for a swap window.
+
+    On a drive with no stop and no disengage that is the whole drive, and a
+    host that reboots in there would otherwise be found at the swap: a build
+    on a dead link, a demote and the backoff, all on modeld's thread.
+
+    The client is taken out of _joined for the ping and put back after, so the
+    frame loop sees a whole one or none, and never waits on the lock.
+    """
     while not self._stop.is_set():
-      # rechecked on every poll, including ones with no news: that is when
-      # alive turns false. The frame thread expires the answer too
-      self._engaged = engaged(ENGAGEMENT_POLL_MS)
-      self._engagement_updated = time.monotonic()
+      if self._rejoin.wait(KEEPALIVE_PERIOD):
+        return
+      with self._lock:
+        joined, self._joined = self._joined, None
+      if joined is None:
+        return  # swapped in on a frame, or closed under us
+      try:
+        joined[0].ping(timeout=PING_TIMEOUT)
+      except Exception as e:
+        self._available = False
+        self._log.warning("jetlink: the link died before it could be used (%s), reopening", e)
+        self._note_link_loss(LOST)
+        try:
+          joined[0].close()
+        except Exception:
+          self._log.exception('jetlink: closing the dead link')
+        self._back_off()
+        return
+      with self._lock:
+        stopped = self._stop.is_set()
+        if not stopped:
+          self._joined = joined
+      if stopped:
+        # close() ran during the ping and found nothing to close
+        self._say_leaving(joined[0], P.LEAVE_STOPPED)
+        joined[0].close()
+        return
+
+  def _write_loop(self) -> None:
+    """The runtime record (gadget.MODELD), once a second, on a hand-back and on
+    the first answer after a swap: tmpfs IO, the link record and a catalog
+    read for the name, so never on the frame thread, and off modeld's realtime
+    core first (_join_loop). The last one, after close(), is stopping.
+
+    status.runtime reads pid, at, stopping, state, active and last_output_at;
+    handovers, held, sha256, name, checkpoint, transport, drops and lags have
+    no reader in jetlink yet, they are for forks (StarPilot's sha and
+    checkpoint, a drive's counts)."""
+    background_thread()
+    pid, names, kinds = os.getpid(), {}, {}
+    failing = False
+    while True:
+      # before the record is built: a wake from here on is for the next one
+      self._record.clear()
+      stopping = self._stop.is_set()
+      try:
+        gadget.write_record(self._record_path, self._runtime(pid, names, kinds, stopping))
+        failing = False
+      except Exception:
+        if not failing:   # once, not every second
+          self._log.exception("jetlink: could not write the runtime record")
+        failing = True
+      if stopping:
+        return
+      self._record.wait(gadget.RECORD_PERIOD)
+
+  def _runtime(self, pid: int, names: dict, kinds: dict, stopping: bool) -> dict:
+    big = self._big
+    state = self.big_model_state
+    swapped_at = self._joined_at   # after the state: a swap sets it before _active
+    if state == 'running' and self._output_at < swapped_at:
+      # swapped in and not answered yet: the swap is still landing, not a
+      # model that stopped answering
+      state = 'joining'
+    spec = getattr(big, 'spec', None)
+    sha = getattr(spec, 'sha256', None)
+    if big is not None and swapped_at not in kinds:
+      # once per swap: the gadget the link runs on does not change under it
+      kinds.clear()
+      kinds[swapped_at] = gadget.link_kind()
+    return {'pid': pid, 'at': time.monotonic(), 'stopping': stopping, 'state': state,
+            'handovers': self._handovers, 'active': big is not None and self._active is big,
+            'last_output_at': self._output_at, 'held': bool(getattr(big, 'held', False)),
+            'sha256': sha, 'name': self._name_of(sha, names) if sha else None,
+            'checkpoint': getattr(spec, 'checkpoint', None),
+            'transport': kinds.get(swapped_at) if big is not None else None, 'drops': self._drops,
+            'lags': self._lags}
+
+  def _name_of(self, sha: str, names: dict) -> str:
+    """The catalog's name, kept once it is one. The sha's stand-in (a row not
+    resolved yet, or a lookup that failed) is asked again after NAME_RETRY."""
+    name, retry_at = names.get(sha, (None, 0.0))
+    if time.monotonic() >= retry_at:
+      try:
+        name = self._name(sha) if self._name is not None else None
+      except Exception:
+        name = None
+      real = bool(name) and name != sha[:16]
+      name = name if real else sha[:16]
+      names[sha] = (name, float('inf') if real else time.monotonic() + NAME_RETRY)
+    return name
 
   def close(self) -> None:
     first = not self._stop.is_set()   # the leave is said once; cleanups close twice
     self._stop.set()
+    self._available = False
     self._rejoin.set()
+    # after the stop: the writer's next record is its last, and says stopping
+    self._record.set()
+    self._writer.join(1.0)
     self._progress.clear()
     with self._lock:
       joined, self._joined = self._joined, None
@@ -718,19 +739,16 @@ def join(parts, cam_w: int, cam_h: int, small) -> JoiningModelState:
   what the link will hand back; another geometry is rejected.
   """
   from jetlink.openpilot import link as links
-  # here rather than in build(): the import then costs modeld's main thread
-  # before the frame loop, not the frame the swap lands on
-  from jetlink.openpilot.model_state import JetlinkModelState
   op = parts.op
   face = op.model_face()
   ready: dict = {}
   link = links.Link(parts.log)
 
   def prepare():
-    from jetlink.openpilot.warp import prepare_reset, warm
+    from jetlink.openpilot.warp import Warp, prepare_reset
     # the gadget first, so the Jetson enumerates while the warp loads. Left to
-    # the join thread the bind landed ~3 s later, behind the small model's
-    # first frame, and one ignition had a 655 ms frame during the bind
+    # the join thread the bind lands ~3 s later, behind the small model's
+    # first frame, and can stall a frame by hundreds of ms
     links.present_early(link, background_thread)
     cached = parts.spec.load()
     if cached is not None:
@@ -739,9 +757,9 @@ def join(parts, cam_w: int, cam_h: int, small) -> JoiningModelState:
     else:
       geometry = parts.warps.geometry()[2:]
     try:
-      ready['reset_small'] = prepare_reset(small)
-      warp = parts.warps.load(cam_w, cam_h, *geometry)
-      warm(warp, face.frame_size(cam_w, cam_h))
+      # the fork's own reset of its small model, else jetlink's from its shape
+      ready['reset_small'] = getattr(op, 'small_reset', lambda small: None)(small) or prepare_reset(small)
+      warp = Warp(parts.warps.load(cam_w, cam_h, *geometry), face.frame_size(cam_w, cam_h))
     except Exception:
       link.close()
       raise
@@ -752,10 +770,11 @@ def join(parts, cam_w: int, cam_h: int, small) -> JoiningModelState:
     warp = ready.get('warp') if ready.get('geometry') == (img_w * 2, img_h * 2) else None
     if warp is None:
       raise RuntimeError('no prepared warp for the server model geometry')
-    return JetlinkModelState(cam_w, cam_h, client, spec, warp, face=face, log=parts.log, event=op.event)
+    return JetlinkModelState(client, spec, warp, face=face, log=parts.log, event=op.event)
 
   def connect(should_stop=None):
     return links.open_link(parts, link, should_stop)
 
   return JoiningModelState(small, connect, build, prepare, reset_small=lambda: ready['reset_small'](),
-                           progress=parts.progress, engagement=op.engagement, log=parts.log)
+                           progress=parts.progress, log=parts.log, in_control=op.in_control,
+                           name=parts.models.name_for)

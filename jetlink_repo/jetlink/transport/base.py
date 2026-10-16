@@ -79,6 +79,33 @@ class Transport(ABC):
   def send(self, msg_type: int, seq: int, parts=(), flags: int = 0, timeout: float | None = None) -> None:
     """Send one message. `parts` is an iterable of buffers, sent as one message."""
 
+  def try_send(self, msg_type: int, seq: int, parts=(), timeout: float | None = None) -> bool:
+    """send(), unless the link would first make the caller wait for the peer
+    to take earlier messages: then False, and nothing was sent. Only a
+    transport that queues its writes can tell (FfsTransport); the rest send,
+    within `timeout` as send() does, and say True."""
+    self.send(msg_type, seq, parts, timeout=timeout)
+    return True
+
+  @property
+  def datagrams(self) -> bool:
+    """Do frames the caller can do without go as datagrams? Only a phone's
+    cable, once its server offered them (TcpTransport.use_datagrams)."""
+    return False
+
+  def use_datagrams(self, port: int, token: int) -> bool:
+    """Send those frames to the server's UDP `port` behind its `token`, where
+    the link can (TcpTransport); False and nothing changes elsewhere."""
+    return False
+
+  def stop_datagrams(self) -> None:
+    """Frames on the link itself again."""
+
+  def net_drops(self) -> int | None:
+    """Packets the kernel dropped on their way in since the link came up, on a
+    link that goes through the network stack (TcpTransport); None elsewhere."""
+    return None
+
   @abstractmethod
   def recv(self, timeout: float | None = None) -> Message:
     """Block for one message. Raises LinkTimeout if `timeout` elapses."""
@@ -161,34 +188,23 @@ class RxBuffer:
 class StreamTransport(Transport):
   """Framing over any ordered byte stream.
 
-  TCP, USB bulk and FunctionFS are all streams, so they all need exactly this.
+  TCP and FunctionFS are both streams, so they both need exactly this.
   Subclasses supply only the two primitives that differ.
   """
 
-  # Extra capacity past the current message, for transports whose reads need a
-  # minimum buffer size (a bulk OUT endpoint wants a whole packet).
-  read_slack = 0
-  # Bulk endpoints reject a read whose buffer is not a whole number of packets.
-  # 0 means "no constraint" (TCP).
-  packet_size = 0
-  read_chunk = 1 << 20
-  # Pad sent messages to a multiple of this and expect the peer's padded
-  # likewise; 0 uses the one-byte PADDED rule. See protocol.GADGET_TX_ALIGN.
+  # Pad sent messages to a multiple of this; 0 uses the one-byte PADDED rule.
+  # The peer's messages always use the PADDED rule: only the gadget pads to a
+  # burst, and only a USB host (the Swift server) reads what it sends. See
+  # protocol.GADGET_TX_ALIGN.
   tx_align = 0
-  rx_align = 0
-  # Largest single write. FunctionFS allocates a contiguous buffer per writev,
-  # so a 4 MB upload chunk hits ENOMEM on a fragmented device where a few
-  # hundred KB of inference does not. 0 means no cap (TCP).
-  write_chunk = 0
-
   def __init__(self, rx_size: int = 1 << 20):
     self.rx = RxBuffer(rx_size)
     self._desynced = False
     self._send_deadline: float | None = None
 
-  def _write_timeout(self, default: float | None = None) -> float | None:
+  def _write_timeout(self) -> float | None:
     if self._send_deadline is None:
-      return default
+      return None
     remaining = self._send_deadline - time.monotonic()
     if remaining <= 0:
       raise LinkError('send timed out; link abandoned')
@@ -196,9 +212,10 @@ class StreamTransport(Transport):
 
   # -- primitives a subclass must provide ----------------------------------
 
-  @abstractmethod
   def _write(self, bufs: list[memoryview]) -> int:
-    """Write from one or more buffers. Returns bytes written (may be partial)."""
+    """Write from one or more buffers. Returns bytes written (may be partial).
+    A transport that overrides send (FfsTransport) need not provide it."""
+    raise NotImplementedError
 
   @abstractmethod
   def _read_into(self, dest: memoryview, timeout: float | None) -> int:
@@ -211,6 +228,21 @@ class StreamTransport(Transport):
   # -- framing -------------------------------------------------------------
 
   def send(self, msg_type: int, seq: int, parts=(), flags: int = 0, timeout: float | None = None) -> None:
+    bufs = self._frame(msg_type, seq, parts, flags)
+    self._send_deadline = None if timeout is None else time.monotonic() + timeout
+    try:
+      while bufs:
+        self._write_timeout()
+        n = self._write(bufs)
+        if n <= 0:
+          raise LinkError("peer went away during send")
+        bufs = advance(bufs, n)
+    finally:
+      self._send_deadline = None
+
+  def _frame(self, msg_type: int, seq: int, parts, flags: int) -> list[memoryview]:
+    """One message as the buffers that go on the wire, in order: the header,
+    `parts`, then the padding. Nothing is copied."""
     # cast('B'): slicing a float32 view in advance() would step by elements
     bufs = [memoryview(p).cast('B') for p in parts]
     length = sum(b.nbytes for b in bufs)
@@ -223,23 +255,8 @@ class StreamTransport(Transport):
       # A bulk transfer only ends on a short packet; see protocol.PACKET_MULTIPLE.
       flags |= P.Flag.PADDED
       bufs.append(memoryview(_PAD)[:1])
-    header = P.pack_header(msg_type, seq, length, flags)
-    bufs.insert(0, memoryview(header))
-    self._send_deadline = None if timeout is None else time.monotonic() + timeout
-    try:
-      while bufs:
-        self._write_timeout()
-        n = self._write(take(bufs, self.write_chunk) if self.write_chunk else bufs)
-        if n <= 0:
-          raise LinkError("peer went away during send")
-        bufs = advance(bufs, n)
-    finally:
-      self._send_deadline = None
-
-  def _clamp_read(self, dest: memoryview) -> int:
-    """How many bytes this transport may ask for in one read."""
-    n = min(dest.nbytes, self.read_chunk)
-    return (n // self.packet_size) * self.packet_size if self.packet_size else n
+    bufs.insert(0, memoryview(P.pack_header(msg_type, seq, length, flags)))
+    return bufs
 
   def _fill(self, need: int, timeout: float | None) -> None:
     """Read until `need` bytes are buffered, or the deadline passes.
@@ -251,32 +268,16 @@ class StreamTransport(Transport):
     whatever has already arrived and nothing else: that is how a caller
     polls for a reply without blocking (JetlinkClient.drain).
     """
-    self.rx.reserve(need + self.read_slack)
+    self.rx.reserve(need)
     end = None if timeout is None else time.monotonic() + timeout
     while self.rx.available < need:
-      dest = self.rx.writable()[:self._read_limit(need - self.rx.available)]
-      if self._clamp_read(dest) == 0:
-        # No room for a whole packet: every read returns 0 and this loop spins
-        # while the peer blocks. read_slack is too small; say so, do not hang.
-        raise LinkError(f"no room to read the rest of a {need} byte message "
-                         f"({self.rx.available} in hand); read_slack too small")
+      dest = self.rx.writable()[:need - self.rx.available]
       remaining = None if end is None else max(0.0, end - time.monotonic())
       n = self._read_into(dest, remaining)
       if n:
         self.rx.committed(n)
       elif remaining == 0.0:
         raise LinkTimeout(f"only {self.rx.available} of {need} bytes arrived in time")
-
-  def _read_limit(self, missing: int) -> int:
-    """`missing` bytes of the current message, rounded up to a whole packet.
-
-    Keeps the USB host in sync: the gadget's messages are burst-aligned, so a
-    read for exactly what is left never stays outstanding past the end of a
-    message. Reading further desynced about once in 400 frames.
-    """
-    if self.packet_size:
-      return -(-missing // self.packet_size) * self.packet_size
-    return missing
 
   def recv(self, timeout: float | None = None) -> Message:
     if self._desynced:
@@ -296,10 +297,7 @@ class StreamTransport(Transport):
       raise LinkError(f"protocol error, link unusable: {e}") from e
     # the remainder of the budget, so one recv cannot block for twice what it
     # was given
-    if self.rx_align:
-      pad = -(P.HEADER_SIZE + length) % self.rx_align
-    else:
-      pad = 1 if flags & P.Flag.PADDED else 0
+    pad = 1 if flags & P.Flag.PADDED else 0
     self._fill(P.HEADER_SIZE + length + pad,
                None if end is None else max(0.0, end - time.monotonic()))
     self.rx.take(P.HEADER_SIZE)

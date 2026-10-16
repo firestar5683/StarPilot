@@ -34,6 +34,11 @@ _TRAILING_DATE = re.compile(r' \([A-Za-z]+ \d{1,2}, \d{4}\)$')
 # the index and the slot are JSON params, and the UI names the active model
 # every frame; the status line can lag a new pick by this long
 INDEX_TTL = 2.0
+# A big model's download over a car's connection: the waits between the
+# attempts of one provisioning run, one more attempt than waits. Each carries
+# on from the .part the last left, so a stall costs the wait, not the bytes
+# (lfs.lfs_download)
+DOWNLOAD_RETRY_DELAYS = (5.0, 15.0, 30.0, 60.0, 120.0)
 
 
 class Models:
@@ -77,11 +82,14 @@ class Models:
       return known[ref]['oid'], int(known[ref]['size'])
     oid, size = self.fetch_pointer(ref)
     known[ref] = {'oid': oid, 'size': size}
+    self._keep_pointers(known)
+    self.op.log.warning("jetlink: %s is %s, %d MB", ref[:10], oid[:16], size >> 20)
+    return oid, size
+
+  def _keep_pointers(self, known: dict[str, dict]) -> None:
     # blocking: the next lookup reads this back, and a put still in flight would be lost under it
     self.op.put(self.op.keys.pointers, known, block=True)
     self._index_cache = None
-    self.op.log.warning("jetlink: %s is %s, %d MB", ref[:10], oid[:16], size >> 20)
-    return oid, size
 
   @staticmethod
   def _row(name: str, ref: str, known: dict[str, dict]) -> dict:
@@ -120,7 +128,7 @@ class Models:
     """What runs with no pick: jetlink's default big model, else the newest the
     catalog lists. Not the chestnut's default, which is the model in the tree.
     A fork with no catalog at all (Keys.catalog None) gets jetlink's default by
-    its ref; one whose catalog has not been fetched yet waits for it, as ever."""
+    its ref; one whose catalog has not been fetched yet waits for it."""
     if self.op.keys.catalog is None:
       return self._row(DEFAULT_BIG_MODEL_NAME, DEFAULT_BIG_MODEL_REF, self._index()[1])
     models = self.model_index()
@@ -154,17 +162,18 @@ class Models:
     """One file per model, so switching back does not re-download."""
     return f"{model['oid'][:16]}.onnx"
 
+  def model_path(self, model: dict) -> Path:
+    """Where a model's ONNX lives, whether or not it is there yet."""
+    return self.model_dir() / self.model_file_name(model)
+
   def shipped_model_path(self) -> Path | None:
     """The chosen large model, if it has been fetched. Keyed on the oid, not
     the in-tree pointer, which moves with upstream syncs; the size is the cheap
     check that the file is the one we mean."""
     model = self.selected_model()
-    if model is None or not model['oid']:
+    if model is None or not self.has_file(model):
       return None
-    path = self.model_dir() / self.model_file_name(model)
-    if path.is_file() and path.stat().st_size == model['size']:
-      return path
-    return None
+    return self.model_path(model)
 
   def lfs_endpoints(self) -> list[str]:
     """Where a model's bytes are asked for, nearest first: the LFS server this
@@ -182,19 +191,43 @@ class Models:
       pass
     return out + [e for e in LFS_ENDPOINTS if e not in out]
 
-  def fetch_shipped_model(self, progress=None, should_stop=None) -> Path | None:
+  def fetch_shipped_model(self, progress=None, should_stop=None, retrying=None) -> Path | None:
     """Download the chosen large model if it is not here yet; None when nothing
     is chosen. The registry streams it to a .part file and hashes it on the way,
-    so only the whole model ever takes the name."""
+    so only the whole model ever takes the name.
+
+    A transfer that fails is tried again after each of DOWNLOAD_RETRY_DELAYS,
+    carrying on from the .part it left; once they are spent the .part outlives
+    the run for the next one. Each attempt asks the LFS server again:
+    the address it hands out expires. `retrying(error, delay)` hears of each
+    wait; a run that is stopped stops waiting."""
     from jetlink.registry.catalog import NetworkError
-    from jetlink.registry.lfs import Pointer, lfs_download, lfs_resolve
+    from jetlink.registry.lfs import Pointer
     model = self.selected_model()
     if model is None or not model['oid']:
       return None
-    dest = self.model_dir() / self.model_file_name(model)
-    if dest.is_file() and dest.stat().st_size == model['size']:
+    dest = self.model_path(model)
+    if self.has_file(model):
       return dest
     pointer = Pointer(model['oid'], int(model['size']))
+    for delay in (*DOWNLOAD_RETRY_DELAYS, None):
+      try:
+        return self._fetch_once(pointer, dest, progress, should_stop)
+      except NetworkError as e:
+        if delay is None:
+          raise
+        self.op.log.warning("jetlink: download of %s failed (%s), trying again in %.0f s", pointer.oid[:16], e, delay)
+        if retrying is not None:
+          retrying(e, delay)
+        end = time.monotonic() + delay
+        while time.monotonic() < end:
+          if should_stop is not None and should_stop():
+            raise
+          time.sleep(min(1.0, end - time.monotonic()))
+
+  def _fetch_once(self, pointer, dest: Path, progress, should_stop) -> Path:
+    from jetlink.registry.catalog import NetworkError
+    from jetlink.registry.lfs import lfs_download, lfs_resolve
     for endpoint in self.lfs_endpoints():
       href = lfs_resolve(endpoint, pointer)
       if href is None:
@@ -202,6 +235,30 @@ class Models:
       self.op.log.warning("jetlink: fetching the large model (%d MB) from %s", pointer.size >> 20, endpoint)
       return lfs_download(href, pointer, dest, progress=progress, should_stop=should_stop)
     raise NetworkError(f"no LFS server has {pointer.oid[:16]}")
+
+  def _row_for(self, oid: str) -> dict | None:
+    """The catalog model with this oid, among those we have resolved."""
+    return next((m for m in self.model_index() if m['oid'] == oid), None)
+
+  def name_for(self, oid: str) -> str:
+    """The catalog's name for the model with this oid, or the oid's first 16
+    characters when it lists none we have resolved."""
+    row = self._row_for(oid)
+    return row['name'] if row is not None else oid[:16]
+
+  def size_for(self, oid: str) -> int | None:
+    """The byte count of the catalog model with this oid, once resolved here."""
+    row = self._row_for(oid)
+    return row['size'] if row is not None else None
+
+  def has_file(self, model: dict) -> bool:
+    """Is this model's ONNX on the comma, whole? Its size is the cheap check."""
+    if not model.get('oid') or not model.get('size'):
+      return False
+    try:
+      return self.model_path(model).stat().st_size == model['size']
+    except OSError:
+      return False
 
   # -- the model manager's catalog --------------------------------------------
 
@@ -212,7 +269,10 @@ class Models:
     Never raises: a probe that fails keeps what the last one found."""
     try:
       from jetlink.registry.catalog import fetch_catalogs, merge_catalogs
-      merged = merge_catalogs([catalog, fetch_catalogs()], selector=self.op.catalog_selector)
+      fetched = fetch_catalogs()
+      self.keep_pins(fetched.get('pointers', {}))
+      merged = merge_catalogs([catalog, fetched], selector=self.op.catalog_selector)
+      merged.pop('pointers', None)  # the pins are kept above, never in the model manager's catalog
       added = len(merged.get('bundles', [])) - len(catalog.get('bundles', []))
       if added <= 0:
         return catalog
@@ -221,6 +281,17 @@ class Models:
     except Exception:
       self.op.log.exception("jetlink: could not check for newer catalogs")
       return self._found_before(catalog)
+
+  def keep_pins(self, pins: dict[str, dict]) -> None:
+    """Writes the list's pins over the kept pointers (see catalog.pinned_pointers)."""
+    known = self.pointers()
+    changed = {ref: pin for ref, pin in pins.items() if known.get(ref) != pin}
+    if not changed:
+      return
+    known.update(changed)
+    self._keep_pointers(known)
+    for ref, pin in changed.items():
+      self.op.log.warning("jetlink: %s is pinned to %s", ref[:10], pin['oid'][:16])
 
   def _found_before(self, catalog: dict) -> dict:
     """The catalog with the models the last probe found folded in again, from the

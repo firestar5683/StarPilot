@@ -11,8 +11,8 @@ openpilot folds these into the tinygrad JIT on the GPU. Shipping the history
 across the link would cost ~10 MB a frame, so the queues live on the server and
 the comma sends only the newest warped frame and the packed scalars. The hidden
 state the graph returns stays there too: the next frame pushes it into the
-features queue, where modeld's prev_feat went. The fork's tests/test_queues.py
-checks this against the tinygrad original, and the staging conformance fixture
+features queue, where modeld's prev_feat went. tests/test_queues.py holds this
+to openpilot's tinygrad original, and the staging conformance fixture
 (JetlinkKit/Scripts/make_conformance_fixtures.py) holds the Swift server's
 queues to this, bit for bit.
 
@@ -59,12 +59,11 @@ class PolicyQueues:
     did. The queues stay until the client resets them."""
     self.prev_feat[...] = 0
 
-  def after_run(self, outputs: dict[str, np.ndarray], dest=None) -> None:
+  def after_run(self, outputs: dict[str, np.ndarray]) -> None:
     """Keep this frame's hidden state for the next one.
 
     Only after a frame whose outputs are all finite: modeld fed back only
     what infer_end returned, and it raises on NOT_FINITE and on a failed run.
-    `dest` is unused; the fork's test_queues still passes it.
     """
     self.prev_feat.reshape(-1)[...] = np.asarray(outputs[DRIVING_OUTPUT], np.float32).reshape(-1)[self._hidden]
 

@@ -24,11 +24,16 @@ dev = ["pytest>=7", "ruff", "onnx>=1.16"]
 [tool.setuptools.packages.find]
 include = ["jetlink*"]
 
+# The root script the comma runs (jetlink/comma/root.py), so a wheel has it too
+[tool.setuptools.package-data]
+"jetlink.comma" = ["jetlink-root.sh"]
+
 [tool.setuptools.dynamic]
 version = { attr = "jetlink.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["real_aio: uses Linux AIO itself, not tests/aio_fakes.FakeAio"]
 
 # The fork's rule set (sunnypilot's pyproject.toml), so code moves between the
 # two without reformatting, with two differences the fork does not allow:

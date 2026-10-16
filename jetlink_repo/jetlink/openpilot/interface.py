@@ -17,7 +17,7 @@ The interface is split by process. The resident gadget owner gets data only
 (OwnerConfig), no callbacks, so it stays at the standard library and about
 10 MB. The heavy processes get the adapter object and each uses its side:
 StatusSide in manager, the UI, hardwared and the model manager, WorkerSide in
-the provisioning run, ModelSide in modeld, BuildSide in the warp build.
+the provisioning run, ModelSide in modeld.
 
 The standard library only: the owner imports this module.
 """
@@ -82,7 +82,8 @@ class ModelFace:
 
 # The sides are typing Protocols so a type checker can hold the adapter to
 # them; conformance() is the check both repos run. A parameter jetlink passes
-# by keyword is keyword-only here, and only those names must match.
+# by keyword is keyword-only here, and only those names must match. The
+# members in OPTIONAL are ones jetlink reads with getattr and a fallback.
 
 class StatusSide(Protocol):
   """Every reader: manager, the UI, hardwared, the model manager."""
@@ -103,10 +104,11 @@ class StatusSide(Protocol):
     """Is comma's chestnut fitted? A USB walk; jetlink caches the answer."""
 
   def camera(self) -> tuple[int, int, int, int]:
-    """This device's (cam_w, cam_h, model_w, model_h): the warp modeld asks for."""
+    """This device's (cam_w, cam_h, model_w, model_h): the warp modeld loads."""
 
   def warp_path(self, cam_w: int, cam_h: int, model_w: int, model_h: int) -> Path:
-    """Where the build puts the warp for this geometry."""
+    """Where modeld's warp for this geometry is: openpilot's driving warp
+    pickle, which warp.Warps.load reads."""
 
 
 class WorkerSide(StatusSide, Protocol):
@@ -127,31 +129,90 @@ class WorkerSide(StatusSide, Protocol):
 
 
 class ModelSide(WorkerSide, Protocol):
-  """modeld: comma's model face, the engagement a swap waits out, and the
-  structured log line the link's telemetry goes to."""
+  """modeld: comma's model face, whether anything is in control, and the
+  structured log line the link's telemetry goes to. What modeld writes onto
+  the model every frame is Jetlink.attach's."""
 
   def model_face(self) -> ModelFace:
     """What a ModelState for comma's large model has to carry."""
 
-  def engagement(self) -> Callable[[int], bool]:
-    """A poller, made on the thread that calls it: (timeout_ms) -> engaged. Waits
-    up to timeout_ms for news and answers True when controls are engaged, or when
-    that is not known."""
+  def in_control(self) -> bool:
+    """Is openpilot or MADS in control? The joining model asks on modeld's
+    frame thread before every frame and swaps the large model in only while
+    not. True when it cannot tell; never raises."""
 
   def event(self, name: str, **fields: Any) -> None:
     """A structured log line (cloudlog.event)."""
 
+  def small_reset(self, small: Any) -> Callable[[], None] | None:
+    """Optional (OPTIONAL): the reset of the fork's small model for a hand-back, or None
+    for jetlink's own (warp.prepare_reset, which knows stock modeld's,
+    modeld_v2's and a ModelState with GPU queues and numpy inputs). Asked once
+    on modeld's main thread before the frame loop. The reset runs on the
+    frame thread at a hand-back, so it zeroes the history in place and
+    allocates and compiles nothing; warp.reset_queues makes one."""
 
-class BuildSide(Protocol):
-  """scons: comma's warp graph."""
 
-  def make_warp(self, cam_w: int, cam_h: int, model_w: int, model_h: int) -> tuple[Callable[..., Any], int]:
-    """The warp graph for this geometry, and the size of the NV12 frame it
-    reads. Imports comma's graph module before anything of tinygrad's."""
-
-
-class Openpilot(ModelSide, BuildSide, Protocol):
+class Openpilot(ModelSide, Protocol):
   """The whole adapter: one object implements every side."""
+
+
+# What modeld hands Jetlink.attach and gets back: not the adapter's, pinned so
+# a fork knows what its ModelState needs and what it may read off the result.
+
+class SmallModel(Protocol):
+  """The fork's own ModelState, whatever its shape. jetlink calls run()
+  positionally and writes attributes onto it (lat_delay, PLANPLUS_CONTROL);
+  the rest is optional, read with getattr: the frame's desire key and numpy
+  inputs (modeld_v2), the lateral delay a joining large model starts on, and
+  sunnypilot's planplus gain."""
+  desire_key: str
+  numpy_inputs: Any
+  lat_delay: float
+  PLANPLUS_CONTROL: float
+
+  def run(self, bufs: Any, transforms: Any, inputs: Any, after_enqueue: Callable[[], None] | None = None) -> Any:
+    """One frame's outputs, as modeld's ModelState.run."""
+
+
+class JoinedModel(Protocol):
+  """What attach returns and modeld reads off and writes onto every frame.
+  frame_drop_ratio is written, lat_delay read and written. lat_delay and the
+  face (get_action_from_model through LONG_SMOOTH_SECONDS, modeld_v2's reads)
+  follow the model that drives, like any name it does not define, so over a
+  stock modeld's small model they are there only while the large one drives."""
+  handovers: int                    # moves on every swap and hand-back; modeld forgives that frame's drops
+  big_model_state: str              # one of STATES
+  chestnut: bool                    # modelV2.big
+  get_action_from_model: Callable[..., Any]
+  constants: Any
+  LAT_SMOOTH_SECONDS: float
+  LONG_SMOOTH_SECONDS: float
+  frame_drop_ratio: float           # modeld's share of dropped camera frames, before every run()
+  lat_delay: float
+
+  def run(self, bufs: Any, transforms: Any, inputs: Any, after_enqueue: Callable[[], None] | None = None) -> Any:
+    """One frame's outputs, from whichever model drives."""
+
+  def close(self) -> None:
+    """Let go of the link at modeld's exit."""
+
+
+# The members of each protocol an implementation may lack: jetlink reads them
+# with getattr and a fallback. conformance() passes an object without one and
+# holds one with it to its signature, and adding one keeps API. Kept out of
+# the protocols, where a name would be a member itself; a type checker still
+# asks for these, as typing has no optional member
+OPTIONAL: dict[type, tuple[str, ...]] = {
+  ModelSide: ('small_reset',),
+  SmallModel: ('desire_key', 'numpy_inputs', 'lat_delay', 'PLANPLUS_CONTROL'),
+  JoinedModel: ('get_action_from_model', 'constants', 'LAT_SMOOTH_SECONDS', 'LONG_SMOOTH_SECONDS', 'lat_delay'),
+}
+
+
+def optional(protocol: type) -> frozenset[str]:
+  """The members of `protocol` an implementation may lack, inherited ones included."""
+  return frozenset(name for cls in protocol.__mro__ for name in OPTIONAL.get(cls, ()))
 
 
 def load_adapter(module: str) -> Openpilot:
@@ -159,7 +220,7 @@ def load_adapter(module: str) -> Openpilot:
   module that holds every openpilot import jetlink needs: its top level
   imports only the standard library, and it has adapter() -> Openpilot and
   owner_config() -> OwnerConfig. The entry points that run as their own
-  process (the provisioning run, the warp build) are told its name."""
+  process (the provisioning run) are told its name."""
   return importlib.import_module(module).adapter()
 
 
@@ -201,9 +262,11 @@ def conformance(obj: object, protocol: type) -> list[str]:
   jetlink pins the interface with it, and the fork's tests run it against the
   real adapter."""
   problems = []
+  may_lack = optional(protocol)
   for name, expected in members(protocol).items():
     if not hasattr(obj, name):
-      problems.append(f"{name}: missing")
+      if name not in may_lack:
+        problems.append(f"{name}: missing")
       continue
     if expected is None:
       continue
