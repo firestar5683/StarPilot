@@ -331,9 +331,10 @@ def compact_sign_obscured_by_actions(state: OnroadState) -> bool:
 class OnroadInput:
   """The onroad wheel emits intent only; the supplied state must be refreshed."""
 
-  def __init__(self, emit: Callable[[OnroadRequest | SlcUiRequest], None], profile: Profile = Profile.LARGE):
+  def __init__(self, emit: Callable[[OnroadRequest | SlcUiRequest], None], profile: Profile = Profile.LARGE, slop: float = 5):
     self.emit = emit
     self.profile = profile
+    self.slop = slop  # how far a tap may drift before it stops being a tap
     self._press: tuple[float, float, bool, str] | None = None
     self._slc_press: tuple[float, float, SlcUiRequest] | None = None
 
@@ -365,12 +366,12 @@ class OnroadInput:
       px, py, request = self._slc_press
       current = next((item for item in slc_controls(self.profile, state) if item.request == request), None)
       in_control = current is not None and current.bounds[0] <= x <= current.bounds[2] and current.bounds[1] <= y <= current.bounds[3]
-      if current is None or abs(x - px) > 5 or abs(y - py) > 5 or not in_control:
+      if current is None or abs(x - px) > self.slop or abs(y - py) > self.slop or not in_control:
         self.cancel()
       return
     if self._press:
       px, py, previous, token = self._press
-      if (abs(x - px) > 5 or abs(y - py) > 5 or not (_inside_widget(x, y, state, "steering_wheel", (1588, 75, 1780, 267)))
+      if (abs(x - px) > self.slop or abs(y - py) > self.slop or not (_inside_widget(x, y, state, "steering_wheel", (1588, 75, 1780, 267)))
           or previous != state.experimental_enabled or token != state.experimental_action_token or not state.experimental_available):
         self.cancel()
 

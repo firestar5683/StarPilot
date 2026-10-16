@@ -158,3 +158,29 @@ def test_projection_experimental_tap_is_not_gated_by_the_comma_screen(monkeypatc
   session._projection_experimental(True)
   invoke.assert_called_once_with()
   session._unavailable.assert_called_once()
+
+
+def test_projected_taps_tolerate_touchscreen_drift():
+  from dataclasses import replace
+  from openpilot.starpilot.system.android_auto.projection_geometry import projection_geometry
+  from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport, projection_customization
+  from openpilot.starpilot.ui.onroad_customization import default_document, offset, widget_size
+  from openpilot.starpilot.ui.onroad_state import OnroadInput, OnroadRequest, OnroadState, SpeedLimitObservation
+  geometry = projection_geometry(1280, 720)
+  width = geometry.logical_width
+  customization = projection_customization(default_layout_for_viewport((width, geometry.logical_height)), default_document())
+  state = replace(OnroadState(True, True, 15, 80, SpeedLimitObservation()), customization=customization,
+                  experimental_available=True, viewport_width=width)
+  dx, dy = offset(customization, 'large', 'steering_wheel')
+  size, _ = widget_size(customization, 'large', 'steering_wheel')
+  x, y = width - 146 - 96 + dx + size / 2, 45 + dy + size / 2
+  emitted = []
+  gesture = OnroadInput(emitted.append, slop=30)
+  gesture.press(x, y, state)
+  gesture.move(x + 12, y - 9, state)  # 8 by 6 physical pixels on the head unit
+  gesture.release(x + 15, y - 12, state)
+  assert emitted == [OnroadRequest('set_experimental', True, '')]
+  # A drag is still not a tap.
+  gesture.press(x, y, state)
+  gesture.release(x + 40, y, state)
+  assert len(emitted) == 1

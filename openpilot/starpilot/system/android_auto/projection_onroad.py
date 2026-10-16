@@ -155,7 +155,7 @@ class ProjectionOnroad:
       from openpilot.starpilot.ui.onroad_state import OnroadInput
       def emit_slc(request) -> None:
         self.slc_action(request)
-      self._slc_input = OnroadInput(emit_slc, native.profile.LARGE)
+      self._slc_input = OnroadInput(emit_slc, native.profile.LARGE, slop=30)
       self.onroad.pressed_action = lambda: self._slc_input.pressed_action
       self.pip = None
       self._pip_saved = None
