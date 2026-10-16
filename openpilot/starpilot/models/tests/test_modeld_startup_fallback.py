@@ -107,20 +107,24 @@ def execute(statements, env):
   exec(compile(ast.fix_missing_locations(ast.Module(body=statements, type_ignores=[])), str(MODEL_SOURCE), "exec"), env)
 
 
-@pytest.mark.parametrize("present,cable,allow_big,big_path,compiled,expected", [
-  (True, False, True, "verified-big", False, True),
-  (False, True, True, "verified-big", False, True),
-  (False, True, True, None, True, False),
-  (False, False, False, None, True, False),
-  (True, False, False, "verified-big", True, False),
-  (False, True, True, None, False, False),
+@pytest.mark.parametrize("present,cable,allow_big,big_path,compiled,expected,link", [
+  (True, False, True, "verified-big", False, True, False),
+  (False, True, True, "verified-big", False, True, False),
+  (False, True, True, None, True, False, False),
+  (False, False, False, None, True, False, False),
+  (True, False, False, "verified-big", True, False, False),
+  (False, True, True, None, False, False, False),
+  # with Jetlink on, the cable is its host: no chestnut wait, no Big Model Failed, the link joins
+  (False, True, True, "verified-big", False, False, True),
+  (True, True, True, "verified-big", False, True, True),
 ])
-def test_observed_availability_and_big_eligibility(monkeypatch, present, cable, allow_big, big_path, compiled, expected):
+def test_observed_availability_and_big_eligibility(monkeypatch, present, cable, allow_big, big_path, compiled, expected, link):
   from types import ModuleType
   import sys
 
   manager = ModuleType("openpilot.starpilot.models.manager")
-  manager.resolve_runtime = Mock(return_value=SimpleNamespace(allow_big=allow_big, big_path=big_path))
+  manager.resolve_runtime = Mock(side_effect=lambda chestnut_available, randomize:
+                                 SimpleNamespace(allow_big=allow_big and chestnut_available, big_path=big_path))
   manager.requested_runtime_id = Mock(return_value="selected")
   amd = ModuleType("tinygrad.runtime.ops_amd")
   amd.AMDDevice = type("FakeAMDDevice", (), {"wait_timeout_ms": 123})
@@ -131,9 +135,10 @@ def test_observed_availability_and_big_eligibility(monkeypatch, present, cable, 
   end = next(i for i, node in enumerate(body) if ast.unparse(node) == "gc.disable()")
   params = Mock()
   env: dict = {"chestnut_present": Mock(return_value=present), "cable_connected": Mock(return_value=cable),
-         "chestnut_compiled": Mock(return_value=compiled), "Params": lambda: params}
+         "chestnut_compiled": Mock(return_value=compiled), "Params": lambda: params,
+         "jetlink_adapter": SimpleNamespace(link_on=lambda: link)}
   execute(body[start:end], env)
-  available = present or cable
+  available = present or (cable and not link)
   manager.resolve_runtime.assert_called_once_with(chestnut_available=available, randomize=True)
   manager.requested_runtime_id.assert_called_once_with(available)
   env["chestnut_present"].assert_called_once_with()
