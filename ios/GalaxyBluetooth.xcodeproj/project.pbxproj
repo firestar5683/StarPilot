@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D92135C445C249E6A5DC0011 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D92135C445C249E6A5DC0012 /* PrivacyInfo.xcprivacy */; };
 		140107256F4F4DF2910BED61 /* BluetoothTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D47658A09FCC6A6C73D1A1A3 /* BluetoothTransport.swift */; };
 		1698566BBEF2185D9C80B6BB /* HTTP.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34DE7063A67F0755E6E69BF7 /* HTTP.swift */; };
 		28D504D2BD92FF8A8AEB68A7 /* CompanionDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AD85D1A585138AF80FEADB9 /* CompanionDiagnostics.swift */; };
@@ -27,6 +28,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		D92135C445C249E6A5DC0012 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		114E3D37646B3A8626A8A232 /* NetworkTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTransport.swift; sourceTree = "<group>"; };
 		3356A9DC86451A9D92F074F8 /* GalaxyBluetoothApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalaxyBluetoothApp.swift; sourceTree = "<group>"; };
 		34DE7063A67F0755E6E69BF7 /* HTTP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTP.swift; sourceTree = "<group>"; };
@@ -84,6 +86,7 @@
 				43A1199899003FF3F5F30831 /* PairingKeyStore.swift */,
 				F48B8D06AA8D8C4AC21E5982 /* Wire.swift */,
 				9CEEC13202AFBF12EE3ABB99 /* Info.plist */,
+				D92135C445C249E6A5DC0012 /* PrivacyInfo.xcprivacy */,
 				8AD85D1A585138AF80FEADB9 /* CompanionDiagnostics.swift */,
 				8F213860FC7A532DBD355109 /* CarPlaySceneDelegate.swift */,
 				4B5E57F6EB2F42B9039B3D1E /* Resources/Web */,
@@ -151,6 +154,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D92135C445C249E6A5DC0011 /* PrivacyInfo.xcprivacy in Resources */,
 				4E7D2B65B79ACE4A91B667A2 /* Resources/Web in Resources */,
 				606A672A792903E98EFFC2D9 /* Resources/Branding.xcassets in Resources */,
 			);
