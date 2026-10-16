@@ -26,6 +26,7 @@ INTERFACE = 'spuplink0'
 RUNTIME = STATUS_PATH.parent
 TABLE = '18082'
 BINARY = Path(__file__).parent / 'bin/hev-socks5-tunnel_linux_arm64'
+PROBE_INTERVAL = 15  # Re-probe other interfaces only this often unless the routes change.
 
 
 def tunnel_config(lease):
@@ -166,6 +167,7 @@ def main():
     buffer, current, last_input = b'', None, time.monotonic()
     message = None
     reason = ''
+    probed_routes, probed_at, has_other = None, 0., False
     try:
       while not stop:
         if not select.select([sys.stdin], [], [], 1)[0]:
@@ -189,9 +191,14 @@ def main():
         if not fresh(message, time.monotonic()):
           break
         lease = message.get('lease')
-        routes = json.loads(command(['ip', '-j', '-4', 'route', 'show', 'table', 'main']).stdout)
-        usable = (lease and Path('/sys/class/net/galaxy0').exists() and not other_internet(routes)
-                  and fresh(lease, time.monotonic()))
+        raw_routes = command(['ip', '-j', '-4', 'route', 'show', 'table', 'main']).stdout
+        routes = json.loads(raw_routes)
+        usable = lease and Path('/sys/class/net/galaxy0').exists() and fresh(lease, time.monotonic())
+        if usable and (raw_routes != probed_routes or time.monotonic() - probed_at > PROBE_INTERVAL):
+          # Probes to dead default routes can block for seconds; avoid repeating them every heartbeat.
+          has_other = other_internet(routes)
+          probed_routes, probed_at = raw_routes, time.monotonic()
+        usable = usable and not has_other
         identity = tuple(validate_lease(lease)[key] for key in ('peer', 'port', 'user', 'pass')) if usable else None
         if identity != current or (backend.child and backend.child.poll() is not None):
           backend.stop()

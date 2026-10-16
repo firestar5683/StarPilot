@@ -13,6 +13,9 @@ DATA = Path('/data/galaxy-ble')
 BRIDGE = Path(__file__).resolve().parent / 'bridge'
 UNIT = 'galaxy-ble-fork.service'
 LAN_UNIT = 'galaxy-lan-discovery.service'
+PAIRING_WINDOW = 120  # Matches the on-screen pairing code lifetime.
+STATUS_HEARTBEAT = 30
+STATUS_STALE = 90  # Longer than the slowest step interval (60 s) plus the heartbeat.
 LOG = logging.getLogger('galaxy.bluetooth.setup')
 
 
@@ -31,7 +34,7 @@ def write_json(path, value):
 def setup_status(data=DATA):
   try:
     value = json.loads((data / 'setup-status.json').read_text())
-    if time.time() - value['updated'] > 45:
+    if time.time() - value['updated'] > STATUS_STALE:
       return 'Bridge startup pending'
     return value['message']
   except (OSError, ValueError, KeyError, TypeError):
@@ -60,9 +63,32 @@ class Bootstrap:
     self.next_attempt = 0
     self.registered = False
     self.discovery_registered = False
+    self.opted_in = False
+    self.ready = False
+    self.last_status = None
+    self.last_write = 0.
 
   def status(self, state, message):
+    self.ready = state == 'ready'
+    now = time.monotonic()
+    if (state, message) == self.last_status and now - self.last_write < STATUS_HEARTBEAT:
+      return
     write_json(self.data / 'setup-status.json', {'state': state, 'message': message, 'updated': time.time()})
+    self.last_status, self.last_write = (state, message), now
+
+  def refresh_requested(self):
+    path = self.data / 'refresh-pairing.json'
+    try:
+      requested = json.loads(path.read_text())['requested']
+    except FileNotFoundError:
+      return False
+    except (OSError, ValueError, KeyError, TypeError):
+      requested = None
+    if type(requested) not in (int, float) or not 0 <= time.time() - requested < PAIRING_WINDOW:
+      # The pairing code has closed; never restart the bridge later without the user watching.
+      path.unlink(missing_ok=True)
+      return False
+    return True
 
   def command(self, args, timeout=20, **kwargs):
     return self.run(args, timeout=timeout, check=True, **kwargs)
@@ -77,6 +103,12 @@ class Bootstrap:
       self.next_attempt = 0
       self.verified = None
       self.registered = False
+      self.opted_in = True
+    # Nothing is installed or advertised until the user pairs a phone or asks for setup.
+    if not self.opted_in and not (self.data / 'pairing.json').exists():
+      self.status('disabled', 'Pair a phone to set up the phone bridge')
+      return
+    self.opted_in = True
     if time.monotonic() < self.next_attempt:
       self.status('error', 'Setup failed. Connect comma to internet, then Retry setup. See setup.log.')
       return
@@ -141,11 +173,10 @@ class Bootstrap:
                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.status('waiting', 'Turn Bluetooth on in comma Settings to pair your phone')
         return
-      refresh = self.data / 'refresh-pairing.json'
-      if refresh.exists() and self.params.get_bool('IsOffroad'):
+      if self.refresh_requested() and self.params.get_bool('IsOffroad'):
         LOG.info('Refreshing phone bridge advertisement: pairing code opened')
         self.systemctl('restart', UNIT, stdout=subprocess.DEVNULL)
-        refresh.unlink(missing_ok=True)
+        (self.data / 'refresh-pairing.json').unlink(missing_ok=True)
       started = self.run(['sudo', '-n', 'systemctl', 'start', UNIT], timeout=20, check=False,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
       if started.returncode != 0:
@@ -177,9 +208,10 @@ def main():
     worker = Bootstrap(Params())
     while True:
       worker.step()
-      for _ in range(10):
+      # Once the bridge is up, systemd keeps it running; check back slowly unless the user acts.
+      for _ in range(60 if worker.ready else 10):
         time.sleep(1)
-        if (DATA / 'refresh-pairing.json').exists() and worker.params.get_bool('IsOffroad'):
+        if (DATA / 'retry-setup.json').exists() or ((DATA / 'refresh-pairing.json').exists() and worker.params.get_bool('IsOffroad')):
           break
 
 

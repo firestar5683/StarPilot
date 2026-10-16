@@ -502,6 +502,8 @@ class Updater:
     init_overlay()
     self._branches_checked = False
     self.params.put("UpdaterState", "checking...", block=True)
+    if phone_uplink_active():
+      raise FastUpdateError("Software downloads are disabled while using phone internet")
     if not self.fetch_update():
       raise FastUpdateError("Target branch is no longer available")
     admitted()

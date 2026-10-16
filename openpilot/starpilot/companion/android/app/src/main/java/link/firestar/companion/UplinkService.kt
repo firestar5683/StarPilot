@@ -102,7 +102,11 @@ class UplinkService : Service() {
             socks?.deniedHosts = (0 until deny.length()).map { deny.getString(it).lowercase() }.toSet()
             if (!response.getBoolean("enabled")) { reset(); update("Enable phone internet in Galaxy"); return }
             update((if (response.optBoolean("active")) "Sharing mobile data with comma" else "Phone internet ready") + " · %.1f MB today".format(used / 1048576.0))
-        } catch (_: Exception) { reset(); update("Reconnecting to Galaxy…") }
+        } catch (_: Exception) {
+            // Keep the SOCKS listener and credentials: the comma still routes to them until its lease expires.
+            synchronized(sessionLock) { cookie = "" }
+            update("Reconnecting to Galaxy…")
+        }
     }
     private fun update(text: String) { if (stopped) return; getSystemService(NotificationManager::class.java).notify(1, notification(text)) }
     override fun onBind(intent: Intent?): IBinder? = null

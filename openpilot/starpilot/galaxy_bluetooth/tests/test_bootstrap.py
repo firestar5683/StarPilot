@@ -35,13 +35,44 @@ class BootstrapTest(unittest.TestCase):
     (self.data / 'installed-requirements').write_text(hashlib.sha256((self.bridge / 'requirements.txt').read_bytes()).hexdigest())
     (self.data / 'pairing.json').write_text('{}')
 
+  def test_nothing_installed_or_started_before_opt_in(self):
+    self.worker.step()
+    self.assertFalse(self.calls)
+    self.assertEqual(json.loads((self.data / 'setup-status.json').read_text())['state'], 'disabled')
+    self.assertFalse((self.data / 'pairing.json').exists())
+
+  def test_retry_opts_in(self):
+    from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup
+    self.params.get_bool.return_value = False
+    retry_setup(self.data)
+    self.worker.step()
+    self.worker.step()
+    self.assertIn('Park', json.loads((self.data / 'setup-status.json').read_text())['message'])
+
+  def test_stale_pairing_refresh_is_dropped(self):
+    self.installed()
+    (self.data / 'refresh-pairing.json').write_text(json.dumps({'requested': 1}))
+    with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=True):
+      self.worker.step()
+    self.assertFalse(any('restart' in call for call in self.calls))
+    self.assertFalse((self.data / 'refresh-pairing.json').exists())
+
+  def test_status_written_only_on_change(self):
+    self.worker.step()
+    path = self.data / 'setup-status.json'
+    path.unlink()
+    self.worker.step()
+    self.assertFalse(path.exists())
+
   def test_missing_dependencies_wait_until_offroad(self):
+    (self.data / 'pairing.json').write_text('{}')
     self.params.get_bool.return_value = False
     self.worker.step()
     self.assertFalse(self.calls)
     self.assertEqual(json.loads((self.data / 'setup-status.json').read_text())['state'], 'waiting')
 
   def test_missing_dependencies_wait_while_phone_shares_internet(self):
+    (self.data / 'pairing.json').write_text('{}')
     self.uplink = True
     self.worker.step()
     self.assertFalse(self.calls)

@@ -19,8 +19,9 @@ class DiscoveryTests(unittest.TestCase):
     interfaces = [interface('wlan0', '192.168.10.85'), interface('eth0', '10.0.0.2'),
                   interface('wlan1', '192.168.10.85'), interface('wlan2', '172.16.0.4', 'DOWN'),
                   interface('wwan0', '10.0.0.3'), interface('tailscale0', '10.0.0.4'),
-                  interface('lo', '127.0.0.1'), interface('eth1', '8.8.8.8'), interface('eth2', 'bad')]
-    self.assertEqual(discovery.private_addresses(interfaces), ['10.0.0.2', '192.168.10.85'])
+                  interface('lo', '127.0.0.1'), interface('eth1', '8.8.8.8'), interface('eth2', 'bad'),
+                  interface('galaxy0', '172.31.254.1'), interface('galaxy1', '172.31.253.1')]
+    self.assertEqual(discovery.private_addresses(interfaces), ['10.0.0.2', '172.31.254.1', '192.168.10.85'])
 
   def test_unchanged_network_does_not_republish_and_network_change_closes_old_service(self):
     publishers = []

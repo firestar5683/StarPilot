@@ -4,6 +4,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import math
+import os
 from pathlib import Path
 import re
 import threading
@@ -25,10 +26,20 @@ def fresh(value, now):
   return type(updated) in (int, float) and math.isfinite(updated) and 0 <= now - updated < LEASE_SECONDS
 
 
+_status_cache: dict = {}
+
+
 def phone_uplink_active(path=STATUS_PATH, clock=time.monotonic) -> bool:
+  # Guards call this per upload chunk; re-parse only when the file is replaced (atomic_json renames).
   try:
-    state = bounded_json(path)
-    return state.get('active') is True and fresh(state, clock())
+    st = os.lstat(path)
+    key = (st.st_ino, st.st_mtime_ns, st.st_size)
+    cached = _status_cache.get(str(path))
+    if cached is None or cached[0] != key:
+      state = bounded_json(path)
+      cached = (key, state.get('active') is True, state)
+      _status_cache[str(path)] = cached
+    return cached[1] and fresh(cached[2], clock())
   except (OSError, ValueError, TypeError, AttributeError):
     return False
 
@@ -97,7 +108,8 @@ class CompanionRegistry:
     lease = validate_lease({**payload, 'peer': peer})
     with self.lock:
       previous = self.lease()
-      if previous and (previous['peer'], previous['user']) != (peer, lease['user']):
+      # The same hotspot peer may rotate credentials (app restart); only a different phone is refused.
+      if previous and previous['peer'] != peer:
         raise FileExistsError('Another phone is sharing data')
       enabled = self.enabled()
       if enabled:

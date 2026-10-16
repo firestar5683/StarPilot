@@ -10,11 +10,23 @@ from collections.abc import Generator
 
 import requests
 
-from openpilot.starpilot.galaxy.companion import phone_uplink_active
-
 SPARSE_CHUNK_FMT = struct.Struct('H2xI4x')
 
 AGNOS_MANIFEST_FILE = "openpilot/common/hardware/comma/agnos.json"
+
+
+def phone_uplink_active() -> bool:
+  try:
+    from openpilot.starpilot.galaxy.companion import phone_uplink_active as active
+  except ImportError:
+    # launch_chffrplus.sh runs this file directly from the old tree before PYTHONPATH is set.
+    try:
+      with open('/run/starpilot-companion/status.json') as f:
+        state = json.load(f)
+      return state.get('active') is True and 0 <= time.monotonic() - state['updated'] < 15
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+      return False
+  return active()
 
 
 class StreamingDecompressor:

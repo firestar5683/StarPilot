@@ -353,9 +353,9 @@ export const NavigationPage = {
         const parsed = parseSharedDestination(share)
         if (parsed.destination) await this.client.action('select', { destination: parsed.destination })
         else {
+          // Text shares can be ambiguous ("Starbucks"); show the results and let the driver pick.
           this.query = parsed.query
           await this.client.search(parsed.query)
-          if (this.client.results.length && !this.client.error) await this.client.choose(this.client.results[0])
         }
       })
     }

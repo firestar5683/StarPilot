@@ -45,6 +45,8 @@ def test_remote_and_conflict_and_disable(tmp_path):
   owner.heartbeat(PAYLOAD, PEER)
   with pytest.raises(FileExistsError):
     owner.heartbeat(PAYLOAD, '172.31.254.11')
+  owner.heartbeat({**PAYLOAD, 'user': 'c' * 32}, PEER)
+  assert owner.lease()['user'] == 'c' * 32
   owner.save({'enabled': False})
   assert owner.lease() is None
 

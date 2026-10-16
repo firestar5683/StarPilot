@@ -18,7 +18,8 @@ def private_addresses(interfaces):
   for interface in interfaces:
     name = interface.get('ifname', '')
     # Never advertise cellular, VPN, loopback, or virtual bridge addresses.
-    if not re.match(r'^(wlan|wl|eth|en)', name) or interface.get('operstate') != 'UP':
+    # galaxy0 is the Galaxy hotspot; iPhones only find comma there via mDNS.
+    if not re.match(r'^(wlan|wl|eth|en|galaxy0$)', name) or interface.get('operstate') != 'UP':
       continue
     for item in interface.get('addr_info', []):
       if item.get('family') != 'inet' or item.get('scope') != 'global':

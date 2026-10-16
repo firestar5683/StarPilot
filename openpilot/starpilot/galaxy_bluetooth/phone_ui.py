@@ -5,6 +5,17 @@ from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup, setup_st
 from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import ensure_key, load_key, rotate_key, qr_payload
 
 
+_status_cache = [0., '']
+
+
+def cached_setup_status(ttl=2.):
+  # Widgets poll every frame; the status file changes at most every few seconds.
+  now = time.monotonic()
+  if now - _status_cache[0] >= ttl:
+    _status_cache[:] = [now, setup_status()]
+  return _status_cache[1]
+
+
 def permitted(allowed):
   try:
     return bool(allowed())
@@ -43,6 +54,7 @@ class PhoneCode:
         super().__init__()
         self.key = key
         self.expires = time.monotonic() + 120
+        self.next_check = 0.
         self.texture = make_texture(qr_payload(key))
         rl.set_texture_filter(self.texture, rl.TextureFilter.TEXTURE_FILTER_POINT)
         self.close_button = self._child(Button('Close', gui_app.pop_widget, font_size=42))
@@ -58,8 +70,12 @@ class PhoneCode:
         super().hide_event()
 
       def _update_state(self):
+        now = time.monotonic()
+        if self.key is not None and now < self.next_check:
+          return
+        self.next_check = now + 1.
         try:
-          valid = permitted(allowed) and time.monotonic() < self.expires and load_key() == self.key
+          valid = permitted(allowed) and now < self.expires and load_key() == self.key
         except (OSError, ValueError, KeyError):
           valid = False
         if not valid:
@@ -106,13 +122,15 @@ def compact_phone_button(allowed):
     retry = BigButton('retry phone setup', 'internet needed for first setup')
     retry.set_enabled(lambda: permitted(allowed))
     retry.set_click_callback(lambda: retry_setup() if permitted(allowed) else None)
-    page._scroller.add_widgets([pair, forget, retry, GreyBigButton('phone bridge', setup_status())])
+    page._scroller.add_widgets([pair, forget, retry, GreyBigButton('phone bridge', cached_setup_status())])
     gui_app.push_widget(page)
 
   class PhoneButton(BigButton):
     def _update_state(self):
       super()._update_state()
-      self.set_value(setup_status())
+      status = cached_setup_status()
+      if status != self.value:
+        self.set_value(status)
 
   button = PhoneButton('StarPilot iPhone app', 'pair or forget app links', scroll=True)
   button.set_enabled(lambda: permitted(allowed))
@@ -133,4 +151,4 @@ def large_phone_rows(allowed):
   return [button_item('StarPilot iPhone app', 'Pair', callback=lambda: open_pairing(allowed), enabled=lambda: permitted(allowed)),
           button_item('Forget all app links', 'Forget', callback=forget, enabled=lambda: permitted(allowed)),
           button_item('Phone bridge setup', 'Retry', callback=lambda: retry_setup() if permitted(allowed) else None,
-                      enabled=lambda: permitted(allowed), description=setup_status())]
+                      enabled=lambda: permitted(allowed), description=cached_setup_status())]
