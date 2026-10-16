@@ -25,7 +25,7 @@ fi
 trap 'echo "Installation stopped. Staged checkout: $staged. Previous checkout, if moved: $backup" >&2' ERR
 
 echo 'Downloading SecretGood phone test branch. Current installation stays in place until verification finishes.'
-git clone --depth 2 --single-branch --branch "$test_branch" "$repo_url" "$staged"
+git clone --depth 32 --single-branch --branch "$test_branch" "$repo_url" "$staged"
 [[ -f "$staged/prebuilt" && -x "$staged/launch_openpilot.sh" && -x "$staged/launch_chffrplus.sh" ]]
 [[ -f "$staged/openpilot/starpilot/galaxy/web/index.html" ]]
 [[ -f "$staged/openpilot/starpilot/galaxy_bluetooth/bridge/server.py" ]]
