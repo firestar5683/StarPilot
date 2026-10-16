@@ -2,6 +2,7 @@
 import math
 import struct
 from types import SimpleNamespace
+from typing import TypedDict
 import unittest
 
 from capnp.lib.capnp import KjException, _DynamicStructReader
@@ -11,7 +12,21 @@ from openpilot.starpilot.flm.runtime_adapter_registry import SourceState
 
 NOW = 10_000_000_000
 CP = 'c' * 64
-FIELDS = {'version': 1, 'enabled': True, 'manual': False, 'resetGeneration': 'reset-1', 'sourceEpoch': 'b' * 64,
+
+
+class ReceiptFields(TypedDict):
+  version: int
+  enabled: bool
+  manual: bool
+  resetGeneration: str
+  sourceEpoch: str
+  observedMonoTime: int
+  validUntilMonoTime: int
+  cpSha256: str
+  calibrationBasis: list[float]
+
+
+FIELDS: ReceiptFields = {'version': 1, 'enabled': True, 'manual': False, 'resetGeneration': 'reset-1', 'sourceEpoch': 'b' * 64,
           'observedMonoTime': NOW, 'validUntilMonoTime': NOW + 500_000_000, 'cpSha256': CP,
           'calibrationBasis': [0.0, 0.0, 0.0]}
 VALID_LOG = [
@@ -35,7 +50,7 @@ def envelope(row, valid=True):
 
 
 def expected(**changes):
-  row = {**FIELDS, **changes}
+  row: ReceiptFields = {**FIELDS, **changes}
   return SourceState(row['enabled'], row['manual'], row['resetGeneration'], row['sourceEpoch'],
                      row['observedMonoTime'], row['validUntilMonoTime'], row['cpSha256'], tuple(row['calibrationBasis']))
 

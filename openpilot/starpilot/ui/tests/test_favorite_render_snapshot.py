@@ -97,7 +97,7 @@ def session_fixture(owner):
   session._favorite_read_at = None
   session._favorite_snapshot = session._favorite_data = None
   session.favorites_owner = owner
-  session._favorite_authority = lambda: True
+  session._favorite_authority = Mock(return_value=True)
   session.favorites = OnroadFavorites(NS(profile=Profile.LARGE), session._favorite_request)
   state = NS(viewport_width=2160, camera_available=True, alert=NS(size=AlertSize.NONE),
              appearance=NS(camera_view=CameraViewChoice.NONE))

@@ -126,8 +126,8 @@ int main() {
   intent.setOptionalSetRelease(true);
   auto retained = [&](const std::string &producer = "card-session", bool optional = false,
                       uint64_t stamp = CARD_NS, uint64_t source = AXIS_SOURCE_NS, uint64_t clock = GAP_NOW) {
-    auto wire = capnp::messageToFlatArray(intent_builder);
-    return aol_armed_intent(wire.asBytes(), stamp, source, clock, optional, producer);
+    auto retained_flat = capnp::messageToFlatArray(intent_builder);
+    return aol_armed_intent(retained_flat.asBytes(), stamp, source, clock, optional, producer);
   };
   assert(retained());
   assert(retained("card-session", false, CARD_NS, AXIS_SOURCE_NS, CARD_NS + 30000000ULL));
