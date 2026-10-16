@@ -12,6 +12,7 @@ import threading
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bridge'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'vendor'))
 from proxy import GalaxyProxy
 from openpilot.common.params import Params
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner

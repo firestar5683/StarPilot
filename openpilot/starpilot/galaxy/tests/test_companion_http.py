@@ -105,9 +105,11 @@ def test_bluetooth_pairing_requires_session_origin_local_and_parked(companion_ht
     server.test_parked.return_value = True
     status, data, _ = request('/api/companion/bluetooth', {'rotate': False}, cookie)
     assert status == 200 and json.loads(data)['type'] == 'galaxy-bluetooth'
+    first = json.loads(data)['key']
+    status, data, _ = request('/api/companion/bluetooth', {'rotate': False}, cookie)
+    assert status == 200 and json.loads(data)['key'] != first  # each phone gets its own key
+    assert len(json.loads(key_file.read_text())['phones']) == 2
     first = key_file.read_bytes()
-    assert request('/api/companion/bluetooth', {'rotate': False}, cookie)[0] == 200
-    assert key_file.read_bytes() == first
     server.remote_transport = True
     assert request('/api/companion/bluetooth', {'rotate': True}, cookie)[0] == 403
     assert key_file.read_bytes() == first

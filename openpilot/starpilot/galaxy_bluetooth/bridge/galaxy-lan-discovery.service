@@ -2,13 +2,12 @@
 Description=Galaxy local Wi-Fi discovery
 After=network.target
 ConditionPathExists=/data/openpilot/openpilot/starpilot/galaxy_bluetooth/bridge/lan_discovery.py
-ConditionPathExists=/data/galaxy-ble/venv/bin/python
 
 [Service]
 Type=simple
 User=comma
 WorkingDirectory=/data/openpilot/openpilot/starpilot/galaxy_bluetooth/bridge
-ExecStart=/data/galaxy-ble/venv/bin/python /data/openpilot/openpilot/starpilot/galaxy_bluetooth/bridge/lan_discovery.py
+ExecStart=/data/openpilot/openpilot/starpilot/galaxy_bluetooth/bridge/run.sh lan_discovery.py
 Restart=on-failure
 RestartSec=30
 NoNewPrivileges=true

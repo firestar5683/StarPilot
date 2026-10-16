@@ -112,7 +112,8 @@ PYTHON_FILES=()
 while IFS= read -r -d '' f; do
   if [[ -f $f ]]; then
     ALL_FILES+=("$f")
-    if [[ $f == *.py ]]; then
+    # Vendored third-party sources keep their upstream indentation.
+    if [[ $f == *.py && $f != openpilot/starpilot/galaxy_bluetooth/vendor/* ]]; then
       PYTHON_FILES+=("$f")
     fi
   fi

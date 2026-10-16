@@ -1,0 +1,32 @@
+{
+  "comment": "Pure-Python sources for the phone bridge, copied unmodified from PyPI so comma never downloads packages. pycryptodome comes from openpilot (opendbc).",
+  "packages": [
+    {
+      "name": "dbus-next",
+      "version": "0.2.3",
+      "source": "dbus_next-0.2.3-py3-none-any.whl",
+      "sha256": "58948f9aff9db08316734c0be2a120f6dc502124d9642f55e90ac82ffb16a18b",
+      "path": "dbus_next",
+      "license": "MIT",
+      "license_file": "licenses/dbus-next.LICENSE"
+    },
+    {
+      "name": "ifaddr",
+      "version": "0.2.0",
+      "source": "ifaddr-0.2.0-py3-none-any.whl",
+      "sha256": "085e0305cfe6f16ab12d72e2024030f5d52674afad6911bb1eee207177b8a748",
+      "path": "ifaddr",
+      "license": "MIT",
+      "license_file": "licenses/ifaddr.LICENSE"
+    },
+    {
+      "name": "zeroconf",
+      "version": "0.151.3",
+      "source": "zeroconf-0.151.3.tar.gz (src/zeroconf, pure-Python mode without Cython extensions)",
+      "sha256": "ce6c548e665759b6150cef4db9ab9d7bdd89857e90c513abd6b7340bdd7dbd6a",
+      "path": "zeroconf",
+      "license": "LGPL-2.1-or-later",
+      "license_file": "licenses/zeroconf.COPYING"
+    }
+  ]
+}

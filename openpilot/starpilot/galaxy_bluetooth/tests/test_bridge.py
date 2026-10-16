@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "vendor"))
 from dbus_next import Variant, DBusError
 from Crypto.Cipher import AES
 from protocol import (Assembler, MAX_BODY, MAX_FRAME, NOTIFICATION_WINDOW, open_message,

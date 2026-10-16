@@ -2,13 +2,16 @@
 import importlib.util
 from pathlib import Path
 import socket
+import sys
 from unittest.mock import Mock, patch
 
 import pytest
+
+ANDROID = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ANDROID.parents[1] / 'galaxy_bluetooth/vendor'))
 from zeroconf import ServiceInfo, NonUniqueNameException
 from zeroconf._utils.name import service_type_name
 
-ANDROID = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('lan_discovery', ANDROID.parents[1] / 'galaxy_bluetooth/bridge/lan_discovery.py')
 assert spec is not None and spec.loader is not None
 lan_discovery = importlib.util.module_from_spec(spec)

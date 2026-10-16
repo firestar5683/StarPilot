@@ -1,12 +1,10 @@
-"""Setup is offroad-only and never turns on the shared Bluetooth radio."""
-import hashlib
-import json
+"""Setup never downloads packages and never turns on the shared Bluetooth radio."""
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
-from openpilot.starpilot.galaxy_bluetooth.bootstrap import Bootstrap, UNIT, refresh_pairing
+from openpilot.starpilot.galaxy_bluetooth.bootstrap import Bootstrap, UNIT
 
 
 class BootstrapTest(unittest.TestCase):
@@ -18,67 +16,51 @@ class BootstrapTest(unittest.TestCase):
     self.data.mkdir()
     self.bridge = self.root / 'bridge'
     self.bridge.mkdir()
-    (self.bridge / 'requirements.txt').write_text('test requirements')
     self.params = Mock()
     self.params.get_bool.return_value = True
     self.calls = []
     def run(args, **kwargs):
       self.calls.append(args)
       return SimpleNamespace(stdout='1', returncode=0)
-    self.uplink = False
-    self.worker = Bootstrap(self.params, self.data, self.bridge, run, uplink_active=lambda: self.uplink)
+    self.worker = Bootstrap(self.params, self.data, self.bridge, run)
 
   def installed(self):
-    python = self.data / 'venv/bin/python'
-    python.parent.mkdir(parents=True)
-    python.touch()
-    (self.data / 'installed-requirements').write_text(hashlib.sha256((self.bridge / 'requirements.txt').read_bytes()).hexdigest())
-    (self.data / 'pairing.json').write_text('{}')
+    from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import add_phone
+    add_phone('iPhone', self.data / 'pairing.json')
 
-  def test_nothing_installed_or_started_before_opt_in(self):
-    self.worker.step()
-    self.assertFalse(self.calls)
-    self.assertEqual(json.loads((self.data / 'setup-status.json').read_text())['state'], 'disabled')
-    self.assertFalse((self.data / 'pairing.json').exists())
-
-  def test_retry_opts_in(self):
-    from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup
-    self.params.get_bool.return_value = False
-    retry_setup(self.data)
-    self.worker.step()
-    self.worker.step()
-    self.assertIn('Park', json.loads((self.data / 'setup-status.json').read_text())['message'])
-
-  def test_stale_pairing_refresh_is_dropped(self):
-    self.installed()
-    (self.data / 'refresh-pairing.json').write_text(json.dumps({'requested': -1000}))
+  def test_bridge_runs_before_any_phone_is_paired(self):
     with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=True):
       self.worker.step()
-    self.assertFalse(any('restart' in call for call in self.calls))
-    self.assertFalse((self.data / 'refresh-pairing.json').exists())
+    self.assertTrue(any('start' in call and UNIT in call for call in self.calls))
+    from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import load_keys
+    self.assertEqual(load_keys(self.data / 'pairing.json'), {})  # empty list: no phone is accepted yet
 
   def test_status_written_only_on_change(self):
-    self.worker.step()
-    path = self.data / 'setup-status.json'
-    path.unlink()
-    self.worker.step()
+    with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=False):
+      self.worker.step()
+      path = self.data / 'setup-status.json'
+      path.unlink()
+      self.worker.step()
     self.assertFalse(path.exists())
 
-  def test_missing_dependencies_wait_until_offroad(self):
-    (self.data / 'pairing.json').write_text('{}')
+  def test_paired_bridge_starts_onroad_without_downloading(self):
+    self.installed()
     self.params.get_bool.return_value = False
-    self.worker.step()
-    self.assertFalse(self.calls)
-    self.assertEqual(json.loads((self.data / 'setup-status.json').read_text())['state'], 'waiting')
+    with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=True):
+      self.worker.step()
+    self.assertTrue(any('start' in call and UNIT in call for call in self.calls))
+    joined = ' '.join(' '.join(call) for call in self.calls)
+    for word in ('install', 'pip', 'uv ', 'venv'):
+      self.assertNotIn(word, joined)
 
-  def test_missing_dependencies_wait_while_phone_shares_internet(self):
-    (self.data / 'pairing.json').write_text('{}')
-    self.uplink = True
-    self.worker.step()
-    self.assertFalse(self.calls)
-    status = json.loads((self.data / 'setup-status.json').read_text())
-    self.assertEqual(status['state'], 'waiting')
-    self.assertIn('phone internet sharing', status['message'])
+  def test_retry_restarts_bridge(self):
+    from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup
+    self.installed()
+    retry_setup(self.data)
+    with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=True):
+      self.worker.step()
+      self.worker.step()
+    self.assertEqual([call for call in self.calls if 'restart' in call], [['sudo', '-n', 'systemctl', 'restart', UNIT]])
 
   def test_power_off_never_starts_bluetooth_or_bridge(self):
     self.installed()
@@ -94,31 +76,16 @@ class BootstrapTest(unittest.TestCase):
       self.worker.step()
     self.assertTrue(any('start' in call and UNIT in call for call in self.calls))
     self.assertFalse(any('bluetooth.service' in call for call in self.calls))
-    self.assertFalse(any('install.sh' in ' '.join(call) for call in self.calls))
 
-  def test_pairing_refresh_restarts_only_bridge_and_only_offroad(self):
+  def test_pairing_a_phone_never_restarts_the_bridge(self):
+    from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import add_phone
     self.installed()
-    refresh_pairing(self.data)
-    self.params.get_bool.return_value = False
     with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=True):
       self.worker.step()
-      self.assertFalse(any('restart' in call for call in self.calls))
-      self.assertTrue((self.data / 'refresh-pairing.json').exists())
-      self.params.get_bool.return_value = True
-      self.worker.step()
-      self.assertEqual([call for call in self.calls if 'restart' in call], [['sudo', '-n', 'systemctl', 'restart', UNIT]])
-      self.assertFalse((self.data / 'refresh-pairing.json').exists())
-      self.worker.step()
-      self.assertEqual(sum('restart' in call for call in self.calls), 1)
-    self.assertFalse(any('bluetooth.service' in call for call in self.calls))
-
-  def test_pairing_refresh_respects_radio_off(self):
-    self.installed()
-    refresh_pairing(self.data)
-    with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=False):
+      add_phone('Android phone', self.data / 'pairing.json')
       self.worker.step()
     self.assertFalse(any('restart' in call for call in self.calls))
-
+    self.assertFalse(any('bluetooth.service' in call for call in self.calls))
 
 if __name__ == '__main__':
   unittest.main()

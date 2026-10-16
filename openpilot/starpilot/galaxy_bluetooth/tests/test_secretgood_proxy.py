@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bridge'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'vendor'))
 from proxy import GalaxyProxy, validate_target
 
 

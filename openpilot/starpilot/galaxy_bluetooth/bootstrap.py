@@ -1,6 +1,5 @@
-"""Install and supervise the phone bridge without changing StarPilot settings."""
+"""Supervise the phone bridge without changing StarPilot settings. Its dependencies are vendored; nothing is downloaded."""
 import fcntl
-import hashlib
 import json
 import logging
 import os
@@ -13,7 +12,6 @@ DATA = Path('/data/galaxy-ble')
 BRIDGE = Path(__file__).resolve().parent / 'bridge'
 UNIT = 'galaxy-ble-fork.service'
 LAN_UNIT = 'galaxy-lan-discovery.service'
-PAIRING_WINDOW = 120  # Matches the on-screen pairing code lifetime.
 STATUS_HEARTBEAT = 30
 STATUS_STALE = 90  # Longer than the slowest step interval (60 s) plus the heartbeat.
 LOG = logging.getLogger('galaxy.bluetooth.setup')
@@ -46,25 +44,13 @@ def retry_setup(data=DATA):
   write_json(data / 'retry-setup.json', {'requested': time.monotonic()})
 
 
-def refresh_pairing(data=DATA):
-  # Explicit user action only; credentials and the shared radio stay unchanged.
-  write_json(data / 'refresh-pairing.json', {'requested': time.monotonic()})
-
-
-def phone_uplink_active():
-  from openpilot.starpilot.galaxy.companion import phone_uplink_active as active
-  return active()
-
-
 class Bootstrap:
-  def __init__(self, params, data=DATA, bridge=BRIDGE, run=subprocess.run, uplink_active=phone_uplink_active):
+  def __init__(self, params, data=DATA, bridge=BRIDGE, run=subprocess.run):
     self.params, self.data, self.bridge, self.run = params, data, bridge, run
-    self.uplink_active = uplink_active
-    self.verified = None
     self.next_attempt = 0
+    self.restart = False
     self.registered = False
     self.discovery_registered = False
-    self.opted_in = False
     self.ready = False
     self.last_status = None
     self.last_write = 0.
@@ -77,20 +63,6 @@ class Bootstrap:
     write_json(self.data / 'setup-status.json', {'state': state, 'message': message, 'updated': time.monotonic()})
     self.last_status, self.last_write = (state, message), now
 
-  def refresh_requested(self):
-    path = self.data / 'refresh-pairing.json'
-    try:
-      requested = json.loads(path.read_text())['requested']
-    except FileNotFoundError:
-      return False
-    except (OSError, ValueError, KeyError, TypeError):
-      requested = None
-    if not isinstance(requested, (int, float)) or isinstance(requested, bool) or not 0 <= time.monotonic() - requested < PAIRING_WINDOW:
-      # The pairing code has closed; never restart the bridge later without the user watching.
-      path.unlink(missing_ok=True)
-      return False
-    return True
-
   def command(self, args, timeout=20, **kwargs):
     return self.run(args, timeout=timeout, check=True, **kwargs)
 
@@ -102,58 +74,15 @@ class Bootstrap:
     if requested.exists():
       requested.unlink(missing_ok=True)
       self.next_attempt = 0
-      self.verified = None
       self.registered = False
-      self.opted_in = True
-    # Nothing is installed or advertised until the user pairs a phone or asks for setup.
-    if not self.opted_in and not (self.data / 'pairing.json').exists():
-      self.status('disabled', 'Pair a phone to set up the phone bridge')
-      return
-    self.opted_in = True
+      self.restart = True
     if time.monotonic() < self.next_attempt:
-      self.status('error', 'Setup failed. Connect comma to internet, then Retry setup. See setup.log.')
+      self.status('error', 'Phone bridge setup failed. Tap Retry to try again.')
       return
     try:
-      digest = hashlib.sha256((self.bridge / 'requirements.txt').read_bytes()).hexdigest()
-      python = self.data / 'venv/bin/python'
-      receipt = self.data / 'installed-requirements'
-      if self.verified != digest:
-        valid = python.exists() and receipt.exists() and receipt.read_text() == digest
-        if valid:
-          try:
-            self.command([str(python), '-c', 'import dbus_next; import zeroconf; from Crypto.Cipher import AES'],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-          except (subprocess.SubprocessError, OSError):
-            valid = False
-        if not valid:
-          if not self.params.get_bool('IsOffroad'):
-            self.status('waiting', 'Park to finish Bluetooth setup')
-            return
-          # Never download dependencies over a phone's shared cellular data.
-          if self.uplink_active():
-            self.status('waiting', 'Bluetooth setup will finish when phone internet sharing stops')
-            return
-          self.status('installing', 'Installing Bluetooth bridge. Comma needs internet.')
-          self.run(['sudo', '-n', 'systemctl', 'stop', UNIT, LAN_UNIT], timeout=20, check=False,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-          log_path = self.data / 'setup.log'
-          if log_path.exists() and log_path.stat().st_size > 256 * 1024:
-            os.replace(log_path, self.data / 'setup.previous.log')
-          env = dict(os.environ, GALAXY_BLE_DATA_DIR=str(self.data), GALAXY_BLE_QUIET='1')
-          with log_path.open('a') as log:
-            os.chmod(log_path, 0o600)
-            self.command(['sh', str(self.bridge / 'install.sh')], timeout=180,
-                         stdout=log, stderr=subprocess.STDOUT, env=env)
-          receipt.write_text(digest)
-          os.chmod(receipt, 0o600)
-          self.registered = False
-        self.verified = digest
-      if not (self.data / 'pairing.json').exists():
-        if not self.params.get_bool('IsOffroad'):
-          self.status('waiting', 'Park to finish phone pairing setup')
-          return
-        from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import ensure_key
-        ensure_key(self.data / 'pairing.json')
+      # The bridge runs before any phone is paired; an empty phone list accepts no one.
+      from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import ensure_store
+      ensure_store(self.data / 'pairing.json')
       if not self.registered:
         self.systemctl('link', '--runtime', '--force', str(self.bridge / UNIT), stdout=subprocess.DEVNULL)
         self.systemctl('daemon-reload', stdout=subprocess.DEVNULL)
@@ -174,10 +103,11 @@ class Bootstrap:
                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.status('waiting', 'Turn Bluetooth on in comma Settings to pair your phone')
         return
-      if self.refresh_requested() and self.params.get_bool('IsOffroad'):
-        LOG.info('Refreshing phone bridge advertisement: pairing code opened')
+      # A newly paired phone needs no restart: the bridge reloads the phone list itself.
+      if self.restart:
+        LOG.info('Restarting phone bridge: retry requested')
         self.systemctl('restart', UNIT, stdout=subprocess.DEVNULL)
-        (self.data / 'refresh-pairing.json').unlink(missing_ok=True)
+        self.restart = False
       started = self.run(['sudo', '-n', 'systemctl', 'start', UNIT], timeout=20, check=False,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
       if started.returncode != 0:
@@ -190,10 +120,10 @@ class Bootstrap:
       except (OSError, ValueError, KeyError, TypeError):
         running = False
       self.status('ready' if running else 'waiting', 'Ready to pair' if running else 'Waiting for Bluetooth. Enable Bluetooth on comma.')
-    except (OSError, subprocess.SubprocessError, ValueError) as error:
-      LOG.error('Phone bridge setup failed: %s', type(error).__name__)  # noqa: TRY400 -- setup.log has the detail
+    except (OSError, subprocess.SubprocessError, ValueError):
+      LOG.exception('Phone bridge setup failed')
       self.next_attempt = time.monotonic() + 60
-      self.status('error', 'Setup failed. Connect comma to internet, then Retry setup. See setup.log.')
+      self.status('error', 'Phone bridge setup failed. Tap Retry to try again.')
 
 
 def main():
@@ -212,7 +142,7 @@ def main():
       # Once the bridge is up, systemd keeps it running; check back slowly unless the user acts.
       for _ in range(60 if worker.ready else 10):
         time.sleep(1)
-        if (DATA / 'retry-setup.json').exists() or ((DATA / 'refresh-pairing.json').exists() and worker.params.get_bool('IsOffroad')):
+        if (DATA / 'retry-setup.json').exists():
           break
 
 

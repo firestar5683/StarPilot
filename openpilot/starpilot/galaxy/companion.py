@@ -45,11 +45,13 @@ def phone_uplink_active(path=STATUS_PATH, clock=time.monotonic) -> bool:
 
 
 def bluetooth_pairing(rotate=False, path=None):
-  # Shares the phone bridge's key file, so Android and iPhone pair with the same comma key.
+  # Each Android pairing gets its own key in the phone bridge's store; rotate forgets every phone.
   from openpilot.starpilot.galaxy_bluetooth.bridge import pairing
   path = pairing.DEFAULT_KEY_PATH if path is None else path
-  key = pairing.rotate_key(path) if rotate else pairing.ensure_key(path)
-  return json.loads(pairing.qr_payload(key))
+  if rotate:
+    pairing.forget_all(path)
+    return {'type': 'galaxy-bluetooth', 'version': 1, 'revoked': True}
+  return json.loads(pairing.qr_payload(pairing.add_phone('Android phone', path)))
 
 
 def validate_lease(value):

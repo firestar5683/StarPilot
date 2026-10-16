@@ -1,8 +1,9 @@
 """Phone-app pairing beside the existing SecretGood Bluetooth controls."""
 import time
 
-from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup, setup_status, refresh_pairing
-from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import ensure_key, load_key, rotate_key, qr_payload
+from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup, setup_status
+from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import (add_phone, describe, forget_all, load_keys, load_phones,
+                                                                 qr_payload, remove_phone)
 
 
 _status_read_at = -1e9
@@ -30,8 +31,8 @@ def open_pairing(allowed):
     return
   from openpilot.system.ui.lib.application import gui_app
   try:
-    code = PhoneCode(ensure_key(), allowed)
-    refresh_pairing()
+    # Every scanned code is a new phone with its own key, so it can be forgotten on its own.
+    code = PhoneCode(add_phone('iPhone'), allowed)
     gui_app.push_widget(code)
   except (OSError, ValueError):
     from openpilot.system.ui.widgets.confirm_dialog import alert_dialog
@@ -40,7 +41,29 @@ def open_pairing(allowed):
 
 def forget_phones(allowed):
   if permitted(allowed):
-    rotate_key()
+    forget_all()
+
+
+def forget_phone(allowed, phone_id):
+  if permitted(allowed):
+    remove_phone(phone_id)
+
+
+def paired_phones():
+  """[(unique label, phone id, detail)] for the forget menus."""
+  try:
+    phones = load_phones()
+  except (OSError, ValueError):
+    return []
+  rows, seen = [], set()
+  for phone in phones:
+    label = describe(phone)
+    if label in seen:
+      label = f"{label} ({phone['id']})"
+    seen.add(label)
+    detail = f"last used {phone['last_used']}" if phone['last_used'] else 'not used yet'
+    rows.append((label, phone['id'], detail))
+  return rows
 
 
 class PhoneCode:
@@ -77,7 +100,7 @@ class PhoneCode:
           return
         self.next_check = now + 1.
         try:
-          valid = permitted(allowed) and now < self.expires and load_key() == self.key
+          valid = permitted(allowed) and now < self.expires and self.key in load_keys().values()
         except (OSError, ValueError, KeyError):
           valid = False
         if not valid:
@@ -116,15 +139,29 @@ def compact_phone_button(allowed):
     pair = BigButton('pair iPhone app', 'scan a private code')
     pair.set_enabled(lambda: permitted(allowed))
     pair.set_click_callback(lambda: open_pairing(allowed))
-    forget = BigButton('forget all app links', 'phones must scan again')
+    forgotten = set()
+    phones = []
+    for label, phone_id, detail in paired_phones():
+      phone = BigButton(f'forget {label}', detail)
+      phone.set_enabled(lambda phone_id=phone_id: permitted(allowed) and phone_id not in forgotten)
+
+      def confirm(label=label, phone_id=phone_id):
+        def forget_one():
+          forget_phone(allowed, phone_id)
+          forgotten.add(phone_id)
+        gui_app.push_widget(BigConfirmationDialog(f'forget {label}?', gui_app.texture('icons_mici/settings/bluetooth.png', 64, 64),
+                                                  forget_one, red=True))
+      phone.set_click_callback(confirm)
+      phones.append(phone)
+    forget = BigButton('forget all phones', 'iPhone and Android pair again')
     forget.set_enabled(lambda: permitted(allowed))
     forget.set_click_callback(lambda: gui_app.push_widget(BigConfirmationDialog(
-      'forget all app links?', gui_app.texture('icons_mici/settings/bluetooth.png', 64, 64),
+      'forget all phones?', gui_app.texture('icons_mici/settings/bluetooth.png', 64, 64),
       lambda: forget_phones(allowed), red=True)))
-    retry = BigButton('retry phone setup', 'internet needed for first setup')
+    retry = BigButton('retry phone setup', 'restart the phone bridge')
     retry.set_enabled(lambda: permitted(allowed))
     retry.set_click_callback(lambda: retry_setup() if permitted(allowed) else None)
-    page._scroller.add_widgets([pair, forget, retry, GreyBigButton('phone bridge', cached_setup_status())])
+    page._scroller.add_widgets([pair, *phones, forget, retry, GreyBigButton('phone bridge', cached_setup_status())])
     gui_app.push_widget(page)
 
   class PhoneButton(BigButton):
@@ -134,7 +171,7 @@ def compact_phone_button(allowed):
       if status != self.value:
         self.set_value(status)
 
-  button = PhoneButton('StarPilot iPhone app', 'pair or forget app links', scroll=True)
+  button = PhoneButton('StarPilot phone app', 'iPhone and Android', scroll=True)
   button.set_enabled(lambda: permitted(allowed))
   button.set_click_callback(options)
   return button
@@ -147,10 +184,28 @@ def large_phone_rows(allowed):
   from openpilot.system.ui.widgets.list_view import button_item
 
   def forget():
-    gui_app.push_widget(ConfirmDialog('Forget all StarPilot app links? Phones must scan a new code.', 'Forget',
+    gui_app.push_widget(ConfirmDialog('Forget all StarPilot phones? iPhone and Android must pair again.', 'Forget',
       callback=lambda result: forget_phones(allowed) if result == DialogResult.CONFIRM else None))
 
-  return [button_item('StarPilot iPhone app', 'Pair', callback=lambda: open_pairing(allowed), enabled=lambda: permitted(allowed)),
-          button_item('Forget all app links', 'Forget', callback=forget, enabled=lambda: permitted(allowed)),
-          button_item('Phone bridge setup', 'Retry', callback=lambda: retry_setup() if permitted(allowed) else None,
+  def forget_one():
+    from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
+    rows = {label: phone_id for label, phone_id, _ in paired_phones()}
+    if not rows:
+      from openpilot.system.ui.widgets.confirm_dialog import alert_dialog
+      gui_app.push_widget(alert_dialog('No phones are paired.'))
+      return
+
+    def chosen(result):
+      label = picker.selection
+      if result != DialogResult.CONFIRM or label not in rows:
+        return
+      gui_app.push_widget(ConfirmDialog(f'Forget {label}? Only this phone must pair again.', 'Forget',
+        callback=lambda confirmed: forget_phone(allowed, rows[label]) if confirmed == DialogResult.CONFIRM else None))
+    picker = MultiOptionDialog('Forget which phone?', list(rows), callback=chosen)
+    gui_app.push_widget(picker)
+
+  return [button_item('Pair StarPilot iPhone app', 'Pair', callback=lambda: open_pairing(allowed), enabled=lambda: permitted(allowed)),
+          button_item('Forget a StarPilot phone', 'Choose', callback=forget_one, enabled=lambda: permitted(allowed)),
+          button_item('Forget all StarPilot phones', 'Forget', callback=forget, enabled=lambda: permitted(allowed)),
+          button_item('StarPilot phone bridge', 'Retry', callback=lambda: retry_setup() if permitted(allowed) else None,
                       enabled=lambda: permitted(allowed), description=cached_setup_status())]

@@ -20,7 +20,7 @@ from dbus_next.service import ServiceInterface, dbus_property, method
 from protocol import (Assembler, INFO_UUID, RX_UUID, SERVICE_UUID, TX_UUID, NOTIFY_UUID,
                       NOTIFICATION_WINDOW, open_message, packets, seal, stream_tag, notification_packets)
 from proxy import GalaxyProxy
-from pairing import load_key
+from pairing import load_keys, mark_used
 from setup_health import write_ready, clear_ready
 
 ROOT = "/link/galaxy/ble"
@@ -50,6 +50,7 @@ class Session:
     self.notification_expected_ack = None
     self.notification_task = None
     self.closed = False
+    self.phone = None  # (id, key) of the phone whose key opened this session
 
   def close(self):
     self.closed = True
@@ -60,9 +61,11 @@ class Session:
 
 
 class Gateway:
-  def __init__(self, key, proxy, key_path=None):
-    self.key = key
+  def __init__(self, keys, proxy, key_path=None):
+    # keys: {phone id: key}. A bare key is accepted for a single phone.
+    self.keys = {"default": keys} if isinstance(keys, (bytes, bytearray)) else dict(keys or {})
     self.key_path = key_path
+    self.used = set()
     self.proxy = proxy
     self.sessions = {}
     self.notifier = None
@@ -72,18 +75,31 @@ class Gateway:
     if self.key_path is None:
       return
     try:
-      key = load_key(self.key_path)
+      keys = load_keys(self.key_path)
     except Exception:
       # Fail closed if the local credential is removed or invalid.
-      key = None
-    if key != self.key:
-      for state in self.sessions.values():
-        state.close()
-      self.sessions.clear()
-      self.key = key
-      LOG.info("Pairing credentials changed; Bluetooth sessions revoked")
-    if key is None:
-      raise DBusError("org.bluez.Error.NotAuthorized", "Pairing credentials unavailable")
+      keys = {}
+    if keys != self.keys:
+      # Only sessions of forgotten (or re-keyed) phones are revoked; other phones stay connected.
+      for path, state in list(self.sessions.items()):
+        if state.phone is None or keys.get(state.phone[0]) != state.phone[1]:
+          state.close()
+          del self.sessions[path]
+      self.keys = keys
+      LOG.info("Pairing credentials changed; %d phone(s) paired", len(keys))
+    if not keys:
+      raise DBusError("org.bluez.Error.NotAuthorized", "No phones are paired")
+
+  def open_request(self, state, data):
+    candidates = [state.phone] if state.phone else list(self.keys.items())
+    for phone_id, key in candidates:
+      try:
+        request = open_message(data, key, "request")
+      except ValueError:
+        continue
+      state.phone = (phone_id, key)
+      return request
+    raise ValueError("Message is not sealed with a paired phone's key")
 
   async def watch_key(self):
     while True:
@@ -186,7 +202,7 @@ class Gateway:
       self.refresh_key()
       if state.closed:
         return
-      request = open_message(data, self.key, "request")
+      request = self.open_request(state, data)
       counter = request.get("counter")
       if request.get("session") != state.challenge.hex() or type(counter) is not int or counter <= state.counter:
         raise ValueError("Invalid session or replayed request")
@@ -199,6 +215,12 @@ class Gateway:
       if notify and (self.notifier is None or not self.notifier.notifying):
         raise ValueError("Subscribe to notifications before requesting that response flow")
       state.counter = counter  # Consume before invoking any mutating endpoint.
+      if self.key_path is not None and state.phone[0] not in self.used:
+        self.used.add(state.phone[0])
+        try:
+          await asyncio.to_thread(mark_used, state.phone[0], self.key_path)
+        except (OSError, ValueError):
+          LOG.warning("Could not record phone use")
       response = await asyncio.to_thread(state.proxy.handle, request)
       self.refresh_key()
       if state.closed:
@@ -208,7 +230,7 @@ class Gateway:
       state.notification_stream = notify
       state.notification_tag = stream_tag(state.challenge.hex(), counter) if notify else b""
       state.read_stream = fast and request.get("responseFlow") == "read-stream"
-      frame = seal(response, self.key, "response", compact_body=fast)
+      frame = seal(response, state.phone[1], "response", compact_body=fast)
       size = state.packet_size if fast else min(180, state.packet_size)
       state.response = list(notification_packets(frame, state.notification_tag, size) if notify else packets(frame, size))
       state.index = 0
@@ -406,9 +428,9 @@ async def serve(args):
   LOG.info("Starting Galaxy bridge pid=%d source=%s", os.getpid(), hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12])  # noqa: ASYNC240 -- once at startup
   key_path = Path(args.key_file)
   clear_ready(key_path.parent)
-  key = load_key(key_path)
+  keys = load_keys(key_path)
   bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-  gateway = Gateway(key, GalaxyProxy(args.galaxy_port), key_path)
+  gateway = Gateway(keys, GalaxyProxy(args.galaxy_port), key_path)
   objects = {
       SERVICE_PATH: GattService(),
       SERVICE_PATH + "/rx": Characteristic(RX_UUID, ["write"], gateway, "rx"),
