@@ -44,4 +44,26 @@ await vm.refresh()
 assert.equal(auth, 1)
 assert.equal(vm.active, false)
 assert.equal(vm.timer, null)
+
+const failing = instance()
+Object.defineProperty(failing, 'passwordValid', { get: () => GalaxyHotspot.computed.passwordValid.call(failing) })
+failing.adopt({ ...value, config: { ...value.config, enabled: false } })
+failing.draft.password = 'short'
+assert.equal(failing.passwordValid, false)
+failing.draft.password = 'a’curly-quote-pass'
+assert.equal(failing.passwordValid, false)
+failing.draft.password = ''
+assert.equal(failing.passwordValid, true)
+failing.draft.password = 'twelve-chars!'
+assert.equal(failing.passwordValid, true)
+failing.active = true
+globalThis.fetch = async (_url, options) => options?.method === 'POST'
+  ? { ok: false, status: 400, json: async () => ({ error: 'Use a 12–63 character password' }) }
+  : { ok: true, json: async () => value }
+await failing.save()
+assert.match(failing.saveError, /12–63 character password/)
+clearTimeout(failing.timer)
+await failing.refresh()
+assert.match(failing.saveError, /12–63 character password/, 'a poll must not hide a failed save')
+failing.stop()
 console.log('Hotspot: schema, Vue template, preview exclusion, stale drafts, unmount race, credential clearing and authentication passed')
