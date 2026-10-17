@@ -402,7 +402,7 @@ export const SpotifyPage = {
       <GxNotice tone="danger" v-if="error && setup">{{ error }}</GxNotice>
       <GxNotice v-if="!setup" :busy="!error" :tone="error ? 'danger' : 'info'">{{ error || "Checking Spotify setup… Reconnecting automatically…" }}</GxNotice>
 
-      <section v-if="setup" class="gx-card gx-stack" aria-labelledby="gx-music-source-title">
+      <section v-if="setup" class="gx-card gx-aa-step" aria-labelledby="gx-music-source-title">
         <h3 id="gx-music-source-title">Music Source</h3>
         <label class="gx-stack"><span>Play music from</span>
           <select class="gx-field" :value="setup.preferences.source || 'spotify'" :disabled="busy || !setup.parked" @change="chooseSource">
@@ -422,6 +422,17 @@ export const SpotifyPage = {
             :index="0" :busy="busy" :save-value="(index, value) => setEnabled(value === 'On')" />
           <p class="gx-note" role="status">{{ statusText }}</p>
           <p class="gx-note">Music only. Calls and microphone audio are not forwarded.</p>
+        </template>
+        <template v-if="setupDone && !phoneSource && !showSetup">
+        <label class="gx-stack"><span>Play on</span>
+          <select class="gx-field" :value="setup.preferences.output === 'bluetooth' ? setup.preferences.outputAddress : setup.preferences.output" :disabled="busy || !setup.parked" @change="chooseOutput">
+            <option value="" disabled>Choose…</option>
+            <option value="android_auto">Android Auto (with StarPilot on the car screen)</option>
+            <optgroup label="Bluetooth">
+              <option v-for="choice in outputChoices" :key="choice.value" :value="choice.value">{{ choice.label }}</option>
+            </optgroup>
+            <option value="test">Silent test (no speaker)</option>
+          </select></label>
         </template>
         <small v-if="!setup.parked" class="gx-note">Put the car in Park or use offroad mode to change the source.</small>
       </section>
@@ -552,7 +563,7 @@ export const SpotifyPage = {
         </li>
       </ol>
 
-      <section v-if="setup && !phoneSource && (setupDone ? showSetup : setup.release.installed)" class="gx-card gx-stack" aria-labelledby="gx-spotify-manage-title">
+      <section v-if="setup && !phoneSource && (setupDone ? showSetup : setup.release.installed)" class="gx-card gx-aa-step" aria-labelledby="gx-spotify-manage-title">
         <h3 id="gx-spotify-manage-title">Storage and Account</h3>
         <label class="gx-stack"><span>Music cache</span>
           <select class="gx-field" :value="setup.preferences.cacheMb" :disabled="busy" @change="saveCache">
