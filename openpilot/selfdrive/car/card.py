@@ -476,6 +476,9 @@ class Car:
 
     # Update carState from CAN
     CS = self.CI.update(can_list)
+    # Honda Bosch-A bounds a coast that implies a reversing lead by ego speed.
+    if hasattr(self.RI, 'v_ego'):
+      self.RI.v_ego = CS.vEgo
     cancel_boot_ns = (time.clock_gettime_ns(time.CLOCK_BOOTTIME)
                       if (getattr(self.CI.CS, 'ev6_aol_source_healthy', False) or
                           qualified_honda_stock_aol(self.CP, marked_only=True) or
