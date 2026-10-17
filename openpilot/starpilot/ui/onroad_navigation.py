@@ -23,6 +23,18 @@ def icon_name(maneuver_type: str, modifier: str) -> str:
   return candidate if candidate in MANIFEST else 'direction_turn_straight.png'
 
 
+def _overlaps_slc_actions(rect, profile, state) -> bool:
+  from openpilot.starpilot.ui.large_speed_geometry import ACTION_HEADER_HEIGHT
+  from openpilot.starpilot.ui.onroad_state import slc_controls
+  for control in slc_controls(profile, state):
+    # Include the decision header drawn above the buttons.
+    left, top, right, bottom = control.bounds
+    top -= ACTION_HEADER_HEIGHT
+    if left < rect.x + rect.width and rect.x < right and top < rect.y + rect.height and rect.y < bottom:
+      return True
+  return False
+
+
 def arrival_time(remaining_seconds: float, now: datetime) -> str:
   arrival = now + timedelta(seconds=max(0, remaining_seconds))
   return arrival.strftime('%I:%M %p').lstrip('0')
@@ -40,11 +52,17 @@ class NavigationCard:
 
   def bounds(self, state):
     if (state.navigation is None or state.alert.size != 'none' or state.reverse_driver_camera or
-        state.appearance.camera_view in (CameraViewChoice.DRIVER, CameraViewChoice.NONE) or
-        (state.speed_limit.action_enabled and state.longitudinal_active)):
+        state.appearance.camera_view in (CameraViewChoice.DRIVER, CameraViewChoice.NONE)):
       return None
     if state.navigation.key != self._key:
       self._key, self.collapsed = state.navigation.key, False
+    rect = self._placed(state)
+    # A live SLC decision keeps its touch priority only where its buttons actually sit on the card.
+    if rect is not None and state.longitudinal_active and _overlaps_slc_actions(rect, self.fonts.profile, state):
+      return None
+    return rect
+
+  def _placed(self, state):
     if self.fonts.profile == Profile.COMPACT:
       return rl.Rectangle(244, 18, 72, 72) if self.collapsed else rl.Rectangle(96, 16, 368, 142)
     # Android Auto layouts place the card; the comma keeps its fixed spot.

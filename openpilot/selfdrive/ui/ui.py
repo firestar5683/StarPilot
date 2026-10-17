@@ -22,6 +22,7 @@ def update_frame(preview=None, controllers=None, star=None):
     # Android Auto bookmarks must be consumed even when the comma screen is off
     # or another widget covers the StarPilot page.
     star._poll_projection_bookmark(time.monotonic_ns())
+    star._poll_projection_slc(time.monotonic_ns())
   if controllers is not None:
     gui_app.measure_frame_phase("controllers", controllers.poll)
   if preview is not None:

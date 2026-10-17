@@ -206,6 +206,23 @@ class TestShadowLifecycle(unittest.TestCase):
     self.assertIsInstance(process, shadow.MapdShadowProcess)
     self.assertEqual(process.cmdline, [str(shadow.PROVIDER_BINARY), '--shadow', '--offline-root', str(shadow.OFFLINE_ROOT)])
 
+  def test_child_alone_runs_below_normal_priority_with_bounded_go_processors(self):
+    import sys
+    self.assertIs(shadow.MapdShadowProcess().launcher, shadow.shadow_launcher)
+    parent_nice = os.nice(0)
+    with tempfile.TemporaryDirectory() as directory:
+      out = Path(directory) / 'policy'
+      script = f'import os; open({str(out)!r}, "w").write(f"{{os.nice(0)}} {{os.environ.get(\'GOMAXPROCS\')}}")'
+      child = Process(target=shadow.shadow_launcher, args=([sys.executable, '-c', script], directory, 'mapd_shadow'))
+      child.start()
+      child.join(10)
+      self.assertEqual(child.exitcode, 0)
+      nice, procs = out.read_text().split()
+    self.assertEqual(int(nice), min(parent_nice + shadow.SHADOW_NICE, 19))
+    self.assertEqual(procs, shadow.SHADOW_GOMAXPROCS)
+    self.assertEqual(os.nice(0), parent_nice)
+    self.assertNotEqual(os.environ.get('GOMAXPROCS'), shadow.SHADOW_GOMAXPROCS)
+
   def test_exited_child_backoff_and_pending_shutdown(self):
     now = [10.0]
     process = shadow.MapdShadowProcess(clock=lambda: now[0])

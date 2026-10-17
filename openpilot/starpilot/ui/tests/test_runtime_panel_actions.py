@@ -42,7 +42,7 @@ def make_feature_view(profile: Profile):
 
 
 class TestRuntimePanelActions(unittest.TestCase):
-  def test_live_slc_action_source_accepts_pcm_long_owner_and_rejects_stock_and_stale(self):
+  def test_live_slc_action_source_accepts_system_and_stock_long_but_rejects_stale(self):
     ui = ui_fake()
     ui.CP = NS(carFingerprint="TOYOTA_HIGHLANDER_TSS2", openpilotLongitudinalControl=True, pcmCruise=True)
     ui.sm.messages["carState"].canValid = True
@@ -55,8 +55,10 @@ class TestRuntimePanelActions(unittest.TestCase):
     with patch("openpilot.starpilot.ui.runtime_snapshot._clock_pair", return_value=(NOW, NOW + BOOT_OFFSET_NS, BOOT_OFFSET_NS)):
       self.assertIs(session._live_slc_message(NOW), ui.sm["slcState"])
       ui.CP.openpilotLongitudinalControl = False
-      self.assertIsNone(session._live_slc_message(NOW))
-      ui.CP.openpilotLongitudinalControl = True
+      ui.sm.messages["carControl"].longActive = False
+      ui.sm.messages["selfdriveState"].enabled = False
+      ui.sm.put("controlsState", NS(longControlState="off"))
+      self.assertIs(session._live_slc_message(NOW), ui.sm["slcState"])
       ui.sm.logMonoTime["slcState"] = NOW - 1_000_000_000
       self.assertIsNone(session._live_slc_message(NOW))
 

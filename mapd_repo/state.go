@@ -104,6 +104,18 @@ func (s *State) ResetRoadEvidence() {
 	s.lastMapLoadAttempt = time.Time{}
 }
 
+// expireRoadEvidence drops everything derived from an expired fix but keeps
+// the verified tile. A dense tile can take longer to load than the fix TTL;
+// discarding it here made every following fix reload it, so the loop never
+// published a match (~600 ms per load, ~60 % CPU, in Las Vegas 2026-10-15).
+// Tile currency is still checked every loop by invalidateChangedTile.
+func (s *State) expireRoadEvidence() {
+	s.clearRoadDerived()
+	s.roadFixMonoTime = 0
+	s.Position = m.Position{}
+	s.DistanceSinceLastPosition = 0
+}
+
 func (s *State) invalidateChangedTile() bool {
 	if s.Data.Loaded && !s.Data.SourceCurrentFor(s.SnapshotID) {
 		s.ResetRoadEvidence()
@@ -129,7 +141,7 @@ func (s *State) ExpireGpsEvidence() {
 
 func (s *State) expireGpsEvidenceAt(now uint64) {
 	if !cereal.GpsFixFreshAt(cereal.GpsSource(s.GpsSource), s.GpsMonoTime, now) && s.RoadStatus != custom.MapdOut_SampleStatus_noGps {
-		s.ResetRoadEvidence()
+		s.expireRoadEvidence()
 		s.RoadStatus = custom.MapdOut_SampleStatus_noGps
 	}
 }

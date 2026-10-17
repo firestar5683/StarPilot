@@ -126,9 +126,13 @@ class TestProjectionOnroad(unittest.TestCase):
       def render(self, *_): events.append('road_render')
       def close(self): events.append('view_closed')
 
+    @dataclass(frozen=True)
+    class State:
+      viewport_width: float = 2160.0
+
     class Adapter:
       def __init__(self, *_): events.append('adapter')
-      def build(self, *_args, **_kwargs): return SimpleNamespace(onroad=SimpleNamespace())
+      def build(self, *_args, **_kwargs): return SimpleNamespace(onroad=State())
 
     native = SimpleNamespace(rl=FakeGraphics, ui_state=ui, camera=Camera, onroad=View,
                              monitor=lambda *_: SimpleNamespace(render=lambda *_a, **_k: None),
@@ -150,6 +154,8 @@ class TestProjectionOnroad(unittest.TestCase):
     native.ui_state.started = True
     view.render()
     self.assertIn('road_render', events)
+    # Touch hit-tests use the car canvas, not the comma's 2160-wide default.
+    self.assertEqual(view._state.viewport_width, 1860)
     view.close()
     self.assertEqual(events[-3:], ['view_closed', 'camera_closed', 'fonts_closed'])
     self.assertEqual(native.ui_state._offroad_transition_callbacks, [])
@@ -345,6 +351,7 @@ class TestProjectionOnroad(unittest.TestCase):
     @dataclass(frozen=True)
     class State:
       alert: Alert = Alert()
+      viewport_width: float = 2160.0
 
     real = {'alert': Alert()}
     native.alert, native.alert_size = Alert, SimpleNamespace(NONE='none', SMALL='small')

@@ -10,6 +10,7 @@ import (
 	"pfeifer.dev/mapd/cereal/log"
 	"pfeifer.dev/mapd/maps"
 	m "pfeifer.dev/mapd/math"
+	ms "pfeifer.dev/mapd/settings"
 )
 
 // denseStreetSpecs lays out a city grid of short blocks plus two long
@@ -183,4 +184,57 @@ func BenchmarkPlausibleWaysDenseTile(b *testing.B) {
 			fullScanPlausibleWays(&tile, location)
 		}
 	})
+}
+
+// referenceOnWay is OnWay's decision without the match-distance prefilter:
+// the 0.01 degree box, then the measured distance.
+func referenceOnWay(way *maps.Way, location log.GpsLocationData, multiplier float32) bool {
+	pos := m.NewPosition(location.Latitude(), location.Longitude())
+	box := way.Box()
+	oversized := box.Overlap(0.01)
+	if !oversized.PosInside(pos) {
+		return false
+	}
+	d, err := way.DistanceFrom(pos)
+	if err != nil || !(d.Distance < maps.MatchDistance(location, way.Width(), multiplier)) {
+		return false
+	}
+	return maps.IsForward(d.LineStart, d.LineEnd, float64(location.BearingDeg())) || !way.OneWay()
+}
+
+// Fixes are scattered around way nodes out to a few match distances, with
+// accuracies from 0 to 400 m, so many land just inside or outside the bound.
+func TestMatchPrefilterIsExact(t *testing.T) {
+	tile := packedRoadTile(t, denseStreetSpecs(40))
+	random := rand.New(rand.NewSource(11))
+	near, accepted := 0, 0
+	for range 20000 {
+		index := random.Intn(tile.Ways.Len())
+		way := tile.Ways.At(index)
+		node := way.Nodes.At(random.Intn(way.Nodes.Len()))
+		accuracy := []float32{0, 3, 5, 12, 40, 400}[random.Intn(6)]
+		reach := float64(accuracy+30) * 3 / ms.R * ms.TO_DEGREES
+		lat := node.Lat() + (random.Float64()*2-1)*reach
+		lon := node.Lon() + (random.Float64()*2-1)*reach
+		location := gpsAt(t, lat, lon, random.Float64()*359)
+		location.SetHorizontalAccuracy(accuracy)
+		for _, multiplier := range []float32{2, way.DistanceMultiplier()} {
+			want := referenceOnWay(&way, location, multiplier)
+			got, err := way.OnWay(location, multiplier)
+			if (err == nil && got.OnWay) != want {
+				t.Fatalf("way %d at %f,%f accuracy %v x%v: prefiltered %v, reference %v",
+					way.Id(), lat, lon, accuracy, multiplier, got.OnWay, want)
+			}
+			if want && !tile.WayMayMatch(index, location, multiplier) {
+				t.Fatalf("index prefilter rejected way %d that matches at %f,%f", way.Id(), lat, lon)
+			}
+			if want {
+				accepted++
+			}
+			near++
+		}
+	}
+	if accepted == 0 || accepted == near {
+		t.Fatalf("samples did not straddle the bound: %d of %d matched", accepted, near)
+	}
 }

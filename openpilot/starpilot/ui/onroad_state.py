@@ -245,8 +245,7 @@ class OnroadRequest:
 def _default_slc_controls(profile: Profile, state: OnroadState) -> tuple[SlcControl, ...]:
   """Only render/accept actions backed by a displayed live SLC decision."""
   observation = state.speed_limit
-  if (state.alert.size != AlertSize.NONE or not state.longitudinal_active or not state.slc_system_long_available or
-      not observation.action_enabled or
+  if (state.alert.size != AlertSize.NONE or not observation.action_enabled or
       observation.kind != ObservationKind.VALID or not observation.session_id):
     return ()
   pending = observation.pending_speed_limit_mps
@@ -270,6 +269,18 @@ def _default_slc_controls(profile: Profile, state: OnroadState) -> tuple[SlcCont
   if (pending is None and observation.speed_limit_mps is not None and
       observation.presentation_id is not None and observation.presentation_id > 0):
     if profile == Profile.COMPACT:
+      return ()
+    # Once this limit is the one in use, adopting it again only helps to clear an override
+    # or to raise a set speed that sits below it.
+    accepted = observation.accepted_speed_limit_mps
+    adjusted = observation.presentation_adjusted_limit_mps or observation.speed_limit_mps
+    # Card selects whole display units. Compare those same units so its rounded
+    # set speed does not keep offering an already applied limit (e.g. 70 mph).
+    display_units = 3.6 if state.metric else 2.2369362921
+    raises_set = (state.cruise_active and state.cruise_kph is not None and
+                  round(state.cruise_kph / 3.6 * display_units) < round(adjusted * display_units))
+    if (accepted is not None and abs(accepted - observation.speed_limit_mps) <= 0.02 and
+        not observation.driver_override_active and not raises_set):
       return ()
     request = SlcUiRequest(SlcActionKind.ADOPT, observation.session_id, observation.decision_id or 0,
                            observation.presentation_id, observation.speed_limit_mps)
@@ -425,7 +436,8 @@ def speed_limit_from_message(message: SlcStateMessage | None) -> SpeedLimitObser
   except (ValueError, AttributeError):
     return SpeedLimitObservation(kind=ObservationKind.UNKNOWN, status="Invalid SLC observation kind")
   if kind != ObservationKind.VALID:
-    return SpeedLimitObservation(kind=kind, source=message.source, status=message.status)
+    return SpeedLimitObservation(kind=kind, source=message.source, status=message.status,
+                                 source_readings=source_readings_from_message(message))
   try:
     return SpeedLimitObservation(kind=kind, source=message.source, speed_limit_mps=message.speedLimit,
                                  source_readings=source_readings_from_message(message),

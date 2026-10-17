@@ -25,7 +25,7 @@ def display_ui():
   return ui
 
 
-def test_one_frame_unknown_slc_keeps_only_display_sign_and_expires():
+def test_unknown_slc_keeps_only_display_sign_until_session_changes():
   ui = display_ui()
   adapter = RuntimeSnapshotAdapter(ui)
   valid = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.speed_limit
@@ -38,8 +38,11 @@ def test_one_frame_unknown_slc_keeps_only_display_sign_and_expires():
   assert not held.action_enabled
   assert all(value is None for value in (held.session_id, held.decision_id, held.presentation_id,
                                          held.pending_speed_limit_mps, held.effective_cap_mps))
-  ui.sm.logMonoTime['slcState'] = NOW + 151_000_000
-  assert adapter.build(ShellMode.ONROAD, now_ns=NOW + 151_000_000).onroad.speed_limit.kind == ObservationKind.UNKNOWN
+  # A long gap with no source information keeps the sign steady instead of flickering.
+  ui.sm.logMonoTime['slcState'] = NOW + 60_000_000_000
+  long_held = adapter.build(ShellMode.ONROAD, now_ns=NOW + 60_000_000_000).onroad.speed_limit
+  assert (long_held.kind, long_held.speed_limit_mps, long_held.status) == (
+    ObservationKind.VALID, valid.speed_limit_mps, 'display_hold')
 
 
 @pytest.mark.parametrize('metric', [False, True])
@@ -75,10 +78,10 @@ def test_unknown_gap_preserves_large_slc_number_offset_and_source(metric, target
     assert all(value is None for value in (obs.effective_cap_mps, obs.effective_cluster_target_mps,
                                            obs.accepted_speed_limit_mps, obs.session_id, obs.decision_id,
                                            obs.presentation_id, obs.pending_speed_limit_mps))
-  # Repeated unknown messages must not extend the hold.
+  # The hold does not expire on its own; only a new session or drive clears it.
   ui.sm.logMonoTime['slcState'] = NOW + 150_000_001
-  expired = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW + 150_000_001).onroad)
-  assert (expired.limit_text, expired.posted_text) == ('–', '–')
+  still = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW + 150_000_001).onroad)
+  assert (still.limit_text, still.posted_text) == (before.limit_text, before.posted_text)
   ui.sm.messages['slcState'] = slc
   ui.sm.logMonoTime['slcState'] = NOW + 160_000_000
   recovered = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW + 160_000_000).onroad)
@@ -92,20 +95,21 @@ def test_slc_hold_rejects_pending_foreign_session_and_new_drive():
     adapter.build(ShellMode.ONROAD, now_ns=NOW)
     ui.sm.messages['slcState'] = replacement
     ui.sm.logMonoTime['slcState'] = NOW + 50_000_000
-    assert adapter.build(ShellMode.ONROAD, now_ns=NOW + 50_000_000).onroad.speed_limit.kind == ObservationKind.UNKNOWN
+    assert adapter.build(ShellMode.ONROAD, now_ns=NOW + 50_000_000).onroad.speed_limit.kind == ObservationKind.STALE
   ui = display_ui()
   adapter = RuntimeSnapshotAdapter(ui)
   adapter.build(ShellMode.ONROAD, now_ns=NOW)
   ui.started_frame = 2
   ui.sm.messages['slcState'] = unknown_slc()
   ui.sm.logMonoTime['slcState'] = NOW + 50_000_000
-  assert adapter.build(ShellMode.ONROAD, now_ns=NOW + 50_000_000).onroad.speed_limit.kind == ObservationKind.UNKNOWN
-  ui = ui_fake()  # A live decision must not be retained as a display-only sign.
+  assert adapter.build(ShellMode.ONROAD, now_ns=NOW + 50_000_000).onroad.speed_limit.kind == ObservationKind.STALE
+  ui = ui_fake()  # A live decision may seed the sign, but never survives as an action identity.
   adapter = RuntimeSnapshotAdapter(ui)
   adapter.build(ShellMode.ONROAD, now_ns=NOW)
   ui.sm.messages['slcState'] = unknown_slc()
   ui.sm.logMonoTime['slcState'] = NOW + 50_000_000
-  assert adapter.build(ShellMode.ONROAD, now_ns=NOW + 50_000_000).onroad.speed_limit.kind == ObservationKind.UNKNOWN
+  held = adapter.build(ShellMode.ONROAD, now_ns=NOW + 50_000_000).onroad.speed_limit
+  assert held.decision_id is None and held.pending_speed_limit_mps is None and not held.action_enabled
 
 
 def test_compact_max_hides_during_gap_without_restarting_same_value_fade():
@@ -146,3 +150,18 @@ def test_new_drive_rearms_max_without_an_intervening_render():
   assert renderer._set_speed_opacity(new_drive, 9_000_000_000) == 0
   assert renderer._set_speed_changed_ns == 9_000_000_000
   assert renderer._set_speed_opacity(new_drive, 9_020_000_000) > 0
+
+
+def test_sources_row_keeps_each_source_while_no_limit_is_known():
+  readings = [NS(source='dashboard', enabled=True, observationKind='unknown', speedLimit=0.0),
+              NS(source='map', enabled=True, observationKind='unknown', speedLimit=0.0)]
+  # Held sign and a session with nothing to hold both keep the per-source rows up.
+  for replacement in (unknown_slc(), unknown_slc(session='another')):
+    ui = display_ui()
+    adapter = RuntimeSnapshotAdapter(ui)
+    adapter.build(ShellMode.ONROAD, now_ns=NOW)
+    replacement.sourceReadings = readings
+    ui.sm.messages['slcState'] = replacement
+    ui.sm.logMonoTime['slcState'] = NOW + 50_000_000
+    shown = adapter.build(ShellMode.ONROAD, now_ns=NOW + 50_000_000).onroad.speed_limit
+    assert [(row.source, row.kind) for row in shown.source_readings] == [('dashboard', 'unknown'), ('map', 'unknown')]

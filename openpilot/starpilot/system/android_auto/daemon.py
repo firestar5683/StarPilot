@@ -167,6 +167,15 @@ def main() -> int:
   if args.once:
     return run_once(args.duration, args.synthetic)
 
+  # Core 6 next to the renderer, before any thread starts so all inherit it
+  # (see placement.py); re-pinned by housekeeping after power saving.
+  from openpilot.common.hardware import COMMA_HARDWARE
+  placement = None
+  if COMMA_HARDWARE:
+    from openpilot.starpilot.system.android_auto.placement import RendererPlacement
+    placement = RendererPlacement(idle=False, report=lambda event: print(json.dumps(event), flush=True))
+    placement.start()
+
   try:
     os.unlink(ANDROID_AUTO_SOCKET_PATH)
   except FileNotFoundError:
@@ -197,6 +206,11 @@ def main() -> int:
           supervisor.maintain()
         except Exception:
           pass
+        if placement is not None:
+          try:
+            placement.maintain(time.monotonic())
+          except Exception:
+            pass
 
     threading.Thread(target=housekeeping, daemon=True).start()
     server = Server(ANDROID_AUTO_SOCKET_PATH, supervisor, source_verifier, authority.configuration_allowed)

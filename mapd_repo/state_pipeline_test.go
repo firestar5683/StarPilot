@@ -298,8 +298,8 @@ func TestSlowTileLoadExpiresGpsBeforePublication(t *testing.T) {
 		return tile, nil
 	}, time.Unix(0, 0))
 	event, out := decodedOutput(t, &s)
-	if event.Valid() || event.LogMonoTime() != boot || out.RoadStatus() != custom.MapdOut_SampleStatus_noGps || out.GpsMonoTime() != fix || out.GpsSource() != custom.MapdOut_GpsSource_external || out.SourceGeneration() != 7 || out.ProducerSession() == 0 || out.SpeedLimit() != 0 || out.WayId() != 0 || s.DistanceSinceLastPosition != 0 || s.Data.Loaded {
-		t.Fatalf("slow loader published stale road: valid=%v status=%v source=%v gps=%d generation=%d limit=%f", event.Valid(), out.RoadStatus(), out.GpsSource(), out.GpsMonoTime(), out.SourceGeneration(), out.SpeedLimit())
+	if event.Valid() || event.LogMonoTime() != boot || out.RoadStatus() != custom.MapdOut_SampleStatus_noGps || out.GpsMonoTime() != fix || out.GpsSource() != custom.MapdOut_GpsSource_external || out.SourceGeneration() != 7 || out.ProducerSession() == 0 || out.SpeedLimit() != 0 || out.WayId() != 0 || s.DistanceSinceLastPosition != 0 || !s.Data.Loaded {
+		t.Fatalf("slow loader published stale road or dropped the verified tile: valid=%v status=%v source=%v gps=%d generation=%d limit=%f", event.Valid(), out.RoadStatus(), out.GpsSource(), out.GpsMonoTime(), out.SourceGeneration(), out.SpeedLimit())
 	}
 	_, seg, err := capnp.NewMessage(capnp.SingleSegment(nil))
 	if err != nil {
@@ -319,6 +319,18 @@ func TestSlowTileLoadExpiresGpsBeforePublication(t *testing.T) {
 	path, err := extOut.Path()
 	if err != nil || path.Len() != 0 || extOut.HasPosition() {
 		t.Fatal("expired road leaked into extended output")
+	}
+
+	// The next fresh fix matches on the kept tile without loading it again.
+	next := syntheticSample(t, cereal.GpsSourceExternal, boot+50_000_000, 7, false, true)
+	boot = next.FixMonoTime + 100_000_000
+	s.ProcessGps(next, true, func(m.Position) (maps.Offline, error) {
+		t.Fatal("expired fix discarded the verified tile; the next fix reloaded it")
+		return maps.Offline{}, nil
+	}, time.Unix(1, 0))
+	event, out = decodedOutput(t, &s)
+	if !event.Valid() || out.RoadStatus() != custom.MapdOut_SampleStatus_matchedLimit || out.GpsMonoTime() != next.FixMonoTime {
+		t.Fatalf("fresh fix after a slow load did not match: status=%v valid=%v", out.RoadStatus(), event.Valid())
 	}
 }
 

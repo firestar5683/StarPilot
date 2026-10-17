@@ -13,7 +13,7 @@ from opendbc.car.structs import car
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
-from openpilot.system.manager.process import NativeProcess
+from openpilot.system.manager.process import NativeProcess, nativelauncher
 from openpilot.starpilot.maps.artifact import elf_arm64_static_file, source_digest
 from openpilot.starpilot.maps.storage import STORAGE_ANCHOR, offline_root as map_offline_root
 
@@ -239,12 +239,30 @@ def enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
               (Source.MAP in settings.selection.slots or settings.selection.mode is not SelectionMode.ORDERED))
 
 
+# Map evidence is background work beside card/selfdrived/controlsd on the
+# busiest cores: below normal priority (still SCHED_OTHER), and two Go
+# processors so the runtime and its GC workers stay off most cores.
+SHADOW_NICE = 10
+SHADOW_GOMAXPROCS = '2'
+
+
+def shadow_launcher(pargs: list[str], cwd: str, name: str) -> None:
+  """In the forked child before exec, so every Go thread inherits it and the manager is untouched."""
+  os.environ['GOMAXPROCS'] = SHADOW_GOMAXPROCS
+  try:
+    os.nice(SHADOW_NICE)
+  except OSError:
+    cloudlog.exception('mapd shadow could not lower its priority')
+  nativelauncher(pargs, cwd, name)
+
+
 class MapdShadowProcess(NativeProcess):
   """NativeProcess with bounded retry for an exited or unavailable shadow."""
 
   def __init__(self, clock=time.monotonic):
     super().__init__('mapd_shadow', str(PROVIDER_DIR.relative_to(BASEDIR)),
                      [str(PROVIDER_BINARY), '--shadow', '--offline-root', str(OFFLINE_ROOT)], enabled)
+    self.launcher = shadow_launcher
     self._clock = clock
     self._failures = 0
     self._retry_at = 0.0

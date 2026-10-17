@@ -179,9 +179,15 @@ class TestOptInLayouts(unittest.TestCase):
     self.assertIsNone(session._live_slc_message(NOW))
     ui.sm["pandaStates"][0].ignitionLine = True
     ui.sm["carControl"].longActive = False
-    self.assertIsNone(session._live_slc_message(NOW))
-    ui.sm["carControl"].longActive = True
+    self.assertIs(session._live_slc_message(NOW), ui.sm["slcState"])
+    # Fresh evidence is required even when a choice cannot command a cruise target.
     ui.sm["carState"].canValid = False
+    self.assertIsNone(session._live_slc_message(NOW))
+    ui.sm["carState"].canValid = True
+    ui.sm["carState"].canTimeout = True
+    self.assertIsNone(session._live_slc_message(NOW))
+    ui.sm["carState"].canTimeout = False
+    ui.sm.recv_frame["slcState"] = 0
     self.assertIsNone(session._live_slc_message(NOW))
 
   def test_slc_action_publisher_is_singleton_for_process(self):

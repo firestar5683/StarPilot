@@ -82,6 +82,9 @@ func plausibleLoadedWays(offlineMaps *maps.Offline, location log.GpsLocationData
 		if indexed {
 			i = int(candidates[c])
 		}
+		if !offlineMaps.WayMayMatch(i, location, 2) {
+			continue
+		}
 		way := offlineMaps.Ways.At(i)
 		if way.Id() <= 0 || way.Nodes.Len() < 2 {
 			continue

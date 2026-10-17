@@ -1,12 +1,14 @@
-"""Runs the car renderer on core 7 at the lowest priority.
+"""Runs the car renderer on core 6 at the lowest priority.
 Safeguards:
-- SCHED_IDLE, so the realtime driving and driver-monitoring models on core 7
-  always preempt it. Core 6 is no longer an option: since 2026-10-07
-  (c01f815736) selfdrive/ui/ui.py runs the comma UI there next to camerad, which
-  left a SCHED_IDLE renderer waiting ~70% of the time with the core 98% busy.
+- SCHED_IDLE, so camerad and the comma UI on core 6 always preempt it.
+- Core 6 again since 2026-10-14. On 2026-10-08 the comma UI took 65-75 % of it
+  and the renderer moved to core 7, but there it waited for a core 47 % of the
+  time behind modeld and dmonitoringmodeld (core 7 at 78 %). With the UI now
+  at 8-14 %, core 6 runs 16-24 % busy, and core 7 is left to the models and
+  Jetlink's frame loop.
 - Every renderer thread is placed, including ones the graphics driver starts later.
 - Parked, power saving turns cores 4-7 off. The pin is re-applied every
-  PLACEMENT_CHECK_INTERVAL seconds once core 7 is back, like selfdrive/ui/ui.py.
+  PLACEMENT_CHECK_INTERVAL seconds once core 6 is back, like selfdrive/ui/ui.py.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-RENDER_CORE = 7
+RENDER_CORE = 6
 PLACEMENT_CHECK_INTERVAL = 1.0  # s
 FALLBACK_NICE = 10  # if SCHED_IDLE is unavailable
 
@@ -38,11 +40,16 @@ def _core_online(core: int) -> bool:
 
 
 class RendererPlacement:
-  """Keeps every renderer thread SCHED_IDLE on RENDER_CORE while that core is online."""
+  """Keeps every thread of this process on RENDER_CORE while that core is online:
+  SCHED_IDLE for the renderer, or normal scheduling (idle=False) for
+  android_autod, whose stream thread otherwise sticks on whichever isolated
+  core it first woke on (core 7, waiting ~32 % of the time behind the models)."""
 
   def __init__(self, core: int = RENDER_CORE, report: Callable[[dict[str, Any]], None] | None = None,
-               thread_ids: Callable[[], list[int]] = _thread_ids, core_online: Callable[[int], bool] = _core_online):
+               thread_ids: Callable[[], list[int]] = _thread_ids, core_online: Callable[[int], bool] = _core_online,
+               idle: bool = True):
     self.core = core
+    self.idle = idle
     self.report = report or (lambda _event: None)
     self.thread_ids = thread_ids
     self.core_online = core_online
@@ -56,9 +63,10 @@ class RendererPlacement:
       self.next_check = float("inf")
       return
     inherited = sorted(os.sched_getaffinity(0))
-    policy = "idle"
+    policy = "idle" if self.idle else "normal"
     try:
-      os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+      if self.idle:
+        os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
     except (AttributeError, OSError):
       policy = f"nice{FALLBACK_NICE}"
       try:

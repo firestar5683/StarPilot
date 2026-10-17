@@ -3,7 +3,9 @@ package maps
 import (
 	"math"
 
+	"pfeifer.dev/mapd/cereal/log"
 	m "pfeifer.dev/mapd/math"
+	ms "pfeifer.dev/mapd/settings"
 )
 
 // Dense tiles hold hundreds of thousands of ways. The road matcher used to
@@ -73,10 +75,12 @@ func buildWayGrid(tile m.Box, ways []m.Box) *wayGrid {
 func (o *Offline) buildWayIndexes() {
 	count := o.Ways.Len()
 	boxes := make([]m.Box, count)
+	lanes := make([]uint8, count)
 	o.endpoints = make(map[m.Position][]int32)
 	for i := range count {
 		raw := o.waysRaw.At(i)
 		boxes[i] = m.Box{MinPos: m.NewPosition(raw.MinLat(), raw.MinLon()), MaxPos: m.NewPosition(raw.MaxLat(), raw.MaxLon())}
+		lanes[i] = raw.Lanes()
 		nodes, err := raw.Nodes()
 		if err != nil || nodes.Len() < 2 {
 			continue
@@ -90,6 +94,24 @@ func (o *Offline) buildWayIndexes() {
 		}
 	}
 	o.grid = buildWayGrid(o.Box(), boxes)
+	o.wayBoxes, o.wayLanes = boxes, lanes
+}
+
+// WayMayMatch is false only when way i cannot pass OnWay(location,
+// distanceMultiplier): the same box and match distance OnWay uses, read from
+// the index so a candidate that cannot match is never decoded. true when the
+// tile has no index.
+func (o *Offline) WayMayMatch(i int, location log.GpsLocationData, distanceMultiplier float32) bool {
+	if i < 0 || i >= len(o.wayBoxes) {
+		return true
+	}
+	lanes := o.wayLanes[i]
+	if lanes == 0 {
+		lanes = 2
+	}
+	width := float32(lanes) * ms.Settings.DefaultLaneWidth // as Way.Width
+	return MayBeWithin(o.wayBoxes[i], m.NewPosition(location.Latitude(), location.Longitude()),
+		MatchDistance(location, width, distanceMultiplier))
 }
 
 // WaysNear returns the indices, in tile order, of every way whose padded box

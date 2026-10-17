@@ -68,7 +68,17 @@ class TestSlcTouch(unittest.TestCase):
     touch.release(400, 630, state(presentation=10))
     self.assertEqual(emitted, [])
 
-  def test_adopt_same_accepted_limit_and_rejected_limit_remain_visible(self):
+  def test_adopt_hidden_once_limit_is_in_use(self):
+    adoptable = state(pending=False)
+    in_use = replace(adoptable, speed_limit=replace(adoptable.speed_limit, speed_limit_mps=18.0))
+    self.assertEqual(slc_controls(Profile.LARGE, in_use), ())
+    # Still offered when it would clear an override or raise a lower set speed.
+    overridden = replace(in_use, speed_limit=replace(in_use.speed_limit, driver_override_active=True))
+    self.assertEqual(slc_controls(Profile.LARGE, overridden)[0].label, "USE LIMIT")
+    self.assertEqual(slc_controls(Profile.LARGE, replace(in_use, cruise_kph=50.0))[0].label, "USE LIMIT")
+    self.assertEqual(slc_controls(Profile.LARGE, replace(in_use, cruise_kph=50.0, longitudinal_active=False)), ())
+
+  def test_adopt_new_limit_and_rejected_limit_remain_visible(self):
     emitted: list[OnroadRequest | SlcUiRequest] = []
     adoptable = state(pending=False)
     for profile, xy in ((Profile.LARGE, (150, 590)),):
@@ -77,11 +87,10 @@ class TestSlcTouch(unittest.TestCase):
       touch.release(*xy, adoptable)
       self.assertEqual(emitted[-1].kind, SlcActionKind.ADOPT)
     self.assertEqual(slc_controls(Profile.COMPACT, adoptable), ())
-    same_accepted = replace(adoptable, speed_limit=replace(adoptable.speed_limit, speed_limit_mps=18.0))
     previously_rejected = replace(adoptable, speed_limit=replace(adoptable.speed_limit, accepted_speed_limit_mps=None))
-    self.assertEqual(slc_controls(Profile.LARGE, same_accepted)[0].label, "USE LIMIT")
     self.assertEqual(slc_controls(Profile.LARGE, previously_rejected)[0].label, "USE LIMIT")
-    self.assertEqual(slc_controls(Profile.LARGE, replace(adoptable, longitudinal_active=False)), ())
+    # Use-limit is offered without longitudinal control; it is recorded without commanding a speed.
+    self.assertEqual(slc_controls(Profile.LARGE, replace(adoptable, longitudinal_active=False))[0].label, "USE LIMIT")
 
 
 class TestSlcDispatcher(unittest.TestCase):

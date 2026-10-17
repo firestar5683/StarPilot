@@ -12,6 +12,23 @@ from opendbc.car.interfaces import ACCEL_MIN, ACCEL_MAX
 
 MIN_EXCESSIVE_ACTUATION_COUNT = int(0.25 / DT_CTRL)
 MIN_LATERAL_ENGAGE_BUFFER = int(1 / DT_CTRL)
+# modeld writes ChestnutLoading/ChestnutActive only at startup, after a load and
+# on a failure; selfdrived reads them every 10th frame (10 Hz), not at 100 Hz.
+STATUS_PARAM_FRAMES = 10
+
+
+def throttled_param(owner, key: str, read):
+  """read(key), re-read at most every STATUS_PARAM_FRAMES of owner.sm's frames.
+  Without a frame counter (a test's message stub) it reads every time."""
+  frame = getattr(owner.sm, 'frame', None)
+  cache = vars(owner).setdefault('_status_params', {})
+  hit = cache.get(key)
+  if frame is not None and hit is not None and 0 <= frame - hit[0] < STATUS_PARAM_FRAMES:
+    return hit[1]
+  value = read(key)
+  if frame is not None:
+    cache[key] = (frame, value)
+  return value
 
 
 class ExcessiveActuationType(StrEnum):
@@ -57,7 +74,7 @@ class ExcessiveActuationCheck:
 
 
 def update_big_model_status(owner) -> bool:
-  big_active = owner.params.get("ChestnutActive")
+  big_active = throttled_param(owner, "ChestnutActive", owner.params.get)
   fresh = owner.sm.seen['modelV2'] and owner.sm.alive['modelV2'] and owner.sm.valid['modelV2']
   published_big = fresh and owner.sm['modelV2'].big
   if published_big and (big_active is True or owner.sm['deviceState'].chestnutPresent):

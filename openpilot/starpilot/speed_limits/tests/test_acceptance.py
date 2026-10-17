@@ -237,7 +237,7 @@ class TestAcceptance(unittest.TestCase):
     self.assertIsNone(result.history_write)
     self.assertIsNone(result.control_target_mps)
 
-  def test_modes_stock_owner_and_inactive_long_never_gain_control_or_consume_action(self):
+  def test_modes_stock_owner_and_inactive_long_never_gain_control_but_driver_is_still_asked(self):
     contexts = [
       Authority(Mode.OFF, LongitudinalOwner.NONE, False, False, False, False),
       Authority(Mode.LATERAL_ONLY, LongitudinalOwner.SYSTEM, True, False, False, False),
@@ -253,9 +253,10 @@ class TestAcceptance(unittest.TestCase):
         lost = step(acted.state, ABSENT, authority, Policy(fallback_previous=True), now_ns=2 * NS)
         for decision in (pending, acted, lost):
           self.assertIsNone(decision.control_target_mps)
-          self.assertIsNone(decision.history_write)
-        self.assertTrue(acted.action_receipt.acknowledged)
-        self.assertFalse(acted.action_receipt.consumed)
+        self.assertIsNone(pending.history_write)
+        # The driver's choice is recorded even though nothing here may act on it.
+        self.assertTrue(acted.action_receipt.consumed)
+        self.assertEqual(acted.state.accepted.candidate, LOW)
         self.assertEqual(acted.state.last_action_sequence, 0)
 
   def test_combined_and_long_only_have_equal_longitudinal_decisions(self):
@@ -297,14 +298,16 @@ class TestAcceptance(unittest.TestCase):
 
   def test_repeated_and_out_of_order_actions_are_seen_but_not_consumed(self):
     pending = self.pending()
-    ineligible = self.act(pending.state, ActionKind.ACCEPT, sequence=10, authority=PAUSED)
+    first = self.act(pending.state, ActionKind.ACCEPT, sequence=10, authority=PAUSED)
+    self.assertTrue(first.action_receipt.consumed)
+    seen = replace(pending.state, last_action_sequence=10)
     for sequence in (10, 9):
-      result = self.act(ineligible.state, ActionKind.ACCEPT, sequence=sequence, now_ns=2 * NS)
+      result = self.act(seen, ActionKind.ACCEPT, sequence=sequence, now_ns=2 * NS)
       self.assertFalse(result.action_receipt.consumed)
       self.assertEqual(result.action_receipt.status, "already_seen")
       self.assertEqual(result.state.last_action_sequence, 10)
       self.assertEqual(result.state.accepted.candidate, HIGH)
-    accepted = self.act(ineligible.state, ActionKind.ACCEPT, sequence=11, now_ns=2 * NS)
+    accepted = self.act(seen, ActionKind.ACCEPT, sequence=11, now_ns=2 * NS)
     self.assertTrue(accepted.action_receipt.consumed)
     self.assertEqual(accepted.state.accepted.candidate, LOW)
 
@@ -593,7 +596,7 @@ class TestAcceptance(unittest.TestCase):
       self.assertEqual(result.adoption_receipt.status, "different_presentation")
       self.assertIsNone(result.adoption)
 
-  def test_adopt_requires_active_system_long_authority_and_control_policy(self):
+  def test_adopt_is_recorded_for_any_authority_but_only_commands_with_system_long(self):
     rejected = self.act(self.pending().state, ActionKind.REJECT)
     request = self.adopt_request(rejected.state, sequence=1)
     contexts = [PAUSED, DISENGAGED, Authority(Mode.OFF, LongitudinalOwner.NONE, False, False, False, False),
@@ -603,11 +606,11 @@ class TestAcceptance(unittest.TestCase):
     for authority in contexts:
       with self.subTest(authority=authority):
         result = step(rejected.state, valid(LOW), authority, Policy(), now_ns=2 * NS, adopt=request)
-        self.assertFalse(result.adoption_receipt.consumed)
-        self.assertEqual(result.adoption_receipt.status, "no_longitudinal_authority")
-        self.assertIn(LOW, result.state.rejected)
+        self.assertTrue(result.adoption_receipt.consumed)
+        self.assertEqual(result.adoption_receipt.status, "adopt")
+        self.assertNotIn(LOW, result.state.rejected)
+        self.assertEqual(result.state.accepted.candidate, LOW)
         self.assertIsNone(result.adoption)
-        self.assertIsNone(result.history_write)
         self.assertIsNone(result.control_target_mps)
         self.assertEqual(result.state.last_action_sequence, 1)
     display = step(rejected.state, valid(LOW), ACTIVE, Policy(display_only=True), now_ns=2 * NS, adopt=request)
@@ -629,7 +632,7 @@ class TestAcceptance(unittest.TestCase):
 
   def test_adoption_and_confirmation_share_seen_sequence_watermark(self):
     shown = self.pending()
-    request = self.adopt_request(shown.state, sequence=5)
+    request = replace(self.adopt_request(shown.state, sequence=5), presentation_id=999)
     paused = step(shown.state, valid(LOW), PAUSED, Policy(), now_ns=NS, adopt=request)
     repeated_action = DriverAction("drive", 5, paused.state.pending.decision_id, ActionKind.ACCEPT)
     repeated = step(paused.state, valid(LOW), ACTIVE, Policy(), now_ns=2 * NS, action=repeated_action)

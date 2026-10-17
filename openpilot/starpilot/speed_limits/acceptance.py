@@ -391,12 +391,13 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
     if (old.presentation is None or old.presentation.presentation_id != adopt.presentation_id or
         old.presentation.candidate != candidate or adopt.candidate != candidate):
       adopt_receipt = replace(adopt_receipt, status="different_presentation")
-    elif not authority.can_control:
-      adopt_receipt = replace(adopt_receipt, status="no_longitudinal_authority")
     else:
+      # Recorded for any authority; only an owner of longitudinal control commands a target.
       state, history = _accept(replace(state, rejected=state.rejected - {candidate}), candidate, now_ns)
       assert state.accepted is not None
       adopt_receipt = replace(adopt_receipt, consumed=True, status="adopt")
+      if not authority.can_control:
+        return finish("driver_adopt", history=history)
       proposal = AdoptionProposal(state.session_id, adopt.sequence_id, adopt.presentation_id, state.accepted, candidate.speed_mps)
       return finish("driver_adopt", target=candidate.speed_mps, history=history, adoption=proposal)
 
@@ -437,13 +438,14 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
       receipt = replace(receipt, status="different_decision")
     elif old.pending is None or old.pending.decision_id != pending.decision_id:
       receipt = replace(receipt, status="not_presented")
-    elif not authority.can_control:
-      receipt = replace(receipt, status="no_longitudinal_authority")
     else:
+      # The driver is always asked, even with only lateral or stock ACC active; the
+      # choice is recorded as accepted history and only commands a target when
+      # this system owns longitudinal control.
       receipt = replace(receipt, consumed=True, status=action.kind.value)
       if action.kind is ActionKind.ACCEPT:
         state, history = _accept(state, candidate, now_ns)
-        return finish("driver_accept", target=candidate.speed_mps, history=history)
+        return finish("driver_accept", target=candidate.speed_mps if authority.can_control else None, history=history)
       state = _reject(state, candidate)
       return finish("driver_reject", target=None if state.rejection_capacity_exhausted else previous_target())
 

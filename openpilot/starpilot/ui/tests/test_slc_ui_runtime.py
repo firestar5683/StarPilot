@@ -1,5 +1,6 @@
 """UI request messages through the real SLC decision runtime, with no IPC."""
 
+from dataclasses import replace
 from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock
@@ -130,6 +131,45 @@ class TestSlcUiRuntime(unittest.TestCase):
     result = runtime.step(sm, cp, now_ns=START + 50_000_000, request=action)
     self.assertEqual(result.message.slcState.actionStatus, "adopt")
     self.assertIsNotNone(result.command)
+
+  def test_projected_use_limit_disappears_after_card_applies_rounded_set_speed(self):
+    from openpilot.selfdrive.car.cruise import VCruiseHelper
+    from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
+
+    for metric, limit in ((False, 70 / 2.2369362921), (True, 90.4 / 3.6)):
+      with self.subTest(metric=metric):
+        sm, cp = replay_inputs()
+        sm['slcDashboardObservation'].speedMps = limit
+        runtime = Runtime(parse({'SpeedLimitController': True, 'SLCPriority1': 'Dashboard'}), session_id='aa-adopt')
+        shown = runtime.step(sm, cp, now_ns=START).message
+        state = OnroadState(True, False, 20.0, 60.0, speed_limit_from_message(shown.slcState),
+                            metric=metric, longitudinal_active=True, slc_system_long_available=True)
+        control, = slc_controls(Profile.LARGE, state)
+        left, top, right, bottom = control.bounds
+        x, y = (left + right) / 2, (top + bottom) / 2
+        emitted = []
+        view = ProjectionOnroad.__new__(ProjectionOnroad)
+        view.native = NS(ui_state=NS(started=True))
+        view._state = state
+        view._slc_input = OnroadInput(emitted.append, Profile.LARGE)
+        self.assertTrue(view._slc_touch('down', x, y))
+        self.assertTrue(view._slc_touch('up', x, y))
+        request, = emitted
+        self.assertEqual(request.kind, SlcActionKind.ADOPT)
+
+        action = publish_request(shown.slcState, request, START)
+        sm.advance(START + 50_000_000)
+        result = runtime.step(sm, cp, now_ns=START + 50_000_000, request=action)
+        self.assertEqual(result.message.slcState.actionStatus, 'adopt')
+        self.assertIsNotNone(result.command)
+        cruise = VCruiseHelper.__new__(VCruiseHelper)
+        cruise.apply_slc_target(result.command.slcCruiseCommand.targetMps, metric)
+        applied = replace(state, cruise_kph=cruise.v_cruise_cluster_kph,
+                          speed_limit=speed_limit_from_message(result.message.slcState))
+        self.assertEqual(slc_controls(Profile.LARGE, applied), ())
+        # A later driver reduction must still offer the same limit again.
+        self.assertEqual(slc_controls(Profile.LARGE, replace(applied, cruise_kph=60.0))[0].request.kind,
+                         SlcActionKind.ADOPT)
 
   def test_old_press_cannot_publish_after_new_runtime_presentation_or_staleness(self):
     sm, cp = replay_inputs()

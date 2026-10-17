@@ -111,7 +111,8 @@ class LayoutPreviewRendererTests(unittest.TestCase):
     for profile in (Profile.LARGE, Profile.COMPACT):
       self.assertEqual([item.label for item in slc_controls(profile, pending)],
                        ["Apply 54", "Keep 49"] if profile == Profile.LARGE else ["ACCEPT", "REJECT"])
-      self.assertEqual(len(slc_controls(profile, sample_state("engaged", document))), 1 if profile == Profile.LARGE else 0)
+      # The engaged sample already uses its accepted limit, so there is no redundant adopt action.
+      self.assertEqual(slc_controls(profile, sample_state("engaged", document)), ())
     manual = sample_state("experimental", document)
     self.assertTrue(manual.experimental_enabled)
     self.assertIsNone(manual.visual_preview)

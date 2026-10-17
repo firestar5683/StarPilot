@@ -178,6 +178,8 @@ type Offline struct {
 	overlap    u.Curry[float64]
 	grid       *wayGrid               // padded way boxes by cell, see way_index.go
 	endpoints  map[m.Position][]int32 // way indices by first/last node
+	wayBoxes   []m.Box                // per-way bounding box, by way index
+	wayLanes   []uint8                // per-way lane tag, by way index
 }
 
 func (o *Offline) _box() m.Box {
