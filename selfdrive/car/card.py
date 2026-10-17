@@ -295,7 +295,9 @@ class Car:
       CS, FPCS = self.mock_carstate.update(CS, FPCS)
     self._inject_favorite_virtual_cruise_events(CS)
 
-    # Update radar tracks from CAN
+    # Update radar tracks from CAN. Honda Bosch-A bounds a coast that implies a reversing lead by ego speed.
+    if hasattr(self.RI, 'v_ego'):
+      self.RI.v_ego = CS.vEgo
     RD: structs.RadarDataT | None = self.RI.update(can_list)
 
     self.sm.update(0)
