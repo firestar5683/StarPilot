@@ -6,6 +6,7 @@ import pytest
 
 from opendbc.car import gen_empty_fingerprint, structs
 from opendbc.car.can_definitions import CanData
+from opendbc.car.honda.bosch_a_radar import bosch_a_range_offset_m
 from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.radar_interface import RadarInterface
@@ -52,6 +53,29 @@ def make_aux(frame_idx=0, rawc9=0, rawca=0, direct_vrel_raw=BOSCH_A_DIRECT_VREL_
   return bytes([B0, B1, B2, B3, B4, B5, B6, B7])
 
 
+# The DBC declares the Honda CHECKSUM (last byte bits 3:0) and 2-bit rolling COUNTER (bits 5:4), so opendbc
+# enforces both and synthesized frames must carry real framing.
+_TEST_COUNTERS: dict[int, int] = {}
+
+
+def _stamp(frame: CanData) -> CanData:
+  data = bytearray(frame.dat)
+  counter = (_TEST_COUNTERS.get(frame.address, -1) + 1) & 0x3
+  _TEST_COUNTERS[frame.address] = counter
+  data[7] = (data[7] & 0xC0) | (counter << 4)
+  checksum = 0
+  address = frame.address
+  while address > 0:
+    checksum += address & 0xF
+    address >>= 4
+  for i, b in enumerate(data):
+    if i == len(data) - 1:
+      b >>= 4
+    checksum += (b >> 4) + (b & 0xF)
+  data[7] |= (8 - checksum) & 0xF
+  return CanData(frame.address, bytes(data), frame.src)
+
+
 def sweep(bus, index, timestamp, with_aux=True):
   frames = []
   for slot in range(16):
@@ -64,7 +88,7 @@ def sweep(bus, index, timestamp, with_aux=True):
     if with_aux:
       address = 0x2C8 + slot if slot < 8 else 0x290 + slot - 8
       frames.append(CanData(address, make_aux(index, direct_vrel_raw=864, direct_vrel_uncertainty_raw=0), bus))
-  return [(timestamp, frames)]
+  return [(timestamp, [_stamp(frame) for frame in frames])]
 
 
 @pytest.mark.parametrize("identity", (CAR.HONDA_CIVIC_BOSCH, CAR.HONDA_CRV_5G))
@@ -78,7 +102,8 @@ def test_actual_parser_points_silence_retires_and_new_track_recovers(identity):
   second = ri.update(sweep(bus, 1, 1_066_666_667))
   assert not second.errors.canError
   assert len(second.points) == 1
-  assert second.points[0].dRel == pytest.approx(0.05712 * 1000 - 3.0)
+  # Firmware range scale 1/16 m per count plus the per-car ROM-default offset (Civic -346/128, CR-V -341/128).
+  assert second.points[0].dRel == pytest.approx(1000 / 16 + bosch_a_range_offset_m(identity))
   assert second.points[0].yRel == pytest.approx(0.0)
   stale = ri.update([(1_400_000_000, [])])
   assert stale is not None and not stale.points and stale.errors.radarUnavailableTemporary

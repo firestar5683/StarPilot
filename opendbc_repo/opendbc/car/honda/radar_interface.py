@@ -33,6 +33,16 @@ class RadarInterface(RadarInterfaceBase):
     self.trigger_msg = 0x445
     self.updated_messages = set()
 
+  @property
+  def v_ego(self):
+    return self.bosch_a.v_ego if self.bosch_a is not None else None
+
+  @v_ego.setter
+  def v_ego(self, value):
+    # Honda Bosch-A bounds a coast that implies a reversing lead by ego speed; card sets this each frame.
+    if self.bosch_a is not None:
+      self.bosch_a.v_ego = value
+
   def update(self, can_strings):
     if self.bosch_a is not None:
       return self.bosch_a.update(can_strings)
