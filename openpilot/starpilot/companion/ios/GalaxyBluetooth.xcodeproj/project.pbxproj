@@ -24,6 +24,8 @@
 		DE64BADD40C934E610D4D505 /* GalaxyWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF41C7E4AB86DEB71B85E4F6 /* GalaxyWebView.swift */; };
 		FACE00000000000000000001 /* PairingScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = FACE00000000000000000002 /* PairingScanner.swift */; };
 		D15C00000000000000000001 /* LANDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15C00000000000000000002 /* LANDiscovery.swift */; };
+		D15C00000000000000000011 /* AudioPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15C00000000000000000012 /* AudioPairing.swift */; };
+		D15C00000000000000000013 /* AudioPairingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15C00000000000000000014 /* AudioPairingSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +48,8 @@
 		F48B8D06AA8D8C4AC21E5982 /* Wire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wire.swift; sourceTree = "<group>"; };
 		FACE00000000000000000002 /* PairingScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingScanner.swift; sourceTree = "<group>"; };
 		D15C00000000000000000002 /* LANDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANDiscovery.swift; sourceTree = "<group>"; };
+		D15C00000000000000000012 /* AudioPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPairing.swift; sourceTree = "<group>"; };
+		D15C00000000000000000014 /* AudioPairingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPairingSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -71,6 +75,8 @@
 			isa = PBXGroup;
 			children = (
 				D15C00000000000000000002 /* LANDiscovery.swift */,
+				D15C00000000000000000014 /* AudioPairingSheet.swift */,
+				D15C00000000000000000012 /* AudioPairing.swift */,
 				114E3D37646B3A8626A8A232 /* NetworkTransport.swift */,
 				D3BBE1488FD8A83E3983FEDE /* GalaxyAssetStore.swift */,
 				5492C1BC71EB8D0DBF12896E /* PrivateLANHTTP.swift */,
@@ -164,6 +170,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				D15C00000000000000000001 /* LANDiscovery.swift in Sources */,
+				D15C00000000000000000013 /* AudioPairingSheet.swift in Sources */,
+				D15C00000000000000000011 /* AudioPairing.swift in Sources */,
 				754B6F8C853BDD47D7593948 /* NetworkTransport.swift in Sources */,
 				B2DE76B1CE686BDFB635FAAE /* GalaxyAssetStore.swift in Sources */,
 				887D84D1E3F00F0A5A8AD090 /* PrivateLANHTTP.swift in Sources */,

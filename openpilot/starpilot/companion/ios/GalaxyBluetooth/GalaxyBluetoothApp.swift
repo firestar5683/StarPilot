@@ -44,6 +44,9 @@ final class AppModel: ObservableObject {
     @Published var selectingDiscoveredComma = false
     private var lastRoute = "Reconnecting…"
     @Published var showDiagnostics = false
+    @Published var showAudioPairing = false
+    private var offerAudioPairing = false
+    lazy var audioPairing = AudioPairing(transport: { [weak self] in self?.transport })
     @Published var tab: CompanionTab = .galaxy
     @Published var developerMode = UserDefaults.standard.bool(forKey: "galaxy.app.developerMode") {
         didSet {
@@ -141,6 +144,7 @@ final class AppModel: ObservableObject {
         pairingKey = code.key
         if mode == .lan { mode = .automatic }
         connectionMessage = "Code scanned. Select your comma below to finish pairing."
+        offerAudioPairing = true
         bluetooth.scan()
     }
     init() {
@@ -200,6 +204,11 @@ final class AppModel: ObservableObject {
             lastAddressCheck = .distantPast
             connectionMessage = "Checking your comma…"
         } catch { connectionMessage = error.localizedDescription }
+    }
+    func startAudioPairing() {
+        guard transport.connected else { return }
+        showAudioPairing = true
+        audioPairing.start()
     }
     func openIfReady() {
         guard wantsConnection, transport.connected, !opened else { return }
@@ -332,6 +341,7 @@ final class AppModel: ObservableObject {
                 }
                 if transport.label != lastRoute { logConnection("Connection availability changed") }
                 if transport.connected { openIfReady(); connectionMessage = "Connected over \(transport.label)." }
+                if transport.connected, offerAudioPairing { offerAudioPairing = false; startAudioPairing() }
                 else { connectionMessage = "Wi-Fi unavailable. Pair over Bluetooth below, or check your comma’s IP address." }
             }
             do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
@@ -444,6 +454,9 @@ struct GalaxyRootView: View {
             if show { if model.developerMode { select(.live) }; model.showDiagnostics = false }
         }
         .onChange(of: bluetooth.connected) { _, connected in if connected { model.openIfReady() } }
+        .sheet(isPresented: $model.showAudioPairing, onDismiss: { model.audioPairing.dismiss() }) {
+            AudioPairingSheet(pairing: model.audioPairing) { model.showAudioPairing = false }
+        }
         .task(id: scenePhase) {
             model.setPhoneActive(scenePhase == .active)
             if scenePhase == .active { model.recoverGalaxy(reload: false); await model.assets.check() }
@@ -510,6 +523,10 @@ struct GalaxyRootView: View {
                     Text("Bluetooth pairing").font(.headline)
                     Text("On comma, open Settings → Pair phone. Scan its code here, then select your comma below. After pairing once, the app reconnects automatically.")
                         .font(.subheadline).foregroundStyle(.secondary)
+                    Button("Set up phone music") { model.startAudioPairing() }
+                        .buttonStyle(.bordered).disabled(!model.transport.connected)
+                    Text("Lets this iPhone play music through comma. Comma opens pairing for two minutes, then you tap comma in Settings → Bluetooth.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Button("Scan pairing code") { model.showPairingScanner = true }
                         .buttonStyle(.borderedProminent).tint(brandPurple)
                         .sheet(isPresented: $model.showPairingScanner) {

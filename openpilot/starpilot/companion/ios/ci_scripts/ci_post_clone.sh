@@ -17,6 +17,9 @@ swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-li
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/GalaxyRequestTransport.swift tests/GalaxyReadCacheRegression.swift -o "$test_dir/read-cache-tests"
 "$test_dir/read-cache-tests"
 
+swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/GalaxyRequestTransport.swift GalaxyBluetooth/AudioPairing.swift tests/AudioPairingRegression.swift -o "$test_dir/audio-pairing-tests"
+"$test_dir/audio-pairing-tests"
+
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/Wire.swift GalaxyBluetooth/HTTP.swift GalaxyBluetooth/GalaxyRequestTransport.swift GalaxyBluetooth/NetworkTransport.swift GalaxyBluetooth/PrivateLANHTTP.swift tests/SecretGoodLANRegression.swift -o "$test_dir/secretgood-lan-tests"
 "$test_dir/secretgood-lan-tests"
 python3 tests/check_secretgood_bundle.py
