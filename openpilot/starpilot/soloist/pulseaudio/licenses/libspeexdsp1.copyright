@@ -1,0 +1,83 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: speexdsp
+Source: https://gitlab.xiph.org/xiph/speexdsp
+
+Files: *
+Copyright:
+ 2002-2008 	Xiph.org Foundation
+ 2002-2008 	Jean-Marc Valin
+ 2005-2007	Analog Devices Inc.
+ 2005-2008	Commonwealth Scientific and Industrial Research 
+                        Organisation (CSIRO)
+ 1993, 2002, 2006 David Rowe
+ 2003-2006	EpicGames
+ 1992-1994	Jutta Degener, Carsten Bormann
+ 2003-2004	Mark Borgerding
+ 2008		Thorvald Natvig
+ 2011		Texas Instruments, Jyri Sarha
+ 2005		Christopher Montogomery
+ 2005-2007	Psi Systems, Inc.
+License: BSD-3-Clause
+
+Files: debian/*
+Copyright: 2022 Boyuan Yang <byang@debian.org>
+License: CC0-1.0
+
+Files: doc/manual.pdf
+Copyright:
+ 2002-2007 Jean-Marc Valin
+ 2002-2007 Xiph.org Foundation
+License: GFDL-1.1-or-later
+
+Files:
+ include/speex/speexdsp_types.h
+ libspeexdsp/smallft.c
+ libspeexdsp/smallft.h
+Copyright:
+ 1994-2002 Xiph.Org Foundation
+License: BSD-3-Clause
+Comment:
+ taken from libogg
+
+
+License: BSD-3-Clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions
+ are met:
+ .
+ - Redistributions of source code must retain the above copyright
+ notice, this list of conditions and the following disclaimer.
+ .
+ - Redistributions in binary form must reproduce the above copyright
+ notice, this list of conditions and the following disclaimer in the
+ documentation and/or other materials provided with the distribution.
+ .
+ - Neither the name of the Xiph.org Foundation nor the names of its
+ contributors may be used to endorse or promote products derived from
+ this software without specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR
+ CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+License: CC0-1.0
+ On Debian systems, the complete text of the Creative Commons Zero v1.0
+ Universal License can be found in "/usr/share/common-licenses/CC0-1.0".
+
+License: GFDL-1.1-or-later
+ Permission is granted to copy, distribute and/or modify this document
+ under the terms of the GNU Free Documentation License, Version 1.1 or
+ any later version published by the Free Software Foundation;
+ with no Invariant Section, with no Front-Cover Texts, and with no
+ Back-Cover.
+ .
+ On Debian systems, the complete text of the GNU Free Documentation License
+ version 1.2 can be found in "/usr/share/common-licenses/GFDL-1.2".

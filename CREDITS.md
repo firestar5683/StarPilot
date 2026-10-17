@@ -25,3 +25,7 @@ The vendored `opendbc_repo/opendbc/bluepilot_lateral` angle core, codecs and For
 ## RAV4 Continental ARS510 receiver
 
 The optional ACC-target and fused-track receivers and DBC preserve firestar5683's Dom integration from `b220a37f4bd119e402225a7aa16a7cd84878d0af` (Sea Turtles, 2026-10-13) and its ARS510 source attribution to ds-sebastian/ars510-radar `fb5b29c2b5999f34afeb6f7ac494a73949d66c67`, copyright 2026 ARS510 radar contributors. The complete MIT permission and warranty notice is retained in THIRD_PARTY_NOTICES.md. Startup/settings ownership is adapted to the current StarPilot architecture; no original firmware binaries or safety permissions are copied.
+
+## Spotify Bluetooth output
+
+Spotify's Bluetooth output binds the comma's BlueALSA A2DP source to the selected speaker through a process-local ALSA configuration, leaving the system ALSA default, soundd and the warning speaker untouched. That approach is adapted from firestar5683's RoadScore Bluetooth output (`roadscore/prototype/bluetooth_output.py`, firestar5683/StarPilot `RoadScore` at `249eb88b3a397db847e4a595d7e23b7e85d329e5`). The Soloist player itself is never included: each user downloads it from Spotify, and the PulseAudio server that carries its audio is vendored unmodified from Ubuntu (see THIRD_PARTY_NOTICES.md).

@@ -438,6 +438,9 @@ class Session:
         item["media_type"] = one(media, 1)
         item["display_id"], item["display_type"] = one(media, 6), one(media, 7)
         item["video_configs"] = [parse_fields(c) for c in media.get(4, []) if isinstance(c, bytes)]
+        if one(media, 2) is not None:
+          item["audio_type"] = one(media, 2)
+          item["audio_configs"] = [parse_fields(c) for c in media.get(3, []) if isinstance(c, bytes)]
       if isinstance(one(fields, 4), bytes):
         item["input"] = True
         try:
@@ -451,7 +454,7 @@ class Session:
       channels.append(item)
     # Everything but the channel list: make, model, year, software and, on newer units, headunit_info.
     head_unit = redact_head_unit(describe_fields({number: values for number, values in response.items() if number != 1}))
-    self.event("discovered", channels=[{k: (json_fields_list(v) if k == "video_configs" else str(v) if k == "input_config" else v)
+    self.event("discovered", channels=[{k: (json_fields_list(v) if k in ("video_configs", "audio_configs") else str(v) if k == "input_config" else v)
                                         for k, v in ch.items()} for ch in channels],
                head_unit=head_unit)
     return channels
@@ -523,6 +526,7 @@ class ProjectionSession(Session):
     self.epoch_acked = 0
     self.video_confirmed = False
     self.input_channel: int | None = None
+    self.audio = None  # MediaAudio, attached by the supervisor when Spotify plays through Android Auto
     self.input_events = 0
     self.touch: TouchMapper | None = None
     self.touch_events: deque[TouchEvent] = deque(maxlen=128)
@@ -621,6 +625,8 @@ class ProjectionSession(Session):
     except ValueError:
       fields = {}  # non-protobuf payload on a channel this sender never opened
     mode = self.mode
+    if self.audio is not None and self.audio.handle(channel, kind, fields):
+      return
     if channel == 0:
       if kind == MSG_PING_REQUEST:
         self.send(0, MSG_PING_RESPONSE, field(1, one(fields, 1, 0)))

@@ -1,0 +1,107 @@
+"""A private PulseAudio server that carries Soloist's audio to one selected output.
+
+AGNOS ships PulseAudio's client library but no server, and Soloist only plays through PulseAudio or
+PipeWire. The matching Ubuntu 24.04 server (the same 16.1+dfsg1-2ubuntu10.1 build as the comma's own
+libpulsecommon) is vendored in ./pulseaudio; see its README for provenance and licenses.
+
+The server never becomes the system's audio: it runs with no default script, owns one sink, and is
+reachable only through a socket in this feature's private run directory. The global ALSA default,
+soundd and the warning speaker are untouched. Outputs:
+
+- bluetooth: the comma's existing BlueALSA A2DP source, through a process-local ALSA configuration.
+  That approach is adapted from firestar5683's RoadScore Bluetooth output
+  (firestar5683/StarPilot@249eb88b3a397db847e4a595d7e23b7e85d329e5, roadscore/prototype/bluetooth_output.py).
+- android_auto: a real-time pipe of 48 kHz stereo PCM that android_autod sends on the car's media channel.
+- test: a null sink, to check Spotify without a speaker.
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+from openpilot.starpilot.soloist.paths import Layout, private_dir
+from openpilot.starpilot.soloist.preferences import ADDRESS, Preferences
+
+SERVER_ROOT = Path(__file__).resolve().parent / 'pulseaudio'
+PCM_NAME = 'starpilot_spotify'
+SINK_NAME = 'spotify'
+SYSTEM_ALSA_CONFIG = Path('/usr/share/alsa/alsa.conf')
+# The Android Auto media channel format every head unit must offer; the pipe runs on the system clock,
+# so it produces exactly real-time audio (silence when paused) whether or not anyone reads it.
+PIPE_RATE, PIPE_CHANNELS, PIPE_BYTES_PER_FRAME = 48000, 2, 4
+
+
+class BackendUnavailable(RuntimeError):
+  pass
+
+
+def bundle_ready(root: Path = SERVER_ROOT) -> bool:
+  return os.access(root / 'bin' / 'pulseaudio', os.X_OK) and (root / 'modules').is_dir()
+
+
+def alsa_config(address: str, base: Path = SYSTEM_ALSA_CONFIG) -> str:
+  """Process-local ALSA config: the system configuration plus one named BlueALSA A2DP PCM."""
+  if not ADDRESS.fullmatch(address):
+    raise BackendUnavailable('Choose a Bluetooth speaker or car first')
+  if any(character in str(base) for character in '\n\r<>"'):
+    raise BackendUnavailable('Invalid system ALSA configuration path')
+  return (f'<{base}>\n\npcm.{PCM_NAME} {{\n  type bluealsa\n  device "{address}"\n  profile "a2dp"\n' +
+          '  hint { show on description "StarPilot Spotify output" }\n}\n')
+
+
+@dataclass(frozen=True)
+class Launch:
+  argv: list[str]
+  env: dict[str, str]
+
+
+def runtime_paths(layout: Layout) -> dict[str, Path]:
+  run = layout.runtime
+  return {'run': run, 'home': run / 'home', 'pulse': run / 'pulse', 'socket': run / 'pulse' / 'native', 'alsa': run / 'alsa.conf',
+          'android_auto': run / 'android-auto.pcm'}
+
+
+def android_auto_pipe(layout: Layout | None = None) -> Path:
+  return runtime_paths(layout or Layout.default())['android_auto']
+
+
+def server_launch(layout: Layout, prefs: Preferences, *, alsa_base: Path = SYSTEM_ALSA_CONFIG, root: Path = SERVER_ROOT) -> Launch:
+  paths = runtime_paths(layout)
+  for key in ('run', 'home', 'pulse'):
+    private_dir(paths[key])
+  paths['socket'].unlink(missing_ok=True)
+  env = {
+    'HOME': str(paths['home']), 'XDG_RUNTIME_DIR': str(paths['run']), 'XDG_CONFIG_HOME': str(paths['home']),
+    'PULSE_RUNTIME_PATH': str(paths['pulse']), 'PULSE_STATE_PATH': str(paths['pulse']),
+    'LD_LIBRARY_PATH': str(root / 'lib'), 'PATH': '/usr/bin:/bin',
+  }
+  if prefs.output == 'bluetooth':
+    paths['alsa'].write_text(alsa_config(prefs.output_address, alsa_base))
+    os.chmod(paths['alsa'], 0o600)
+    env['ALSA_CONFIG_PATH'] = str(paths['alsa'])
+    sink = f'module-alsa-sink device={PCM_NAME} sink_name={SINK_NAME} channels=2 tsched=0'
+  elif prefs.output == 'android_auto':
+    paths['android_auto'].unlink(missing_ok=True)
+    sink = (f'module-pipe-sink file={paths["android_auto"]} sink_name={SINK_NAME} format=s16le rate={PIPE_RATE} ' +
+            f'channels={PIPE_CHANNELS} use_system_clock_for_timing=yes')
+  else:
+    sink = f'module-null-sink sink_name={SINK_NAME}'
+  argv = [str(root / 'bin' / 'pulseaudio'), '--daemonize=no', '--system=no', '--use-pid-file=no', '-n',
+          '--exit-idle-time=-1', '--realtime=no', '--high-priority=no', '--disallow-exit', '--log-target=stderr',
+          '--log-level=notice', f'--dl-search-path={root / "modules"}',
+          '-L', f'module-native-protocol-unix socket={paths["socket"]} auth-anonymous=1', '-L', sink]
+  return Launch(argv, env)
+
+
+def player_launch(layout: Layout, prefs: Preferences, api_key: str) -> Launch:
+  paths = runtime_paths(layout)
+  private_dir(layout.state)
+  private_dir(layout.cache)
+  # The key must be an argument: Soloist documents no file, fd or environment alternative.
+  argv = [str(layout.current / 'soloist'), '--device-name', prefs.device_name, '--api-key', api_key,
+          '--data-dir', str(layout.state), '--cache-dir', str(layout.cache), '--cache-size', str(prefs.cache_mb),
+          '--initial-volume', str(prefs.initial_volume), '--ws', '127.0.0.1:0']
+  env = {'HOME': str(paths['home']), 'XDG_RUNTIME_DIR': str(paths['run']), 'PATH': '/usr/bin:/bin',
+         'PULSE_SERVER': f'unix:{paths["socket"]}', 'PULSE_SINK': SINK_NAME}
+  return Launch(argv, env)

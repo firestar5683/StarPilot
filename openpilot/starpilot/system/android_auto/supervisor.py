@@ -1181,8 +1181,15 @@ class Supervisor:
     self._set(view=source.label, encoder=getattr(encoder, "backend", "libx264"), target_fps=fps)
     watch = LinkWatch(lease, self.log).start()
     try:
+      from openpilot.starpilot.system.android_auto.media_audio import MediaAudio
+      session.audio = MediaAudio.create(session, self.log)
+    except Exception as error:  # music is optional; projection must never depend on it
+      self.log("media_audio_unavailable", error=str(error))
+    try:
       self._stream(session, encoder, source, watch, interval)
     finally:
+      if session.audio is not None:
+        session.audio.close()
       watch.stop()
       source.close()
       encoder.close()
@@ -1206,6 +1213,7 @@ class Supervisor:
     recoveries: list[float] = []  # when the hardware encoder was reopened, this session
     encode_peak = 0.0
     wait_for_frame = False
+    audio = getattr(session, "audio", None)
     self._stage("streaming")
     while not self._stop.is_set():
       pass_started = time.monotonic()
@@ -1221,6 +1229,15 @@ class Supervisor:
           break
         handled = session.pump(0.0)
       session.check_progress()
+      if audio is not None:
+        try:
+          audio.service()  # non-blocking: drains the Spotify pipe and sends within the car's audio credit
+        except (OSError, TimeoutError):
+          raise  # the link itself failed; video would fail the same way
+        except Exception as error:
+          self.log("media_audio_failed", error=f"{type(error).__name__}: {error}")
+          audio.close()
+          audio = session.audio = None
       now = time.monotonic()
       wait_for_frame = True
       if session.focused:
@@ -1274,7 +1291,8 @@ class Supervisor:
           self._set(view=source.label)
         window = [t for t in sent_times if now - t <= 5.0]
         ordered = sorted(ages)
-        stats = {**session.stats(), "fps": round(len(window) / 5.0, 1), "encode_ms": round(encoder.last_encode_ms, 1),
+        audio_stats = {"media_audio": audio.status()} if audio is not None else {}
+        stats = {**session.stats(), **audio_stats, "fps": round(len(window) / 5.0, 1), "encode_ms": round(encoder.last_encode_ms, 1),
                  "encode_peak_ms": round(encode_peak, 1), "encoder_recoveries": len(recoveries),
                  "frame_age_p95_ms": round(ordered[int(len(ordered) * 0.95) - 1] * 1000) if ordered else None,
                  "uptime_s": round(now - started), "frames_from_view": source.frames, "wifi_dbm": watch.wifi_dbm}

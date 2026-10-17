@@ -92,6 +92,14 @@
       "description": "Show StarPilot on your car’s screen",
       "availability": "local-only",
       "visibility": "authenticated"
+    },
+    {
+      "name": "Spotify",
+      "path": "/spotify",
+      "icon": "bi-spotify",
+      "description": "Play Spotify through your car or a Bluetooth speaker",
+      "availability": "local-only",
+      "visibility": "authenticated"
     }
   ]
 }

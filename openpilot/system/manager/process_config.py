@@ -74,6 +74,11 @@ def android_auto_enabled(started: bool, params: Params, CP: car.CarParams) -> bo
   # role until the user enables projection on supported hardware.
   return COMMA_HARDWARE and platform.system() == "Linux" and params.get_bool("AndroidAutoEnabled")
 
+def spotify_enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # One stat of a feature-owned flag; Spotify keeps its settings out of Params.
+  from openpilot.starpilot.soloist.paths import enabled
+  return COMMA_HARDWARE and platform.system() == "Linux" and enabled()
+
 def jetlink_enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
   if not COMMA_HARDWARE or platform.system() != 'Linux':
     return False
@@ -140,6 +145,7 @@ procs = [
   JetlinkProcess("jetlinkd", "openpilot.starpilot.system.jetlink.daemon", jetlink_enabled, enabled=COMMA_HARDWARE),
   PythonProcess("android_autod", "openpilot.starpilot.system.android_auto.daemon", android_auto_enabled, enabled=COMMA_HARDWARE,
                 restart_on_exit=True),  # boot can race bluetoothd (NoSuchUnit)
+  PythonProcess("spotifyd", "openpilot.starpilot.soloist.supervisor", spotify_enabled, enabled=COMMA_HARDWARE, restart_on_exit=True),
   # Boot can race the audio device; selfdrived blocks engagement while soundd is down.
   PythonProcess("soundd", "openpilot.selfdrive.ui.soundd", driverview, restart_on_exit=True),
   PythonProcess("locationd", "openpilot.selfdrive.locationd.locationd", only_onroad),

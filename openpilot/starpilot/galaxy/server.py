@@ -67,7 +67,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
                 android_auto_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
-                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None, toyota_tools=None, replay_client=None, replay_root=None):
+                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None, toyota_tools=None, replay_client=None, replay_root=None,
+                spotify_setup=None):
   training_results_source = training_results if training_results is not None else FlmTrainingResults()
   cloud = cloud_provider
   hotspot_source = hotspot
@@ -178,6 +179,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   bluetooth_lock = threading.Lock()
   bluetooth_source = bluetooth
   aa_setup_source = android_auto_setup
+  spotify_setup_source = spotify_setup
   aa_client_source = android_auto_client
   aa_source_lock = threading.Lock()
   aa_registry_source = None
@@ -345,6 +347,18 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                                           enable_bluetooth=enable_bluetooth)
         server.android_auto_setup_source = aa_setup_source
     return aa_setup_source
+
+  def spotify_owner():
+    nonlocal spotify_setup_source
+    with bluetooth_lock:
+      if spotify_setup_source is None:
+        from openpilot.starpilot.galaxy.spotify_setup import SpotifySetup
+        def paired_devices(identity):
+          return bluetooth_owner().snapshot(session=identity).get('devices', [])
+        spotify_setup_source = SpotifySetup(parked=configuration_allowed, session_valid=bluetooth_session_valid,
+                                            paired_devices=paired_devices)
+        server.spotify_setup_source = spotify_setup_source
+    return spotify_setup_source
 
   def aa_source_registry():
     nonlocal aa_registry_source
@@ -857,6 +871,22 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           result = aa_setup_owner().status(identity)
         except Exception:
           self.json(503, {'error': 'Android Auto setup is unavailable'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+      elif path == '/api/spotify/setup':
+        if not self.require_session():
+          return
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          result = spotify_owner().status(identity)
+        except Exception:
+          self.json(503, {'error': 'Spotify setup is unavailable'})
         else:
           if self.settings_session() == identity:
             self.json(200, result)
@@ -1397,6 +1427,42 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         finally:
           self.connection.settimeout(old_timeout)
         return
+      if path == '/api/spotify/upload':
+        if not self.require_session():
+          return
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        if self.headers.get('Transfer-Encoding') is not None or \
+           self.headers.get('Content-Type', '').lower() != 'application/octet-stream':
+          self.json(415, {'error': 'Binary .tar.gz upload required'})
+          return
+        try:
+          size = int(self.headers.get('Content-Length', ''))
+        except ValueError:
+          size = -1
+        from openpilot.starpilot.soloist.package import MAX_UPLOAD_BYTES
+        if not 0 < size <= MAX_UPLOAD_BYTES:
+          self.json(413, {'error': 'Soloist download size is invalid'})
+          return
+        from openpilot.starpilot.galaxy.spotify_setup import SetupRejected as SpotifyRejected
+        old_timeout = self.connection.gettimeout()
+        try:
+          self.connection.settimeout(30.0)
+          result = spotify_owner().upload(identity, self.rfile, size)
+        except SpotifyRejected as error:
+          self.json(409, {'error': str(error)})
+        except (OSError, TimeoutError):
+          self.json(503, {'error': 'Soloist upload failed'})
+        else:
+          if self.settings_session() == identity:
+            self.json(202, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+        finally:
+          self.connection.settimeout(old_timeout)
+        return
       if path not in ('/api/connect/provider', '/api/developer/intense-logging', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
@@ -1405,6 +1471,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/galaxy/pair', '/api/galaxy/unpair', '/api/galaxy/device-name', '/api/galaxy/hotspot', '/api/cameras/snapshot',
                       '/api/android-auto/layout', '/api/android-auto/enable', '/api/android-auto/control', '/api/android-auto/pairing',
                       '/api/android-auto/pairing/response', '/api/android-auto/pairing/cancel', '/api/android-auto/pairing/select',
+                      '/api/spotify/enable', '/api/spotify/key', '/api/spotify/preferences', '/api/spotify/control', '/api/spotify/maintenance',
                       '/api/ui/layout', '/api/ui/layout/preview', '/api/favorites/slots',
                       '/api/maps/start', '/api/maps/cancel', '/api/flm/start', '/api/flm/cancel', '/api/flm/live-action',
                       '/api/flm/train', '/api/flm/recommend', '/api/flm/save-report',
@@ -1419,7 +1486,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         self.json(405, {'error': 'Method unavailable'})
         return
       if (path.startswith(('/api/replay/', '/api/recordings/', '/api/connect/', '/api/developer/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/flm/', '/api/bluetooth/',
-                           '/api/android-auto/', '/api/controllers/', '/api/vehicle-selection/', '/api/toyota-tools/',
+                           '/api/android-auto/', '/api/spotify/', '/api/controllers/', '/api/vehicle-selection/', '/api/toyota-tools/',
                            '/api/models/', '/api/ui/', '/api/favorites/', '/api/sounds/', '/api/software/',
                            '/api/drives/', '/api/navigation/', '/api/drive-state/', '/api/sentry/', '/api/crash-reports/')) and
           not self.require_session()):
@@ -1992,6 +2059,37 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             aa_registry_source.revoke(identity)
         self.respond(200, b'{"authenticated":false}', cookie='galaxy_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
         return
+      if path.startswith('/api/spotify/'):
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        from openpilot.starpilot.galaxy.spotify_setup import SetupRejected as SpotifyRejected
+        try:
+          owner = spotify_owner()
+          if path == '/api/spotify/enable' and type(payload) is dict and set(payload) == {'enabled'}:
+            result = owner.enable(identity, payload['enabled'])
+          elif path == '/api/spotify/key' and type(payload) is dict and set(payload) == {'key'}:
+            result = owner.set_key(identity, payload['key'])
+          elif path == '/api/spotify/preferences' and type(payload) is dict:
+            result = owner.save_preferences(identity, payload)
+          elif path == '/api/spotify/control' and type(payload) is dict and set(payload) in ({'action'}, {'action', 'args'}):
+            result = owner.control(identity, payload['action'], payload.get('args', {}))
+          elif path == '/api/spotify/maintenance' and type(payload) is dict and set(payload) == {'action'}:
+            result = owner.maintenance(identity, payload['action'])
+          else:
+            self.json(400, {'error': 'Invalid Spotify request'})
+            return
+        except SpotifyRejected as error:
+          self.json(409, {'error': str(error)})
+        except (OSError, RuntimeError):
+          self.json(503, {'error': 'Spotify is unavailable'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+        return
       if path == '/api/android-auto/enable':
         if type(payload) is not dict or set(payload) not in ({'enabled'}, {'enabled', 'enableBluetooth'}) or \
            type(payload['enabled']) is not bool or type(payload.get('enableBluetooth', False)) is not bool or \
@@ -2493,6 +2591,26 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
 
     def do_DELETE(self):
       if not self.local_request(mutation=True):
+        return
+      if urlsplit(self.path).path == '/api/spotify':
+        if not self.require_session():
+          return
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        from openpilot.starpilot.galaxy.spotify_setup import SetupRejected as SpotifyRejected
+        try:
+          result = spotify_owner().remove(identity)
+        except SpotifyRejected as error:
+          self.json(409, {'error': str(error)})
+        except (OSError, RuntimeError):
+          self.json(503, {'error': 'Spotify data could not be removed'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
         return
       if urlsplit(self.path).path != '/api/android-auto/identity':
         self.json(405, {'error': 'Method unavailable'})

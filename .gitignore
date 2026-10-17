@@ -18,6 +18,7 @@ a.out
 .venv-linux-arm64/
 bin/
 !openpilot/starpilot/galaxy/bin/
+!openpilot/starpilot/soloist/pulseaudio/bin/
 
 # created at launch for comma hardware PYTHONPATH (PC uses editable installs via pyproject.toml)
 /msgq
@@ -44,6 +45,8 @@ bin/
 *.os-*
 *.so
 !openpilot/tools/replay/libmedia_mux.so
+!openpilot/starpilot/soloist/pulseaudio/lib/*.so
+!openpilot/starpilot/soloist/pulseaudio/modules/*.so
 *.a
 st[0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z]
 *.unchunked

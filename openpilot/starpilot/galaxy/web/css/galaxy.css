@@ -1739,3 +1739,16 @@ progress { max-width: 100%; accent-color: var(--primary); }
   .gx-replay__controls { gap: 4px; }
   .gx-replay__player:fullscreen .gx-replay__video { min-height: 0; flex: 1; }
 }
+
+/* Spotify */
+.gx-spotify-now { display: grid; gap: var(--sp-3); }
+.gx-spotify-now__main { display: flex; gap: var(--sp-3); align-items: center; min-width: 0; }
+.gx-spotify-now__art { flex: none; width: 72px; height: 72px; border-radius: var(--radius-sm); object-fit: cover; background: var(--surface-container-high); }
+.gx-spotify-now__art--empty { display: grid; place-items: center; font-size: 1.75rem; color: var(--on-surface-variant); }
+.gx-spotify-now__text { min-width: 0; }
+.gx-spotify-now__text h3, .gx-spotify-now__text p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-spotify-now__progress { display: grid; gap: 2px; }
+.gx-spotify-now__progress input, .gx-spotify-now__volume input { width: 100%; accent-color: var(--primary); }
+.gx-spotify-now__controls { align-items: center; flex-wrap: wrap; }
+.gx-spotify-now__play { min-width: 64px; font-size: 1.4rem; }
+.gx-spotify-now__volume { display: flex; flex: 1 1 160px; align-items: center; gap: var(--sp-2); min-width: 0; }
