@@ -77,6 +77,24 @@ class BluetoothHttpTest(unittest.TestCase):
     finally:
       connection.close()
 
+  def test_accept_pair_opens_a_window_and_prepares_the_music_receiver(self):
+    self.stop()
+    aa_setup = mock.Mock()
+    aa_setup.enabled.return_value = False
+    self.server = make_server(port=0, owner=self.access, bluetooth=self.bluetooth, android_auto_setup=aa_setup, parked=lambda: True)
+    self.worker = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True)
+    self.worker.start()
+    _, _, headers = self.request('/api/auth/login', {'password': 'password123'})
+    cookie = headers['Set-Cookie'].split(';', 1)[0]
+    with mock.patch('openpilot.starpilot.galaxy.spotify_setup.SpotifySetup.prepare_phone_pairing') as prepare:
+      self.assertEqual(self.request('/api/bluetooth/action', {'operation': 'accept_pair'}, cookie)[0], 200)
+      prepare.assert_called_once_with()
+      self.assertEqual(self.request('/api/bluetooth/action', {'operation': 'accept_pair', 'address': 'AA:BB:CC:DD:EE:FF'}, cookie)[0], 400)
+      prepare.assert_called_once_with()
+    operation, address, *_ = self.bluetooth.calls[-1]
+    self.assertEqual((operation, address), ('accept_pair', None))
+    self.assertEqual(len(self.bluetooth.calls), 1)
+
   def test_authenticated_status_and_parked_mutation(self):
     self.assertEqual(self.request('/api/bluetooth/status')[0], 401)
     code, _, headers = self.request('/api/auth/login', {'password': 'password123'})

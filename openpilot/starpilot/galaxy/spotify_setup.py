@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from openpilot.starpilot.soloist import backend, credentials, package, preferences
+from openpilot.starpilot.soloist.phone_audio import A2DP_SOURCE
 from openpilot.starpilot.soloist.paths import CONTROL_SOCKET, Layout, private_dir
 
 LINKS = {
@@ -158,11 +159,20 @@ class SpotifySetup:
     self._require_session(session)
     current = preferences.load(self.layout)
     fields = {'deviceName': 'device_name', 'cacheMb': 'cache_mb', 'initialVolume': 'initial_volume',
-              'output': 'output', 'outputAddress': 'output_address'}
+              'output': 'output', 'outputAddress': 'output_address', 'source': 'source', 'phoneAddress': 'phone_address'}
     if not isinstance(payload, dict) or not payload or set(payload) - set(fields):
       raise SetupRejected('Invalid Spotify settings')
     values = {**current.__dict__, **{fields[key]: value for key, value in payload.items()}}
     changes_output = values['output'] != current.output or values['output_address'] != current.output_address
+    if values['source'] != current.source or values['phone_address'] != current.phone_address:
+      self._require_parked('change the music source')
+      if values['phone_address']:
+        match = next((d for d in self.status(session)['devices'] if d['address'] == str(values['phone_address']).upper()), None)
+        if match is None:
+          raise SetupRejected('Pair your phone on the Bluetooth page first')
+        values['phone_name'] = match['name']
+      else:
+        values['phone_name'] = ''
     if changes_output:
       self._require_parked('change where music plays')
       if values['output'] == 'bluetooth' and values['output_address']:
@@ -177,6 +187,31 @@ class SpotifySetup:
     except (ValueError, TypeError) as error:
       raise SetupRejected(str(error)) from error
     return self.status(session)
+
+  def prepare_phone_pairing(self) -> None:
+    """Advertise the music receiver before a phone pairs, so the phone offers the comma as an audio output."""
+    if not (self.layout.enabled_flag.exists() and self.client.available):
+      return
+    try:
+      self.client.call('prepare_phone_pairing')
+    except (OSError, RuntimeError, ValueError):
+      pass
+
+  def adopt_phone(self, address: str, name: str, uuids: object) -> bool:
+    """Offer a newly paired phone as the music source without overriding anything the owner chose."""
+    if not isinstance(uuids, (list, tuple)) or A2DP_SOURCE not in {str(value).lower() for value in uuids}:
+      return False
+    current = preferences.load(self.layout)
+    if current.phone_address:
+      return False
+    values = {**current.__dict__, 'phone_address': str(address).upper(), 'phone_name': str(name)}
+    if not package.release_status(self.layout).get('installed'):
+      values['source'] = 'phone'
+    try:
+      preferences.save(preferences.validated(values), self.layout)
+    except (ValueError, TypeError):
+      return False
+    return True
 
   def control(self, session: tuple, action: object, args: object) -> dict:
     self._require_session(session)

@@ -1,13 +1,13 @@
-"""Spotify music over the head unit's media audio channel, as a phone sends it.
+"""Music from Spotify or a Bluetooth phone over the head unit's media audio channel, as a phone sends it.
 
-The channel is opened only when Spotify is set to play through Android Auto. Every step is driven
+The channel is opened only when music is set to play through Android Auto. Every step is driven
 by messages the session loop already reads, so nothing here waits on the car and the video path
 keeps its timing: open → setup (PCM) → audio focus → start → timestamped PCM with ACK credit.
 
 PCM comes from the Spotify supervisor's real-time pipe (48 kHz, 16-bit, stereo), which runs on the
 system clock and carries silence while paused. Focus is requested when sound starts and released
 after a stretch of silence, the way a phone treats a paused player. If the car takes focus for good
-(the driver picks the radio), Spotify is paused instead of fighting for the speakers.
+(the driver picks the radio), the selected source is paused instead of fighting for the speakers.
 """
 from __future__ import annotations
 
@@ -75,12 +75,18 @@ class PipeSource:
     self.fd: int | None = None
     self.checked = 0.0
     self.active_value = False
+    self.generation = None
 
   def active(self, now: float) -> bool:
     if now - self.checked >= 1.0:
       self.checked = now
       try:
-        self.active_value = self.routed() and stat.S_ISFIFO(self.path.stat().st_mode)
+        info = self.path.stat()
+        identity = (info.st_dev, info.st_ino)
+        if identity != self.generation:
+          self.close()
+          self.generation = identity
+        self.active_value = self.routed() and stat.S_ISFIFO(info.st_mode)
       except OSError:
         self.active_value = False
       if not self.active_value:
@@ -114,24 +120,24 @@ class PipeSource:
       self.fd = None
 
 
-def spotify_routed() -> bool:
+def music_routed() -> bool:
   from openpilot.starpilot.soloist import paths, preferences
   return paths.enabled() and preferences.load().output == 'android_auto'
 
 
-def pause_spotify() -> None:
+def pause_music() -> None:
   def worker():
     try:
       from openpilot.starpilot.galaxy.spotify_setup import SpotifyClient
       SpotifyClient().call('control', action='pause', args={})
     except Exception:
       pass
-  threading.Thread(target=worker, name='aa_spotify_pause', daemon=True).start()
+  threading.Thread(target=worker, name='aa_music_pause', daemon=True).start()
 
 
 class MediaAudio:
   def __init__(self, session, channel: int, config_index: int, source, log: Callable[..., None],
-               pause: Callable[[], None] = pause_spotify, clock: Callable[[], float] = time.monotonic):
+               pause: Callable[[], None] = pause_music, clock: Callable[[], float] = time.monotonic):
     self.session, self.channel, self.config_index = session, channel, config_index
     self.source, self.log, self.pause, self.clock = source, log, pause, clock
     self.state = 'closed'  # closed, opening, setup, ready, focus_wait, playing, suspended, unavailable
@@ -146,10 +152,11 @@ class MediaAudio:
     self.base_us = 0
     self.last_sound = -1e9
     self.car_paused = False
+    self.source_generation = getattr(source, 'generation', None)
     self.stats = {'chunks_sent': 0, 'acked': 0, 'dropped_ms': 0, 'focus': None}
 
   @classmethod
-  def create(cls, session, log, *, source=None, routed: Callable[[], bool] = spotify_routed, **kwargs):
+  def create(cls, session, log, *, source=None, routed: Callable[[], bool] = music_routed, **kwargs):
     found = media_channel(session.channels)
     if found is None:
       return None
@@ -174,8 +181,16 @@ class MediaAudio:
     if not active:
       self.buffer.clear()
       if self.state in ('playing', 'focus_wait'):
-        self._give_back('spotify_not_routed')
+        self._give_back('music_not_routed')
       return
+    generation = getattr(self.source, 'generation', None)
+    if generation != self.source_generation:
+      self.source_generation = generation
+      self.buffer.clear()
+      self.last_sound = -1e9
+      self.car_paused = False
+      if self.state in ('playing', 'focus_wait', 'suspended'):
+        self._give_back('source_changed')
     playing = self.state == 'playing'
     data = self.source.read(BUFFER_PLAYING)
     if data:

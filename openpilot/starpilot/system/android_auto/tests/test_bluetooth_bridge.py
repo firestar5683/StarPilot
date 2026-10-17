@@ -92,6 +92,8 @@ def test_phone_role_temporarily_changes_adapter_and_restores(tmp_path):
     shared.request('scan')
   with pytest.raises(BluetoothRejected, match='Android Auto pairing operation'):
     shared.request('pair', address='AA:BB:CC:DD:EE:FF', session=('old', 'session'))
+  with pytest.raises(BluetoothRejected, match='Android Auto pairing operation'):
+    shared.request('accept_pair', session=state['session'])
   lease.release()
   lease.release()
   assert bluez.writes == [(True, True), (False, False)] and phone.released == 1 and bluez.agent_closed == 1

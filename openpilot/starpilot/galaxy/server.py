@@ -18,7 +18,7 @@ from openpilot.starpilot.galaxy.batch_routes import change_drive_state, delete_r
 from openpilot.starpilot.galaxy.access import AccessStatus, default_owner
 from openpilot.starpilot.galaxy.auth import LocalSessions
 from openpilot.starpilot.galaxy.http_server import (_LocalHTTPHandler, _LocalHTTPServer, allowed_authority,
-                                                  direct_local_connection, static_asset)
+                                                  direct_local_connection, install_origin_allowed, static_asset)
 from openpilot.starpilot.galaxy.camera_snapshot import CameraSnapshot, SnapshotDenied, SnapshotUnavailable
 from openpilot.starpilot.galaxy.remote import default_remote_pairing, gateway_cookie_valid
 from openpilot.starpilot.galaxy.crash_reports import CrashChanged, CrashMissing, CrashReports, CrashUnavailable
@@ -315,7 +315,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if bluetooth_source is None:
         from openpilot.common.params import Params
         authority = context_source(Params())
-        bluetooth_source = BluetoothOwner(authority.configuration_allowed, session_valid=bluetooth_session_valid)
+        bluetooth_source = BluetoothOwner(authority.configuration_allowed, session_valid=bluetooth_session_valid,
+                                          on_paired=lambda address, name, uuids: spotify_owner().adopt_phone(address, name, uuids))
         server.bluetooth_authority = authority
         server.bluetooth_source = bluetooth_source
     return bluetooth_source
@@ -540,6 +541,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     def direct_local(self):
       return not getattr(self.server, 'remote_transport', False) and \
              direct_local_connection(self.client_address[0], self.connection.getsockname()[0], self.headers)
+
+    def spotify_install_allowed(self):
+      return install_origin_allowed(self.client_address[0], self.connection.getsockname()[0], self.headers,
+                                    getattr(self.server, 'remote_transport', False))
 
     def authenticated(self):
       return self.settings_session() is not None
@@ -884,7 +889,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(401, {'error': 'Sign in to Galaxy'})
           return
         try:
-          result = spotify_owner().status(identity)
+          result = {**spotify_owner().status(identity), 'uploadAllowed': self.spotify_install_allowed()}
         except Exception:
           self.json(503, {'error': 'Spotify setup is unavailable'})
         else:
@@ -1433,6 +1438,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         identity = self.settings_session()
         if identity is None:
           self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        if not self.spotify_install_allowed():
+          self.json(403, {'error': 'Install Spotify over your local network or the Galaxy tunnel'})
           return
         if self.headers.get('Transfer-Encoding') is not None or \
            self.headers.get('Content-Type', '').lower() != 'application/octet-stream':
@@ -2361,7 +2369,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           if payload['operation'] == 'power':
             if set(payload) != {'operation', 'enabled'} or type(payload['enabled']) is not bool:
               raise ValueError('Invalid Bluetooth request')
-          elif payload['operation'] in ('scan', 'stop_scan', 'cancel_pair'):
+          elif payload['operation'] in ('scan', 'stop_scan', 'cancel_pair', 'accept_pair'):
             if set(payload) != {'operation'}:
               raise ValueError('Invalid Bluetooth request')
           elif payload['operation'] == 'pairing_response':
@@ -2396,6 +2404,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               if type(result) is not dict:
                 raise BluetoothUnavailable('service_unavailable')
             else:
+              if payload['operation'] == 'accept_pair' and configuration_allowed():
+                spotify_owner().prepare_phone_pairing()
               result = bluetooth_owner().request(payload['operation'], address=payload.get('address'), enabled=payload.get('enabled'),
                                                  session=identity, prompt_id=payload.get('promptId'),
                                                  accepted=payload.get('accepted'), value=payload.get('value', ''))

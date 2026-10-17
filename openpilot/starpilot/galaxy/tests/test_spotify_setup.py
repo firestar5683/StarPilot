@@ -6,6 +6,7 @@ import threading
 import pytest
 
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
+from openpilot.starpilot.galaxy.http_server import install_origin_allowed
 from openpilot.starpilot.galaxy.server import make_server
 from openpilot.starpilot.galaxy.spotify_setup import SetupRejected, SpotifySetup
 from openpilot.starpilot.soloist import credentials, preferences
@@ -150,7 +151,7 @@ def test_routes_require_a_session(api):
   assert request('DELETE', '/api/spotify')[0] == 401
 
 
-def test_routes_round_trip(api):
+def test_routes_round_trip(api, monkeypatch):
   request, cookie, setup, layout = api
   code, status = request('GET', '/api/spotify/setup', cookie=cookie)
   assert code == 200 and status['release'] == {'installed': False}
@@ -162,7 +163,88 @@ def test_routes_round_trip(api):
   assert code == 200 and status['enabled'] is True and layout.enabled_flag.exists()
   code, status = request('POST', '/api/spotify/preferences', json.dumps({'output': 'test', 'outputAddress': ''}), cookie=cookie)
   assert code == 200 and status['preferences']['output'] == 'test'
+  # The phone Bluetooth bridge reaches the server from loopback, so installs are refused here.
+  code, refusal = request('POST', '/api/spotify/upload', b'\x1f\x8bxx', cookie=cookie, content_type='application/octet-stream')
+  assert code == 403 and 'local network' in refusal['error'] and setup.job.started == []
+  assert request('GET', '/api/spotify/setup', cookie=cookie)[1]['uploadAllowed'] is False
+  # LAN, hotspot and tunnel peers are covered by the policy test below; here only the route's own checks are exercised.
+  monkeypatch.setattr('openpilot.starpilot.galaxy.server.install_origin_allowed', lambda *_args, **_kwargs: True)
+  assert request('GET', '/api/spotify/setup', cookie=cookie)[1]['uploadAllowed'] is True
   assert request('POST', '/api/spotify/upload', b'\x1f\x8bxx', cookie=cookie, content_type='application/json')[0] == 415
   code, status = request('POST', '/api/spotify/upload', b'\x1f\x8bxx', cookie=cookie, content_type='application/octet-stream')
   assert code == 202 and setup.job.started == [b'\x1f\x8bxx']
   assert request('POST', '/api/spotify/control', json.dumps({'action': 'pause'}), cookie=cookie)[0] == 409  # not running
+
+
+def test_phone_source_requires_park_and_a_paired_device_without_spotify(owner):
+  setup, state, layout, _ = owner
+  state['parked'] = False
+  with pytest.raises(SetupRejected, match='Park'):
+    setup.save_preferences(SESSION, {'source': 'phone'})
+  state['parked'] = True
+  with pytest.raises(SetupRejected, match='Pair your phone'):
+    setup.save_preferences(SESSION, {'source': 'phone', 'phoneAddress': '11:22:33:44:55:66'})
+  result = setup.save_preferences(SESSION, {'source': 'phone', 'phoneAddress': 'AA:BB:CC:DD:EE:FF', 'output': 'android_auto'})
+  assert result['preferences']['source'] == 'phone' and result['preferences']['phoneName'] == 'My Car'
+  assert not result['keyPresent'] and not result['release']['installed']
+  with pytest.raises(SetupRejected, match='different device'):
+    setup.save_preferences(SESSION, {'output': 'bluetooth', 'outputAddress': 'AA:BB:CC:DD:EE:FF'})
+  assert preferences.load(layout).output == 'android_auto'
+
+
+@pytest.mark.parametrize('peer,destination,headers,remote,allowed', [
+  ('192.168.1.20', '192.168.1.5', {}, False, True),          # home LAN
+  ('172.31.254.10', '172.31.254.1', {}, False, True),        # Galaxy hotspot
+  ('10.0.0.8', '10.0.0.2', {}, False, True),
+  ('127.0.0.1', '127.0.0.1', {}, False, False),              # phone Bluetooth bridge and anything local to the comma
+  ('127.0.0.1', '127.0.0.1', {}, True, True),                # Galaxy tunnel
+  ('203.0.113.9', '192.168.1.5', {}, False, False),          # public peer
+  ('192.168.1.20', '192.168.1.5', {'X-Forwarded-For': '8.8.8.8'}, False, False),
+  ('not-an-address', '192.168.1.5', {}, False, False),
+])
+def test_install_origin_policy(peer, destination, headers, remote, allowed):
+  assert install_origin_allowed(peer, destination, headers, remote) is allowed
+
+
+def test_adopt_phone_offers_only_an_unchosen_audio_source_and_never_overrides(owner):
+  setup, _, layout, _ = owner
+  a2dp = '0000110a-0000-1000-8000-00805f9b34fb'
+  assert not setup.adopt_phone('11:22:33:44:55:66', 'Pixel', ['0000111e-0000-1000-8000-00805f9b34fb'])
+  assert preferences.load(layout).phone_address == ''
+  assert setup.adopt_phone('11:22:33:44:55:66', 'Pixel', [a2dp.upper()])
+  chosen = preferences.load(layout)
+  assert (chosen.phone_address, chosen.phone_name, chosen.source) == ('11:22:33:44:55:66', 'Pixel', 'phone')
+  assert not setup.adopt_phone('66:55:44:33:22:11', 'Other', [a2dp])
+  assert preferences.load(layout).phone_address == '11:22:33:44:55:66'
+
+
+def test_adopt_phone_keeps_spotify_when_soloist_is_installed(owner):
+  setup, _, layout, _ = owner
+  release = layout.current
+  release.mkdir(parents=True)
+  (release / 'soloist').write_text('x')
+  (release / 'release.json').write_text('{}')
+  assert setup.adopt_phone('11:22:33:44:55:66', 'Pixel', ['0000110a-0000-1000-8000-00805f9b34fb'])
+  chosen = preferences.load(layout)
+  assert (chosen.phone_address, chosen.source) == ('11:22:33:44:55:66', 'spotify')
+
+
+def test_prepare_phone_pairing_only_talks_to_a_running_enabled_feature(owner):
+  setup, _, layout, client = owner
+  setup.prepare_phone_pairing()
+  assert client.calls == []
+  preferences.set_enabled(True, layout)
+  setup.prepare_phone_pairing()
+  assert client.calls == []
+  client.available = True
+  setup.prepare_phone_pairing()
+  assert client.calls == [('prepare_phone_pairing', {})]
+
+
+def test_unpaired_connected_device_is_not_offered_or_accepted_as_a_phone(owner):
+  setup, _, _, _ = owner
+  connected_only = {'address': '66:55:44:33:22:11', 'name': 'Companion phone', 'paired': False, 'connected': True}
+  setup.paired_devices = lambda _s: [*DEVICES, connected_only]
+  assert '66:55:44:33:22:11' not in {device['address'] for device in setup.status(SESSION)['devices']}
+  with pytest.raises(SetupRejected, match='Pair your phone'):
+    setup.save_preferences(SESSION, {'source': 'phone', 'phoneAddress': '66:55:44:33:22:11'})

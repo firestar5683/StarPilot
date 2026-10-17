@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from queue import Full
 import fcntl
+import json
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -120,6 +122,24 @@ class PairingSession:
       return True
 
 
+class OpenPairingSession(PairingSession):
+  """A short window in which the first phone to ask is the one paired."""
+  SECONDS = 120.0
+
+  def __init__(self, identity: tuple, parked: Callable[[], bool], clock: Callable[[], float]):
+    super().__init__(identity, '', '', parked, clock)
+    self.name = ''
+    self.uuids: tuple[str, ...] = ()
+
+  def claim(self, path: str, address: str, name: str) -> bool:
+    with self.condition:
+      if self.state != 'pairing' or self.callbacks_closed:
+        return False
+      if not self.path:
+        self.path, self.address, self.name = path, address, name[:80]
+      return self.path == path
+
+
 class BluetoothUnavailable(Exception):
   def __init__(self, message: str, *, code: str = 'service_unavailable'):
     super().__init__(message)
@@ -215,6 +235,7 @@ class BlueZ:
     devices = sorted(self._devices(objects), key=lambda item: (not item['connected'], not item['paired'], item['name']))
     return {'adapter': bool(adapter), 'powered': adapter.get('Powered') is True,
             'discovering': adapter.get('Discovering') is True,
+            'adapterAddress': str(adapter.get('Address', '')).upper(), 'adapterName': str(adapter.get('Alias') or adapter.get('Name') or ''),
             'devices': [{key: value for key, value in item.items() if key != 'path'} for item in devices[:64]]}
 
   def _device_path(self, address: str) -> str:
@@ -265,10 +286,89 @@ class BlueZ:
       raise BluetoothUnavailable('BlueZ identity is unavailable')
     return reply.body[0]
 
+  def adapter_identity(self) -> tuple[str, dict[str, Any], str]:
+    path, props = self._adapter(self._objects())
+    if not path:
+      raise BluetoothUnavailable('Bluetooth adapter is unavailable')
+    return path, props, self._bluez_sender()
+
+  def set_pairing_visibility(self, path: str, *, pairable: bool, discoverable: bool) -> None:
+    address = DBusAddress(path, bus_name=BLUEZ, interface=ADAPTER)
+    for key, value in (('Pairable', pairable), ('Discoverable', discoverable)):
+      reply = self.router.send_and_get_reply(Properties(address).set(key, 'b', value), timeout=10.0)
+      if reply.header.message_type == MessageType.error:
+        raise BluetoothRejected(f'Bluetooth {key} change failed')
+
   def pair(self, address: str, expected_path: str, session: PairingSession) -> bool:
     path = self._device_path(address)
     if path != expected_path:
       raise BluetoothRejected('Device changed before pairing')
+
+    def action(pair_succeeded: threading.Event) -> bool:
+      if session.state != 'pairing' or session.callbacks_closed or not session.parked() or session.clock() >= session.deadline:
+        return False
+      self._call(path, DEVICE, 'Pair', timeout=70.0)
+      paired = next((item['paired'] for item in self._devices(self._objects()) if item['address'] == address), False)
+      if paired:
+        if session.state != 'pairing' or not session.parked() or session.clock() >= session.deadline:
+          return False
+        self._call(path, 'org.freedesktop.DBus.Properties', 'Set', 'ssv', (DEVICE, 'Trusted', ('b', True)))
+        pair_succeeded.set()
+      return paired
+    return self._serve_agent(session, lambda device_path: device_path == path, action)
+
+  def accept_pair(self, session: OpenPairingSession, journal: Callable[[str, str, bool, bool], None],
+                  restored: Callable[[], None]) -> bool:
+    """Let one nearby phone pair with the comma while the pairing agent is registered."""
+    adapter, props, sender = self.adapter_identity()
+    if props.get('Powered') is not True or props.get('Discovering') is True:
+      raise BluetoothUnavailable('Bluetooth adapter is not ready for phone pairing')
+    pairable, discoverable = props.get('Pairable') is True, props.get('Discoverable') is True
+
+    def claim(device_path: str) -> bool:
+      device = self._objects().get(device_path, {}).get(DEVICE)
+      if device is None or device.get('Paired') is True or device.get('Blocked') is True:
+        return False
+      device_class = device.get('Class', 0)
+      # Phones only: a nearby speaker, car or accessory cannot take the window.
+      if type(device_class) is not int or (device_class >> 8) & 0x1f != 2:
+        return False
+      address = str(device.get('Address', '')).upper()
+      return ADDRESS.fullmatch(address) is not None and session.claim(device_path, address, str(device.get('Alias') or device.get('Name') or ''))
+
+    def action(pair_succeeded: threading.Event) -> bool:
+      if session.state != 'pairing' or not session.parked() or session.clock() >= session.deadline:
+        return False
+      self.set_pairing_visibility(adapter, pairable=True, discoverable=True)
+      while session.state == 'pairing' and session.parked() and session.clock() < session.deadline:
+        if session.path:
+          device = self._objects().get(session.path, {}).get(DEVICE, {})
+          if device.get('Paired') is True:
+            self._call(session.path, 'org.freedesktop.DBus.Properties', 'Set', 'ssv', (DEVICE, 'Trusted', ('b', True)))
+            pair_succeeded.set()
+            # Service records arrive just after the bond; the music source needs them.
+            for _ in range(20):
+              if device.get('UUIDs') or session.clock() >= session.deadline:
+                break
+              time.sleep(0.5)
+              device = self._objects().get(session.path, {}).get(DEVICE, {})
+            session.uuids = tuple(str(value).lower() for value in device.get('UUIDs', ()))
+            return True
+        time.sleep(0.25)
+      return False
+
+    journal(adapter, sender, pairable, discoverable)
+    try:
+      return self._serve_agent(session, claim, action, default_agent=True)
+    finally:
+      now_adapter, _, now_sender = self.adapter_identity()
+      if (now_adapter, now_sender) == (adapter, sender):
+        self.set_pairing_visibility(adapter, pairable=pairable, discoverable=discoverable)
+      # Kept on failure above so the next owner can still undo the window.
+      restored()
+
+  def _serve_agent(self, session: PairingSession, target: Callable[[str], bool],
+                   action: Callable[[threading.Event], bool], *, default_agent: bool = False) -> bool:
     bluez_sender = self._bluez_sender()
     agent_filter = self.router.filter(MatchRule(type='method_call', interface=AGENT, path=AGENT_PATH), bufsize=16)
     queue = agent_filter.__enter__()
@@ -297,7 +397,7 @@ class BlueZ:
             session.cancel()
           reply(message, accepted=True)
           return
-        if not body or type(body[0]) is not str or body[0] != path:
+        if not body or type(body[0]) is not str or not target(body[0]):
           reply(message, accepted=False)
           return
         device_path = body[0]
@@ -381,16 +481,9 @@ class BlueZ:
     try:
       self._call('/org/bluez', 'org.bluez.AgentManager1', 'RegisterAgent', 'os', (AGENT_PATH, 'KeyboardDisplay'))
       registered = True
-      if session.state != 'pairing' or session.callbacks_closed or not session.parked() or session.clock() >= session.deadline:
-        return False
-      self._call(path, DEVICE, 'Pair', timeout=70.0)
-      paired = next((item['paired'] for item in self._devices(self._objects()) if item['address'] == address), False)
-      if paired:
-        if session.state != 'pairing' or not session.parked() or session.clock() >= session.deadline:
-          return False
-        self._call(path, 'org.freedesktop.DBus.Properties', 'Set', 'ssv', (DEVICE, 'Trusted', ('b', True)))
-        pair_succeeded.set()
-      return paired
+      if default_agent:
+        self._call('/org/bluez', 'org.bluez.AgentManager1', 'RequestDefaultAgent', 'o', (AGENT_PATH,))
+      return action(pair_succeeded)
     finally:
       session.close_callbacks()
       try:
@@ -414,15 +507,17 @@ class BlueZ:
 
 
 class BluetoothOwner:
-  OPERATIONS = frozenset(('power', 'scan', 'stop_scan', 'connect', 'disconnect', 'forget', 'pair', 'pairing_response', 'cancel_pair'))
+  OPERATIONS = frozenset(('power', 'scan', 'stop_scan', 'connect', 'disconnect', 'forget', 'pair', 'accept_pair', 'pairing_response', 'cancel_pair'))
   SCAN_SECONDS = 20.0
 
   def __init__(self, parked: Callable[[], bool], *, bluez_factory=BlueZ, radio_helper: Path = RADIO_HELPER,
                systemctl: Callable[..., Any] = subprocess.run, clock: Callable[[], float] = time.monotonic,
                timer_factory: Callable[..., Any] = threading.Timer,
                session_valid: Callable[[tuple], bool] = lambda _identity: True,
-               admission_lock: Path = ADMISSION_LOCK, radio_preference: RadioPreference | None = None):
+               admission_lock: Path = ADMISSION_LOCK, radio_preference: RadioPreference | None = None,
+               on_paired: Callable[[str, str, tuple[str, ...]], None] | None = None):
     self.parked = parked
+    self.on_paired = on_paired
     self.bluez_factory = bluez_factory
     self.radio_helper = radio_helper
     self.radio_preference = radio_preference if radio_preference is not None else RadioPreference()
@@ -564,6 +659,8 @@ class BluetoothOwner:
         with pairing.condition:
           result['pairing'] = {'address': pairing.address, 'state': pairing.state,
                                'prompt': dict(pairing.prompt) if pairing.prompt is not None else None}
+          if isinstance(pairing, OpenPairingSession):
+            result['pairing'].update(incoming=True, name=pairing.name)
       else:
         result['pairing'] = None
     return result
@@ -587,6 +684,64 @@ class BluetoothOwner:
         except (OSError, RuntimeError):
           pass
       pairing.finish(paired and pairing.parked())
+
+  @property
+  def window_journal_path(self) -> Path:
+    return self.admission_lock.with_suffix('.recovery.json')
+
+  def _write_journal(self, path: str, sender: str, pairable: bool, discoverable: bool) -> None:
+    payload = {'path': path, 'sender': sender, 'pairable': pairable, 'discoverable': discoverable}
+    fd, temp_name = tempfile.mkstemp(prefix='.' + self.window_journal_path.name + '.', dir=self.window_journal_path.parent)
+    temp = Path(temp_name)
+    try:
+      with os.fdopen(fd, 'w') as out:
+        json.dump(payload, out)
+        out.flush()
+        os.fsync(out.fileno())
+      os.replace(temp, self.window_journal_path)
+    finally:
+      temp.unlink(missing_ok=True)
+
+  def _recover_visibility(self) -> None:
+    """Undo a window left open by a crash, only on the same BlueZ instance."""
+    try:
+      data = json.loads(self.window_journal_path.read_text())
+    except FileNotFoundError:
+      return
+    except ValueError:
+      self.window_journal_path.unlink(missing_ok=True)
+      return
+    client = self._client()
+    path, _, sender = client.adapter_identity()
+    if (path, sender) == (data.get('path'), data.get('sender')) and type(data.get('pairable')) is bool and \
+       type(data.get('discoverable')) is bool:
+      client.set_pairing_visibility(path, pairable=data['pairable'], discoverable=data['discoverable'])
+    self.window_journal_path.unlink(missing_ok=True)
+
+  def _accept_worker(self, pairing: OpenPairingSession) -> None:
+    client = None
+    paired = False
+    try:
+      client = self.bluez_factory()
+      with pairing.condition:
+        pairing.cancel_callback = lambda: client.cancel_pair(pairing.path) if pairing.path else None
+        canceled = pairing.state != 'pairing'
+      if not canceled:
+        paired = client.accept_pair(pairing, self._write_journal, lambda: self.window_journal_path.unlink(missing_ok=True))
+    except (BluetoothRejected, BluetoothUnavailable, OSError, RuntimeError, ValueError):
+      pass
+    finally:
+      if client is not None:
+        try:
+          client.close()
+        except (OSError, RuntimeError):
+          pass
+      pairing.finish(paired and pairing.parked())
+    if pairing.state == 'paired' and self.on_paired is not None:
+      try:
+        self.on_paired(pairing.address, pairing.name, pairing.uuids)
+      except Exception:
+        pass
 
   def _watch_pair(self, pairing: PairingSession) -> None:
     while not pairing.done.wait(0.25):
@@ -638,9 +793,9 @@ class BluetoothOwner:
           not isinstance(value, str) or len(value) > 16):
         raise ValueError('Invalid pairing response')
     elif enabled is not None or prompt_id is not None or accepted is not None or value or \
-         (address is None) != (operation in ('scan', 'stop_scan', 'cancel_pair')):
+         (address is None) != (operation in ('scan', 'stop_scan', 'cancel_pair', 'accept_pair')):
       raise ValueError('Invalid Bluetooth request')
-    if operation in ('pair', 'cancel_pair') and session is None:
+    if operation in ('pair', 'accept_pair', 'cancel_pair') and session is None:
       raise ValueError('Pairing requires a session')
     if address is not None:
       address = normalized_address(address)
@@ -720,6 +875,16 @@ class BluetoothOwner:
                                  lambda: self.session_valid(session), self.clock)
         self.pairing = pairing
         threading.Thread(target=self._pair_worker, args=(pairing,), daemon=True).start()
+        threading.Thread(target=self._watch_pair, args=(pairing,), daemon=True).start()
+      elif operation == 'accept_pair':
+        assert session is not None
+        if self.pairing is not None and not self.pairing.done.is_set():
+          raise BluetoothRejected('Pairing is in progress', code='busy')
+        self._stop_scan()
+        self._recover_visibility()
+        pairing = OpenPairingSession(session, lambda: self.session_valid(session), self.clock)
+        self.pairing = pairing
+        threading.Thread(target=self._accept_worker, args=(pairing,), daemon=True).start()
         threading.Thread(target=self._watch_pair, args=(pairing,), daemon=True).start()
       else:
         self._client().operation(operation, address)

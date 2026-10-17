@@ -22,10 +22,14 @@ class Preferences:
   output: str = 'bluetooth'           # or 'android_auto' (the car's media channel), or 'test' (a silent sink)
   output_address: str = ''
   output_name: str = ''
+  source: str = 'spotify'
+  phone_address: str = ''
+  phone_name: str = ''
 
   def public(self) -> dict:
     return {'deviceName': self.device_name, 'cacheMb': self.cache_mb, 'initialVolume': self.initial_volume,
-            'output': self.output, 'outputAddress': self.output_address, 'outputName': self.output_name}
+            'output': self.output, 'outputAddress': self.output_address, 'outputName': self.output_name,
+            'source': self.source, 'phoneAddress': self.phone_address, 'phoneName': self.phone_name}
 
 
 def validated(values: dict) -> Preferences:
@@ -43,7 +47,16 @@ def validated(values: dict) -> Preferences:
   if address and not ADDRESS.fullmatch(address):
     raise ValueError('Invalid Bluetooth address')
   output_name = prefs.output_name.strip()[:80] if isinstance(prefs.output_name, str) else ''
-  return Preferences(name, prefs.cache_mb, prefs.initial_volume, prefs.output, address, output_name if address else '')
+  if prefs.source not in ('spotify', 'phone'):
+    raise ValueError('Unknown music source')
+  phone = prefs.phone_address.upper() if isinstance(prefs.phone_address, str) else ''
+  if phone and not ADDRESS.fullmatch(phone):
+    raise ValueError('Invalid phone Bluetooth address')
+  if prefs.source == 'phone' and phone and prefs.output == 'bluetooth' and phone == address:
+    raise ValueError('Choose a different device for the phone and speaker')
+  phone_name = prefs.phone_name.strip()[:80] if isinstance(prefs.phone_name, str) else ''
+  return Preferences(name, prefs.cache_mb, prefs.initial_volume, prefs.output, address, output_name if address else '',
+                     prefs.source, phone, phone_name if phone else '')
 
 
 def load(layout: Layout | None = None) -> Preferences:

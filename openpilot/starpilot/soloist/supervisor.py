@@ -14,12 +14,13 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
 
-from openpilot.starpilot.soloist import backend, credentials, package, preferences
+from openpilot.starpilot.soloist import backend, credentials, package, preferences, phone_audio
 from openpilot.starpilot.soloist.client import PlayerClient
 from openpilot.starpilot.soloist.paths import CONTROL_SOCKET, Layout, private_dir
 
@@ -27,6 +28,7 @@ A2DP_SINK = '0000110b-0000-1000-8000-00805f9b34fb'
 EXIT_EXPIRED = 10
 STOP_SECONDS = 5.0
 OUTPUT_RETRY_SECONDS = 20.0
+PAIRING_PROFILE_SECONDS = 180.0  # the pairing window plus time for the phone to save the comma's services
 MAX_FAST_FAILURES = 5
 LOG_LINES = 200
 EXPIRES_IN = re.compile(r'client expires in (\d+) days?')
@@ -118,6 +120,10 @@ class Supervisor:
     self.expired_target: str | None = None
     self.days_left: int | None = None
     self.secret = ''
+    self.phone = phone_audio.PhoneInput()
+    self.phone_prefs = None
+    self.phone_profile = False
+    self.pairing_profile_until = 0.0
 
   # ---- status ---------------------------------------------------------------------------------------
   def _set(self, state: str, message: str = '') -> None:
@@ -162,7 +168,7 @@ class Supervisor:
     threading.Thread(target=self._record, args=(process.stdout, label), name=f'spotify_{label}_log', daemon=True).start()
     return process
 
-  def stop_children(self) -> None:
+  def stop_children(self, *, release_phone: bool = True) -> None:
     if self.client is not None:
       self.client.stop()
       self.client = None
@@ -170,6 +176,75 @@ class Supervisor:
     _kill_group(self.server)
     self.player = self.server = None
     self.launched = None
+    if release_phone:
+      self.phone.close()
+      self.phone_prefs = None
+      if self.clock() >= self.pairing_profile_until:
+        self._release_profile()
+
+  def _release_profile(self) -> None:
+    if self.phone_profile:
+      phone_audio.profile('release')
+      self.phone_profile = False
+
+  def tick_phone(self, prefs: preferences.Preferences) -> None:
+    now = self.clock()
+    if prefs != self.phone_prefs:
+      self.stop_children()
+      self.phone_prefs = prefs
+      self.retry_at = 0
+    if not prefs.phone_address:
+      self._set('no_phone', 'Pair your phone in the companion app or on the Bluetooth page, then choose it as the music source.')
+      return
+    if prefs.output == 'bluetooth' and not prefs.output_address:
+      self._set('no_output', 'Choose where music plays.')
+      return
+    if now < self.retry_at:
+      return
+    try:
+      if not backend.bundle_ready():
+        raise RuntimeError('This build is missing the music audio component.')
+      if not self.phone.powered():
+        self.stop_children(release_phone=False)
+        self._set('waiting_bluetooth', 'Turn on Bluetooth from the Bluetooth page to receive phone music.')
+        self.retry_at = now + 5
+        return
+      if not self.phone_profile:
+        phone_audio.profile('acquire')
+        self.phone_profile = True
+      if not self.phone.ready(prefs.phone_address, now):
+        self.stop_children(release_phone=False)
+        self._set('waiting_phone', f'Waiting for {prefs.phone_name or "your phone"}. Select the comma as its Bluetooth audio output.')
+        self.retry_at = now + 5
+        return
+      if prefs.output == 'bluetooth' and not self.output.ready(prefs.output_address):
+        self.stop_children(release_phone=False)
+        self._set('waiting_output', f'Waiting for {prefs.output_name or "your speaker"} to connect.')
+        self.retry_at = now + OUTPUT_RETRY_SECONDS
+        return
+      if self.player is not None:
+        if self.player.poll() is None and self.server is not None and self.server.poll() is None:
+          return
+        raise RuntimeError('Phone audio disconnected. Reconnecting…')
+      self.server = self._start(backend.server_launch(self.layout, prefs), 'audio')
+      socket_path = backend.runtime_paths(self.layout)['socket']
+      deadline = time.monotonic() + 5
+      while not socket_path.exists() and self.server.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.1)
+      if not socket_path.exists():
+        raise RuntimeError('Audio output could not open')
+      env = {**os.environ, 'PULSE_SERVER': f'unix:{socket_path}', 'STARPILOT_AUDIO_PARENT_PID': str(os.getpid())}
+      argv = [sys.executable, '-m', 'openpilot.starpilot.soloist.phone_audio', prefs.phone_address,
+              env['PULSE_SERVER'], str(self.layout.runtime / 'phone-alsa.conf')]
+      # Resolve this checkout explicitly; the worker runs in the private runtime directory.
+      env['PYTHONPATH'] = str(Path(__file__).resolve().parents[3])
+      self.player = self._start(backend.Launch(argv, env), 'phone')
+      self._set('phone_ready', 'Phone audio connected. Play music on your phone; use the phone and car volume controls.')
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+      self.stop_children(release_phone=False)
+      self.phone.close()
+      self.retry_at = now + OUTPUT_RETRY_SECONDS
+      self._set('phone_retrying', str(error))
 
   # ---- policy ---------------------------------------------------------------------------------------
   def desired(self) -> tuple[str, str, tuple | None]:
@@ -191,6 +266,15 @@ class Supervisor:
     return 'running', '', (target, key, prefs)
 
   def tick(self) -> None:
+    prefs = preferences.load(self.layout)
+    if prefs.source == 'phone':
+      self.tick_phone(prefs)
+      return
+    if self.phone_prefs is not None:
+      self.stop_children()
+      self.retry_at = 0
+    elif self.phone_profile and self.clock() >= self.pairing_profile_until:
+      self._release_profile()
     state, message, launch_key = self.desired()
     now = self.clock()
     if launch_key != self.launched:
@@ -265,6 +349,15 @@ class Supervisor:
     if command == 'status':
       return {'ok': True, 'status': self.status()}
     if command == 'control':
+      phone_prefs = self.phone_prefs
+      if phone_prefs is not None:
+        if request.get('action') != 'pause' or request.get('args', {}) != {}:
+          return {'ok': False, 'error': 'Use your phone for playback and volume controls'}
+        try:
+          self.phone.pause(phone_prefs.phone_address)
+          return {'ok': True}
+        except (OSError, RuntimeError):
+          return {'ok': False, 'error': 'Phone playback control is unavailable'}
       client = self.client
       if client is None:
         return {'ok': False, 'error': 'Spotify isn’t running'}
@@ -272,6 +365,17 @@ class Supervisor:
       if not isinstance(args, dict):
         return {'ok': False, 'error': 'Invalid control'}
       client.send(str(request.get('action')), args)
+      return {'ok': True}
+    if command == 'prepare_phone_pairing':
+      # A phone only offers the comma as an audio output if the receiving profile is advertised when it pairs.
+      with self.lock:
+        try:
+          if not self.phone_profile:
+            phone_audio.profile('acquire')
+            self.phone_profile = True
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+          return {'ok': False, 'error': str(error)}
+        self.pairing_profile_until = self.clock() + PAIRING_PROFILE_SECONDS
       return {'ok': True}
     if command == 'reset_session':
       with self.lock:
@@ -325,6 +429,8 @@ def main() -> None:
   os.nice(10)  # music yields to everything driving-related; children inherit this
   supervisor = Supervisor()
   reap_orphans(supervisor.layout)
+  if Path('/run/systemd/system/bluealsa.service.d/90-starpilot-phone.conf').exists():
+    phone_audio.profile('release')
   stop = threading.Event()
 
   def shutdown(*_):
@@ -335,15 +441,21 @@ def main() -> None:
   try:
     while not stop.is_set():
       with supervisor.lock:
-        supervisor.tick()
+        try:
+          supervisor.tick()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+          supervisor._set('failed', str(error))
       supervisor.publish()
       stop.wait(1.0)
   finally:
-    supervisor.stop_children()
     try:
-      os.unlink(CONTROL_SOCKET)
-    except FileNotFoundError:
-      pass
+      supervisor.pairing_profile_until = 0.0
+      supervisor.stop_children()
+    finally:
+      try:
+        os.unlink(CONTROL_SOCKET)
+      except FileNotFoundError:
+        pass
 
 
 if __name__ == '__main__':

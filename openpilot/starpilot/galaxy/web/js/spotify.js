@@ -113,8 +113,9 @@ export function formatTime(ms) {
 
 export class SpotifyFeed {
   constructor({ publish, unauthorized = () => { }, fetcher = (...args) => fetch(...args), uploader = uploadPackage,
-    later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
-    Object.assign(this, { publish, unauthorized, fetcher, uploader, later, cancelTimer })
+    later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id),
+    overBluetooth = () => globalThis.StarPilotApp?.bluetooth?.() === true }) {
+    Object.assign(this, { publish, unauthorized, fetcher, uploader, later, cancelTimer, overBluetooth })
     this.active = false
     this.generation = 0
     this.pollTimer = null
@@ -142,7 +143,9 @@ export class SpotifyFeed {
     if (!this.active) return
     if (this.pollTimer !== null) this.cancelTimer(this.pollTimer)
     const fast = this.setup?.import?.state === "running" || this.setup?.service?.player?.connected
-    this.pollTimer = this.later(() => { this.pollTimer = null; this.refresh() }, fast ? 1500 : 4000)
+    // The phone Bluetooth link is slow, so poll it a lot less.
+    const delay = this.overBluetooth() ? (fast ? 5000 : 15000) : (fast ? 1500 : 4000)
+    this.pollTimer = this.later(() => { this.pollTimer = null; this.refresh() }, delay)
   }
 
   async request(path, options = {}, timeout = 8000, transport = this.fetcher) {
@@ -198,7 +201,7 @@ export class SpotifyFeed {
   }
 
   async upload(file) {
-    if (!this.active || this.busy || !this.setup || this.setup.import?.state === "running" ||
+    if (!this.active || this.busy || !this.setup || this.setup.uploadAllowed === false || this.setup.import?.state === "running" ||
       !file || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > this.setup.maxUploadBytes) return false
     this.busy = true
     this.uploadProgress = { loaded: 0, total: file.size }
@@ -263,7 +266,9 @@ export const SpotifyPage = {
       const prefs = this.setup?.preferences
       return !!prefs && (["test", "android_auto"].includes(prefs.output) || ADDRESS.test(prefs.outputAddress))
     },
-    setupDone() { return !!(this.installed && this.setup?.keyPresent && this.outputChosen) },
+    phoneSource() { return this.setup?.preferences.source === "phone" },
+    setupDone() { return this.phoneSource ? !!(ADDRESS.test(this.setup?.preferences.phoneAddress || "") && this.outputChosen) :
+      !!(this.installed && this.setup?.keyPresent && this.outputChosen) },
     player() { return this.setup?.service?.player || null },
     playing() { return this.player?.status === "playing" },
     track() { return this.player?.loggedIn ? this.player.track : null },
@@ -297,7 +302,9 @@ export const SpotifyPage = {
       if (this.setup && this.archiveFile.size > this.setup.maxUploadBytes) return "This file is too large to be the Soloist download."
       return this.archiveMagicError
     },
+    installBlocked() { return this.setup?.uploadAllowed === false },
     uploadReason() {
+      if (this.installBlocked) return "Installing Spotify needs your local network or the Galaxy tunnel."
       if (!this.archiveFile) return "Choose the file you downloaded."
       if (this.archiveError) return this.archiveError
       if (this.archiveChecking) return "Checking the file…"
@@ -334,6 +341,8 @@ export const SpotifyPage = {
       if (result) this.keyEditing = false
     },
     removeKey() { return this.feed.post("./api/spotify/maintenance", { action: "remove_key" }) },
+    chooseSource(event) { return this.feed.post("./api/spotify/preferences", { source: event.target.value }) },
+    choosePhone(event) { return this.feed.post("./api/spotify/preferences", { phoneAddress: event.target.value }) },
     chooseOutput(event) {
       const value = event.target.value
       if (["test", "android_auto"].includes(value)) return this.feed.post("./api/spotify/preferences", { output: value, outputAddress: "" })
@@ -387,13 +396,37 @@ export const SpotifyPage = {
   template: `
     <section class="gx-driving gx-spotify" aria-label="Spotify" :aria-busy="busy || undefined">
       <header class="gx-page-header">
-        <h2>Spotify</h2>
-        <p>Play Spotify through your car or a Bluetooth speaker, with your comma as a Spotify Connect device you control from the Spotify app.</p>
+        <h2>Spotify and Phone Audio</h2>
+        <p>Play Spotify on your comma, or send music from your phone through the comma to your car.</p>
       </header>
       <GxNotice tone="danger" v-if="error && setup">{{ error }}</GxNotice>
       <GxNotice v-if="!setup" :busy="!error" :tone="error ? 'danger' : 'info'">{{ error || "Checking Spotify setup… Reconnecting automatically…" }}</GxNotice>
 
-      <section v-if="setup && setupDone" class="gx-card gx-aa-step gx-aa-home gx-spotify-now" aria-labelledby="gx-spotify-now-title">
+      <section v-if="setup" class="gx-card gx-stack" aria-labelledby="gx-music-source-title">
+        <h3 id="gx-music-source-title">Music Source</h3>
+        <label class="gx-stack"><span>Play music from</span>
+          <select class="gx-field" :value="setup.preferences.source || 'spotify'" :disabled="busy || !setup.parked" @change="chooseSource">
+            <option value="spotify">Spotify Connect on the comma</option>
+            <option value="phone">Phone over Bluetooth</option>
+          </select>
+        </label>
+        <template v-if="phoneSource">
+          <p class="gx-note">Pair your phone in the companion app, or tap <strong>Let a phone pair</strong> on the <a class="gx-link" href="#/bluetooth">Bluetooth page</a>. Then choose it below and turn on phone audio. On your phone, select the comma as the media audio output. No Spotify install or API key is needed.</p>
+          <label class="gx-stack"><span>Phone</span>
+            <select class="gx-field" :value="setup.preferences.phoneAddress" :disabled="busy || !setup.parked" @change="choosePhone">
+              <option value="">Choose your paired phone…</option>
+              <option v-for="choice in outputChoices" :key="choice.value" :value="choice.value">{{ choice.label }}</option>
+            </select>
+          </label>
+          <GalaxySettingRow :row="switchRow('Phone Audio', setup.enabled, 'Forward music from the selected phone. Playback and volume stay on your phone.')"
+            :index="0" :busy="busy" :save-value="(index, value) => setEnabled(value === 'On')" />
+          <p class="gx-note" role="status">{{ statusText }}</p>
+          <p class="gx-note">Music only. Calls and microphone audio are not forwarded.</p>
+        </template>
+        <small v-if="!setup.parked" class="gx-note">Put the car in Park or use offroad mode to change the source.</small>
+      </section>
+
+      <section v-if="setup && setupDone && !phoneSource" class="gx-card gx-aa-step gx-aa-home gx-spotify-now" aria-labelledby="gx-spotify-now-title">
         <div class="gx-spotify-now__main">
           <img v-if="track?.artwork" class="gx-spotify-now__art" :src="track.artwork" alt="" referrerpolicy="no-referrer" loading="lazy" />
           <span v-else class="gx-spotify-now__art gx-spotify-now__art--empty" aria-hidden="true"><i class="bi bi-music-note-beamed"></i></span>
@@ -427,8 +460,8 @@ export const SpotifyPage = {
         </div>
       </section>
 
-      <ol v-if="setup" v-show="!setupDone || showSetup" id="gx-spotify-steps" class="gx-aa__steps">
-        <li class="gx-card gx-aa-step" :class="{ 'gx-aa-step--done': installed }">
+      <ol v-if="setup" v-show="phoneSource || !setupDone || showSetup" id="gx-spotify-steps" class="gx-aa__steps">
+        <li v-if="!phoneSource" class="gx-card gx-aa-step" :class="{ 'gx-aa-step--done': installed }">
           <div class="gx-aa-step__head">
             <span class="gx-aa-step__num" aria-hidden="true"><i v-if="installed" class="bi bi-check-lg"></i><template v-else>1</template></span>
             <div><h3>Spotify Soloist</h3><p>Spotify’s player for devices like your comma. You download it from Spotify, then upload it here.</p></div>
@@ -437,17 +470,18 @@ export const SpotifyPage = {
             <div class="gx-aa-status">
               <span class="gx-aa-pill" :class="'gx-aa-pill--' + release.level" role="status">{{ release.label }}</span>
               <div class="gx-actions gx-aa-status__actions">
-                <button v-if="!setup.release.installed" class="gx-btn" @click="openInstall">Install</button>
-                <button v-else-if="release.level !== 'ok'" class="gx-btn" @click="openInstall">Update</button>
-                <button v-else class="gx-btn gx-btn--tonal" @click="openInstall">Install newer version</button>
+                <button v-if="!setup.release.installed" class="gx-btn" :disabled="installBlocked" @click="openInstall">Install</button>
+                <button v-else-if="release.level !== 'ok'" class="gx-btn" :disabled="installBlocked" @click="openInstall">Update</button>
+                <button v-else class="gx-btn gx-btn--tonal" :disabled="installBlocked" @click="openInstall">Install newer version</button>
               </div>
             </div>
+            <p v-if="installBlocked" class="gx-note" role="status">Installing Spotify needs your local network or the Galaxy tunnel. Phone audio works over Bluetooth.</p>
             <p v-if="setup.import?.state === 'running' && !installOpen" class="gx-note" role="status">Installing…</p>
             <p class="gx-note">Each Soloist build works for 90 days. Before it runs out, this step shows <strong>Update</strong>; download again the same way.</p>
           </div>
         </li>
 
-        <li class="gx-card gx-aa-step" :class="{ 'gx-aa-step--done': setup.keyPresent }">
+        <li v-if="!phoneSource" class="gx-card gx-aa-step" :class="{ 'gx-aa-step--done': setup.keyPresent }">
           <div class="gx-aa-step__head">
             <span class="gx-aa-step__num" aria-hidden="true"><i v-if="setup.keyPresent" class="bi bi-check-lg"></i><template v-else>2</template></span>
             <div><h3>Your API Key</h3><p>Spotify gives each person their own key. Creating one needs Spotify Premium.</p></div>
@@ -493,13 +527,13 @@ export const SpotifyPage = {
                 <option value="test">Silent test (no speaker)</option>
               </select></label>
             <small v-if="!setup.parked" class="gx-note">Put the car in Park or use offroad mode to change this.</small>
-            <p v-if="setup.preferences.output === 'android_auto'" class="gx-note">Music plays through the car while <a class="gx-link" href="#/android-auto">Android Auto</a> is connected, and the car shows it as Android Auto audio. If you switch the car to the radio, Spotify pauses.</p>
+            <p v-if="setup.preferences.output === 'android_auto'" class="gx-note">Music plays through the car while <a class="gx-link" href="#/android-auto">Android Auto</a> is connected, and the car shows it as Android Auto audio. If you switch the car to the radio, playback is paused when the source supports it.</p>
             <p v-else-if="!outputChoices.length" class="gx-note">No paired devices yet. Pair your car or speaker on the <a class="gx-link" href="#/bluetooth">Bluetooth</a> page first.</p>
             <p v-else-if="setup.preferences.output === 'bluetooth'" class="gx-note">Don’t see it? Pair it on the <a class="gx-link" href="#/bluetooth">Bluetooth</a> page. In your car, choose <strong>Bluetooth Audio</strong> as the source.</p>
           </div>
         </li>
 
-        <li class="gx-card gx-aa-step" :class="{ 'gx-aa-step--done': setupDone && setup.enabled && player?.loggedIn }">
+        <li v-if="!phoneSource" class="gx-card gx-aa-step" :class="{ 'gx-aa-step--done': setupDone && setup.enabled && player?.loggedIn }">
           <div class="gx-aa-step__head">
             <span class="gx-aa-step__num" aria-hidden="true"><i v-if="setupDone && setup.enabled && player?.loggedIn" class="bi bi-check-lg"></i><template v-else>4</template></span>
             <div><h3>Connect Spotify</h3><p>Turn it on, then pick <strong>{{ setup.preferences.deviceName }}</strong> in the Spotify app’s device list.</p></div>
@@ -518,7 +552,7 @@ export const SpotifyPage = {
         </li>
       </ol>
 
-      <section v-if="setup && (setupDone ? showSetup : setup.release.installed)" class="gx-card gx-stack" aria-labelledby="gx-spotify-manage-title">
+      <section v-if="setup && !phoneSource && (setupDone ? showSetup : setup.release.installed)" class="gx-card gx-stack" aria-labelledby="gx-spotify-manage-title">
         <h3 id="gx-spotify-manage-title">Storage and Account</h3>
         <label class="gx-stack"><span>Music cache</span>
           <select class="gx-field" :value="setup.preferences.cacheMb" :disabled="busy" @change="saveCache">

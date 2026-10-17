@@ -186,3 +186,37 @@ def test_pipe_source_reads_a_fifo_without_blocking(tmp_path):
   os.close(writer)
   source.close()
   assert not ma.PipeSource(tmp_path / 'missing', lambda: True).active(10.0)
+
+
+def test_source_switch_discards_old_audio_and_releases_focus(audio):
+  stream, session, source, now, _ = audio
+  source.generation = 1
+  ready(stream, session)
+  play(stream, session, source, now)
+  stream.buffer.extend(TONE)
+  source.generation = 2
+  stream.service()
+  assert not stream.buffer and stream.state == 'ready'
+  assert session.sent[-1] == (0, ma.AUDIO_FOCUS_REQUEST, field(1, ma.FOCUS_RELEASE))
+
+
+def test_replaced_pipe_reopens_instead_of_reading_previous_source(tmp_path):
+  path = tmp_path / 'audio.pcm'
+  os.mkfifo(path)
+  source = ma.PipeSource(path, lambda: True)
+  assert source.active(10)
+  old = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+  source.read(16)
+  generation = source.generation
+  path.unlink()
+  os.mkfifo(path)
+  new = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+  try:
+    os.write(old, b'old!')
+    os.write(new, b'new!')
+    assert source.active(12) and source.generation != generation
+    assert source.read(16) == b'new!'
+  finally:
+    source.close()
+    os.close(old)
+    os.close(new)

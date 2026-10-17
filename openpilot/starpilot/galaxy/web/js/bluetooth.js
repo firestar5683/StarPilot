@@ -5,7 +5,7 @@ import { ControllersPage } from "./controllers.js"
 import { BluetoothDeviceList } from "./bluetooth-devices.js"
 
 const ADDRESS = /^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/
-const OPERATIONS = new Set(["power", "scan", "stop_scan", "connect", "disconnect", "forget", "pair", "pairing_response", "cancel_pair"])
+const OPERATIONS = new Set(["power", "scan", "stop_scan", "connect", "disconnect", "forget", "pair", "accept_pair", "pairing_response", "cancel_pair"])
 const PAIR_STATES = new Set(["pairing", "paired", "failed", "canceled"])
 const BLUETOOTH_ERRORS = {
   radio_unavailable: "Bluetooth radio support is unavailable on this device.",
@@ -29,7 +29,10 @@ export function validPairInput(prompt, value) {
 function validPairing(value) {
   if (value === null) return true
   const prompt = value?.prompt
-  return ADDRESS.test(value?.address) && PAIR_STATES.has(value?.state) &&
+  // A window opened for a phone has no address until the first phone asks to pair.
+  const incoming = value?.incoming === true
+  return (incoming ? value.address === "" || ADDRESS.test(value.address) : ADDRESS.test(value?.address)) &&
+    (!incoming || typeof value.name === "string" && value.name.length <= 80) && PAIR_STATES.has(value?.state) &&
     (prompt === null || (typeof prompt === "object" && /^[0-9a-f]{32}$/.test(prompt.id) &&
       PROMPT_KINDS.has(prompt.kind) && typeof prompt.value === "string" && prompt.value.length <= 16 &&
       typeof prompt.displayOnly === "boolean"))
@@ -39,6 +42,7 @@ export function validBluetoothStatus(value) {
   return value?.version === 1 && typeof value.available === "boolean" && typeof value.parked === "boolean" &&
     typeof value.powered === "boolean" && typeof value.discovering === "boolean" &&
     (value.errorCode === null || ["radio_unavailable", "adapter_unavailable", "service_unavailable", "radio_preference_unavailable"].includes(value.errorCode)) &&
+    ["adapterAddress", "adapterName"].every((key) => value[key] === undefined || typeof value[key] === "string" && value[key].length <= 80) &&
     validPairing(value.pairing ?? null) && Array.isArray(value.devices) && value.devices.length <= 64 && value.devices.every((device) =>
       ADDRESS.test(device?.address) && typeof device.name === "string" && device.name.length <= 80 &&
       [device.paired, device.connected, device.trusted].every((flag) => typeof flag === "boolean"))
@@ -196,9 +200,11 @@ export const BluetoothPage = {
             <p v-else-if="!status.parked">Park to restart the Bluetooth radio.</p>
             <div class="gx-driving__actions gx-actions"><button class="gx-btn" :disabled="!status.parked || !status.available" @click="action('power', {enabled: !status.powered})">Turn {{ status.powered ? 'Off' : 'On' }}</button>
 
-              <button class="gx-btn gx-btn--tonal" :disabled="!status.powered" @click="action(status.discovering ? 'stop_scan' : 'scan')">{{ status.discovering ? 'Stop Search' : 'Search' }}</button></div></div>
-          <div v-if="status.pairing" class="gx-card gx-driving__intro" role="status"><h3>Pairing {{ status.pairing.address }}</h3>
-            <p v-if="status.pairing.state === 'pairing'">Waiting for the device and any confirmation below.</p>
+              <button class="gx-btn gx-btn--tonal" :disabled="!status.powered" @click="action(status.discovering ? 'stop_scan' : 'scan')">{{ status.discovering ? 'Stop Search' : 'Search' }}</button>
+              <button class="gx-btn gx-btn--tonal" :disabled="!status.powered || !status.parked || status.discovering || status.pairing?.state === 'pairing'" @click="action('accept_pair')">Let a phone pair</button></div></div>
+          <div v-if="status.pairing" class="gx-card gx-driving__intro" role="status"><h3>{{ status.pairing.incoming ? (status.pairing.name ? 'Pairing ' + status.pairing.name : 'Let a phone pair') : 'Pairing ' + status.pairing.address }}</h3>
+            <p v-if="status.pairing.incoming && status.pairing.state === 'pairing' && !status.pairing.address">Open Bluetooth settings on your phone and tap <strong>{{ status.adapterName || 'this comma' }}</strong>. This stays open for two minutes and accepts only one phone.</p>
+            <p v-else-if="status.pairing.state === 'pairing'">Waiting for the device and any confirmation below.</p>
             <p v-else>{{ status.pairing.state === 'paired' ? 'Device paired.' : status.pairing.state === 'canceled' ? 'Pairing canceled.' : 'Pairing did not complete.' }}</p>
             <div v-if="status.pairing.prompt" class="gx-driving__intro"><p>{{ status.pairing.prompt.kind === 'confirmation' ? 'Confirm this code matches the device:' :
               status.pairing.prompt.kind === 'pin' ? 'Enter the PIN shown by the device.' :

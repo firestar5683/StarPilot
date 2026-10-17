@@ -16,12 +16,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from jeepney import DBusAddress, MatchRule, new_error, new_method_return
-from jeepney.low_level import HeaderFields, MessageType
-from jeepney.wrappers import Properties
+from jeepney import MatchRule, new_error, new_method_return
+from jeepney.low_level import HeaderFields
 
 from openpilot.starpilot.bluetooth.owner import (
-  ADAPTER, AGENT, BLUEZ, BlueZ, BluetoothOwner, BluetoothRejected, BluetoothUnavailable, PairingSession, normalized_address,
+  AGENT, BlueZ, BluetoothOwner, BluetoothRejected, BluetoothUnavailable, PairingSession, normalized_address,
 )
 from openpilot.starpilot.system.android_auto.incoming_pairing import IncomingPairing
 
@@ -39,19 +38,6 @@ class PhoneProfile(Protocol):
 
 class PhoneRoleBlueZ(BlueZ):
   """The existing owner's D-Bus connection is the sole adapter-property writer."""
-
-  def adapter_identity(self) -> tuple[str, dict[str, Any], str]:
-    path, props = self._adapter(self._objects())
-    if not path:
-      raise BluetoothUnavailable('Bluetooth adapter is unavailable')
-    return path, props, self._bluez_sender()
-
-  def set_pairing_visibility(self, path: str, *, pairable: bool, discoverable: bool) -> None:
-    address = DBusAddress(path, bus_name=BLUEZ, interface=ADAPTER)
-    for key, value in (('Pairable', pairable), ('Discoverable', discoverable)):
-      reply = self.router.send_and_get_reply(Properties(address).set(key, 'b', value), timeout=10.0)
-      if reply.header.message_type == MessageType.error:
-        raise BluetoothRejected(f'Bluetooth {key} change failed')
 
   def register_incoming_agent(self, agent: IncomingPairing, sender: str) -> Callable[[], None]:
     agent_filter = self.router.filter(MatchRule(type='method_call', interface=AGENT, path=AA_AGENT_PATH), bufsize=16)
@@ -688,7 +674,7 @@ class SharedBluetoothOwner(BluetoothOwner):
         lease = None
     if lease is not None and operation in ('power', 'scan', 'stop_scan', 'forget', 'connect', 'disconnect'):
       raise BluetoothRejected('Android Auto pairing has the Bluetooth adapter')
-    if lease is not None and operation in ('pair', 'cancel_pair', 'pairing_response'):
+    if lease is not None and operation in ('pair', 'accept_pair', 'cancel_pair', 'pairing_response'):
       raise BluetoothRejected('Use the Android Auto pairing operation for this lease')
     return super().request(operation, **kwargs)
 

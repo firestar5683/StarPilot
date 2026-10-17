@@ -94,10 +94,10 @@
       "visibility": "authenticated"
     },
     {
-      "name": "Spotify",
+      "name": "Spotify and Phone Audio",
       "path": "/spotify",
       "icon": "bi-spotify",
-      "description": "Play Spotify through your car or a Bluetooth speaker",
+      "description": "Play Spotify or forward phone music through your comma to your car",
       "availability": "local-only",
       "visibility": "authenticated"
     }

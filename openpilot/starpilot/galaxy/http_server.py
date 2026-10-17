@@ -107,6 +107,16 @@ def direct_local_connection(peer: str, destination: str, headers) -> bool:
     return False
 
 
+def install_origin_allowed(peer: str, destination: str, headers, remote_transport: bool = False) -> bool:
+  """Large installs are for the tunnel or a real LAN/hotspot client, never the phone Bluetooth bridge (loopback)."""
+  if remote_transport:
+    return True
+  try:
+    return not ip_address(peer).is_loopback and direct_local_connection(peer, destination, headers)
+  except ValueError:
+    return False
+
+
 def allowed_authority(host: str, local_address: str, port: int) -> bool:
   """Accept only the literal address reached by this socket, or loopback's name."""
   if host == f'localhost:{port}' and local_address == '127.0.0.1':
