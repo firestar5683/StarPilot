@@ -1,3 +1,5 @@
+import numpy as np
+
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.common.conversions import Conversions as CV
@@ -25,9 +27,22 @@ BOLT_CC_BUTTON_CARS = {
   CAR.CHEVROLET_BOLT_CC_2018_2021,
   CAR.CHEVROLET_BOLT_CC_2022_2023,
 }
-BOLT_CC_TARGET_DEADBAND_MPH = 0.75
-BOLT_CC_REVERSE_CONFIRM_S = 0.6
-BOLT_CC_DIRECTION_MEMORY_S = 1.5
+# Bolt CC-only (no ACC, no pedal interceptor) longitudinal control taps the stock
+# cruise +/- buttons. The stock cruise is itself a slow speed servo, so the set
+# speed is driven from the planner's speed target instead of the acceleration
+# command, which limit-cycles when fed through 1 mph steps.
+BOLT_CC_SPEEDO_RATIO = 1.01           # stock cruise holds vEgo about 1% under the displayed set speed
+BOLT_CC_PLAN_HORIZON_S = 2.5          # actuators.speed is the planned speed this far ahead
+BOLT_CC_TAP_HYSTERESIS_MPH = 0.8      # |target - set speed| needed before a 1 mph tap
+BOLT_CC_TARGET_TAU_UP_S = 3.0         # target filter time constant while the target rises
+BOLT_CC_TARGET_TAU_DOWN_S = 1.5       # target filter time constant while the target falls
+BOLT_CC_URGENT_DROP_MS = 1.0          # planned speed drop below the filtered target that bypasses the filter
+BOLT_CC_URGENT_DECEL = -0.5           # accel command that bypasses the filter and shortens the tap interval
+BOLT_CC_TAP_INTERVAL_BP_MPH = [1.0, 3.0, 6.0]
+BOLT_CC_TAP_INTERVAL_V_S = [1.5, 0.6, 0.25]
+BOLT_CC_URGENT_TAP_INTERVAL_S = 0.25
+BOLT_CC_MIN_SET_SPEED_MPH = 25.0      # stock cruise will not set below this, taps are wasted
+BOLT_CC_CANCEL_MARGIN_MS = 3.25       # cancel when the target falls this far below the engage speed
 VOLT_CC_CARS = {
   CAR.CHEVROLET_VOLT_CC,
 }
@@ -311,34 +326,67 @@ def create_lka_icon_command(bus, active, critical, steer):
   return CanData(0x104c006c, dat, bus)
 
 
-def stabilize_bolt_cc_button(controller, CP, requested_button):
-  if CP.carFingerprint not in BOLT_CC_BUTTON_CARS:
-    return requested_button
+def _bolt_cc_setpoint_button(controller, CS, actuators, v_cruise, ms_convert, is_metric):
+  """Pick the stock cruise button that moves the set speed toward the planner's speed target.
 
-  direction_buttons = (CruiseButtons.RES_ACCEL, CruiseButtons.DECEL_SET)
-  if requested_button not in direction_buttons:
-    controller.gm_cc_pending_reverse_button = CruiseButtons.INIT
-    return requested_button
+  Returns (button, min_seconds_since_last_tap). Filter state lives on the controller and is
+  cleared by the controller whenever button spam is not active.
+  """
+  v_ego = float(CS.out.vEgo)
+  accel = float(actuators.accel)
+  stock_speed = float(CS.out.cruiseState.speed)
+  speed_setpoint = int(round(stock_speed * ms_convert))
 
-  last_button = getattr(controller, "gm_cc_last_direction_button", CruiseButtons.INIT)
-  last_frame = getattr(controller, "gm_cc_last_direction_frame", -int(BOLT_CC_DIRECTION_MEMORY_S / DT_CTRL) - 1)
-  recently_sent = (controller.frame - last_frame) * DT_CTRL <= BOLT_CC_DIRECTION_MEMORY_S
-  reversing_to_accel = (last_button == CruiseButtons.DECEL_SET and
-                        requested_button == CruiseButtons.RES_ACCEL and recently_sent)
+  # controlsd publishes the planned speed ~2.5 s ahead in actuators.speed. With no lead
+  # this equals the cruise speed, so the set speed simply parks there.
+  v_plan = float(getattr(actuators, "speed", 0.0) or 0.0)
+  if v_plan <= 0.0:
+    v_plan = v_ego + BOLT_CC_PLAN_HORIZON_S * accel
+  raw_target = max(v_plan, 0.0)
+  has_cruise_cap = v_cruise is not None and float(v_cruise) > 0.0
+  if has_cruise_cap:
+    raw_target = min(raw_target, float(v_cruise))
 
-  if reversing_to_accel:
-    pending_button = getattr(controller, "gm_cc_pending_reverse_button", CruiseButtons.INIT)
-    if pending_button != requested_button:
-      controller.gm_cc_pending_reverse_button = requested_button
-      controller.gm_cc_pending_reverse_frame = controller.frame
-      return CruiseButtons.INIT
+  filtered = getattr(controller, "gm_cc_target_speed", None)
+  last_frame = getattr(controller, "gm_cc_target_frame", None)
+  if filtered is None or last_frame is None:
+    # Start from what the stock cruise already holds so engaging is tap-free.
+    filtered = stock_speed / BOLT_CC_SPEEDO_RATIO if stock_speed > 0.0 else v_ego
+    dt = DT_CTRL
+  else:
+    dt = min(max((controller.frame - last_frame) * DT_CTRL, DT_CTRL), 0.5)
+  controller.gm_cc_target_frame = controller.frame
 
-    pending_frame = getattr(controller, "gm_cc_pending_reverse_frame", controller.frame)
-    if (controller.frame - pending_frame) * DT_CTRL < BOLT_CC_REVERSE_CONFIRM_S:
-      return CruiseButtons.INIT
+  # A sudden drop in the planned speed (lead braking) must not wait on the filter.
+  urgent = accel <= BOLT_CC_URGENT_DECEL or raw_target < filtered - BOLT_CC_URGENT_DROP_MS
+  if urgent and raw_target < filtered:
+    filtered = raw_target
+  else:
+    tau = BOLT_CC_TARGET_TAU_UP_S if raw_target > filtered else BOLT_CC_TARGET_TAU_DOWN_S
+    filtered += (raw_target - filtered) * min(dt / tau, 1.0)
+  controller.gm_cc_target_speed = filtered
 
-  controller.gm_cc_pending_reverse_button = CruiseButtons.INIT
-  return requested_button
+  if CS.CP.minEnableSpeed - filtered > BOLT_CC_CANCEL_MARGIN_MS:
+    return CruiseButtons.CANCEL, 0.0
+
+  # The speedo ratio applies to the speed we want to travel at. The cruise speed is
+  # already in displayed units, so it caps the set speed directly.
+  target_setpoint = filtered * BOLT_CC_SPEEDO_RATIO * ms_convert
+  if has_cruise_cap:
+    target_setpoint = min(target_setpoint, float(round(float(v_cruise) * ms_convert)))
+  diff = target_setpoint - speed_setpoint
+
+  min_setpoint = BOLT_CC_MIN_SET_SPEED_MPH * (CV.MPH_TO_KPH if is_metric else 1.0)
+  button = CruiseButtons.INIT
+  if diff < -BOLT_CC_TAP_HYSTERESIS_MPH and speed_setpoint > min_setpoint:
+    button = CruiseButtons.DECEL_SET
+  elif diff > BOLT_CC_TAP_HYSTERESIS_MPH:
+    button = CruiseButtons.RES_ACCEL
+
+  interval = float(np.interp(abs(diff), BOLT_CC_TAP_INTERVAL_BP_MPH, BOLT_CC_TAP_INTERVAL_V_S))
+  if button == CruiseButtons.DECEL_SET and urgent:
+    interval = min(interval, BOLT_CC_URGENT_TAP_INTERVAL_S)
+  return button, interval
 
 
 def _create_volt_cc_spam_command(CS, actuators, ms_convert, longitudinal_adjustment_active):
@@ -388,7 +436,8 @@ def _create_volt_cc_spam_command(CS, actuators, ms_convert, longitudinal_adjustm
   return CruiseButtons.RES_ACCEL, rate
 
 
-def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggles, longitudinal_adjustment_active=False):
+def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggles, longitudinal_adjustment_active=False,
+                              v_cruise=None):
   accel = actuators.accel
   v_ego = CS.out.vEgo
   cruise_btn = CruiseButtons.INIT
@@ -396,23 +445,21 @@ def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggl
   is_metric = getattr(starpilot_toggles, "is_metric", False)
   ms_convert = CV.MS_TO_KPH if is_metric else CV.MS_TO_MPH
   speed_setpoint = int(round(CS.out.cruiseState.speed * ms_convert))
-  projected_setpoint = (v_ego * 1.01 + 3 * accel) * ms_convert
-  desired_setpoint = int(round(projected_setpoint))
   bolt_cc = CS.CP.carFingerprint in BOLT_CC_BUTTON_CARS
-  target_deadband = BOLT_CC_TARGET_DEADBAND_MPH * (CV.MPH_TO_KPH if is_metric else 1.0) if bolt_cc else 0.0
-  comparison_setpoint = projected_setpoint if bolt_cc else desired_setpoint
 
-  if CS.CP.carFingerprint in VOLT_CC_CARS:
+  if bolt_cc:
+    cruise_btn, rate = _bolt_cc_setpoint_button(controller, CS, actuators, v_cruise, ms_convert, is_metric)
+  elif CS.CP.carFingerprint in VOLT_CC_CARS:
     cruise_btn, rate = _create_volt_cc_spam_command(CS, actuators, ms_convert, longitudinal_adjustment_active)
   else:
+    desired_setpoint = int(round((v_ego * 1.01 + 3 * accel) * ms_convert))
     if CS.CP.minEnableSpeed - (desired_setpoint / ms_convert) > 3.25:
       cruise_btn = CruiseButtons.CANCEL
-    elif comparison_setpoint < speed_setpoint - target_deadband and speed_setpoint > CS.CP.minEnableSpeed * ms_convert + 1:
+    elif desired_setpoint < speed_setpoint and speed_setpoint > CS.CP.minEnableSpeed * ms_convert + 1:
       cruise_btn = CruiseButtons.DECEL_SET
-    elif comparison_setpoint > speed_setpoint + target_deadband:
+    elif desired_setpoint > speed_setpoint:
       cruise_btn = CruiseButtons.RES_ACCEL
 
-  cruise_btn = stabilize_bolt_cc_button(controller, CS.CP, cruise_btn)
   if cruise_btn == CruiseButtons.CANCEL:
     controller.apply_speed = 0
   elif cruise_btn == CruiseButtons.DECEL_SET:
@@ -462,9 +509,6 @@ def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggl
   # Or bus 2, since we're forwarding... but I think it does
   if (cruise_btn != CruiseButtons.INIT) and ((controller.frame - controller.last_button_frame) * DT_CTRL > rate):
     controller.last_button_frame = controller.frame
-    if bolt_cc and cruise_btn in (CruiseButtons.RES_ACCEL, CruiseButtons.DECEL_SET):
-      controller.gm_cc_last_direction_button = cruise_btn
-      controller.gm_cc_last_direction_frame = controller.frame
     if CS.CP.carFingerprint == CAR.CHEVROLET_MALIBU_HYBRID_CC:
       phase_map = malibu_phase_map_for_button(cruise_btn)
       if phase_map:
