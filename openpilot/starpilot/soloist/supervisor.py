@@ -21,6 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from openpilot.starpilot.soloist import backend, credentials, package, preferences, phone_audio
+from openpilot.starpilot.soloist import now_playing as now_playing_module
 from openpilot.starpilot.soloist.client import PlayerClient
 from openpilot.starpilot.soloist.paths import CONTROL_SOCKET, Layout, private_dir
 
@@ -122,6 +123,7 @@ class Supervisor:
     self.secret = ''
     self.phone = phone_audio.PhoneInput()
     self.phone_prefs = None
+    self.phone_track = None
     self.phone_profile = False
     self.pairing_profile_until = 0.0
 
@@ -137,8 +139,10 @@ class Supervisor:
     if state == 'running' and player is not None:
       state = ('connecting' if not player['connected'] else 'waiting' if not player['loggedIn'] else
                'playing' if player['status'] == 'playing' and player['active'] else 'ready')
+    now_playing = (now_playing_module.from_phone(self.phone_track) if self.phone_prefs is not None and self.player is not None
+                   else now_playing_module.from_spotify(player))
     return {'state': state, 'message': self.message, 'daysLeft': self.days_left, 'player': player,
-            'log': list(self.log)[-20:]}
+            'nowPlaying': now_playing, 'log': list(self.log)[-20:]}
 
   def publish(self) -> None:
     try:
@@ -224,6 +228,7 @@ class Supervisor:
         return
       if self.player is not None:
         if self.player.poll() is None and self.server is not None and self.server.poll() is None:
+          self.phone_track = self.phone.track(prefs.phone_address)
           return
         raise RuntimeError('Phone audio disconnected. Reconnecting…')
       self.server = self._start(backend.server_launch(self.layout, prefs), 'audio')

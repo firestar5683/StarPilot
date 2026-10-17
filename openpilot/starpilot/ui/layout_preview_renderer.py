@@ -214,6 +214,8 @@ class _Canvas:
         self.view = ProjectionOnroad.create_view(OnroadView, self.fonts, viewport=viewport, **layers)
         from openpilot.starpilot.system.android_auto.projection_exit import ProjectionExit
         self.view.projection_exit_layer = ProjectionExit(rl).render
+        self.view.now_playing.track = {'source': 'spotify', 'status': 'playing', 'title': 'Midnight City', 'artist': 'M83', 'album': '',
+                                       'durationMs': 243000, 'position': {'ms': 92000, 'at': 0, 'speed': 0.0}}
         from openpilot.starpilot.ui.onroad_map import MapOverlay, SampleTileReader
         self.map = MapOverlay(reader=SampleTileReader(), fonts=self.fonts)
         self.view.map_layer = self._render_map

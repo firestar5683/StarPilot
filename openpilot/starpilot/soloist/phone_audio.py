@@ -78,6 +78,18 @@ class PhoneInput:
       return bool(props.get('Connected'))
     return False
 
+  def track(self, address: str) -> dict | None:
+    """The phone's Bluetooth media player (title, artist, status), for the car screen; never raises."""
+    try:
+      from openpilot.starpilot.bluetooth.owner import DEVICE
+      objects = self._objects()
+      device = next((path for path, interfaces in objects.items()
+                     if str(interfaces.get(DEVICE, {}).get('Address', '')).upper() == address), None)
+      return next((interfaces[MEDIA_PLAYER] for path, interfaces in objects.items()
+                   if device and path.startswith(device + '/') and MEDIA_PLAYER in interfaces), None)
+    except Exception:
+      return None
+
   def pause(self, address: str) -> None:
     if self.client is None:
       return

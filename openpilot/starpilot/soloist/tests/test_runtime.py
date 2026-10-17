@@ -295,3 +295,23 @@ def test_reap_orphans_only_targets_feature_binaries(layout, tmp_path, monkeypatc
   killed = []
   monkeypatch.setattr(supervisor.os, 'kill', lambda pid, sig: killed.append(pid))
   assert supervisor.reap_orphans(layout, proc) == 1 and killed == [100]
+
+
+def test_status_publishes_the_spotify_track_for_the_car_screen(layout):
+  sup, _ = make_supervisor(layout, [])
+  sup.client = type('Client', (), {'snapshot': lambda self: {
+    'connected': True, 'loggedIn': True, 'active': True, 'status': 'playing', 'position': None,
+    'track': {'title': 'Song', 'artists': 'Band', 'album': '', 'durationMs': 1000}}})()
+  assert sup.status()['nowPlaying']['title'] == 'Song'
+  sup.client = None
+  assert sup.status()['nowPlaying'] is None
+
+
+def test_status_publishes_the_phone_track_only_while_phone_audio_runs(layout):
+  sup, _ = make_supervisor(layout, [])
+  sup.phone_prefs = object()
+  sup.phone_track = {'Status': 'playing', 'Track': {'Title': 'Phone Song', 'Artist': 'Band'}}
+  assert sup.status()['nowPlaying'] is None
+  sup.player = object()
+  found = sup.status()['nowPlaying']
+  assert found['source'] == 'phone' and found['title'] == 'Phone Song'

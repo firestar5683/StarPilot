@@ -74,3 +74,11 @@ Device acceptance remains necessary: test Android/iPhone pairing and audio,
 44.1/48 kHz tracks, radio focus loss/resume, phone disconnect/reconnect, Bluetooth
 off/on, source switching, service restart and reboot. Test wireless Android Auto
 and Bluetooth output separately for radio coexistence, latency and dropouts.
+
+## Now playing on the car screen
+
+Android Auto layouts include a **Now playing** card (Galaxy → Android Auto layout) that shows the title,
+artist and progress of Spotify or of the phone's Bluetooth player, with a background opacity setting. The
+supervisor publishes the snapshot in its status file; the car screen reads it once a second only while the
+card is enabled, and the card stays hidden when nothing is playing or an alert is up. Phone metadata comes
+from the phone's Bluetooth media player (BlueZ `MediaPlayer1`), so it depends on the phone sharing it.

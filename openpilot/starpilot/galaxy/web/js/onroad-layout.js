@@ -189,6 +189,16 @@ export const LayoutWidgetPreview = {
           :font-size="profile === 'large' ? 48 : 21" font-weight="600"
           style="filter: drop-shadow(2px 2px 1px #000000aa)">{{ clock24Hour ? '18:00' : '12:00 PM' }}</text>
       </template>
+      <g v-else-if="widget.kind === 'now_playing'">
+        <rect x="0" y="0" :width="widget.width" :height="widget.height" rx="37" fill="#0f0d17" :fill-opacity="(widget.opacity ?? 85) / 100 * .92" />
+        <rect x="10" y="18" width="5" :height="widget.height - 36" rx="2.5" fill="#c7aef7" />
+        <text x="32" y="52" font-size="34" font-weight="600" fill="#f5f2fc">Midnight City</text>
+        <text x="32" y="96" font-size="26" fill="#b8b2c8">M83</text>
+        <rect x="32" :y="widget.height - 26" :width="widget.width - 64" height="6" rx="3" fill="#ffffff" fill-opacity=".2" />
+        <rect x="32" :y="widget.height - 26" :width="(widget.width - 64) * .38" height="6" rx="3" fill="#c7aef7" />
+        <rect :x="widget.width - 52" y="28" width="10" height="34" rx="4" fill="#c7aef7" />
+        <rect :x="widget.width - 34" y="28" width="10" height="34" rx="4" fill="#c7aef7" />
+      </g>
       <template v-else-if="widget.kind === 'speed_limit'">
         <rect x="10" y="8" width="100" height="116" rx="14" fill="none" stroke="white" stroke-width="2" />
         <text x="60" y="18" dominant-baseline="text-before-edge" text-anchor="middle" font-size="20" font-weight="600" fill="white">SPEED</text>
