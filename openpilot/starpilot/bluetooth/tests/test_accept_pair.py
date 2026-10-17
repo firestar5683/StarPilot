@@ -29,7 +29,7 @@ def device(address, device_class, *, paired=False, uuids=()):
 
 class WindowHarness:
   def __init__(self, test, *, pairable=False, discoverable=False, seconds=120.0):
-    self.responses, self.calls, self.visibility, self.journal, self.restored = [], [], [], [], []
+    self.responses, self.calls, self.visibility, self.journal, self.restored, self.classes = [], [], [], [], [], []
     self.incoming = Queue()
     self.now = time.monotonic
     harness = self
@@ -44,7 +44,8 @@ class WindowHarness:
 
     self.objects = {
       '/org/bluez/hci0': {'org.bluez.Adapter1': {'Powered': True, 'Discovering': False, 'Pairable': pairable,
-                                                  'Discoverable': discoverable, 'Address': 'AA:AA:AA:AA:AA:AA'}},
+                                                  'Discoverable': discoverable, 'Address': 'AA:AA:AA:AA:AA:AA',
+                                                  'Class': 0x4c0000}},
       PHONE: {'org.bluez.Device1': device('11:22:33:44:55:66', 0x5a020c)},
       SPEAKER: {'org.bluez.Device1': device('AA:BB:CC:DD:EE:01', 0x240414)},
     }
@@ -55,6 +56,7 @@ class WindowHarness:
     test.enterContext(patch.object(self.bluez, 'set_pairing_visibility',
                                    lambda path, *, pairable, discoverable: self.visibility.append((pairable, discoverable))))
     test.enterContext(patch.object(self.bluez, '_call', self.call))
+    test.enterContext(patch.object(self.bluez, 'set_class', lambda major, minor: self.classes.append((major, minor)) or True))
     self.session = OpenPairingSession(('session', b'generation'), lambda: True, self.now)
     self.session.deadline = self.now() + seconds
 
@@ -110,6 +112,7 @@ class AcceptPairWindowTest(unittest.TestCase):
     self.assertEqual(harness.calls[-1], 'UnregisterAgent')
     self.assertIn('Set', harness.calls)
     self.assertEqual(harness.responses[0].header.message_type, MessageType.error)
+    self.assertEqual(harness.classes, [(4, 5), (0, 0)], 'shown as a speaker, then the original class returns')
 
   def test_devices_that_are_not_phones_cannot_claim_the_window(self):
     harness = WindowHarness(self, seconds=0.8)

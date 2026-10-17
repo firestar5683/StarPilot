@@ -25,6 +25,19 @@ from openpilot.starpilot.bluetooth.radio_preference import RadioPreference
 RADIO_HELPER = Path('/usr/comma/bluetooth-radio')
 RADIO_UNIT = 'starpilot-bluetooth-radio.service'
 ADDRESS = re.compile(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}\Z')
+# iPhones only list nearby devices that look like audio gear, so the window presents as a loudspeaker.
+SPEAKER_CLASS = (4, 5)
+
+
+def set_device_class(major: int, minor: int) -> bool:
+  for command in (['sudo', '-n', 'btmgmt', '--index', '0', 'class', str(major), str(minor)],
+                  ['sudo', '-n', 'hciconfig', 'hci0', 'class', f'{(major << 8) | (minor << 2):#08x}']):
+    try:
+      if subprocess.run(command, capture_output=True, timeout=5).returncode == 0:
+        return True
+    except (OSError, subprocess.TimeoutExpired):
+      pass
+  return False
 BLUEZ = 'org.bluez'
 ADAPTER = 'org.bluez.Adapter1'
 DEVICE = 'org.bluez.Device1'
@@ -292,6 +305,8 @@ class BlueZ:
       raise BluetoothUnavailable('Bluetooth adapter is unavailable')
     return path, props, self._bluez_sender()
 
+  set_class = staticmethod(set_device_class)
+
   def set_pairing_visibility(self, path: str, *, pairable: bool, discoverable: bool) -> None:
     address = DBusAddress(path, bus_name=BLUEZ, interface=ADAPTER)
     for key, value in (('Pairable', pairable), ('Discoverable', discoverable)):
@@ -324,6 +339,7 @@ class BlueZ:
     if props.get('Powered') is not True or props.get('Discovering') is True:
       raise BluetoothUnavailable('Bluetooth adapter is not ready for phone pairing')
     pairable, discoverable = props.get('Pairable') is True, props.get('Discoverable') is True
+    original_class = props.get('Class') if type(props.get('Class')) is int else 0
 
     def claim(device_path: str) -> bool:
       device = self._objects().get(device_path, {}).get(DEVICE)
@@ -339,6 +355,8 @@ class BlueZ:
     def action(pair_succeeded: threading.Event) -> bool:
       if session.state != 'pairing' or not session.parked() or session.clock() >= session.deadline:
         return False
+      if (original_class >> 8) & 0x1f != SPEAKER_CLASS[0]:
+        self.class_changed = self.set_class(*SPEAKER_CLASS)
       self.set_pairing_visibility(adapter, pairable=True, discoverable=True)
       while session.state == 'pairing' and session.parked() and session.clock() < session.deadline:
         if session.path:
@@ -358,12 +376,15 @@ class BlueZ:
       return False
 
     journal(adapter, sender, pairable, discoverable)
+    self.class_changed = False
     try:
       return self._serve_agent(session, claim, action, default_agent=True)
     finally:
       now_adapter, _, now_sender = self.adapter_identity()
       if (now_adapter, now_sender) == (adapter, sender):
         self.set_pairing_visibility(adapter, pairable=pairable, discoverable=discoverable)
+      if self.class_changed:
+        self.set_class((original_class >> 8) & 0x1f, (original_class >> 2) & 0x3f)
       # Kept on failure above so the next owner can still undo the window.
       restored()
 
