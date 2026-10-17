@@ -598,6 +598,35 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       finally:
         aa_source_registry().revoke_source(source)
 
+    def aa_phone_window(self, identity, operation, payload=None):
+      """The phone pairing window inside a running Android Auto projection; handled False when none holds the adapter."""
+      registry = aa_source_registry()
+      minted = operation == 'accept_pair'
+      source = registry.mint(identity) if minted else registry.current(identity)
+      if source is None:
+        return {'handled': False}
+      arguments = {}
+      if operation == 'pairing_response':
+        arguments = {'prompt_id': payload['promptId'], 'accepted': payload['accepted'], 'value': payload.get('value', '')}
+      try:
+        if self.settings_session() != identity:
+          raise ValueError('Galaxy session changed')
+        delegated = aa_client().call('phone_window', source=source, operation=operation, **arguments)
+      except (OSError, RuntimeError):
+        delegated = {'handled': False}
+      if type(delegated) is not dict or type(delegated.get('handled')) is not bool:
+        delegated = {'handled': False}
+      if minted and (not delegated['handled'] or 'error_code' in delegated) or operation == 'cancel_pair' and delegated['handled']:
+        registry.revoke_source(source)
+      found = delegated.get('bluetooth')
+      paired = found.pop('windowPaired', None) if type(found) is dict else None
+      if type(paired) is dict and configuration_allowed():
+        try:
+          spotify_owner().adopt_phone(paired['address'], paired['name'], tuple(paired['uuids']))
+        except Exception:
+          pass
+      return delegated
+
     def do_GET(self):
       if not self.local_request():
         return
@@ -888,6 +917,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           return
         try:
           result = bluetooth_owner().snapshot(session=identity)
+          if result.get('pairing') is None and aa_setup_owner().enabled():
+            delegated = self.aa_phone_window(identity, 'status')
+            if delegated['handled'] and type(delegated.get('bluetooth')) is dict:
+              result['pairing'] = delegated['bluetooth'].get('pairing')
         except (OSError, RuntimeError):
           self.json(503, {'error': 'Bluetooth is unavailable', 'code': 'unavailable'})
         else:
@@ -2454,6 +2487,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               self.json(401, {'error': 'Sign in to Galaxy'})
               return
             delegated = {'handled': False}
+            if payload['operation'] == 'accept_pair' and configuration_allowed():
+              spotify_owner().prepare_phone_pairing()
             if payload['operation'] in ('connect', 'disconnect', 'forget') and aa_setup_owner().enabled():
               try:
                 delegated = self.aa_command(identity, 'bluetooth_action', operation=payload['operation'],
@@ -2472,13 +2507,18 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 unavailable = ('service_unavailable', 'adapter_unavailable', 'radio_unavailable', 'radio_preference_unavailable')
                 raise BluetoothUnavailable('Android Auto Bluetooth service is unavailable',
                                            code=code if type(code) is str and code in unavailable else 'service_unavailable')
+            elif payload['operation'] in ('accept_pair', 'pairing_response', 'cancel_pair') and aa_setup_owner().enabled():
+              delegated = self.aa_phone_window(identity, payload['operation'], payload)
+              if 'error_code' in delegated:
+                code = delegated['error_code']
+                if type(code) is str and code in ('busy', 'park_required', 'changed', 'session_expired'):
+                  raise BluetoothRejected('Android Auto could not complete the Bluetooth change', code=code)
+                raise BluetoothUnavailable('Android Auto Bluetooth service is unavailable')
             if delegated['handled']:
               result = delegated.get('bluetooth')
               if type(result) is not dict:
                 raise BluetoothUnavailable('service_unavailable')
             else:
-              if payload['operation'] == 'accept_pair' and configuration_allowed():
-                spotify_owner().prepare_phone_pairing()
               result = bluetooth_owner().request(payload['operation'], address=payload.get('address'), enabled=payload.get('enabled'),
                                                  session=identity, prompt_id=payload.get('promptId'),
                                                  accepted=payload.get('accepted'), value=payload.get('value', ''))

@@ -723,6 +723,10 @@ class Supervisor:
     return bool(receiver) and (address.upper() == receiver.upper() or
       self._shared_bluetooth_owner is not None and self._shared_bluetooth_owner.companion_accepts(address))
 
+  def phone_window(self, operation: str, session: tuple, **arguments):
+    owner = self._shared_bluetooth_owner
+    return None if owner is None else owner.phone_window(operation, session, **arguments)
+
   def companion_bluetooth_action(self, operation: str, address: str, session: tuple):
     owner = self._shared_bluetooth_owner
     if owner is None:

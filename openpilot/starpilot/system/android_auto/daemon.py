@@ -29,7 +29,7 @@ from openpilot.starpilot.system.android_auto.supervisor import Supervisor
 
 PAIRING_COMMANDS = {"prepare_pairing", "pairing_status", "pairing_response", "cancel_pairing", "pair_device"}
 AUTHENTICATED_COMMANDS = {"start", "set_auto_connect", "select_receiver", "set_view", "set_connection",
-                          "prepare_pairing", "pairing_status", "pairing_response", "cancel_pairing", "pair_device", "devices", "bluetooth_action"}
+                          "prepare_pairing", "pairing_status", "pairing_response", "cancel_pairing", "pair_device", "devices", "bluetooth_action", "phone_window"}
 
 
 def _offroad() -> bool:
@@ -58,7 +58,7 @@ def handle(supervisor: Supervisor, request: dict[str, Any], verifier: GalaxySour
     source = request.get('source')
     if not isinstance(source, str) or verifier is None or not verifier.valid(source):
       raise RuntimeError('Authenticated Galaxy Android Auto source required')
-    if command != 'bluetooth_action':
+    if command not in ('bluetooth_action', 'phone_window'):
       supervisor.bind_source_session(('galaxy', source))
   if command in PAIRING_COMMANDS and not (parked or _offroad)():
     raise RuntimeError("Disengage and shift into Park before pairing")
@@ -70,6 +70,22 @@ def handle(supervisor: Supervisor, request: dict[str, Any], verifier: GalaxySour
       return {'handled': True, 'error_code': 'park_required'}
     try:
       result = supervisor.companion_bluetooth_action(request['operation'], request['address'], ('galaxy', request['source']))
+    except (BluetoothRejected, BluetoothUnavailable) as error:
+      return {'handled': True, 'error_code': error.code}
+    except (OSError, RuntimeError):
+      return {'handled': True, 'error_code': 'service_unavailable'}
+    return {'handled': result is not None, **({'bluetooth': result} if result is not None else {})}
+  if command == 'phone_window':
+    from openpilot.starpilot.bluetooth.owner import BluetoothRejected, BluetoothUnavailable
+    operation = request.get('operation')
+    fields = {'command', 'source', 'operation'} | ({'prompt_id', 'accepted', 'value'} if operation == 'pairing_response' else set())
+    if set(request) != fields or operation not in ('accept_pair', 'pairing_response', 'cancel_pair', 'status'):
+      raise ValueError('Invalid phone pairing request')
+    if operation != 'status' and not (parked or _offroad)():
+      return {'handled': True, 'error_code': 'park_required'}
+    answer = {key: request[key] for key in ('prompt_id', 'accepted', 'value') if key in request}
+    try:
+      result = supervisor.phone_window(operation, ('galaxy', request['source']), **answer)
     except (BluetoothRejected, BluetoothUnavailable) as error:
       return {'handled': True, 'error_code': error.code}
     except (OSError, RuntimeError):

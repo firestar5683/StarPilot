@@ -20,7 +20,7 @@ from jeepney import MatchRule, new_error, new_method_return
 from jeepney.low_level import HeaderFields
 
 from openpilot.starpilot.bluetooth.owner import (
-  AGENT, BlueZ, BluetoothOwner, BluetoothRejected, BluetoothUnavailable, PairingSession, normalized_address,
+  AGENT, BlueZ, BluetoothOwner, BluetoothRejected, BluetoothUnavailable, OpenPairingSession, PairingSession, normalized_address,
 )
 from openpilot.starpilot.system.android_auto.incoming_pairing import IncomingPairing
 
@@ -176,6 +176,9 @@ class SharedBluetoothOwner(BluetoothOwner):
     self.lock_path = lock_path
     self.companion_devices: dict[str, str] = {}
     self.journal_path = lock_path.with_suffix('.recovery.json')
+    self.window_paired: dict | None = None
+    if self.on_paired is None:
+      self.on_paired = lambda address, name, uuids: setattr(self, 'window_paired', {'address': address, 'name': name, 'uuids': list(uuids)})
 
   def _process_lock(self):
     self.lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -315,6 +318,11 @@ class SharedBluetoothOwner(BluetoothOwner):
       lease.released = True
       self.companion_devices.clear()
       self.phone_lease = None
+      window = self.pairing
+      if isinstance(window, OpenPairingSession) and not window.done.is_set():
+        # Let the phone window put its visibility back before the lease restores the original.
+        window.cancel()
+        window.done.wait(5.0)
       if lease.session is not None:
         self.cancel_session(lease.session)
       try:
@@ -670,6 +678,45 @@ class SharedBluetoothOwner(BluetoothOwner):
       if operation == 'disconnect':
         self.companion_devices.pop(address, None)
       return self.snapshot(session=session)
+    finally:
+      self.lock.release()
+
+  def phone_window(self, operation: str, session: tuple, *, prompt_id: str | None = None,
+                   accepted: bool | None = None, value: str = '') -> dict | None:
+    """Open, answer or read a phone pairing window inside the projection lease; None means no projection holds the adapter."""
+    if operation not in ('accept_pair', 'pairing_response', 'cancel_pair', 'status'):
+      raise ValueError('Unsupported phone window operation')
+    if not self.lock.acquire(blocking=False):
+      raise BluetoothRejected('Bluetooth is busy', code='busy')
+    try:
+      lease = self.phone_lease
+      window = self.pairing if isinstance(self.pairing, OpenPairingSession) else None
+      if lease is None or lease.released:
+        return None
+      if lease.session is not None:
+        raise BluetoothRejected('Finish Android Auto pairing first', code='busy')
+      if not self.session_valid(session):
+        raise BluetoothRejected('Galaxy session expired', code='session_expired')
+      if operation != 'accept_pair' and (window is None or window.identity != session):
+        return None
+      if operation == 'accept_pair':
+        if not self.parked():
+          raise BluetoothRejected('Park before pairing a phone', code='park_required')
+        if self.pairing is not None and not self.pairing.done.is_set():
+          raise BluetoothRejected('Pairing is in progress', code='busy')
+        window = OpenPairingSession(session, lambda: self.session_valid(session) and self.parked(), self.clock)
+        self.pairing = window
+        self.window_paired = None
+        # The lease already journals the original visibility; the window only returns it to the lease's state.
+        threading.Thread(target=self._accept_worker, args=(window, lambda *_: None, lambda: None), daemon=True).start()
+        threading.Thread(target=self._watch_pair, args=(window,), daemon=True).start()
+      elif operation == 'cancel_pair':
+        window.cancel()
+      elif operation == 'pairing_response' and (prompt_id is None or type(accepted) is not bool or not window.respond(session, prompt_id, accepted, value)):
+        raise BluetoothRejected('Pairing prompt changed')
+      result = self.snapshot(session=session)
+      result['windowPaired'] = self.window_paired
+      return result
     finally:
       self.lock.release()
 

@@ -718,7 +718,7 @@ class BluetoothOwner:
       client.set_pairing_visibility(path, pairable=data['pairable'], discoverable=data['discoverable'])
     self.window_journal_path.unlink(missing_ok=True)
 
-  def _accept_worker(self, pairing: OpenPairingSession) -> None:
+  def _accept_worker(self, pairing: OpenPairingSession, journal: Callable | None = None, restored: Callable | None = None) -> None:
     client = None
     paired = False
     try:
@@ -727,7 +727,8 @@ class BluetoothOwner:
         pairing.cancel_callback = lambda: client.cancel_pair(pairing.path) if pairing.path else None
         canceled = pairing.state != 'pairing'
       if not canceled:
-        paired = client.accept_pair(pairing, self._write_journal, lambda: self.window_journal_path.unlink(missing_ok=True))
+        paired = client.accept_pair(pairing, journal or self._write_journal,
+                                    restored or (lambda: self.window_journal_path.unlink(missing_ok=True)))
     except (BluetoothRejected, BluetoothUnavailable, OSError, RuntimeError, ValueError):
       pass
     finally:
