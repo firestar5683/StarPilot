@@ -65,7 +65,8 @@ export class BluetoothFeed {
 
   emit() { this.publish({ status: this.status, busy: this.busy, error: this.error }) }
   stop(cancelPair = false) {
-    if (cancelPair && this.active && this.status?.pairing?.state === "pairing") {
+    // A phone window has to survive the page being hidden: the phone is opened to tap the comma.
+    if (cancelPair && this.active && this.status?.pairing?.state === "pairing" && !this.status.pairing.incoming) {
       this.fetcher("./api/bluetooth/action", { method: "POST", credentials: "same-origin", keepalive: true,
         headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "cancel_pair" }) }).catch(() => {})
     }

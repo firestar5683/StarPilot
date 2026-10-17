@@ -115,3 +115,11 @@ test('timed-out background polling preserves status and resumes even when fetch 
   assert.equal(feed.status.devices[0].address, car.address);
   assert(states.every((s) => s.busy === false)); feed.stop();
 });
+
+test('hiding the page keeps a phone pairing window open so the phone can find the comma', async () => {
+  const calls = [];
+  const {feed} = harness(async (url, options) => {calls.push(options); return response(status([car],
+    {discovering: false, pairing: {address: '', state: 'pairing', prompt: null, incoming: true, name: ''}}))});
+  await feed.start(); feed.stop(true);
+  assert(!calls.some((options) => options?.body && JSON.parse(options.body).operation === 'cancel_pair'));
+});

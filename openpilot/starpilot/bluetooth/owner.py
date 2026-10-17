@@ -30,7 +30,8 @@ SPEAKER_CLASS = (4, 5)
 
 
 def set_device_class(major: int, minor: int) -> bool:
-  for command in (['sudo', '-n', 'btmgmt', '--index', '0', 'class', str(major), str(minor)],
+  # btmgmt takes the minor class as its byte in the class field (shifted past the two format bits).
+  for command in (['sudo', '-n', 'btmgmt', '--index', '0', 'class', str(major), str(minor << 2)],
                   ['sudo', '-n', 'hciconfig', 'hci0', 'class', f'{(major << 8) | (minor << 2):#08x}']):
     try:
       if subprocess.run(command, capture_output=True, timeout=5).returncode == 0:
@@ -38,6 +39,8 @@ def set_device_class(major: int, minor: int) -> bool:
     except (OSError, subprocess.TimeoutExpired):
       pass
   return False
+
+
 BLUEZ = 'org.bluez'
 ADAPTER = 'org.bluez.Adapter1'
 DEVICE = 'org.bluez.Device1'
