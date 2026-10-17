@@ -139,7 +139,7 @@ class PulseWriter:
     self.lib.pa_simple_free.argtypes = [C.c_void_p]
     self.lib.pa_simple_free.restype = None
     spec = SampleSpec(3, 48000, 2)  # PA_SAMPLE_S16LE
-    attr = BufferAttr(38400, 19200, 0, 3840, 0xffffffff)  # 200 ms maximum, 100 ms target
+    attr = BufferAttr(38400, 19200, 0xffffffff, 3840, 0xffffffff)  # 200 ms maximum, 100 ms target, refill before playing
     error = C.c_int()
     self.stream = self.lib.pa_simple_new(server.encode(), b'StarPilot phone', 1, backend.SINK_NAME.encode(), b'Phone music',
                                            C.byref(spec), None, C.byref(attr), C.byref(error))

@@ -207,7 +207,8 @@ export const BluetoothPage = {
             <p v-if="status.pairing.incoming && status.pairing.state === 'pairing' && !status.pairing.address">Open Bluetooth settings on your phone and tap <strong>{{ status.adapterName || 'this comma' }}</strong>. This stays open for two minutes and accepts only one phone.</p>
             <p v-else-if="status.pairing.state === 'pairing'">Waiting for the device and any confirmation below.</p>
             <p v-else>{{ status.pairing.state === 'paired' ? 'Device paired.' : status.pairing.state === 'canceled' ? 'Pairing canceled.' : 'Pairing did not complete.' }}</p>
-            <div v-if="status.pairing.prompt" class="gx-driving__intro"><p>{{ status.pairing.prompt.kind === 'confirmation' ? 'Confirm this code matches the device:' :
+            <div v-if="status.pairing.prompt" class="gx-driving__intro"><p>{{ status.pairing.incoming && status.pairing.prompt.displayOnly && status.pairing.prompt.kind === 'confirmation' ? 'Accepted automatically. Tap Pair on your phone if it shows this code:' :
+              status.pairing.prompt.kind === 'confirmation' ? 'Confirm this code matches the device:' :
               status.pairing.prompt.kind === 'pin' ? 'Enter the PIN shown by the device.' :
               status.pairing.prompt.kind === 'passkey' ? 'Enter the device passkey.' :
               status.pairing.prompt.kind === 'authorization' ? 'Allow this device to pair?' : 'Use this code on the device:' }}</p>

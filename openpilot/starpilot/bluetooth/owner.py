@@ -155,6 +155,12 @@ class OpenPairingSession(PairingSession):
         self.path, self.address, self.name = path, address, name[:80]
       return self.path == path
 
+  def ask(self, kind: str, path: str, value: str = '') -> tuple[bool, str]:
+    # The signed-in owner opened this window for their own phone; a confirmation is shown, not waited on.
+    if kind not in ('confirmation', 'authorization'):
+      return super().ask(kind, path, value)
+    return (True, '') if self.display(kind, path, value) else (False, '')
+
 
 class BluetoothUnavailable(Exception):
   def __init__(self, message: str, *, code: str = 'service_unavailable'):
