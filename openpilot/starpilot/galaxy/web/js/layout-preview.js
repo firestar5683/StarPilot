@@ -42,8 +42,10 @@ export function sceneHidesWidget(scene, profile, id, layout = {}, widgets = {}) 
   if (id === "cem_gauge") return !scene.startsWith("cem_")
   if (id === "torque_bar" || profile === "compact" && id === "steering_wheel") return !lateral
   if (profile === "compact" && id === "max_speed") return !longitudinal
-  if (id === "speed_limit_actions") return !longitudinal || scene === "slc_unavailable" || scene === "slc_display" ||
-    profile === "compact" && scene !== "slc_pending"
+  // Native samples already use their accepted limit except for a pending decision,
+  // a lower set speed, or a driver override. Those are the remaining actionable scenes.
+  if (id === "speed_limit_actions") return profile === "compact" ? scene !== "slc_pending" :
+    !["slc_pending", "slc_max", "slc_pedal", "slc_retained"].includes(scene)
   const overlaps = (a, b) => a && b && a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
   const box = key => {
     if (!layout[key]?.enabled || !widgets[key]) return null

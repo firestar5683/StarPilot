@@ -651,7 +651,10 @@ def test_intentional_small_sign_action_overlap_roundtrips_and_large_is_independe
                                      presentation_id=2, action_enabled=True)
   state = road(document, speed_limit=observation, longitudinal_active=True, slc_system_long_available=True)
   assert compact_sign_obscured_by_actions(state)
-  for change in ({"longitudinal_active": False}, {"alert": OnroadAlert(size=AlertSize.FULL)},
+  # Recording a driver choice is still available without software longitudinal control.
+  assert compact_sign_obscured_by_actions(replace(state, longitudinal_active=False, slc_system_long_available=False))
+  for change in ({"alert": OnroadAlert(size=AlertSize.FULL)},
+                 {"speed_limit": replace(observation, action_enabled=False)},
                  {"speed_limit": replace(observation, pending_speed_limit_mps=None)}):
     assert not compact_sign_obscured_by_actions(replace(state, **change))
 

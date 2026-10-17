@@ -162,7 +162,9 @@ class TestStatusParamThrottle(unittest.TestCase):
     from openpilot.selfdrive.selfdrived.helpers import STATUS_PARAM_FRAMES, throttled_param
     reads = []
     owner = SimpleNamespace(sm=SimpleNamespace(frame=0))
-    read = lambda key: reads.append(key) or len(reads)
+    def read(key):
+      reads.append(key)
+      return len(reads)
     for frame in range(3 * STATUS_PARAM_FRAMES):
       owner.sm.frame = frame
       throttled_param(owner, "ChestnutLoading", read)
