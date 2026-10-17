@@ -750,6 +750,13 @@ class BluetoothOwner:
     with self.lock:
       self._admission_leave()
 
+  def _end_idle_window(self) -> None:
+    """A phone pairing window nobody has claimed yet must not block the buttons; close it and carry on."""
+    pairing = self.pairing
+    if isinstance(pairing, OpenPairingSession) and pairing.state == 'pairing' and not pairing.path:
+      pairing.cancel()
+      pairing.done.wait(5.0)
+
   def cancel_session(self, identity: tuple) -> None:
     with self.lock:
       if self.pairing is not None and self.pairing.identity == identity:
@@ -830,6 +837,8 @@ class BluetoothOwner:
           raise BluetoothRejected('Pairing changed')
         self.pairing.cancel()
         return self.snapshot(session=session)
+      if operation not in ('stop_scan', 'accept_pair'):
+        self._end_idle_window()
       if self.pairing is not None and self.pairing.state == 'pairing' and operation != 'stop_scan':
         raise BluetoothRejected('Pairing is in progress', code='busy')
       if operation == 'power':

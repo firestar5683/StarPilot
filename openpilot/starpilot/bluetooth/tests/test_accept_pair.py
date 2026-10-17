@@ -242,6 +242,29 @@ class AcceptPairOwnerTest(unittest.TestCase):
     self.assertEqual(self.paired, [('11:22:33:44:55:66', 'Pixel', (A2DP_SOURCE,))])
     self.assertEqual(self.owner.snapshot(session=self.identity)['pairing']['state'], 'paired')
 
+  def request_when_free(self, *args, **kwargs):
+    # The closed window's watcher briefly holds the owner lock while it lets go of the adapter.
+    for _ in range(100):
+      try:
+        return self.owner.request(*args, **kwargs)
+      except BluetoothRejected as error:
+        if str(error) != 'Bluetooth is busy':
+          raise
+        time.sleep(0.02)
+    self.fail('owner stayed busy')
+
+  def test_unclaimed_window_gives_way_to_forget_and_pair(self):
+    for operation in ('forget', 'connect', 'disconnect', 'scan'):
+      self.request_when_free('accept_pair', session=self.identity)
+      self.wait_for_prompt()
+      window = self.owner.pairing
+      window.path = ''
+      address = None if operation == 'scan' else '11:22:33:44:55:66'
+      self.request_when_free(operation, address=address, session=self.identity)
+      self.assertTrue(window.done.is_set(), operation)
+      self.assertEqual(self.paired, [])
+      self.request_when_free('stop_scan', session=self.identity)
+
   def test_declined_or_canceled_window_does_not_report_a_phone(self):
     self.owner.request('accept_pair', session=self.identity)
     self.wait_for_prompt()
