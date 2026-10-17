@@ -32,7 +32,7 @@ public sunnypilot repositories:
 
 The optional RAV4 radar decoders and `toyota_tss2_ars510.dbc` are adapted from
 <https://github.com/ds-sebastian/ars510-radar> at
-`fb5b29c2b5999f34afeb6f7ac494a73949d66c67`.
+`de3da93527f3e5dba08c2ea872b1bd9ac4aaa41f`.
 
 MIT License
 
