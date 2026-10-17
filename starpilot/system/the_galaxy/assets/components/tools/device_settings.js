@@ -86,6 +86,10 @@ const VEHICLE_SETTING_MAKES = {
   SubaruAvhStartup: ["Subaru"],
   SubaruRedneckCruise: ["Subaru"],
   SNGHack: ["Lexus", "Toyota"],
+  LockDoors: ["Lexus", "Toyota"],
+  LockDoorsSpeed: ["Lexus", "Toyota"],
+  UnlockDoors: ["Lexus", "Toyota"],
+  UnlockDoorsTrigger: ["Lexus", "Toyota"],
   ToyotaAutoHold: ["Lexus", "Toyota"],
 }
 const RADAR_REQUIRED_KEYS = new Set(["HumanLaneChanges", "RadarTakeoffs"])
