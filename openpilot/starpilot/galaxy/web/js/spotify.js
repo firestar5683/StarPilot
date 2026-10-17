@@ -327,7 +327,7 @@ export const SpotifyPage = {
     nameValid() { return /^[^\x00-\x1f\x7f]{1,40}$/.test(this.nameValue.trim()) },
     outputChoices() {
       const devices = this.setup?.devices || []
-      return devices.map((device) => ({ value: device.address, label: device.name + (device.connected ? " · connected" : "") }))
+      return devices.map((device) => ({ value: device.address, label: device.name + (device.connected ? "" : " (Not Connected)") }))
     },
   },
   methods: {
@@ -439,8 +439,6 @@ export const SpotifyPage = {
 
       <section v-if="setup && setupDone && !phoneSource" class="gx-card gx-aa-step gx-aa-home gx-spotify-now" aria-labelledby="gx-spotify-now-title">
         <div class="gx-spotify-now__main">
-          <img v-if="track?.artwork" class="gx-spotify-now__art" :src="track.artwork" alt="" referrerpolicy="no-referrer" loading="lazy" />
-          <span v-else class="gx-spotify-now__art gx-spotify-now__art--empty" aria-hidden="true"><i class="bi bi-music-note-beamed"></i></span>
           <div class="gx-spotify-now__text">
             <h3 id="gx-spotify-now-title">{{ track?.title || setup.preferences.deviceName }}</h3>
             <p v-if="track">{{ track.artists }}<template v-if="track.album"> · {{ track.album }}</template></p>
