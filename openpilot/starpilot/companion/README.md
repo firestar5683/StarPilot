@@ -20,6 +20,19 @@ The comma side lives elsewhere:
 Over Bluetooth, pairing, phone internet sharing, APK downloads, recordings,
 replay, cameras and map tiles are blocked; they need Wi-Fi.
 
+## Phone music
+
+After pairing, each app also sets the phone up for Bluetooth music through comma
+(needs a comma build with phone audio). Comma opens a two-minute pairing window that
+takes one phone and needs the code approved; adapter visibility returns to what it was.
+
+- Android bonds from the app and asks you to approve the code. Menu: **Set up phone music**.
+- iPhone cannot start a Bluetooth bond from an app, so it asks you to tap comma in
+  Settings → Bluetooth. Button: **Set up phone music** under Bluetooth pairing.
+
+Older comma builds are skipped quietly. Installing Spotify (`/api/spotify/upload`) is
+blocked over Bluetooth like the other large uploads.
+
 ## Android
 
 Install: join the Galaxy hotspot, open Galaxy → **Galaxy Access & Install** →

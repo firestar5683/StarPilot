@@ -321,6 +321,7 @@ class MainActivity : Activity() {
                         } catch (_: Exception) { message("Invalid Galaxy Bluetooth pairing code") }
                     }.setNegativeButton("Cancel", null).show()
                 }
+                action("Set up phone music", "Let this phone play music through comma") { pairAudioOverWifi() }
                 action("Forget pairing on this phone") { pairing.forget(); ble?.close(); disconnected() }
                 action("Revoke all paired phones", "Unpairs every phone from this comma, including iPhones", danger = true) {
                     AlertDialog.Builder(this@MainActivity).setMessage("Revoke every phone using this comma's Galaxy Bluetooth key, including iPhones? Pair again afterward.")
@@ -492,10 +493,48 @@ class MainActivity : Activity() {
                     else if (screen != null) pairingNotice("Bluetooth is paired. When Wi-Fi isn't available, Automatic uses Bluetooth for Galaxy controls.", true)
                     else message("Pairing saved. Enable Bluetooth on comma and choose Bluetooth in Connections to connect.")
                 }
+                if (!rotate && generation == connectionGeneration.get()) pairAudio(wifi.first, host)
             } catch (e: Exception) { runOnUiThread {
                 if (generation == connectionGeneration.get()) pairingNotice("Couldn't pair Bluetooth: ${e.message ?: "comma didn't answer"}. Open Galaxy over Wi-Fi, then try again.", pairing.load() != null)
             } }
         }.start()
+    }
+    /** Also bond this phone with comma for Bluetooth music. Runs on a worker thread; comma opens a short pairing window. */
+    private fun pairAudio(network: Network, origin: String) {
+        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            runOnUiThread { requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 3) }
+            return
+        }
+        val adapter = getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter
+        if (adapter == null || !adapter.isEnabled) { runOnUiThread { message("Turn on Bluetooth on this phone to also set up music with comma.") }; return }
+        val galaxy = GalaxyWifi(network, origin)
+        val outcome = try {
+            AudioPairing(
+                status = { galaxy.bluetoothStatus() },
+                open = { galaxy.openAudioWindow() },
+                respond = { id, accepted -> galaxy.respond(id, accepted) },
+                bonded = { adapter.bondedDevices.map { it.address.uppercase() }.toSet() },
+                bond = { address -> adapter.getRemoteDevice(address).createBond() },
+                confirm = { code -> confirmCode(code) },
+            ).run()
+        } catch (_: Exception) { AudioPairing.Outcome.FAILED }
+        AudioPairing.message(outcome)?.let { text -> runOnUiThread { message(text) } }
+    }
+    private fun pairAudioOverWifi() {
+        val wifi = Networks.wifi(this) ?: Networks.wifi(this, false)
+        val host = if (Networks.wifi(this) != null) Networks.ORIGIN else Networks.localOrigin(prefs.getString("host", "") ?: "")
+        if (wifi == null || host == null) { message("To set up phone music, join the comma's Galaxy Wi-Fi or the same Wi-Fi as comma first."); return }
+        Thread { pairAudio(wifi.first, host) }.start()
+    }
+    private fun confirmCode(code: String): Boolean {
+        val answer = LinkedBlockingQueue<Boolean>(1)
+        runOnUiThread {
+            if (isFinishing || isDestroyed) { answer.offer(false); return@runOnUiThread }
+            AlertDialog.Builder(this).setTitle("Pair music with comma").setMessage("Check that comma and this phone both show $code.")
+                .setPositiveButton("Pair") { _, _ -> answer.offer(true) }.setNegativeButton("Cancel") { _, _ -> answer.offer(false) }
+                .setOnCancelListener { answer.offer(false) }.show()
+        }
+        return answer.poll(90, TimeUnit.SECONDS) ?: false
     }
     /** Pairing results appear on the connect screen when it is showing, otherwise in a dialog over Galaxy. */
     private fun pairingNotice(text: String, paired: Boolean) {
@@ -552,6 +591,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, permissions, results)
         if (code == 1 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) AppUpdates.checkAsync(this)
+        if (code == 3 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) pairAudioOverWifi()
         if (code == 2) { if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) connectBluetooth(bluetoothAttemptAutomatic)
             else disconnected().apply {
                 route(Route.BLUETOOTH, RouteState.FAILED, "Needs permission")

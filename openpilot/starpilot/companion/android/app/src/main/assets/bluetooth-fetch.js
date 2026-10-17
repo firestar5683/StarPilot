@@ -17,7 +17,7 @@
     if (url.origin !== location.origin) throw new Error('External resources are not available over Bluetooth. Connect using Galaxy Wi-Fi or LAN.')
     if (url.pathname === '/data/runtime.json') url.pathname = '/api/companion/runtime'
     if (!url.pathname.startsWith('/api/')) return original(input, options)
-    if (['/api/companion/bluetooth', '/api/recordings/', '/api/replay/', '/api/cameras/', '/api/android-auto/upload', '/api/navigation/map/tiles/'].some(path => url.pathname.startsWith(path)) ||
+    if (['/api/companion/bluetooth', '/api/recordings/', '/api/replay/', '/api/cameras/', '/api/android-auto/upload', '/api/spotify/upload', '/api/navigation/map/tiles/'].some(path => url.pathname.startsWith(path)) ||
         ['/api/companion/uplink', '/api/companion/app.apk', '/api/auth/login', '/api/auth/logout'].includes(url.pathname)) {
       return new Response(JSON.stringify({error: 'This action is not available over Bluetooth. Connect using Galaxy Wi-Fi or LAN.', code: 'bluetooth_unavailable'}), {status: 501, headers: {'Content-Type': 'application/json'}})
     }
