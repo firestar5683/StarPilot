@@ -1,4 +1,6 @@
+import { parseSharedDestination } from "./share-destination.js"
 import { GxNotice } from "./notice.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { connectionError } from "./polling.js"
 import { NavigationMap } from "./navigation-map.js"
 import { MapOperationsPanel } from "./map-operations.js"
@@ -285,10 +287,10 @@ export const FavoriteChoices = {
 
 export const NavigationPage = {
   name: "NavigationPage",
-  components: { GxNotice, MapOperationsPanel, NavigationMap, OfflineRoadMapsPanel, FavoriteChoices },
+  components: { GxNotice, BluetoothNotice, MapOperationsPanel, NavigationMap, OfflineRoadMapsPanel, FavoriteChoices },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, default: null }, initialTab: { type: String, default: "route" } },
-  data() { return { data: null, results: [], busy: false, error: "", stale: false, tab: this.initialTab, query: "", token: "", searched: false,
+  data() { return { bluetooth: bluetoothConnection(), data: null, results: [], busy: false, error: "", stale: false, tab: this.initialTab, query: "", token: "", searched: false,
     suggestions: [], suggestOpen: false, savedSuggestionPlaces: {}, favoritePicker: null, searchPending: false } },
   watch: { initialTab(value) { this.tab = value } },
   computed: {
@@ -341,7 +343,22 @@ export const NavigationPage = {
     if (this.mode !== "local") return
     this.visibilityHandler = () => document.visibilityState === "hidden" ? this.client.stop() : this.client.start()
     document.addEventListener("visibilitychange", this.visibilityHandler)
-    if (document.visibilityState !== "hidden") this.client.start()
+    if (document.visibilityState !== "hidden") {
+      this.client.start().then(async () => {
+        const params = new URLSearchParams(location.search)
+        const share = params.get('share')
+        if (!share || !this.client.data || this.client.stale || !this.client.active) return
+        params.delete('share')
+        history.replaceState(history.state, '', `${location.pathname}${params.size ? '?' + params : ''}${location.hash}`)
+        const parsed = parseSharedDestination(share)
+        if (parsed.destination) await this.client.action('select', { destination: parsed.destination })
+        else {
+          // Text shares can be ambiguous ("Starbucks"); show the results and let the driver pick.
+          this.query = parsed.query
+          await this.client.search(parsed.query)
+        }
+      })
+    }
   },
   beforeUnmount() { document.removeEventListener("visibilitychange", this.visibilityHandler); clearTimeout(this.suggestTimer); this.client.stop(); this.token = "" },
   methods: {
@@ -583,7 +600,8 @@ export const NavigationPage = {
         <section class="gx-card gx-navigation__preview" aria-label="Route preview">
           <div class="gx-navigation__preview-head"><div class="gx-navigation__step"><div><h3>Your route</h3><p role="status">{{ stale ? 'Reconnecting · last received route' : statusLabel }}</p></div></div>
             <span v-if="summary" class="gx-navigation__trip">{{ duration(summary.duration) }} · {{ distance(summary.distance) }}</span></div>
-          <NavigationMap v-if="ready" :data="data" :stale="stale" />
+          <BluetoothNotice v-if="bluetooth" feature="Map preview">Destination controls remain available.</BluetoothNotice>
+          <NavigationMap v-else-if="ready" :data="data" :stale="stale" />
           <div v-else class="gx-navigation__empty"><i class="bi bi-signpost-split" aria-hidden="true"></i><p>{{ mode !== 'local' ? 'Connect to your comma to use navigation.' : 'Set up navigation to show the map.' }}</p><button v-if="mode === 'local' && data" type="button" class="gx-btn gx-btn--tonal" @click="selectTab('setup')">Open navigation setup</button></div>
         </section>
         </div>

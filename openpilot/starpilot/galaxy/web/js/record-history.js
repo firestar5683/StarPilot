@@ -1,5 +1,6 @@
 import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { SnapshotFeed } from "./snapshot-feed.js"
 import { RecordingActions } from "./recording-actions.js"
 import { GalaxySelect } from "./galaxy-select.js"
@@ -16,14 +17,15 @@ export class LocalHistoryFeed extends SnapshotFeed {
   static subject = "local recordings"
   static unavailable = "Local recordings are unavailable."
   static invalid = "Local recording inventory is unavailable."
+  start() { if (bluetoothConnection()) return this.stop(); return super.start() }
 }
 
 export const LocalRecordingsPage = {
   name: "LocalRecordingsPage",
-  components: { GxState, GxNotice, RecordingActions, GalaxySelect, RouteWorkspace },
+  components: { GxState, GxNotice, BluetoothNotice, RecordingActions, GalaxySelect, RouteWorkspace },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     routePath: { type: String, default: "/recordings" }, go: { type: Function, default: () => {} } },
-  data: () => ({ sortOrder: "newest", query: "", preservedOnly: false, status: "idle", data: null, error: "", entryMode: "footage", exports: null }),
+  data: () => ({ bluetooth: bluetoothConnection(), sortOrder: "newest", query: "", preservedOnly: false, status: "idle", data: null, error: "", entryMode: "footage", exports: null }),
   computed: {
     selectedRouteId() { const id = this.routePath.startsWith("/recordings/") ? this.routePath.slice(12) : null; return id },
     selectedSummary() { return this.data?.routes.find(route => route.routeId === this.selectedRouteId) || null },
@@ -71,8 +73,9 @@ export const LocalRecordingsPage = {
   },
   template: `
     <div class="gx-view gx-recordings">
-      <RouteWorkspace v-if="selectedRouteId && mode === 'local'" :key="selectedRouteId" :route-id="selectedRouteId" :summary="selectedSummary" :initial-mode="entryMode" :unauthorized="unauthorized" :exports="exports" @back="go('/recordings')" @changed="refresh" />
-      <div v-show="!selectedRouteId" ref="routeList" class="gx-recordings__browse">
+      <BluetoothNotice v-if="bluetooth" feature="Local recordings and replay" />
+      <RouteWorkspace v-else-if="selectedRouteId && mode === 'local'" :key="selectedRouteId" :route-id="selectedRouteId" :summary="selectedSummary" :initial-mode="entryMode" :unauthorized="unauthorized" :exports="exports" @back="go('/recordings')" @changed="refresh" />
+      <div v-else ref="routeList" class="gx-recordings__browse">
       <header class="gx-recordings__heading"><h2>Routes</h2><span v-if="mode === 'local' && data" class="gx-note">{{ stats.count }} drives · ~{{ formatDuration(stats.minutes) }}</span></header>
       <GxState v-if="mode !== 'local'">Local recordings are unavailable in the offline preview.</GxState>
       <template v-else>

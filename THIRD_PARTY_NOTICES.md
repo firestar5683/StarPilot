@@ -116,3 +116,27 @@ SOFTWARE.
 ## PulseAudio server for Spotify
 
 `openpilot/starpilot/soloist/pulseaudio/` contains unmodified AArch64 binaries from Ubuntu 24.04 packages: PulseAudio 16.1 (LGPL-2.1-or-later), libltdl (LGPL-2.1-or-later), libtdb (LGPL-3.0-or-later), libsoxr (LGPL-2.1-or-later), liborc and speexdsp (BSD-style). The complete copyright and license notices are in that directory's `licenses/`, package hashes in `PACKAGES.sha512`, and the corresponding source is available from Ubuntu's archive for the exact versions listed in its README. The libraries are dynamically linked and may be replaced with `update.sh`.
+
+## Galaxy Android companion tunnel
+
+`openpilot/starpilot/galaxy/bin/hev-socks5-tunnel_linux_arm64` is the upstream
+[hev-socks5-tunnel 2.18.0](https://github.com/heiher/hev-socks5-tunnel/releases/tag/2.18.0)
+static Linux ARM64 release, under the MIT license. Its notice is retained in
+`openpilot/starpilot/galaxy/bin/LICENSE.hev-socks5-tunnel`; the adjacent SHA-256
+file pins the downloaded artifact. The Android companion uses the Kotlin
+standard library (Apache-2.0) and the Gradle wrapper (Apache-2.0); no third-party
+UI framework is bundled.
+
+## Galaxy Bluetooth companion source snapshot
+
+The Galaxy Bluetooth phone bridge and iOS app from https://github.com/firestar5683/StarPilot
+(natehuby76, PRs #224/#225) are included under `openpilot/starpilot/galaxy_bluetooth/`
+and `openpilot/starpilot/companion/ios/`, with their license files (`UPSTREAM-LICENSE`, `openpilot/starpilot/companion/ios/UPSTREAM-GALAXY-LICENSE`).
+The bridge runs on openpilot's Python with PyCryptodome 3.23.0 (BSD/public-domain
+components, from opendbc). Its other dependencies are vendored unmodified, as
+pure-Python sources, in `openpilot/starpilot/galaxy_bluetooth/vendor/`:
+dbus-next 0.2.3 (MIT), ifaddr 0.2.0 (MIT) and Zeroconf 0.151.3
+(LGPL-2.1-or-later). Their license texts are in `vendor/licenses/`, and
+`vendor/VENDOR.json` records each PyPI source file and its SHA-256. Zeroconf is
+kept as separate, unmodified source files that can be replaced with another
+compatible version, as the LGPL requires.

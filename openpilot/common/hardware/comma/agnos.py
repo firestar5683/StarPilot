@@ -15,8 +15,24 @@ SPARSE_CHUNK_FMT = struct.Struct('H2xI4x')
 AGNOS_MANIFEST_FILE = "openpilot/common/hardware/comma/agnos.json"
 
 
+def phone_uplink_active() -> bool:
+  try:
+    from openpilot.starpilot.galaxy.companion import phone_uplink_active as active
+  except ImportError:
+    # launch_chffrplus.sh runs this file directly from the old tree before PYTHONPATH is set.
+    try:
+      with open('/run/starpilot-companion/status.json') as f:
+        state = json.load(f)
+      return state.get('active') is True and 0 <= time.monotonic() - state['updated'] < 15
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+      return False
+  return active()
+
+
 class StreamingDecompressor:
   def __init__(self, url: str) -> None:
+    if phone_uplink_active():
+      raise requests.ConnectionError("AGNOS downloads are disabled on the phone uplink")
     self.buf = b""
 
     self.req = requests.get(url, stream=True, headers={'Accept-Encoding': 'identity'}, timeout=60)
@@ -26,6 +42,9 @@ class StreamingDecompressor:
     self.sha256 = hashlib.sha256()
 
   def read(self, length: int) -> bytes:
+    if phone_uplink_active():
+      self.req.close()
+      raise requests.ConnectionError("Phone uplink activated; AGNOS download stopped")
     while len(self.buf) < length and not self.eof:
       if self.decompressor.needs_input:
         self.req.raise_for_status()

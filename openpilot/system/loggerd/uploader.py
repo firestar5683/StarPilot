@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from openpilot.starpilot.galaxy.companion import phone_uplink_active
+
 import json
 import os
 import random
@@ -12,7 +14,7 @@ from collections.abc import Iterator
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
 from openpilot.common.api import Api
-from openpilot.common.utils import get_upload_stream
+from openpilot.common.utils import CallbackReader, get_upload_stream
 from openpilot.common.params import Params
 from openpilot.common.realtime import set_core_affinity
 from openpilot.common.hardware.hw import Paths
@@ -179,6 +181,11 @@ class Uploader:
     return None
 
   def do_upload(self, key: str, fn: str):
+    def guard(*_):
+      if phone_uplink_active():
+        raise requests.exceptions.ConnectionError("Phone uplink forbids log uploads")
+
+    guard()
     url_resp = self.api.get("v1.4/" + self.dongle_id + "/upload_url/", timeout=10, path=key, access_token=self.api.get_token())
     if url_resp.status_code == 412:
       return url_resp
@@ -194,8 +201,8 @@ class Uploader:
     stream = None
     try:
       compress = key.endswith('.zst') and not fn.endswith('.zst')
-      stream, _ = get_upload_stream(fn, compress)
-      response = requests.put(url, data=stream, headers=headers, timeout=10)
+      stream, length = get_upload_stream(fn, compress)
+      response = requests.put(url, data=CallbackReader(stream, guard, length), headers=headers, timeout=10)
       return response
     finally:
       if stream:
@@ -252,6 +259,8 @@ class Uploader:
 
 
   def step(self, network_type: int, metered: bool) -> bool | None:
+    if phone_uplink_active():
+      return None
     d = self.next_file_to_upload(metered)
     if d is None:
       return None
@@ -297,7 +306,7 @@ def main(exit_event: threading.Event | None = None) -> None:
     always_allow_uploads = params.get_bool("AlwaysAllowUploads")
     offroad = params.get_bool("IsOffroad")
     network_type = sm['deviceState'].networkType if not force_wifi else NetworkType.wifi
-    if network_type == NetworkType.none:
+    if phone_uplink_active() or network_type == NetworkType.none:
       if allow_sleep:
         time.sleep(60 if offroad else 5)
       continue

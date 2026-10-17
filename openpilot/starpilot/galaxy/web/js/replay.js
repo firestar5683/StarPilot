@@ -1,5 +1,6 @@
 import { requestJson } from "./startup.js"
 import { GxNotice } from "./notice.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { GxState } from "./state.js"
 import { GxIconButton } from "./icon-button.js"
 import { markRaw } from "../vendor/vue/vue.esm-browser.js"
@@ -386,10 +387,10 @@ export class ReplayClient {
 }
 
 export const ReplayViewer = {
-  components: { GxNotice, GxState, GxIconButton },
+  components: { GxNotice, BluetoothNotice, GxState, GxIconButton },
   props: { clientId: { type: String, required: true }, routeId: { type: String, required: true }, startSegment: { type: Number, default: null }, unauthorized: { type: Function, required: true } },
   emits: ["segment", "busy"],
-  data: () => ({ client: null, replay: null, replayBusy: false, replayError: "", replayDetail: null, replayVideoReady: false, replayBuffering: false, seekPosition: null }),
+  data: () => ({ bluetooth: bluetoothConnection(), client: null, replay: null, replayBusy: false, replayError: "", replayDetail: null, replayVideoReady: false, replayBuffering: false, seekPosition: null }),
   computed: {
     playing() { return this.client?.ownedSession === this.replay?.sessionId && !!this.replay?.sessionId && !TERMINAL.has(this.replay.state) },
     controlsBusy() { return this.replayBusy || !this.replay?.offroad || ["preparing", "seeking", "stopping"].includes(this.replay.state) },
@@ -397,6 +398,7 @@ export const ReplayViewer = {
     canStart() { return this.replay?.offroad && TERMINAL.has(this.replay.state) && !this.replayBusy && this.replayDetail?.playable === true },
   },
   mounted() {
+    if (this.bluetooth) return
     this.client = markRaw(new ReplayClient({ clientId: this.clientId, video: () => this.$refs.video, unauthorized: this.unauthorized, publish: update => {
       Object.assign(this.$data, update)
       this.$emit("busy", this.controlsBusy)
@@ -407,11 +409,11 @@ export const ReplayViewer = {
     document.addEventListener("visibilitychange", this.visibility)
     this.client.open(this.routeId, this.startSegment)
   },
-  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.client.close() },
+  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.client?.close() },
   methods: {
     replayTime,
     stopAndWait() { return this.client.stopAndWait() },
-    close() { return this.client.stop() },
+    close() { return this.client?.stop() },
     seek(value) { this.seekPosition = null; this.client.control("seek", Number(value)) },
     cycleRate() {
       const rates = [.5, 1, 2]
@@ -421,12 +423,15 @@ export const ReplayViewer = {
   },
   watch: {
     startSegment(value) {
+      if (!this.client) return
       this.client.startSegment = value
       const range = this.replay?.segmentRanges?.find(row => row[0] === value)
       if (this.playing && range && !(range[1] <= this.replay.position && this.replay.position < range[2])) this.seek(range[1])
     },
   },
   template: `<div class="gx-replay">
+    <BluetoothNotice v-if="bluetooth" feature="Route replay and video" />
+    <template v-else>
     <div ref="player" class="gx-replay__player">
     <div class="gx-replay__screen">
     <video ref="video" class="gx-replay__video" playsinline muted aria-label="Recorded route with driving interface" @waiting="client?.videoWaiting()" @error="client?.videoError()"></video>
@@ -452,5 +457,6 @@ export const ReplayViewer = {
     <p v-if="replayDetail?.reason" class="gx-note">{{ replayDetail.reason }}</p>
     <details v-if="playing && seekGaps.length" class="gx-route-workspace__help gx-replay__gaps"><summary>{{ seekGaps.length }} missing recording {{ seekGaps.length === 1 ? 'range' : 'ranges' }}</summary><p class="gx-note">Missing recordings: <span v-for="(gap, i) in seekGaps" :key="i">{{ i ? ", " : "" }}{{ replayTime(gap[0]-replay.start) }}–{{ replayTime(gap[1]-replay.start) }}</span>. Seeks move to the nearest recorded position.</p></details>
     <button v-if="canStart && !replayError" class="gx-btn gx-btn--tonal" @click="client.open(routeId, startSegment)">Play replay</button>
+    </template>
   </div>`,
 }

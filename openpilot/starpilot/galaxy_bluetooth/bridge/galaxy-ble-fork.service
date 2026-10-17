@@ -1,0 +1,20 @@
+[Unit]
+Description=Galaxy Bluetooth bridge from the installed StarPilot fork
+After=bluetooth.service
+Requisite=bluetooth.service
+PartOf=bluetooth.service
+ConditionPathExists=/data/openpilot/openpilot/starpilot/galaxy_bluetooth/bridge/server.py
+ConditionPathExists=/data/galaxy-ble/pairing.json
+
+[Service]
+Type=simple
+User=comma
+WorkingDirectory=/data/openpilot/openpilot/starpilot/galaxy_bluetooth/bridge
+ExecStart=/data/openpilot/openpilot/starpilot/galaxy_bluetooth/bridge/run.sh server.py --key-file /data/galaxy-ble/pairing.json
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

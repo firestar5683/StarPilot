@@ -107,7 +107,8 @@ class TestBluetoothLarge(unittest.TestCase):
                  'Widget': Widget, 'Scroller': Scroller, 'BluetoothOwner': Owner, 'BluetoothRejected': ValueError,
                  'BluetoothUnavailable': RuntimeError, 'gui_app': self.app, 'button_item': lambda *a, **kw: Row((a, kw)),
                  'text_item': lambda *a, **kw: Row((a, kw)), 'ConfirmDialog': Dialog, 'alert_dialog': Dialog,
-                 'DialogResult': type('Result', (), {'CONFIRM': 1}), 'Keyboard': Dialog}
+                 'DialogResult': type('Result', (), {'CONFIRM': 1}), 'Keyboard': Dialog,
+                 'setup_status': lambda: 'Ready to pair', 'large_phone_rows': lambda allowed: []}
     tree.body.insert(0, ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0))
     exec(compile(ast.fix_missing_locations(tree), str(path), 'exec'), scope)
     self.panel_type = scope['BluetoothLarge']

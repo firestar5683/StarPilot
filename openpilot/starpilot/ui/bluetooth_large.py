@@ -4,6 +4,8 @@ import re
 import time
 import uuid
 
+from openpilot.starpilot.galaxy_bluetooth.bootstrap import setup_status
+from openpilot.starpilot.galaxy_bluetooth.phone_ui import large_phone_rows
 from openpilot.starpilot.bluetooth.owner import BluetoothOwner, BluetoothRejected, BluetoothUnavailable
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets import DialogResult, Widget
@@ -23,6 +25,7 @@ class BluetoothLarge(Widget):
 
   def __init__(self, connectivity_allowed: Callable[[], bool]):
     super().__init__()
+    self.phone_pairing_allowed = connectivity_allowed
     self.session = None
     self.active = False
     self.owner = BluetoothOwner(connectivity_allowed, session_valid=lambda identity: self.active and identity == self.session)
@@ -232,7 +235,8 @@ class BluetoothLarge(Widget):
     devices = tuple((item.get("address"), item.get("name"), item.get("paired"), item.get("connected"))
                     for item in status.get("devices", ()))
     signature = repr((self.status is None, status.get("available"), status.get("powered"), status.get("parked"),
-                      status.get("discovering"), status.get("errorCode"), status.get("pairing"), devices))
+                      status.get("discovering"), status.get("errorCode"), status.get("pairing"), devices,
+                      setup_status()))
     if hasattr(self, "_scroller") and (self._touch_held or gui_app.mouse_events):
       return
     if signature == self._signature:
@@ -279,6 +283,7 @@ class BluetoothLarge(Widget):
           rows.append(button_item("Forget " + device_label(device), "Forget", callback=lambda a=address:
             self._confirm("Forget this Bluetooth device?", lambda: self._request("forget", address=a)),
             enabled=lambda: self.active and self._ready()))
+    rows.extend(large_phone_rows(self.phone_pairing_allowed))
     previous = getattr(self, "_scroller", None)
     self._scroller = Scroller(rows, spacing=0, line_separator=True)
     if previous is not None:
