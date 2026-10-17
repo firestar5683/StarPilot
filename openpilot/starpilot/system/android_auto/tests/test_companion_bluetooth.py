@@ -27,8 +27,10 @@ class CompanionTests(unittest.TestCase):
     self.owner.parked = lambda: self.state['parked']
     self.owner.session_valid = lambda session: session == SESSION and self.state['valid']
     self.owner.companion_devices = {}
+    self.forgotten = []
     self.client = SimpleNamespace(adapter_identity=lambda: ('/org/bluez/hci0', {'Powered': True}, ':1.5'),
-      _objects=dict, _devices=lambda objects: list(self.devices.values()))
+      _objects=dict, _devices=lambda objects: list(self.devices.values()),
+      operation=lambda operation, address: self.forgotten.append((operation, address)))
     self.owner._client = Mock(side_effect=lambda: self.client)
     def call(*args, **kwargs):
       self.calls.append((args, kwargs))
@@ -87,10 +89,43 @@ class CompanionTests(unittest.TestCase):
   def test_no_owner_is_only_fallback_case_and_unsupported_operations_stay_denied(self):
     self.owner.phone_lease = None
     self.assertIsNone(self.owner.companion_action('connect', CAR, SESSION))
-    for operation in ('scan', 'pair', 'forget', 'power', 'stop_scan'):
+    for operation in ('scan', 'pair', 'power', 'stop_scan'):
       with self.assertRaises(ValueError):
         self.owner.companion_action(operation, CAR, SESSION)
     self.assertEqual(self.calls, [])
+
+  def test_forget_removes_another_device_while_projection_keeps_its_lease(self):
+    other = '02:00:00:00:00:09'
+    self.devices[other] = {'address': other, 'path': '/org/bluez/hci0/dev_old', 'paired': True, 'connected': False, 'uuids': []}
+    self.owner.companion_devices[other] = self.devices[other]['path']
+    result = self.owner.companion_action('forget', other, SESSION)
+    self.assertIsNotNone(result)
+    self.assertEqual(self.forgotten, [('forget', other)])
+    self.assertNotIn(other, self.owner.companion_devices)
+    self.assertFalse(self.lease.released)
+    self.assertIs(self.owner.phone_lease, self.lease)
+
+  def test_forget_never_removes_the_projection_receiver_or_foreign_devices(self):
+    with self.assertRaises(Rejected) as error:
+      self.owner.companion_action('forget', ADAPTER, SESSION)
+    self.assertEqual(error.exception.code, 'busy')
+    self.devices[CAR]['path'] = '/org/bluez/hci1/dev_car'
+    with self.assertRaises(Rejected):
+      self.owner.companion_action('forget', CAR, SESSION)
+    del self.devices[CAR]
+    with self.assertRaises(Rejected):
+      self.owner.companion_action('forget', CAR, SESSION)
+    self.assertEqual(self.forgotten, [])
+
+  def test_forget_is_fail_closed_during_pairing_and_for_expired_sessions(self):
+    self.state['valid'] = False
+    with self.assertRaises(Rejected):
+      self.owner.companion_action('forget', CAR, SESSION)
+    self.state['valid'] = True
+    self.lease.session = SESSION
+    with self.assertRaises(Rejected):
+      self.owner.companion_action('forget', CAR, SESSION)
+    self.assertEqual(self.forgotten, [])
 
   def test_failed_connect_revokes_new_admission_without_releasing_projection(self):
     def failure(): raise TimeoutError('D-Bus operation timed out')

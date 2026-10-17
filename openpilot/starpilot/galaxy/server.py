@@ -2454,9 +2454,15 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               self.json(401, {'error': 'Sign in to Galaxy'})
               return
             delegated = {'handled': False}
-            if payload['operation'] in ('connect', 'disconnect') and aa_setup_owner().enabled():
-              delegated = self.aa_command(identity, 'bluetooth_action', operation=payload['operation'],
-                                          address=normalized_address(payload['address']))
+            if payload['operation'] in ('connect', 'disconnect', 'forget') and aa_setup_owner().enabled():
+              try:
+                delegated = self.aa_command(identity, 'bluetooth_action', operation=payload['operation'],
+                                            address=normalized_address(payload['address']))
+              except (OSError, RuntimeError):
+                # Without a running Android Auto service nothing else holds the adapter, so forgetting is local.
+                if payload['operation'] != 'forget':
+                  raise
+                delegated = {'handled': False}
               if type(delegated) is not dict or type(delegated.get('handled')) is not bool:
                 raise BluetoothUnavailable('service_unavailable')
               if 'error_code' in delegated:

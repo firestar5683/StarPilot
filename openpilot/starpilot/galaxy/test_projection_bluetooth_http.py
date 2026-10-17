@@ -167,6 +167,21 @@ class ProjectionBluetoothHttpTest(unittest.TestCase):
     self.assertEqual(len(self.bluetooth.calls), 2)
     self.assertEqual(self.bluetooth.calls[-1][0], 'disconnect')
 
+  def test_forget_is_delegated_to_a_running_projection_and_falls_back_without_the_daemon(self):
+    snapshot = self.bluetooth.snapshot()
+    self.aa.result = {'handled': True, 'bluetooth': snapshot}
+    code, result, _ = self.action('forget')
+    self.assertEqual((code, result), (200, snapshot))
+    self.assertEqual(self.aa.calls[0][1]['operation'], 'forget')
+    self.assertEqual(self.bluetooth.calls, [])
+    self.aa.result = {'handled': False}
+    self.assertEqual(self.action('forget')[0], 200)
+    self.assertEqual(self.bluetooth.calls[-1][0], 'forget')
+    self.aa.error = OSError('daemon is not running')
+    self.assertEqual(self.action('forget')[0], 200)
+    self.assertEqual([call[0] for call in self.bluetooth.calls], ['forget', 'forget'])
+    self.assertEqual(self.action('connect')[0], 503)
+
   def test_owner_busy_and_error_codes_never_fall_back(self):
     for error, code in [('busy', 409), ('park_required', 409), ('changed', 409), ('service_unavailable', 503)]:
       self.aa.result = {'handled': True, 'error_code': error}

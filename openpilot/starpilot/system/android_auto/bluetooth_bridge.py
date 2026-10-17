@@ -605,7 +605,7 @@ class SharedBluetoothOwner(BluetoothOwner):
     None means this process holds no AA lease. A pairing lease or any invalid
     target is rejected without releasing the controller or falling back.
     """
-    if operation not in ('connect', 'disconnect'):
+    if operation not in ('connect', 'disconnect', 'forget'):
       raise ValueError('Unsupported companion Bluetooth operation')
     address = normalized_address(address)
     if not self.lock.acquire(blocking=False):
@@ -630,6 +630,15 @@ class SharedBluetoothOwner(BluetoothOwner):
       if address == lease.receiver:
         raise BluetoothRejected('Stop projection before changing its adapter', code='busy')
       device = lease.phone.device(address)
+      if operation == 'forget':
+        # Any other device on this adapter, never the projection receiver (rejected above).
+        if device is None or not device['path'].startswith(lease.adapter_path + '/'):
+          raise BluetoothRejected('Device is unavailable', code='changed')
+        client.operation('forget', address)
+        if self.phone_lease is not lease or lease.released or not self.session_valid(session):
+          raise BluetoothRejected('Bluetooth owner changed', code='changed')
+        self.companion_devices.pop(address, None)
+        return self.snapshot(session=session)
       hfp = '0000111e-0000-1000-8000-00805f9b34fb'
       if device is None or not device['paired'] or hfp not in device.get('uuids', []):
         raise BluetoothRejected('Choose an already paired hands-free car', code='changed')
