@@ -14,6 +14,7 @@ const BLUETOOTH_ERRORS = {
   radio_preference_unavailable: "The Bluetooth power setting could not be read. Try again after restarting the device.",
   busy: "Bluetooth is being used by another operation. Finish pairing or stop searching, then try again.",
   park_required: "Park before changing Bluetooth connections.",
+  projection_active: "Android Auto is using this device. Stop Android Auto, then try again.",
   session_expired: "The pairing session expired. Refresh and start pairing again.",
   changed: "The Bluetooth device or pairing request changed. Refresh and try again.",
 }

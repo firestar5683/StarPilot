@@ -636,7 +636,7 @@ class SharedBluetoothOwner(BluetoothOwner):
       if receiver is None or not receiver['paired'] or receiver['path'] != lease.device_path:
         raise BluetoothRejected('Projection receiver changed', code='changed')
       if address == lease.receiver:
-        raise BluetoothRejected('Stop projection before changing its adapter', code='busy')
+        raise BluetoothRejected('Stop projection before changing its adapter', code='projection_active')
       device = lease.phone.device(address)
       if operation == 'forget':
         # Any other device on this adapter, never the projection receiver (rejected above).

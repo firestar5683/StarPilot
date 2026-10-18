@@ -2537,7 +2537,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 raise BluetoothUnavailable('service_unavailable')
               if 'error_code' in delegated:
                 code = delegated['error_code']
-                if type(code) is str and code in ('busy', 'park_required', 'changed', 'session_expired'):
+                if type(code) is str and code in ('busy', 'park_required', 'changed', 'session_expired', 'projection_active'):
                   raise BluetoothRejected('Android Auto could not complete the Bluetooth change', code=code)
                 unavailable = ('service_unavailable', 'adapter_unavailable', 'radio_unavailable', 'radio_preference_unavailable')
                 raise BluetoothUnavailable('Android Auto Bluetooth service is unavailable',

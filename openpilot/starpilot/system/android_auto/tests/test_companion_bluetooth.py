@@ -108,7 +108,7 @@ class CompanionTests(unittest.TestCase):
   def test_forget_never_removes_the_projection_receiver_or_foreign_devices(self):
     with self.assertRaises(Rejected) as error:
       self.owner.companion_action('forget', ADAPTER, SESSION)
-    self.assertEqual(error.exception.code, 'busy')
+    self.assertEqual(error.exception.code, 'projection_active')
     self.devices[CAR]['path'] = '/org/bluez/hci1/dev_car'
     with self.assertRaises(Rejected):
       self.owner.companion_action('forget', CAR, SESSION)
@@ -275,7 +275,7 @@ class CompanionTests(unittest.TestCase):
     self.assertEqual(self.daemon_call(), {'handled': False})
 
   def test_daemon_denials_and_timeouts_never_produce_normal_owner_fallback(self):
-    self.assertEqual(self.daemon_call(address=ADAPTER), {'handled': True, 'error_code': 'busy'})
+    self.assertEqual(self.daemon_call(address=ADAPTER), {'handled': True, 'error_code': 'projection_active'})
     self.lease.session = SESSION
     self.assertEqual(self.daemon_call(), {'handled': True, 'error_code': 'busy'})
     self.lease.session = None
