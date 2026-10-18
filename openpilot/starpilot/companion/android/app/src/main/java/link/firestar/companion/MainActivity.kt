@@ -73,6 +73,9 @@ class MainActivity : Activity() {
         runCatching { cm.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), wifiWatcher, handler) }
         connect(Networks.localOrigin(intent.getStringExtra(AppUpdates.ORIGIN_EXTRA) ?: ""))
+        if (PhoneGpsService.enabled(prefs) && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            startForegroundService(Intent(this, PhoneGpsService::class.java))
+        }
     }
     private fun idle() = resumed && !isFinishing && web == null && ble == null && discovery == null && lanPicker == null && screen?.busy() == false
     override fun onNewIntent(intent: Intent) {
@@ -328,6 +331,10 @@ class MainActivity : Activity() {
                         .setPositiveButton("Revoke") { _, _ -> pairOverWifi(true) }.setNegativeButton("Cancel", null).show()
                 }
             }
+            .group("Phone GPS") {
+                if (PhoneGpsService.enabled(prefs)) action("Stop sharing phone GPS") { setPhoneGps(false) }
+                else action("Share phone GPS with comma", "Comma uses it for navigation when its own GPS has no fix") { setPhoneGps(true) }
+            }
             .group("This app") { action("Notification settings") { appNotificationSettings() } }
             .show()
     }
@@ -537,6 +544,17 @@ class MainActivity : Activity() {
         return answer.poll(90, TimeUnit.SECONDS) ?: false
     }
     /** Pairing results appear on the connect screen when it is showing, otherwise in a dialog over Galaxy. */
+    private fun phoneGpsPermissions(): Array<String> = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION) +
+        (if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT) else emptyArray()) +
+        (if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.POST_NOTIFICATIONS) else emptyArray())
+    private fun setPhoneGps(enabled: Boolean) {
+        if (!enabled) { prefs.edit().putBoolean("phoneGps", false).apply(); stopService(Intent(this, PhoneGpsService::class.java)); return }
+        val missing = phoneGpsPermissions().filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) { requestPermissions(missing.toTypedArray(), 4); return }
+        prefs.edit().putBoolean("phoneGps", true).apply()
+        startForegroundService(Intent(this, PhoneGpsService::class.java))
+        message("Sharing phone GPS. Keep this app's notification while driving; comma uses it only when its own GPS has no fix.")
+    }
     private fun pairingNotice(text: String, paired: Boolean) {
         val s = screen ?: return message(text)
         s.detail(text)
@@ -592,6 +610,12 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(code, permissions, results)
         if (code == 1 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) AppUpdates.checkAsync(this)
         if (code == 3 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) pairAudioOverWifi()
+        if (code == 4) {
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                prefs.edit().putBoolean("phoneGps", true).apply()
+                startForegroundService(Intent(this, PhoneGpsService::class.java))
+            } else message("Allow precise location to share phone GPS with comma.")
+        }
         if (code == 2) { if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) connectBluetooth(bluetoothAttemptAutomatic)
             else disconnected().apply {
                 route(Route.BLUETOOTH, RouteState.FAILED, "Needs permission")

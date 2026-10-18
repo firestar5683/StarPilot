@@ -17,10 +17,17 @@ import java.util.concurrent.TimeUnit
 /** Serialized GATT operations; a failed mutation is never replayed. Call from a worker thread. */
 @SuppressLint("MissingPermission")
 /** [hello] ({"name", "replaces"}) is sent once with the first request so comma can label this phone and drop its old key. */
-class BleTransport(private val context: Context, private val key: ByteArray, private val hello: JSONObject? = null) : Closeable {
+class BleTransport(context: Context, private val key: ByteArray, private val hello: JSONObject? = null) : Closeable {
+    private val context: Context = context.applicationContext
     companion object {
         fun uuid(part: String): UUID = UUID.fromString("bd49000$part-6dc1-4de7-a7d0-6cdb441f7650")
+        // comma keeps one session per phone, so every sender shares the newest connection.
+        @SuppressLint("StaticFieldLeak") @Volatile var active: BleTransport? = null
+            private set
+        private val connecting = java.util.concurrent.atomic.AtomicInteger()
+        val busy get() = connecting.get() > 0
     }
+    val open get() = !closed && session.isNotEmpty()
     private data class Event(val kind: String, val status: Int, val data: ByteArray = byteArrayOf())
     private val events = LinkedBlockingQueue<Event>()
     @Volatile private var gatt: BluetoothGatt? = null
@@ -63,6 +70,10 @@ class BleTransport(private val context: Context, private val key: ByteArray, pri
     /** Returns the authenticated device address so the next connection can skip scanning. */
     @Synchronized fun connect(preferredAddress: String? = null): String {
         check(!closed)
+        connecting.incrementAndGet()
+        try { return connectOnce(preferredAddress) } finally { connecting.decrementAndGet() }
+    }
+    private fun connectOnce(preferredAddress: String?): String {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: throw IOException("Bluetooth is unavailable")
         if (!adapter.isEnabled) throw IOException("Enable Bluetooth on your phone and comma")
         val remembered = preferredAddress?.let { runCatching { adapter.getRemoteDevice(it) }.getOrNull() }
@@ -92,6 +103,9 @@ class BleTransport(private val context: Context, private val key: ByteArray, pri
             // Authenticate before exposing cached controls. Do not trust the advertised device name.
             val response = request(JSONObject().put("method", "GET").put("path", "/_bridge/health").apply { hello?.let { put("phone", it) } })
             if (response.getInt("status") != 200) throw IOException("Galaxy Bluetooth authentication failed")
+            val previous = active
+            active = this
+            if (previous !== this) previous?.close()
             return device.address
         } catch (e: Exception) { close(); throw e }
     }
@@ -123,6 +137,7 @@ class BleTransport(private val context: Context, private val key: ByteArray, pri
     }
     override fun close() {
         closed = true
+        if (active === this) active = null
         val old = gatt; gatt = null
         old?.disconnect(); old?.close()
         events.offer(Event("disconnect", -1))
