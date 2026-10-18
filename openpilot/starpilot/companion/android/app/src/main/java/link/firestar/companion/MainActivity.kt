@@ -5,7 +5,6 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.pm.PackageManager
 import java.net.HttpURLConnection
-import java.net.URL
 import java.util.Base64
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
@@ -265,7 +264,7 @@ class MainActivity : Activity() {
                 if (Networks.wifi(this, false) != null) discoverLan() else joinWifi("Join the same Wi-Fi as comma, then come back")
             }
             Route.BLUETOOTH -> if (pairing.load() != null) connectBluetooth() else {
-                supersedeConnection(); refreshRoutes(connectScreen()); pairOverWifi(false)
+                supersedeConnection(); refreshRoutes(connectScreen()); pairPhone()
             }
         }
     }
@@ -313,23 +312,8 @@ class MainActivity : Activity() {
                 }
             }
             .group("Bluetooth pairing") {
-                action("Pair over Wi-Fi", "Get a pairing key from comma over Wi-Fi") { pairOverWifi(false) }
-                action("Paste a pairing code", "From Galaxy on another device") {
-                    val field = EditText(this@MainActivity).apply { hint = "galaxy-bluetooth JSON or 64-character key" }
-                    AlertDialog.Builder(this@MainActivity).setTitle("Pair with comma").setView(field).setPositiveButton("Save") { _, _ ->
-                        try {
-                            val raw = field.text.toString().trim()
-                            savePairing(if (raw.startsWith("{")) JSONObject(raw) else JSONObject().put("type", "galaxy-bluetooth").put("version", 1).put("key", raw))
-                            message("Bluetooth pairing saved. Choose Bluetooth in Connections to connect.")
-                        } catch (_: Exception) { message("Invalid Galaxy Bluetooth pairing code") }
-                    }.setNegativeButton("Cancel", null).show()
-                }
-                action("Set up phone music", "Let this phone play music through comma") { pairAudioOverWifi() }
+                action("Pair with comma", "On comma (Settings > Bluetooth > Pair phone) or Galaxy (Bluetooth page), then tap here") { pairPhone() }
                 action("Forget pairing on this phone") { pairing.forget(); ble?.close(); disconnected() }
-                action("Revoke all paired phones", "Unpairs every phone from this comma, including iPhones", danger = true) {
-                    AlertDialog.Builder(this@MainActivity).setMessage("Revoke every phone using this comma's Galaxy Bluetooth key, including iPhones? Pair again afterward.")
-                        .setPositiveButton("Revoke") { _, _ -> pairOverWifi(true) }.setNegativeButton("Cancel", null).show()
-                }
             }
             .group("Phone GPS") {
                 if (PhoneGpsService.enabled(prefs)) action("Stop sharing phone GPS") { setPhoneGps(false) }
@@ -446,102 +430,47 @@ class MainActivity : Activity() {
         (Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)?.trim()?.takeIf { it.isNotEmpty() }
             ?: "${Build.MANUFACTURER} ${Build.MODEL}").take(40)
     private fun phoneHello(): JSONObject = JSONObject().put("name", phoneName()).apply { pairing.previousId()?.let { put("replaces", it) } }
-    private fun pairOverWifi(rotate: Boolean) {
-        val generation = connectionGeneration.get()
-        val wifi = Networks.wifi(this) ?: Networks.wifi(this, false)
-        if (wifi == null) { pairingNotice("To pair Bluetooth, join the comma's Galaxy Wi-Fi or the same Wi-Fi as comma first.", false); return }
-        val host = if (Networks.wifi(this) != null) Networks.ORIGIN else Networks.localOrigin(prefs.getString("host", "") ?: "")
-        if (host == null) { pairingNotice("To pair Bluetooth, open Galaxy over Wi-Fi first so this phone knows comma's address.", false); return }
-        if (!rotate) screen?.route(Route.BLUETOOTH, RouteState.TRYING, "Pairing…")
+    /** One step for the app and music: comma's open pairing window gives this phone its key, then bonds it for music. */
+    private fun pairPhone() {
+        val permissions = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+            else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) { requestPermissions(permissions, 5); return }
+        val generation = supersedeConnection()
+        connectScreen().apply {
+            refreshRoutes(this)
+            headline("Pairing with comma")
+            route(Route.BLUETOOTH, RouteState.TRYING, "Pairing…")
+            detail("On comma open Settings > Bluetooth > Pair phone, or tap Pair phone on the Galaxy Bluetooth page. Keep Bluetooth on for comma and this phone.")
+        }
         Thread {
+            val transport = BleTransport(this, null)
+            ble = transport
             try {
-                fun connection(path: String) = (wifi.first.openConnection(URL(host + path)) as HttpURLConnection).apply {
-                    instanceFollowRedirects = false; connectTimeout = 5000; readTimeout = 5000
-                    setRequestProperty("Origin", host)
-                }
-                val auth = connection("/api/auth/session")
-                val cookie = try {
-                    check(auth.responseCode == 200) { "Galaxy authentication failed" }
-                    auth.getHeaderField("Set-Cookie")?.substringBefore(';') ?: error("Galaxy session unavailable")
-                } finally { auth.disconnect() }
-                fun post(payload: JSONObject): Pair<Int, JSONObject> {
-                    val call = connection("/api/companion/bluetooth")
-                    try {
-                        call.requestMethod = "POST"; call.doOutput = true
-                        call.setRequestProperty("Cookie", cookie); call.setRequestProperty("Content-Type", "application/json")
-                        call.outputStream.use { it.write(payload.toString().toByteArray()) }
-                        val status = call.responseCode
-                        val body = (if (status == 200) call.inputStream else call.errorStream).use { input ->
-                            val bytes = java.io.ByteArrayOutputStream()
-                            val buffer = ByteArray(1024)
-                            while (true) {
-                                val count = input.read(buffer)
-                                if (count < 0) break
-                                require(bytes.size() + count <= 8192) { "Invalid pairing response" }
-                                bytes.write(buffer, 0, count)
-                            }
-                            bytes.toByteArray()
-                        }
-                        return status to JSONObject(String(body))
-                    } finally { call.disconnect() }
-                }
-                // Newer comma names this phone and replaces its previous key instead of adding another phone.
-                val payload = JSONObject().put("rotate", rotate)
-                if (!rotate) { payload.put("name", phoneName()); pairing.id()?.let { payload.put("replaces", it) } }
-                var (status, value) = post(payload)
-                if (status == 400 && !rotate) { val retry = post(JSONObject().put("rotate", false)); status = retry.first; value = retry.second }  // older comma
-                check(status == 200) { value.optString("error", "Pairing failed") }
-                val result = value
-                if (!rotate && generation != connectionGeneration.get()) return@Thread
-                if (rotate) { pairing.forget(); ble?.close() } else savePairing(result)
+                val claim = ClaimPairing.claim(transport, phoneName())
+                if (generation != connectionGeneration.get()) return@Thread
+                pairing.save(claim.key, claim.id.ifEmpty { null })
+                transport.close()
+                runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail("Paired. Setting up music: tap Pair if your phone asks.") }
+                val outcome = bondMusic(claim.adapterAddress)
+                if (generation != connectionGeneration.get()) return@Thread
                 runOnUiThread {
                     if (generation != connectionGeneration.get()) return@runOnUiThread
-                    if (rotate) pairingNotice("All Bluetooth phones revoked. Pair again to reconnect.", false)
-                    else if (screen != null) pairingNotice("Bluetooth is paired. When Wi-Fi isn't available, Automatic uses Bluetooth for Galaxy controls.", true)
-                    else message("Pairing saved. Enable Bluetooth on comma and choose Bluetooth in Connections to connect.")
+                    MusicBond.message(outcome)?.let { message(it) }
+                    connectBluetooth()
                 }
-                if (!rotate && generation == connectionGeneration.get()) pairAudio(wifi.first, host)
-            } catch (e: Exception) { runOnUiThread {
-                if (generation == connectionGeneration.get()) pairingNotice("Couldn't pair Bluetooth: ${e.message ?: "comma didn't answer"}. Open Galaxy over Wi-Fi, then try again.", pairing.load() != null)
-            } }
+            } catch (e: Exception) {
+                transport.close()
+                runOnUiThread { if (generation == connectionGeneration.get()) pairingNotice("Couldn't pair: ${e.message ?: "comma didn't answer"}", pairing.load() != null) }
+            }
         }.start()
     }
-    /** Also bond this phone with comma for Bluetooth music. Runs on a worker thread; comma opens a short pairing window. */
-    private fun pairAudio(network: Network, origin: String) {
-        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            runOnUiThread { requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 3) }
-            return
-        }
+    private fun bondMusic(address: String): MusicBond.Outcome {
         val adapter = getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter
-        if (adapter == null || !adapter.isEnabled) { runOnUiThread { message("Turn on Bluetooth on this phone to also set up music with comma.") }; return }
-        val galaxy = GalaxyWifi(network, origin)
-        val outcome = try {
-            AudioPairing(
-                status = { galaxy.bluetoothStatus() },
-                open = { galaxy.openAudioWindow() },
-                respond = { id, accepted -> galaxy.respond(id, accepted) },
-                bonded = { adapter.bondedDevices.map { it.address.uppercase() }.toSet() },
-                bond = { address -> adapter.getRemoteDevice(address).createBond() },
-                confirm = { code -> confirmCode(code) },
-            ).run()
-        } catch (_: Exception) { AudioPairing.Outcome.FAILED }
-        AudioPairing.message(outcome)?.let { text -> runOnUiThread { message(text) } }
-    }
-    private fun pairAudioOverWifi() {
-        val wifi = Networks.wifi(this) ?: Networks.wifi(this, false)
-        val host = if (Networks.wifi(this) != null) Networks.ORIGIN else Networks.localOrigin(prefs.getString("host", "") ?: "")
-        if (wifi == null || host == null) { message("To set up phone music, join the comma's Galaxy Wi-Fi or the same Wi-Fi as comma first."); return }
-        Thread { pairAudio(wifi.first, host) }.start()
-    }
-    private fun confirmCode(code: String): Boolean {
-        val answer = LinkedBlockingQueue<Boolean>(1)
-        runOnUiThread {
-            if (isFinishing || isDestroyed) { answer.offer(false); return@runOnUiThread }
-            AlertDialog.Builder(this).setTitle("Pair music with comma").setMessage("Check that comma and this phone both show $code.")
-                .setPositiveButton("Pair") { _, _ -> answer.offer(true) }.setNegativeButton("Cancel") { _, _ -> answer.offer(false) }
-                .setOnCancelListener { answer.offer(false) }.show()
-        }
-        return answer.poll(90, TimeUnit.SECONDS) ?: false
+        if (adapter == null || !adapter.isEnabled) return MusicBond.Outcome.FAILED
+        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return MusicBond.Outcome.FAILED
+        return try {
+            MusicBond({ adapter.bondedDevices.map { it.address.uppercase() }.toSet() }, { adapter.getRemoteDevice(it).createBond() }).run(address)
+        } catch (_: Exception) { MusicBond.Outcome.FAILED }
     }
     /** Pairing results appear on the connect screen when it is showing, otherwise in a dialog over Galaxy. */
     private fun phoneGpsPermissions(): Array<String> = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION) +
@@ -567,7 +496,7 @@ class MainActivity : Activity() {
         if (key == null) {
             disconnected().apply {
                 route(Route.BLUETOOTH, RouteState.UNAVAILABLE, "Not paired")
-                detail("Pair Bluetooth first: tap Bluetooth while Galaxy is reachable over Wi-Fi, or paste a pairing code in More options.")
+                detail("Pair first: tap Pair phone on comma (Settings > Bluetooth) or on the Galaxy Bluetooth page, then tap Pair with comma here.")
             }
             return
         }
@@ -609,7 +538,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, permissions, results)
         if (code == 1 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) AppUpdates.checkAsync(this)
-        if (code == 3 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) pairAudioOverWifi()
+        if (code == 5 && results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) pairPhone()
         if (code == 4) {
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                 prefs.edit().putBoolean("phoneGps", true).apply()

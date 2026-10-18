@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 /** Serialized GATT operations; a failed mutation is never replayed. Call from a worker thread. */
 @SuppressLint("MissingPermission")
 /** [hello] ({"name", "replaces"}) is sent once with the first request so comma can label this phone and drop its old key. */
-class BleTransport(context: Context, private val key: ByteArray, private val hello: JSONObject? = null) : Closeable {
+class BleTransport(context: Context, private val key: ByteArray?, private val hello: JSONObject? = null) : Closeable {
     private val context: Context = context.applicationContext
     companion object {
         fun uuid(part: String): UUID = UUID.fromString("bd49000$part-6dc1-4de7-a7d0-6cdb441f7650")
@@ -33,6 +33,7 @@ class BleTransport(context: Context, private val key: ByteArray, private val hel
     @Volatile private var gatt: BluetoothGatt? = null
     @Volatile private var closed = false
     private var session = ""
+    private var challenge = ByteArray(0)
     private var counter = 0L
     private var packetSize = 20
     private val callback = object : BluetoothGattCallback() {
@@ -74,6 +75,19 @@ class BleTransport(context: Context, private val key: ByteArray, private val hel
         try { return connectOnce(preferredAddress) } finally { connecting.decrementAndGet() }
     }
     private fun connectOnce(preferredAddress: String?): String {
+        val device = linkUp(preferredAddress)
+        try {
+            // Authenticate before exposing cached controls. Do not trust the advertised device name.
+            val response = request(JSONObject().put("method", "GET").put("path", "/_bridge/health").apply { hello?.let { put("phone", it) } })
+            if (response.getInt("status") != 200) throw IOException("Galaxy Bluetooth authentication failed")
+            val previous = active
+            active = this
+            if (previous !== this) previous?.close()
+            return device.address
+        } catch (e: Exception) { close(); throw e }
+    }
+    /** Scans, connects and reads the session challenge; nothing is authenticated yet. */
+    private fun linkUp(preferredAddress: String?): BluetoothDevice {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: throw IOException("Bluetooth is unavailable")
         if (!adapter.isEnabled) throw IOException("Enable Bluetooth on your phone and comma")
         val remembered = preferredAddress?.let { runCatching { adapter.getRemoteDevice(it) }.getOrNull() }
@@ -99,15 +113,32 @@ class BleTransport(context: Context, private val key: ByteArray, private val hel
             if (gatt?.requestMtu(517) == true) packetSize = (ByteBuffer.wrap(await("mtu")).int - 3).coerceIn(20, 512)
             val info = read("4")
             require(info.size == 17 && info[0].toInt() == 1)
+            challenge = info.copyOfRange(1, 17)
             session = info.drop(1).joinToString("") { "%02x".format(it.toInt() and 255) }
-            // Authenticate before exposing cached controls. Do not trust the advertised device name.
-            val response = request(JSONObject().put("method", "GET").put("path", "/_bridge/health").apply { hello?.let { put("phone", it) } })
-            if (response.getInt("status") != 200) throw IOException("Galaxy Bluetooth authentication failed")
-            val previous = active
-            active = this
-            if (previous !== this) previous?.close()
-            return device.address
+            return device
         } catch (e: Exception) { close(); throw e }
+    }
+    /** Asks the comma whose pairing window is open for a key. Returns the session challenge and comma's reply. */
+    @Synchronized fun claim(body: ByteArray): Pair<ByteArray, ByteArray> {
+        check(!closed)
+        connecting.incrementAndGet()
+        try {
+            linkUp(null)
+            val frame = ByteBuffer.allocate(4 + body.size).putInt(body.size).put(body).array()
+            for (packet in BleWire.packets(frame, packetSize)) write(packet)
+            val assembler = BleWire.Assembler()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
+            while (System.nanoTime() < deadline) {
+                val packet = read("3")
+                if (packet.contentEquals(byteArrayOf(0))) { Thread.sleep(30); continue }
+                val result = assembler.add(packet)
+                if (result != null) {
+                    write(ByteBuffer.allocate(5).put(2).put(packet, 1, 4).array())
+                    return challenge to result
+                }
+            }
+            throw IOException("comma didn't answer. Tap Pair phone on comma (Settings > Bluetooth) or on the Galaxy Bluetooth page, then try again.")
+        } catch (e: Exception) { close(); throw e } finally { connecting.decrementAndGet() }
     }
     @Synchronized fun request(value: JSONObject): JSONObject {
         check(!closed && session.isNotEmpty())
@@ -116,7 +147,7 @@ class BleTransport(context: Context, private val key: ByteArray, private val hel
         val request = JSONObject(value.toString()).put("id", id).put("session", session).put("counter", count).put("responseCodec", 2).put("responseFlow", "read-stream")
         // Upstream read-stream flow acknowledges once after authenticated reassembly.
         try {
-            for (packet in BleWire.packets(BleWire.seal(request.toString().toByteArray(), key), packetSize)) write(packet)
+            for (packet in BleWire.packets(BleWire.seal(request.toString().toByteArray(), key ?: throw IOException("Not paired")), packetSize)) write(packet)
             val assembler = BleWire.Assembler()
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(90)
             while (System.nanoTime() < deadline) {
@@ -124,7 +155,7 @@ class BleTransport(context: Context, private val key: ByteArray, private val hel
                 if (packet.contentEquals(byteArrayOf(0))) { Thread.sleep(30); continue }
                 val result = assembler.add(packet)
                 if (result != null) {
-                    val decoded = BleWire.decode(result, key)
+                    val decoded = BleWire.decode(result, key ?: throw IOException("Not paired"))
                     val response = JSONObject(String(decoded.json, Charsets.UTF_8))
                     decoded.body?.let { require(!response.has("body")); response.put("body", java.util.Base64.getEncoder().encodeToString(it)) }
                     require(response.getString("id") == id && response.getString("session") == session && response.getLong("counter") == count)

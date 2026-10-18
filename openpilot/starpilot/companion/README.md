@@ -14,24 +14,24 @@ The comma side lives elsewhere:
 
 - `openpilot/starpilot/galaxy_bluetooth/` — Bluetooth bridge, LAN discovery and
   the pairing screen, run by the `galaxy_phone` process.
-- `openpilot/starpilot/galaxy/companion*.py` — phone internet sharing and
-  Wi-Fi pairing endpoints.
+- `openpilot/starpilot/galaxy/companion*.py` — phone internet sharing.
 
 Over Bluetooth, pairing, phone internet sharing, APK downloads, recordings,
 replay, cameras and map tiles are blocked; they need Wi-Fi.
 
-## Phone music
+## Pairing and phone music
 
-After pairing, each app also sets the phone up for Bluetooth music through comma
-(needs a comma build with phone audio). Comma opens a two-minute pairing window that
-takes one phone and needs the code approved; adapter visibility returns to what it was.
+One step pairs the app and phone music. On comma open Settings → Bluetooth →
+**Pair phone**; comma opens a two-minute window that takes one phone.
 
-- Android bonds from the app and asks you to approve the code. Menu: **Set up phone music**.
-- iPhone cannot start a Bluetooth bond from an app, so it asks you to tap comma in
-  Settings → Bluetooth. Button: **Set up phone music** under Bluetooth pairing.
+- Android: tap **Pair with comma** in the app. It gets its key, then bonds for music
+  and shows one system prompt to approve.
+- iPhone: tap **Pair with comma** in the app, then tap comma once in
+  Settings → Bluetooth (iOS cannot start a Bluetooth bond from an app).
+- No app: tap comma in the phone's Bluetooth settings to pair music only.
 
-Older comma builds are skipped quietly. Installing Spotify (`/api/spotify/upload`) is
-blocked over Bluetooth like the other large uploads.
+Forgetting a Bluetooth device in comma Settings also removes its app key. Installing
+Spotify (`/api/spotify/upload`) is blocked over Bluetooth like the other large uploads.
 
 ## Phone GPS
 
