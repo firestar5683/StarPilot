@@ -455,6 +455,7 @@ class TestProjectionOnroad(unittest.TestCase):
       experimental_enabled: bool = False
       conditional_configured: object = None
       conditional_effective: object = None
+      engaged: bool = True
 
     native.alert, native.alert_size = Alert, SimpleNamespace(NONE='none', SMALL='small')
     view = projection.ProjectionOnroad(dependencies=native)
@@ -477,6 +478,25 @@ class TestProjectionOnroad(unittest.TestCase):
                                  conditional('lead', True)), start=1):
       self.assertIs(view._with_mode_notice(frame, now), frame)
     self.assertEqual(view._with_mode_notice(conditional('manual_chill', False), 10).alert.text1, 'Chill Mode')
+
+    # Disengaged, conditional mode reports nothing, so the banner follows the mode flag.
+    view = projection.ProjectionOnroad(dependencies=native)
+    def parked(experimental):
+      return State(experimental_enabled=experimental, conditional_configured=ModeChoice.CCM, engaged=False)
+    view._with_mode_notice(parked(False), 0)
+    self.assertEqual(view._with_mode_notice(parked(True), 1).alert.text1, 'Experimental Mode')
+    self.assertEqual(view._with_mode_notice(parked(False), 3_000_000_000).alert.text1, 'Chill Mode')
+
+    # The planner handing back to conditional mode, and engaging or disengaging, are not the driver's doing.
+    view = projection.ProjectionOnroad(dependencies=native)
+    view._with_mode_notice(conditional('manual_chill', False), 0)
+    for now, frame in enumerate((conditional('lead', True), conditional('manual_experimental', True)), start=1):
+      shown = view._with_mode_notice(frame, now)
+    self.assertEqual(shown.alert.text1, 'Experimental Mode')
+    quiet = view._with_mode_notice(conditional('cruising', False), 10_000_000_000)
+    self.assertEqual(quiet.alert.text1, '')
+    parked = State(experimental_enabled=True, conditional_configured=ModeChoice.CEM, engaged=False)
+    self.assertIs(view._with_mode_notice(parked, 20_000_000_000), parked)
     view.close()
 
   def test_negotiated_viewport_overrides_landscape_fallback(self):

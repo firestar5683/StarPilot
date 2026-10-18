@@ -29,7 +29,11 @@ def driving_mode_label(state) -> str | None:
   if choice in (ModeChoice.CEM, ModeChoice.CCM):
     effective = getattr(state, 'conditional_effective', None)
     if effective is None:
-      return None  # not reported while disengaged or between planner updates
+      if getattr(state, 'engaged', True):
+        return None  # not reported between planner updates
+      # Disengaged, nothing is reported and nothing switches by itself: the flag is the driver's choice.
+      experimental = getattr(state, 'experimental_enabled', None)
+      return None if not isinstance(experimental, bool) else 'Experimental Mode' if experimental else 'Chill Mode'
     if effective.reason == 'manual_experimental':
       return 'Experimental Mode'
     if effective.reason == 'manual_chill':
@@ -147,6 +151,7 @@ class ProjectionOnroad:
     self._certificate_notice_until_ns: int | None = None
     self._bookmark_notice_until_ns: int | None = None
     self._mode_label: str | None = None  # the drive's last known driving mode
+    self._mode_engaged: bool | None = None
     self._mode_notice: tuple[str, int] | None = None  # (banner text, shown until)
     self._base_customization = None
     self._projection_customization = None
@@ -419,8 +424,13 @@ class ProjectionOnroad:
   def _with_mode_notice(self, state, now_ns):
     """Show the new driving mode briefly when it changes during a drive; a real alert always wins."""
     label = driving_mode_label(state)
+    engaged = bool(getattr(state, 'engaged', True))
+    if engaged != self._mode_engaged:
+      self._mode_engaged = engaged
+      self._mode_label = None  # engaging or disengaging is not a mode change
     if label is not None:
-      if self._mode_label is not None and label != self._mode_label:
+      # Only the driver's own choice is announced, never the planner handing back to conditional mode.
+      if self._mode_label is not None and label != self._mode_label and not label.startswith('Conditional'):
         self._mode_notice = (label, now_ns + MODE_NOTICE_NS)
       self._mode_label = label
     if self._mode_notice is None or now_ns >= self._mode_notice[1]:
@@ -500,7 +510,7 @@ class ProjectionOnroad:
       if self.favorites is not None:
         self.favorites.cancel()
       self._certificate_notice_until_ns = None  # the next drive shows the heads-up again
-      self._mode_label = self._mode_notice = None  # a drive's starting mode is not a change
+      self._mode_label = self._mode_engaged = self._mode_notice = None  # a drive's starting mode is not a change
       self._monitor_pair = None
       self._monitor_pair_ns = None
       if self.pip is not None:
