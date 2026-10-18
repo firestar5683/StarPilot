@@ -131,7 +131,8 @@ def production_enabled(cp) -> bool:
     return qualified(cp) and cp.safetyConfigs[0].safetyParam == 73
   required = ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU | ToyotaFlags.SECOC | ToyotaFlags.RAISED_ACCEL_LIMIT
   allowed = required | ToyotaFlags.HYBRID | ToyotaFlags.HAS_BSM
-  if (not cp.pcmCruise or not cp.secOcRequired or not cp.secOcKeyAvailable or cp.alternativeExperience != 0 or
+  # alternativeExperience 32: Always On Lateral (starpilot/car/toyota/aol.py secoc_qualified)
+  if (not cp.pcmCruise or not cp.secOcRequired or not cp.secOcKeyAvailable or cp.alternativeExperience not in (0, 32) or
       cp.steerControlType != structs.CarParams.SteerControlType.torque or len(cp.safetyConfigs) != 1 or
       cp.flags & required != required or int(cp.flags) & ~int(allowed)):
     return False

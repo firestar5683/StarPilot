@@ -1,6 +1,8 @@
 #pragma once
 
 static bool toyota_aol_enabled = false;
+// SecOC TSS2 (2021+ Sienna): no 0x3BC GEAR_PACKET; the gear comes in 0x127 GEAR_PACKET_HYBRID (checksummed, ~60 Hz)
+static bool toyota_aol_secoc = false;
 static bool toyota_aol_stock = false;
 static bool toyota_aol_main = false;
 static bool toyota_aol_drive = false;
@@ -36,7 +38,8 @@ static uint8_t toyota_aol_permission(void) {
   static const uint32_t source_timeout[4] = {303031U, 10000000U, 3333334U, 400000U};
   bool fresh = true;
   for (unsigned int i = 0U; i < 4U; i++) {
-    fresh &= toyota_aol_seen[i] && (safety_get_ts_elapsed(microsecond_timer_get(), toyota_aol_ts[i]) <= source_timeout[i]);
+    const uint32_t timeout = ((i == 1U) && toyota_aol_secoc) ? 200000U : source_timeout[i];
+    fresh &= toyota_aol_seen[i] && (safety_get_ts_elapsed(microsecond_timer_get(), toyota_aol_ts[i]) <= timeout);
   }
   uint8_t permission = 0U;
   if (fresh && toyota_aol_main && toyota_aol_drive && toyota_aol_doors_closed && toyota_aol_eps) {
@@ -49,11 +52,12 @@ static uint8_t toyota_aol_permission(void) {
 }
 
 static void toyota_aol_observe(const CANPacket_t *msg) {
+  const uint32_t gear_addr = toyota_aol_secoc ? 0x127U : 0x3BCU;
   if (toyota_aol_enabled && (msg->bus == 0U) && (GET_LEN(msg) != 8U)) {
     unsigned int index = 4U;
     if (msg->addr == 0x1D3U) {
       index = 0U;
-    } else if (msg->addr == 0x3BCU) {
+    } else if (msg->addr == gear_addr) {
       index = 1U;
     } else if (msg->addr == 0x620U) {
       index = 2U;
@@ -69,10 +73,15 @@ static void toyota_aol_observe(const CANPacket_t *msg) {
     if (msg->addr == 0x1D3U) {
       index = 0U;
       toyota_aol_main = GET_BIT(msg, 15U) && !GET_BIT(msg, 47U);
-    } else if (msg->addr == 0x3BCU) {
+    } else if (msg->addr == gear_addr) {
       index = 1U;
-      const unsigned int gear = msg->data[1] & 0x3FU;
-      toyota_aol_drive = (gear == 0U) || (gear == 1U);
+      if (toyota_aol_secoc) {
+        const unsigned int gear = msg->data[5] >> 4U;  // GEAR_PACKET_HYBRID.GEAR: P 0, R 1, N 2, D 3, B 4
+        toyota_aol_drive = (gear == 3U) || (gear == 4U);
+      } else {
+        const unsigned int gear = msg->data[1] & 0x3FU;
+        toyota_aol_drive = (gear == 0U) || (gear == 1U);
+      }
     } else if (msg->addr == 0x620U) {
       index = 2U;
       toyota_aol_doors_closed = (msg->data[5] & 0x3CU) == 0U;
@@ -95,7 +104,13 @@ static void toyota_aol_observe(const CANPacket_t *msg) {
 static void toyota_aol_configure(uint16_t param) {
   toyota_aol_reset();
   toyota_aol_stock = (param == 585U) || (param == 4681U);
+#ifdef ALLOW_DEBUG
+  toyota_aol_secoc = (param == 2121U);  // EPS scale 73 | SECOC, openpilot longitudinal (SecOC exists only in debug builds)
+#else
+  toyota_aol_secoc = false;
+#endif
   toyota_aol_enabled = (toyota_aol_stock && (alternative_experience == 32)) ||
+                       (toyota_aol_secoc && (alternative_experience == 32)) ||
                        ((param == 4169U) && (alternative_experience == 32)) ||
                        ((param == 73U) && ((alternative_experience == 32) || (alternative_experience == 160) || (alternative_experience == 288)));
   if (toyota_aol_enabled) {
