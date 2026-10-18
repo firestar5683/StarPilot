@@ -230,8 +230,8 @@ class Session:
   # ----------------------------------------------------------------- framing
 
   def send(self, channel: int, kind: int, body: bytes = b"", encrypted: bool = True, control: bool = False, *,
-           deadline: float | None = None) -> None:
-    """Send one whole message within one deadline; the session is invalid on failure."""
+           deadline: float | None = None) -> int:
+    """Send one whole message within one deadline and return its fragment count; the session is invalid on failure."""
     if self.authenticated and not encrypted:
       raise ValueError("Plaintext is forbidden after authentication")
     data = struct.pack(">H", kind) + body
@@ -266,6 +266,7 @@ class Session:
     finally:
       if timed_peer:
         self.peer.settimeout(previous_timeout)
+    return -(-len(data) // FRAGMENT_SIZE)
 
   def receive(self, *, deadline: float | None = None) -> tuple[int, int, bytes]:
     """Read one complete message within one deadline, tolerating partial reads."""
@@ -511,9 +512,13 @@ class ProjectionSession(Session):
   ACK_DRAIN_SECONDS = 0.1  # before calling an ACK late, read what already arrived, for at most this long
   MAX_WINDOW = 2
   nav = None
+  # HeadunitPad acknowledges every fragment (codec config included) rather than every frame.
+  fragment_acks = False
 
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
+    self.frame_fragments: deque[int] = deque()
+    self.fragment_credit = 0
     self.channels: list[dict] = []
     self.mode: VideoMode | None = None
     self.window = 1
@@ -696,6 +701,9 @@ class ProjectionSession(Session):
         self.session_id += 1
         self.unacked = 0
         self.pending.clear()
+        if self.fragment_acks:
+          self.frame_fragments.clear()
+          self.fragment_credit = 0
         self.config_ack_slack = 0
         self.epoch_acked = 0
       self.media_started = True
@@ -706,6 +714,19 @@ class ProjectionSession(Session):
   def _handle_ack(self, sid, count: int) -> None:
     if sid in self.retired_sessions:
       return
+    if self.fragment_acks:
+      if sid != self.session_id:
+        raise ValueError(f"Invalid video acknowledgement session={sid} count={count} pending={self.unacked}")
+      self.fragment_credit += count
+      frames = 0
+      while self.frame_fragments and self.fragment_credit >= self.frame_fragments[0]:
+        self.fragment_credit -= self.frame_fragments.popleft()
+        frames += 1
+      if self.fragment_credit and not self.frame_fragments:
+        raise ValueError(f"Invalid video acknowledgement session={sid} count={count} pending={self.unacked}")
+      if not frames:
+        return
+      count = frames
     # Head units may acknowledge codec config like a frame: under the current
     # session (as an extra count) or, like the DHU, under session 0.
     if sid != self.session_id and 0 < count <= self.config_ack_slack:
@@ -770,12 +791,16 @@ class ProjectionSession(Session):
     if self.needs_keyframe and not keyframe:
       raise ValueError("A fresh media epoch must start with SPS/PPS and an IDR frame")
     assert self.mode is not None
+    fragments = 0
     if self.needs_keyframe:
       config = codec_config(data)
       if config:
-        self.send(self.mode.channel, AV_MEDIA_CODEC_CONFIG, config)
-        self.config_ack_slack += 1
-    self.send(self.mode.channel, AV_MEDIA_WITH_TIMESTAMP, struct.pack(">Q", timestamp_us) + data)
+        fragments += self.send(self.mode.channel, AV_MEDIA_CODEC_CONFIG, config)
+        if not self.fragment_acks:
+          self.config_ack_slack += 1
+    fragments += self.send(self.mode.channel, AV_MEDIA_WITH_TIMESTAMP, struct.pack(">Q", timestamp_us) + data)
+    if self.fragment_acks:
+      self.frame_fragments.append(fragments)
     self.needs_keyframe = False
     self.pending.append(time.monotonic())
     self.unacked += 1

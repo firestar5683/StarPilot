@@ -16,6 +16,7 @@ on Stop. Nothing here runs as root or touches vehicle control.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import os
@@ -31,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from openpilot.common.hardware import COMMA_HARDWARE
+from openpilot.starpilot.galaxy.hotspot import ADDRESS as HOTSPOT_ADDRESS, NETWORK as HOTSPOT_NETWORK
 from openpilot.starpilot.system.android_auto import identity as identity_store
 from openpilot.starpilot.system.android_auto.auto_connect import AutoConnectPolicy
 from openpilot.starpilot.system.android_auto.bootstrap import NAMES, BootstrapError, WirelessBootstrap
@@ -72,6 +74,7 @@ STATE_LABELS = {
   "negotiating": "negotiating video", "streaming": "projecting", "suspended": "car showing its own screen",
   "backoff": "retrying", "stopping": "stopping", "error": "error",
   "waiting_for_usb": "plug into the car's usb", "usb_accessory": "starting usb",
+  "waiting_for_ipad": "open headunitpad on the ipad",
 }
 
 
@@ -371,7 +374,7 @@ class Supervisor:
         if self._stop.is_set():
           raise RuntimeError("Android Auto is still stopping; try again in a moment")
         return
-      if self.config["connection"] != "wired" and not self.config["receiver_address"]:
+      if self.config["connection"] == "wireless" and not self.config["receiver_address"]:
         raise RuntimeError("Choose your car first")
       identity = identity_store.load_identity()  # fail fast with a clear message
       self._stop.clear()
@@ -455,8 +458,8 @@ class Supervisor:
     self.log("view_selected", view=view)
 
   def set_connection(self, connection: str) -> None:
-    """Choose wireless (Bluetooth + car Wi-Fi) or wired (USB) projection."""
-    if connection not in ("wireless", "wired"):
+    """Choose wireless (Bluetooth + car Wi-Fi), wired (USB) or HeadunitPad (iPad on the Galaxy hotspot) projection."""
+    if connection not in identity_store.CONNECTIONS:
       raise RuntimeError(f"Unknown connection {connection!r}")
     if connection == "wired" and (reason := wired_blocker()):
       raise RuntimeError(reason)
@@ -871,9 +874,11 @@ class Supervisor:
 
   def _run(self, generation: int, trigger: str = "manual") -> None:
     self.log.open()
-    wired = self.config["connection"] == "wired"
-    self.log("session_start", receiver="usb" if wired else self.config["receiver_name"], generation=generation, trigger=trigger)
-    lease = NoLease() if wired else self._lease()
+    connection = self.config["connection"]
+    wireless = connection == "wireless"
+    receiver = {"wired": "usb", "headunitpad": "headunitpad"}.get(connection, self.config["receiver_name"])
+    self.log("session_start", receiver=receiver, generation=generation, trigger=trigger)
+    lease = self._lease() if wireless else NoLease()
     attempt = 0
     try:
       while not self._stop.is_set():
@@ -909,7 +914,7 @@ class Supervisor:
           delay = max(delay, PEER_STOP_RETRY_SECONDS)  # the car ended projection itself; do not bounce straight back
         self._set(state="backoff", attempt=attempt, retry_in=delay, mode=None)
         try:
-          self._wait_backoff(delay, car_can_wake=not wired and not peer_stopped)
+          self._wait_backoff(delay, car_can_wake=wireless and not peer_stopped)
         except Cancelled:
           break
     finally:
@@ -938,6 +943,9 @@ class Supervisor:
   def _attempt(self, lease) -> None:
     if self.config["connection"] == "wired":
       self._attempt_usb()
+      return
+    if self.config["connection"] == "headunitpad":
+      self._attempt_headunitpad()
       return
     config = self.config
     address = config["receiver_address"]
@@ -1042,6 +1050,41 @@ class Supervisor:
     finally:
       self._release_usb(gadget, bridge, listener, failed)
 
+  def _attempt_headunitpad(self) -> None:
+    """HeadunitPad: the iPad joins the Galaxy hotspot, finds this port and connects like a head unit."""
+    ident = identity_store.load_identity()
+    port = int(self.config["headunitpad_port"])
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    self._track(listener)
+    try:
+      listener.bind((HOTSPOT_ADDRESS, port))
+    except OSError as error:
+      raise RuntimeError(f"Turn on the Galaxy hotspot and join it from the iPad ({error})") from error
+    listener.listen(1)
+    listener.settimeout(1.0)
+    self._stage("waiting_for_ipad", f"{HOTSPOT_ADDRESS}:{port}")
+    sock = self._accept_headunitpad(listener)
+    listener.close()
+    self._project(None, NoLease(), ident, connect=lambda: sock, fragment_acks=True)
+
+  def _accept_headunitpad(self, listener: socket.socket) -> socket.socket:
+    network = ipaddress.ip_network(HOTSPOT_NETWORK)
+    while True:
+      self._check_cancel()
+      try:
+        sock, (address, _) = listener.accept()
+      except TimeoutError:
+        continue
+      if ipaddress.ip_address(address) not in network:
+        self.log("headunitpad_rejected", address=address)
+        sock.close()
+        continue
+      sock.settimeout(None)
+      sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+      self.log("headunitpad_connected", address=address)
+      return self._track(sock)
+
   def _release_usb(self, gadget, bridge, listener, failed: bool) -> None:
     """Undo a wired attempt, running every step even when one fails.
 
@@ -1143,11 +1186,12 @@ class Supervisor:
         self._wait(1.0 + attempt * 0.5)
     raise RuntimeError(f"Car did not accept the projection connection: {last_error}")
 
-  def _project(self, result, lease, ident, connect=None) -> None:
+  def _project(self, result, lease, ident, connect=None, fragment_acks: bool = False) -> None:
     config = self.config
     sock = connect() if connect is not None else self._connect_tcp(result, lease)
     ca = ident.root if config.get("verify_head_unit", False) else None
     session = ProjectionSession(sock, ident.cert, ident.key, self.log, ca)
+    session.fragment_acks = fragment_acks
     self._stage("authenticating")
     session.authenticate()
     self._stage("negotiating")

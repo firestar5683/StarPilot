@@ -2292,7 +2292,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(403, {'error': 'Park before changing automatic connection'})
             return
           command, arguments = 'set_auto_connect', {'enabled': payload['enabled']}
-        elif action == 'connection' and set(payload) == {'action', 'connection'} and payload['connection'] in ('wireless', 'wired'):
+        elif action == 'connection' and set(payload) == {'action', 'connection'} and payload['connection'] in ('wireless', 'wired', 'headunitpad'):
           if not configuration_allowed():
             self.json(403, {'error': 'Park before changing the connection type'})
             return
@@ -2314,7 +2314,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           runtime = aa_client().call('status')['status']
           if runtime.get('pairing_ready'):
             raise ValueError('Finish or cancel pairing first')
-          if command == 'start' and not runtime.get('receiver_address') and runtime.get('connection') != 'wired':
+          if command == 'start' and not runtime.get('receiver_address') and runtime.get('connection') == 'wireless':
             raise ValueError('Select a car first')
           if command == 'start' and not aa_setup_owner().identity_status().get('installed'):
             raise ValueError('Verify your Android Auto package first')

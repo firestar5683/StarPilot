@@ -11,6 +11,7 @@ import socket
 import ssl
 import struct
 import threading
+import time
 from pathlib import Path
 
 from openpilot.starpilot.system.android_auto import bootstrap as bs
@@ -74,8 +75,12 @@ class FakeHeadUnit:
   """Car side of one AA TCP session. Runs in a thread; records what the phone sent."""
 
   def __init__(self, identity: dict[str, Path], *, window: int = 4, reject_auth: bool = False, require_client_cert: bool = True,
-               unsolicited_focus: bool = False, version: tuple[int, int] = (1, 7), ack_codec_config: bool | int = True):
+               unsolicited_focus: bool = False, version: tuple[int, int] = (1, 7), ack_codec_config: bool | int = True,
+               connect_to: tuple[str, int] | None = None, ack_fragments: bool = False):
     self.unsolicited_focus = unsolicited_focus
+    self.connect_to = connect_to  # dial the phone, as HeadunitPad does, instead of waiting for it
+    self.ack_fragments = ack_fragments  # like HeadunitPad: one ACK per received video fragment
+    self.fragments = 0
     self.ack_codec_config = ack_codec_config
     self.codec_configs: list[tuple[int | None, bytes, int]] = []  # (session, SPS/PPS, frames received before it)
     self.version = version
@@ -123,7 +128,9 @@ class FakeHeadUnit:
 
   def _receive(self) -> tuple[int, int, bytes]:
     assembled = bytearray()
+    self.fragments = 0
     while True:
+      self.fragments += 1
       channel, flags, size = struct.unpack(">BBH", self._read_exact(4))
       if flags & 3 == 1:
         self._read_exact(4)
@@ -143,8 +150,11 @@ class FakeHeadUnit:
 
   def _run(self) -> None:
     try:
-      self.listener.settimeout(20)
-      self.sock, _ = self.listener.accept()
+      if self.connect_to is not None:
+        self.sock = self._dial(self.connect_to)
+      else:
+        self.listener.settimeout(20)
+        self.sock, _ = self.listener.accept()
       self.sock.settimeout(20)
       self._session()
     except BaseException as error:  # surfaced to the test
@@ -154,6 +164,20 @@ class FakeHeadUnit:
       if self.sock is not None:
         self.sock.close()
       self.listener.close()
+
+  def _dial(self, address: tuple[str, int]) -> socket.socket:
+    deadline = time.monotonic() + 20
+    while True:
+      try:
+        return socket.create_connection(address, timeout=1)
+      except OSError:
+        if self.stop.is_set() or time.monotonic() > deadline:
+          raise
+        time.sleep(0.05)
+
+  def _ack(self, session_id: int) -> None:
+    for _ in range(self.fragments if self.ack_fragments else 1):
+      self._send(3, 0x8004, field(1, session_id) + field(2, 1))
 
   def _session(self) -> None:
     self._send(0, 1, struct.pack(">HH", *self.version), encrypted=False)
@@ -228,14 +252,14 @@ class FakeHeadUnit:
         if self.ack_codec_config is not False:  # True: current session; an int: that session id (the DHU uses 0)
           ack_session = session_id if self.ack_codec_config is True else self.ack_codec_config
           assert isinstance(ack_session, int)
-          self._send(3, 0x8004, field(1, ack_session) + field(2, 1))
+          self._ack(ack_session)
       elif channel == 3 and kind == 0:
         assert isinstance(session_id, int)
         self.frames.append((session_id, data[8:]))
         unacked += 1
         self.streaming.set()
         if not self.hold_acks.is_set():
-          self._send(3, 0x8004, field(1, session_id) + field(2, 1))
+          self._ack(session_id)
           unacked -= 1
       elif channel == 1 and kind == 0x8002:
         self._send(1, 0x8003, field(1, 0))

@@ -94,6 +94,8 @@ PIPELINE_RESET = ("gpu_nv12", "async_readback")
 # Older files get today's default (off).
 VERIFY_RESET = ("verify_head_unit",)
 
+CONNECTIONS = ("wireless", "wired", "headunitpad")
+
 DEFAULT_CONFIG = {
   "config_version": CONFIG_VERSION,
   "receiver_address": "",      # Bluetooth address of the paired head unit
@@ -102,7 +104,9 @@ DEFAULT_CONFIG = {
   "companion_name": "",
   "rfcomm_channel": 0,         # 0 = discover through SDP (normal); set only to work around a broken SDP record
   "verify_head_unit": False,   # verify the car's certificate against root-cert.pem when present
-  "connection": "wireless",    # "wireless": Bluetooth + the car's Wi-Fi; "wired": USB cable from the car to the comma's USB-C port
+  "connection": "wireless",    # "wireless": Bluetooth + the car's Wi-Fi; "wired": USB cable from the car to the comma's USB-C port;
+                               # "headunitpad": an iPad running HeadunitPad joins the Galaxy hotspot and connects to the comma
+  "headunitpad_port": 5277,    # HeadunitPad's "Headunit Server" port
   "usb_mode": "auto",          # wired: "auto" waits for the car's accessory handshake, then presents as an accessory itself;
                                # "handshake" waits for it only; "direct" presents as an accessory at once
   "view": "car",               # Separate StarPilot road view; legacy mirror has no source
@@ -146,8 +150,10 @@ def load_config(path: Path | None = None) -> dict:
   config["fps"] = 0 if int(config["fps"]) <= 0 else max(5, min(30, int(config["fps"])))
   if config["view"] not in ("car", "mirror"):
     config["view"] = "car"
-  if config["connection"] not in ("wireless", "wired"):
+  if config["connection"] not in CONNECTIONS:
     config["connection"] = "wireless"
+  if not 1024 <= int(config["headunitpad_port"]) <= 65535:
+    config["headunitpad_port"] = DEFAULT_CONFIG["headunitpad_port"]
   if config["usb_mode"] not in ("auto", "handshake", "direct"):
     config["usb_mode"] = "auto"
   config["bitrate_kbps"] = max(1000, min(12000, int(config["bitrate_kbps"])))
