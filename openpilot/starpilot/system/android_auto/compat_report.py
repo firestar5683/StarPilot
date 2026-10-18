@@ -127,7 +127,7 @@ def summarize(events: list[dict]) -> dict:
   for record in events:
     name = record["event"]
     if name == "session_start":
-      report["transport"] = "wired" if record.get("receiver") == "usb" else "wireless"
+      report["transport"] = {"usb": "wired", "headunitpad": "headunitpad"}.get(record.get("receiver"), "wireless")
       report["trigger"] = record.get("trigger", "")
       if record.get("receiver") and record.get("receiver") != "usb":
         report["car"].setdefault("bluetooth_name", record["receiver"])

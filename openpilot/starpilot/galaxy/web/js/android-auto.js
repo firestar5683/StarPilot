@@ -535,7 +535,7 @@ export const AndroidAutoPage = {
       return ""
     },
     connectReason() {
-      if (!this.selected && this.runtime?.connection === "wireless") return "Pair your car in step 2 first."
+      if (!this.selected && !["wired", "headunitpad"].includes(this.runtime?.connection)) return "Pair your car in step 2 first."
       if (!this.setup?.enabled) return "Turn on Android Auto Support in step 1."
       if (!this.setup.serviceReady) return "Waiting for the Android Auto service to start."
       if (this.pairing?.active) return "Finish or cancel pairing first."
