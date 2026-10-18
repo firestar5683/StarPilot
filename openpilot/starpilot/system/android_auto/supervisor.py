@@ -1194,10 +1194,17 @@ class Supervisor:
     except Exception as error:  # music is optional; projection must never depend on it
       self.log("media_audio_unavailable", error=str(error))
     try:
+      from openpilot.starpilot.system.android_auto.nav_status import NavStatus
+      session.nav = NavStatus.create(session, self.log)
+    except Exception as error:  # turn-by-turn is optional; projection must never depend on it
+      self.log("nav_status_unavailable", error=str(error))
+    try:
       self._stream(session, encoder, source, watch, interval)
     finally:
       if session.audio is not None:
         session.audio.close()
+      if getattr(session, "nav", None) is not None:
+        session.nav.close()
       watch.stop()
       source.close()
       encoder.close()
@@ -1222,6 +1229,7 @@ class Supervisor:
     encode_peak = 0.0
     wait_for_frame = False
     audio = getattr(session, "audio", None)
+    nav = getattr(session, "nav", None)
     self._stage("streaming")
     while not self._stop.is_set():
       pass_started = time.monotonic()
@@ -1246,6 +1254,15 @@ class Supervisor:
           self.log("media_audio_failed", error=f"{type(error).__name__}: {error}")
           audio.close()
           audio = session.audio = None
+      if nav is not None:
+        try:
+          nav.service()  # non-blocking: compares the route's next turn and sends at most a few small messages
+        except (OSError, TimeoutError):
+          raise
+        except Exception as error:
+          self.log("nav_status_failed", error=f"{type(error).__name__}: {error}")
+          nav.close()
+          nav = session.nav = None
       now = time.monotonic()
       wait_for_frame = True
       if session.focused:

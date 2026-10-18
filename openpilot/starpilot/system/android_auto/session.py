@@ -24,6 +24,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from openpilot.starpilot.system.android_auto.nav_status import NAVIGATION_SERVICE, parse_navigation
 from openpilot.starpilot.system.android_auto.touch import InputConfig, KeyTracker, TouchEvent, TouchMapper, parse_input_config
 from openpilot.starpilot.system.android_auto.wire import describe, describe_fields, field, json_fields, one, parse_fields, signed
 
@@ -441,6 +442,11 @@ class Session:
         if one(media, 2) is not None:
           item["audio_type"] = one(media, 2)
           item["audio_configs"] = [parse_fields(c) for c in media.get(3, []) if isinstance(c, bytes)]
+      if isinstance(one(fields, NAVIGATION_SERVICE), bytes):
+        try:
+          item["navigation"] = parse_navigation(one(fields, NAVIGATION_SERVICE))
+        except ValueError:
+          item["navigation"] = {}
       if isinstance(one(fields, 4), bytes):
         item["input"] = True
         try:
@@ -504,6 +510,7 @@ class ProjectionSession(Session):
   ACK_TIMEOUT = 2.5
   ACK_DRAIN_SECONDS = 0.1  # before calling an ACK late, read what already arrived, for at most this long
   MAX_WINDOW = 2
+  nav = None
 
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
@@ -526,6 +533,7 @@ class ProjectionSession(Session):
     self.epoch_acked = 0
     self.video_confirmed = False
     self.input_channel: int | None = None
+    self.nav = None  # NavStatus, attached by the supervisor when the head unit offers turn-by-turn
     self.audio = None  # MediaAudio, attached by the supervisor when Spotify plays through Android Auto
     self.input_events = 0
     self.touch: TouchMapper | None = None
@@ -628,6 +636,8 @@ class ProjectionSession(Session):
       fields = {}  # non-protobuf payload on a channel this sender never opened
     mode = self.mode
     if self.audio is not None and self.audio.handle(channel, kind, fields):
+      return
+    if self.nav is not None and self.nav.handle(channel, kind, fields):
       return
     if channel == 0:
       if kind == MSG_PING_REQUEST:
