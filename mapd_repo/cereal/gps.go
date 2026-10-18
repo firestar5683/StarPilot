@@ -1,8 +1,11 @@
 package cereal
 
 import (
+	"encoding/json"
 	"log/slog"
 	"math"
+	"os"
+	"regexp"
 
 	"capnproto.org/go/capnp/v3"
 	"pfeifer.dev/mapd/cereal/custom"
@@ -15,6 +18,8 @@ const (
 	externalFixMaxAge     = 500_000_000   // 10 Hz source: 500 ms
 	internalFixMaxAge     = 2_000_000_000 // 1 Hz source: 2 s
 	carFixMaxAge          = 2_500_000_000 // Optional CAN observation: 2.5 s
+	phoneFixMaxAge        = 2_500_000_000 // Companion app over Bluetooth or Wi-Fi: 2.5 s
+	gpsModeRefresh        = 1_000_000_000 // Galaxy navigation setting reread interval
 	maxHorizontalAccuracy = 50.0          // input sanity ceiling, not road-match qualification
 	maxClockPairSkew      = 1_000_000     // an interrupted pair cannot date a source event
 	maxClockOffsetDrift   = 1_000_000     // a larger BOOTTIME/MONOTONIC step fences queued fixes
@@ -39,7 +44,52 @@ const (
 	GpsSourceInternal
 	GpsSourceExternal
 	GpsSourceCar
+	GpsSourcePhone
 )
+
+// Galaxy navigation's GPS source setting: backup uses the phone only without
+// comma or car GPS, comma never uses it, phone prefers it whenever it has a fix.
+const (
+	GpsModeBackup = "backup"
+	GpsModeComma  = "comma"
+	GpsModePhone  = "phone"
+)
+
+var storagePrefix = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+func navigationSettingsPath() string {
+	prefix := os.Getenv("OPENPILOT_PREFIX")
+	if prefix == "" {
+		return "/data/starpilot/navigation/settings.json"
+	}
+	if !storagePrefix.MatchString(prefix) {
+		return ""
+	}
+	return "/data/starpilot-" + prefix + "/navigation/settings.json"
+}
+
+// ReadGpsMode returns the saved choice, or backup when it is missing or invalid.
+func ReadGpsMode() string {
+	path := navigationSettingsPath()
+	if path == "" {
+		return GpsModeBackup
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || len(raw) > 1<<20 {
+		return GpsModeBackup
+	}
+	var settings struct {
+		GpsSource string `json:"gpsSource"`
+	}
+	if json.Unmarshal(raw, &settings) != nil {
+		return GpsModeBackup
+	}
+	switch settings.GpsSource {
+	case GpsModeComma, GpsModePhone:
+		return settings.GpsSource
+	}
+	return GpsModeBackup
+}
 
 type GpsSample struct {
 	Location         log.GpsLocationData
@@ -60,7 +110,12 @@ type GpsSub struct {
 	gpsLocation         Subscriber[log.GpsLocationData]
 	gpsLocationExternal Subscriber[log.GpsLocationData]
 	carGps              *Subscriber[custom.StarPilotCarState_Gps]
+	phoneGps            *Subscriber[custom.StarPilotCarState_Gps]
 	car                 gpsCandidate
+	phone               gpsCandidate
+	mode                func() string
+	modeValue           string
+	modeReadAt          uint64
 	internal            gpsCandidate
 	external            gpsCandidate
 	selected            GpsSource
@@ -83,6 +138,8 @@ func GpsFixFreshAt(source GpsSource, fixMonoTime, now uint64) bool {
 		return now-fixMonoTime <= externalFixMaxAge
 	case GpsSourceCar:
 		return now-fixMonoTime <= carFixMaxAge
+	case GpsSourcePhone:
+		return now-fixMonoTime <= phoneFixMaxAge
 	case GpsSourceInternal:
 		return now-fixMonoTime <= internalFixMaxAge
 	default:
@@ -134,6 +191,35 @@ func (s *GpsSub) clearCandidates() {
 	s.internal = gpsCandidate{}
 	s.external = gpsCandidate{}
 	s.car = gpsCandidate{}
+	s.phone = gpsCandidate{}
+}
+
+func (s *GpsSub) gpsMode(now uint64) string {
+	if s.modeValue == "" || now < s.modeReadAt || now-s.modeReadAt >= gpsModeRefresh {
+		read := s.mode
+		if read == nil {
+			read = ReadGpsMode
+		}
+		s.modeValue, s.modeReadAt = read(), now
+	}
+	return s.modeValue
+}
+
+// updateWrapped admits a StarPilotCarState.Gps-shaped fix dated by its own source time.
+func (c *gpsCandidate) updateWrapped(event DecodedEvent[custom.StarPilotCarState_Gps], sensor log.GpsLocationData_SensorSource,
+	clock clockSample, barrierMono, maxAge uint64) bool {
+	sourceTime := event.Value.SourceMonoTime()
+	if sourceTime == 0 || sourceTime > event.LogMonoTime || event.LogMonoTime > clock.monoAfter {
+		return false
+	}
+	location, err := carGpsLocation(event.Value)
+	if err != nil {
+		return false
+	}
+	location.SetSource(sensor)
+	valid := event.Valid && !math.IsNaN(float64(location.Speed())) && !math.IsInf(float64(location.Speed()), 0) && location.Speed() >= 0 &&
+		!math.IsNaN(location.Altitude()) && !math.IsInf(location.Altitude(), 0)
+	return c.updateWithAge(DecodedEvent[log.GpsLocationData]{Value: location, Valid: valid, LogMonoTime: sourceTime}, clock, barrierMono, maxAge)
 }
 
 func (s *GpsSub) clockReady(clock clockSample) bool {
@@ -166,7 +252,7 @@ func (s *GpsSub) ReadSample() (sample GpsSample, success bool) {
 		clock = s.clock()
 	}
 	ready := s.clockReady(clock)
-	internalNew, externalNew, carNew := false, false, false
+	internalNew, externalNew, carNew, phoneNew := false, false, false, false
 	if event, ok := s.gpsLocation.ReadEvent(); ok && ready {
 		internalNew = s.internal.update(event, clock, s.barrierMono)
 	}
@@ -176,23 +262,29 @@ func (s *GpsSub) ReadSample() (sample GpsSample, success bool) {
 
 	if s.carGps != nil {
 		if event, ok := s.carGps.ReadEvent(); ok && ready {
-			sourceTime := event.Value.SourceMonoTime()
-			if sourceTime > 0 && sourceTime <= event.LogMonoTime && event.LogMonoTime <= clock.monoAfter {
-				location, err := carGpsLocation(event.Value)
-				if err == nil {
-					carNew = s.car.updateWithAge(DecodedEvent[log.GpsLocationData]{Value: location, Valid: event.Valid && !math.IsNaN(float64(location.Speed())) && !math.IsInf(float64(location.Speed()), 0) && location.Speed() >= 0 && !math.IsNaN(location.Altitude()) && !math.IsInf(location.Altitude(), 0), LogMonoTime: sourceTime}, clock, s.barrierMono, carFixMaxAge)
-				}
-			}
+			carNew = s.car.updateWrapped(event, log.GpsLocationData_SensorSource_car, clock, s.barrierMono, carFixMaxAge)
+		}
+	}
+	if s.phoneGps != nil {
+		if event, ok := s.phoneGps.ReadEvent(); ok && ready {
+			// The enum has no phone value; android is the closest.
+			phoneNew = s.phone.updateWrapped(event, log.GpsLocationData_SensorSource_android, clock, s.barrierMono, phoneFixMaxAge)
 		}
 	}
 
+	mode := s.gpsMode(clock.boot)
+	phoneFresh := ready && mode != GpsModeComma && GpsFixFreshAt(GpsSourcePhone, s.phone.fixMonoTime, clock.boot)
 	source := GpsSourceNone
-	if ready && GpsFixFreshAt(GpsSourceExternal, s.external.fixMonoTime, clock.boot) {
+	if phoneFresh && mode == GpsModePhone {
+		source = GpsSourcePhone
+	} else if ready && GpsFixFreshAt(GpsSourceExternal, s.external.fixMonoTime, clock.boot) {
 		source = GpsSourceExternal
 	} else if ready && GpsFixFreshAt(GpsSourceInternal, s.internal.fixMonoTime, clock.boot) {
 		source = GpsSourceInternal
 	} else if ready && GpsFixFreshAt(GpsSourceCar, s.car.fixMonoTime, clock.boot) {
 		source = GpsSourceCar
+	} else if phoneFresh {
+		source = GpsSourcePhone
 	}
 	sample.SourceChanged = source != s.selected
 	if sample.SourceChanged {
@@ -215,6 +307,10 @@ func (s *GpsSub) ReadSample() (sample GpsSample, success bool) {
 		sample.Location = s.car.location
 		sample.FixMonoTime = s.car.fixMonoTime
 		sample.NewFix = carNew
+	case GpsSourcePhone:
+		sample.Location = s.phone.location
+		sample.FixMonoTime = s.phone.fixMonoTime
+		sample.NewFix = phoneNew
 	default:
 		return sample, false
 	}
@@ -234,24 +330,28 @@ func (s *GpsSub) Close() {
 	if s.carGps != nil {
 		s.carGps.Sub.Msgq.Close()
 	}
+	if s.phoneGps != nil {
+		s.phoneGps.Sub.Msgq.Close()
+	}
 }
 
 func GetGpsSub() (gpsSub GpsSub) {
 	return GpsSub{
-		carGps:              optionalCarGpsSubscriber(),
+		carGps:              optionalWrappedGpsSubscriber("starpilotCarState", CarGpsReader),
+		phoneGps:            optionalWrappedGpsSubscriber("phoneGps", PhoneGpsReader),
 		gpsLocation:         NewSubscriber("gpsLocation", GpsLocationReader, true, ms.Settings.SubscriberSettings.ShadowGpsLocation),
 		gpsLocationExternal: NewSubscriber("gpsLocationExternal", GpsLocationExternalReader, true, ms.Settings.SubscriberSettings.ShadowGpsLocationExternal),
 	}
 }
 
-func optionalCarGpsSubscriber() (subscriber *Subscriber[custom.StarPilotCarState_Gps]) {
+func optionalWrappedGpsSubscriber(service string, reader func(log.Event) (custom.StarPilotCarState_Gps, error)) (subscriber *Subscriber[custom.StarPilotCarState_Gps]) {
 	defer func() {
 		if recover() != nil {
 			subscriber = nil
-			slog.Warn("Optional car GPS subscriber unavailable")
+			slog.Warn("Optional GPS subscriber unavailable", "service", service)
 		}
 	}()
-	value := NewSubscriber("starpilotCarState", CarGpsReader, true, false)
+	value := NewSubscriber(service, reader, true, false)
 	return &value
 }
 

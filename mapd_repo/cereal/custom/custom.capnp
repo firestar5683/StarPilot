@@ -73,7 +73,8 @@ struct CustomReserved3 @0xda96579883444c35 {
 struct CustomReserved4 @0x80ae746ee2596b11 {
 }
 
-struct CustomReserved5 @0xa5cd762cd951a455 {
+struct PhoneGps @0xa5cd762cd951a455 {
+  gps @0 :StarPilotCarState.Gps;  # sourceMonoTime is comma receive time minus the phone's fix age
 }
 
 struct CustomReserved6 @0xf98d843bfd7004a3 {

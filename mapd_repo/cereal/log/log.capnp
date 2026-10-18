@@ -2628,7 +2628,7 @@ struct Event {
     starpilotCarState @109 :Custom.StarPilotCarState;
     customReserved3 @110 :Custom.CustomReserved3;
     customReserved4 @111 :Custom.CustomReserved4;
-    customReserved5 @112 :Custom.CustomReserved5;
+    phoneGps @112 :Custom.PhoneGps;
     customReserved6 @113 :Custom.CustomReserved6;
     customReserved7 @114 :Custom.CustomReserved7;
     customReserved8 @115 :Custom.CustomReserved8;

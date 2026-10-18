@@ -176,7 +176,7 @@ func (s *State) ProcessGps(sample cereal.GpsSample, success bool, load MapLoader
 	pos := m.PosFromLocation(location)
 	s.Position = pos
 	// Unknown CAN direction or speed uncertainty cannot create confident road evidence.
-	if sample.Source == cereal.GpsSourceCar && (math.IsNaN(float64(location.BearingAccuracyDeg())) || math.IsInf(float64(location.BearingAccuracyDeg()), 0) || location.BearingAccuracyDeg() <= 0 || location.BearingAccuracyDeg() >= 180 || math.IsNaN(float64(location.SpeedAccuracy())) || math.IsInf(float64(location.SpeedAccuracy()), 0) || location.SpeedAccuracy() >= 100) {
+	if (sample.Source == cereal.GpsSourceCar || sample.Source == cereal.GpsSourcePhone) && (math.IsNaN(float64(location.BearingAccuracyDeg())) || math.IsInf(float64(location.BearingAccuracyDeg()), 0) || location.BearingAccuracyDeg() <= 0 || location.BearingAccuracyDeg() >= 180 || math.IsNaN(float64(location.SpeedAccuracy())) || math.IsInf(float64(location.SpeedAccuracy()), 0) || location.SpeedAccuracy() >= 100) {
 		s.clearRoadDerived()
 		s.roadFixMonoTime = 0
 		s.RoadStatus = custom.MapdOut_SampleStatus_noMatch
