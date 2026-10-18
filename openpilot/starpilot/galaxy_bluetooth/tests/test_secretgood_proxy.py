@@ -101,6 +101,11 @@ class ProxyTest(unittest.TestCase):
       self.assertEqual(self.request(path)['status'], 501, path)
     self.assertEqual(self.server.auths, 0)
 
+  def test_phone_gps_is_carried_over_bluetooth(self):
+    self.request()
+    self.assertEqual(self.request('/api/companion/location', 'POST', '{}')['status'], 200)
+    self.assertEqual(self.server.seen[-1][0], '/api/companion/location')
+
   def test_runtime_identity_and_isolated_handshake_cookies(self):
     self.assertEqual(self.request('/data/runtime.json')['status'], 200)
     second = self.proxy.new_session()

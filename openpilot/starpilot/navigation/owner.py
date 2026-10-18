@@ -23,6 +23,7 @@ import requests
 
 from openpilot.starpilot.storage import starpilot_storage_root
 from openpilot.starpilot.navigation.position import LastPositionStore
+from openpilot.starpilot.gps.source import GPS_MODES
 
 MAX_DOCUMENT = 256 * 1024
 MAX_RESPONSE = 8 * 1024 * 1024
@@ -145,7 +146,7 @@ class NavigationOwner:
     try:
       info = os.stat(self.path)
     except FileNotFoundError:
-      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': [], 'recents': [],
+      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': [], 'recents': [], 'gpsSource': 'backup',
               **dict.fromkeys(ROUTE_AVOIDANCES, False)}
     key = (info.st_ino, info.st_mtime_ns, info.st_size)
     cached = getattr(self, '_read_cache', None)
@@ -155,7 +156,7 @@ class NavigationOwner:
       with self.path.open('rb') as source:
         raw = source.read(MAX_DOCUMENT + 1)
     except FileNotFoundError:
-      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': [], 'recents': [],
+      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': [], 'recents': [], 'gpsSource': 'backup',
               **dict.fromkeys(ROUTE_AVOIDANCES, False)}
     try:
       value = json.loads(raw)
@@ -175,6 +176,8 @@ class NavigationOwner:
       for setting in ROUTE_AVOIDANCES:
         if type(value.setdefault(setting, False)) is not bool:
           raise ValueError
+      if value.setdefault('gpsSource', 'backup') not in GPS_MODES:
+        raise ValueError
     except (ValueError, TypeError, KeyError):
       raise ValidationError('Saved navigation settings could not be read') from None
     self._read_cache = (key, copy.deepcopy(value))
@@ -330,6 +333,7 @@ class NavigationOwner:
               'noDestination' if document['destination'] is None else 'waitingForLocation')
     result = {key: document[key] for key in ('enabled', 'destination', 'recents', 'revision')}
     result.update({key: document[key] for key in ROUTE_AVOIDANCES})
+    result['gpsSource'] = document['gpsSource']
     # Home and Work lead, then places in the order they were saved.
     result['favorites'] = sorted(document['favorites'], key=lambda row: FAVORITE_LABELS.index(row['label']) if 'label' in row else 2)
     from openpilot.starpilot.navigation.mapbox_budget import read_usage
@@ -478,8 +482,10 @@ class NavigationOwner:
         self._tile_bytes -= len(tile)
 
   def configure(self, patch: dict, expected_revision: str, authorized) -> dict:
-    if not isinstance(patch, dict) or not patch or set(patch) - ({'enabled', 'token'} | ROUTE_AVOIDANCES.keys()):
+    if not isinstance(patch, dict) or not patch or set(patch) - ({'enabled', 'token', 'gpsSource'} | ROUTE_AVOIDANCES.keys()):
       raise ValidationError('Unknown navigation setting')
+    if 'gpsSource' in patch and patch['gpsSource'] not in GPS_MODES:
+      raise ValidationError('Choose a GPS source')
     if 'enabled' in patch and type(patch['enabled']) is not bool:
       raise ValidationError('Navigation enabled must be on or off')
     if any(type(patch[key]) is not bool for key in ROUTE_AVOIDANCES if key in patch):
@@ -493,7 +499,7 @@ class NavigationOwner:
       if any(key in patch and patch[key] != value[key] for key in ROUTE_AVOIDANCES):
         value['routeChoice'] = 0
       value.update(patch)
-    result = self._change(update, expected_revision, authorized, preserve_active=set(patch) <= ROUTE_AVOIDANCES.keys())
+    result = self._change(update, expected_revision, authorized, preserve_active=set(patch) <= ROUTE_AVOIDANCES.keys() | {'gpsSource'})
     if 'token' in patch:
       with self._tile_lock:
         self._tiles.clear()

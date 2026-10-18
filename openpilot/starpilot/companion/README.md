@@ -37,7 +37,8 @@ Spotify (`/api/spotify/upload`) is blocked over Bluetooth like the other large u
 
 Each app can send the phone's GPS to comma about once a second, over Bluetooth or
 Galaxy Wi-Fi. Comma publishes it as `phoneGps` and navigation uses it only when
-comma's own GPS and the car's GPS have no fix. mapd and speed limits don't use it.
+comma's own GPS and the car's GPS have no fix. Galaxy → Navigation → GPS Source can
+instead ignore the phone or prefer it; mapd follows the same choice.
 
 - Android: Connections → **Share phone GPS with comma**. Runs as a foreground
   service with a notification.

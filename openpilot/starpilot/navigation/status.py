@@ -4,7 +4,7 @@ from openpilot.starpilot.parked_evidence import RESUME_SKEW_NS
 
 from openpilot.starpilot.navigation.wire import navigation_state
 
-from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS as GPS_TTL_NS, GPS_PRIORITY, GPS_SOURCES, bearing, observation
+from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS as GPS_TTL_NS, GPS_SOURCES, SOURCE_NAMES, bearing, gps_mode, gps_priority, observation
 
 
 def boot_time_ns():
@@ -72,9 +72,11 @@ class NavigationStatusSource:
       self.gps_offset_ns = offset
       return None
     candidates = []
+    mode = gps_mode()
     for service in GPS_SOURCES:
       try:
-        fix = observation(self.sm, service, after)
+        priority = gps_priority(service, mode)
+        fix = None if priority is None else observation(self.sm, service, after)
         if fix is None:
           continue
         stamp, gps = fix
@@ -82,8 +84,8 @@ class NavigationStatusSource:
         if (self.sm.seen[service] and self.sm.alive[service] and self.gps_after_mono_ns < stamp and
             0 <= after - receipt <= GPS_TTL_NS):
           direction = bearing(gps)
-          candidates.append((GPS_PRIORITY[service], stamp,
-                             {'longitude': float(gps.longitude), 'latitude': float(gps.latitude),
+          candidates.append((priority, stamp,
+                             {'longitude': float(gps.longitude), 'latitude': float(gps.latitude), 'source': SOURCE_NAMES[service],
                               **({'bearing': direction} if direction is not None else {}),
                               'validForMs': min(stamp + GPS_TTL_NS - after, receipt + GPS_TTL_NS - after) / 1e6}))
       except (AttributeError, KeyError, TypeError, ValueError, OverflowError, RuntimeError):

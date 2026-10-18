@@ -1,9 +1,36 @@
+import json
 import math
+import time
 
 GPS_SOURCES = {"gpsLocationExternal": "ublox", "gpsLocation": "qcomdiag", "starpilotCarState": "car", "phoneGps": "phone"}
 GPS_PRIORITY = {"gpsLocationExternal": 2, "gpsLocation": 2, "starpilotCarState": 1, "phoneGps": 0}
 WRAPPED_SOURCES = ("starpilotCarState", "phoneGps")
 GPS_MAX_AGE_NS = 2_500_000_000
+# backup: phone only without comma or car GPS; comma: never the phone; phone: the phone whenever it has a fix.
+GPS_MODES = ("backup", "comma", "phone")
+SOURCE_NAMES = {"gpsLocationExternal": "comma", "gpsLocation": "comma", "starpilotCarState": "car", "phoneGps": "phone"}
+_mode = [-math.inf, "backup"]
+
+
+def gps_mode(now=None):
+  """The GPS source chosen in Galaxy navigation settings, reread at most once a second."""
+  now = time.monotonic() if now is None else now
+  if now - _mode[0] >= 1.:
+    try:
+      from openpilot.starpilot.storage import starpilot_storage_root
+      with (starpilot_storage_root() / "navigation" / "settings.json").open("rb") as source:
+        value = json.loads(source.read(1 << 20)).get("gpsSource", "backup")
+    except (OSError, ValueError, AttributeError):
+      value = "backup"
+    _mode[:] = [now, value if value in GPS_MODES else "backup"]
+  return _mode[1]
+
+
+def gps_priority(service, mode):
+  """Rank of a source under the chosen mode, or None when it must not be used."""
+  if service == "phoneGps":
+    return None if mode == "comma" else 3 if mode == "phone" else 0
+  return GPS_PRIORITY[service]
 
 
 def observation(sm, service, now_ns):
@@ -23,12 +50,16 @@ def observation(sm, service, now_ns):
     return None
 
 
-def select_location(sm, now_ns):
+def select_location(sm, now_ns, mode=None):
+  mode = mode or gps_mode()
+  phone = None if mode == "comma" else observation(sm, "phoneGps", now_ns)
+  if mode == "phone" and phone is not None:
+    return phone
   native = [fix for service in ("gpsLocationExternal", "gpsLocation")
             if (fix := observation(sm, service, now_ns)) is not None]
   if native:
     return max(native, key=lambda fix: fix[0])
-  return observation(sm, "starpilotCarState", now_ns) or observation(sm, "phoneGps", now_ns)
+  return observation(sm, "starpilotCarState", now_ns) or phone
 
 
 def bearing(gps):

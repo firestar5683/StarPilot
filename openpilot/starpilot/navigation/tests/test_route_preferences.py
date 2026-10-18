@@ -21,6 +21,15 @@ def owner(tmp_path, monkeypatch):
   return NavigationOwner(tmp_path, runtime_source=lambda: None, transient_root=tmp_path / 'runtime')
 
 
+def test_gps_source_defaults_saves_and_rejects_unknown(owner):
+  assert owner.snapshot()['gpsSource'] == 'backup'
+  saved = owner.configure({'gpsSource': 'phone'}, '0', True)
+  assert owner.snapshot()['gpsSource'] == 'phone'
+  assert json.loads(owner.path.read_text())['gpsSource'] == 'phone'
+  with pytest.raises(ValidationError):
+    owner.configure({'gpsSource': 'tunnel'}, saved['revision'], True)
+
+
 def test_preferences_default_and_survive_restart(owner):
   assert all(owner.snapshot()[key] is False for key in ROUTE_AVOIDANCES)
   saved = owner.configure({'enabled': True, 'token': 'pk.test', 'avoidTolls': True}, '0', True)

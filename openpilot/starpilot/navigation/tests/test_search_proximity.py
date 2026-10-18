@@ -53,7 +53,7 @@ def source():
   messages = Messages(clock)
   with patch('openpilot.cereal.messaging.SubMaster', return_value=messages) as factory:
     result = NavigationStatusSource(mono_clock=lambda: clock.mono, boot_clock=clock.boot)
-  assert factory.call_args.args[0] == ['starpilotNavigation', 'gpsLocationExternal', 'gpsLocation', 'starpilotCarState', 'deviceState']
+  assert factory.call_args.args[0] == ['starpilotNavigation', 'gpsLocationExternal', 'gpsLocation', 'starpilotCarState', 'phoneGps', 'deviceState']
   clock.mono += 100_000_000
   messages.fix('gpsLocationExternal')
   messages.fix('gpsLocation', stamp=clock.mono - 30_000_000, longitude=-90., latitude=40.)
@@ -243,7 +243,7 @@ def test_cancel_during_optional_context_never_sends_provider_or_fallback(tmp_pat
 def test_map_position_lease_uses_oldest_envelope_or_receipt_and_expires(source):
   reader, sm, clock = source
   sm.valid['gpsLocation'] = False
-  assert reader.map_position() == {'longitude': -87.63, 'latitude': 41.88, 'validForMs': 2480.}
+  assert reader.map_position() == {'longitude': -87.63, 'latitude': 41.88, 'source': 'comma', 'validForMs': 2480.}
   sm.recv_time['gpsLocationExternal'] = (clock.mono - 500_000_000) / 1e9
   assert reader.map_position()['validForMs'] == 2000.
   clock.mono += 2_000_000_001

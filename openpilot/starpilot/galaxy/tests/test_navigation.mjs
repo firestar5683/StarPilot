@@ -13,6 +13,11 @@ for (const key of ['avoidTolls', 'avoidHighways', 'avoidFerries']) {
   for (const value of ['true', 1, null, []]) assert(!validNavigation({ ...snapshot(), [key]: value }))
 }
 assert(!validNavigation({ ...snapshot(), route: [{ latitude: 90, longitude: Infinity }] }))
+for (const value of ['backup', 'comma', 'phone']) assert(validNavigation({ ...snapshot(), gpsSource: value }))
+assert(!validNavigation({ ...snapshot(), gpsSource: 'tunnel' }))
+const located = { latitude: 1, longitude: 2, validForMs: 1000 }
+assert(validNavigation({ ...snapshot(), location: { ...located, source: 'phone' } }))
+assert(!validNavigation({ ...snapshot(), location: { ...located, source: 'satellite' } }))
 assert(!validNavigation({ ...snapshot(), destination: { ...place, latitude: 120 } }))
 assert(!validNavigation({ ...snapshot(), instruction: { text: "Turn left" } }))
 for (const network of ['online', 'offline', 'unknown']) assert(validNavigation({ ...snapshot(), network }))
