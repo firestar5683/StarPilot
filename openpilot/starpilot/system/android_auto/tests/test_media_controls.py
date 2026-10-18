@@ -85,6 +85,10 @@ def opened(stream, session):
   session.sent.clear()
 
 
+def test_unknown_duration_is_still_sent_as_zero():
+  assert parse_fields(ms.metadata_message({**TRACK, 'durationMs': None}))[6] == [0]
+
+
 def test_only_head_units_offering_the_service_get_it():
   assert ms.MediaStatus.create(Session([3]), lambda *a, **k: None, feed=Feed()) is None
   assert ms.media_info_channel(Session([ms.MEDIA_INFO_SERVICE]).channels) == 11

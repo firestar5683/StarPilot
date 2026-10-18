@@ -39,10 +39,8 @@ def status_message(track: dict | None, now_ms: float | None = None) -> bytes:
 
 
 def metadata_message(track: dict) -> bytes:
-  body = field(1, track['title']) + field(2, track.get('artist') or '') + field(3, track.get('album') or '')
-  if track.get('durationMs'):
-    body += field(6, track['durationMs'] // 1000)
-  return body + field(7, 0)
+  return (field(1, track['title']) + field(2, track.get('artist') or '') + field(3, track.get('album') or '') +
+          field(6, (track.get('durationMs') or 0) // 1000) + field(7, 0))
 
 
 def routed_snapshot() -> dict | None:
