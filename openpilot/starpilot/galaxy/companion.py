@@ -44,19 +44,6 @@ def phone_uplink_active(path=STATUS_PATH, clock=time.monotonic) -> bool:
     return False
 
 
-def bluetooth_pairing(rotate=False, path=None, name=None, replaces=None):
-  # Each Android pairing gets its own key in the phone bridge's store; rotate forgets every phone.
-  # Newer apps send their device name and the id of the key they are replacing, so re-pairing
-  # renames and replaces that phone instead of adding another entry.
-  from openpilot.starpilot.galaxy_bluetooth.bridge import pairing
-  path = pairing.DEFAULT_KEY_PATH if path is None else path
-  if rotate:
-    pairing.forget_all(path)
-    return {'type': 'galaxy-bluetooth', 'version': 1, 'revoked': True}
-  phone_id, key = pairing.add_phone(pairing.clean_name(name) or 'Android phone', path, replaces=replaces)
-  return json.loads(pairing.qr_payload(key, phone_id))
-
-
 def validate_lease(value):
   if type(value) is not dict:
     raise ValueError('Invalid companion heartbeat')

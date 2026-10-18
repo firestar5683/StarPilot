@@ -411,7 +411,7 @@ export const SpotifyPage = {
           </select>
         </label>
         <template v-if="phoneSource">
-          <p class="gx-note">Pair your phone in the companion app, or tap <strong>Let a phone pair</strong> on the <a class="gx-link" href="#/bluetooth">Bluetooth page</a>. Then choose it below and turn on phone audio. On your phone, select the comma as the media audio output. No Spotify install or API key is needed.</p>
+          <p class="gx-note">Pair your phone in the companion app, or tap <strong>Pair phone</strong> on the <a class="gx-link" href="#/bluetooth">Bluetooth page</a>. Then choose it below and turn on phone audio. On your phone, select the comma as the media audio output. No Spotify install or API key is needed.</p>
           <label class="gx-stack"><span>Phone</span>
             <select class="gx-field" :value="setup.preferences.phoneAddress" :disabled="busy || !setup.parked" @change="choosePhone">
               <option value="">Choose your paired phone…</option>

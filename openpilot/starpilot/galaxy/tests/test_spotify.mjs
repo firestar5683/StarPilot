@@ -111,4 +111,4 @@ for (const [overBluetooth, expected] of [[false, 4000], [true, 15000]]) {
   assert.ok(delays.includes(expected), `${overBluetooth}: ${delays}`)
   slow.stop()
 }
-assert.match(SpotifyPage.template, /Let a phone pair/)
+assert.match(SpotifyPage.template, /Pair phone/)

@@ -17,10 +17,11 @@ from dbus_next.aio import MessageBus
 from dbus_next.constants import PropertyAccess
 from dbus_next.service import ServiceInterface, dbus_property, method
 
+import claim
 from protocol import (Assembler, INFO_UUID, RX_UUID, SERVICE_UUID, TX_UUID, NOTIFY_UUID,
                       NOTIFICATION_WINDOW, open_message, packets, seal, stream_tag, notification_packets)
 from proxy import GalaxyProxy
-from pairing import introduce, load_keys, mark_used
+from pairing import add_phone, introduce, link_address, load_keys, mark_used, remove_phone
 from setup_health import write_ready, clear_ready
 
 ROOT = "/link/galaxy/ble"
@@ -62,10 +63,12 @@ class Session:
 
 
 class Gateway:
-  def __init__(self, keys, proxy, key_path=None):
+  def __init__(self, keys, proxy, key_path=None, claim_path=None):
     # keys: {phone id: key}. A bare key is accepted for a single phone.
     self.keys = {"default": keys} if isinstance(keys, (bytes, bytearray)) else dict(keys or {})
     self.key_path = key_path
+    self.claim_path = claim_path
+    self.claim_lock = asyncio.Lock()
     self.used = set()
     self.proxy = proxy
     self.sessions = {}
@@ -88,8 +91,42 @@ class Gateway:
           del self.sessions[path]
       self.keys = keys
       LOG.info("Pairing credentials changed; %d phone(s) paired", len(keys))
-    if not keys:
+    if not keys and claim.window(self.claim_path) is None:
       raise DBusError("org.bluez.Error.NotAuthorized", "No phones are paired")
+
+  async def answer_claim(self, state, data):
+    """While comma's pairing window is open, give one phone its own key. False when this is not a claim."""
+    if self.claim_path is None or self.key_path is None or data[:4] != claim.REQUEST_MAGIC or claim.window(self.claim_path) is None:
+      return False
+    public, name = claim.parse_request(data)
+    claim.validate(public)
+    async with self.claim_lock:
+      window = claim.window(self.claim_path)
+      if window is None:
+        raise ValueError("Pairing window closed")
+      phone_id, key = await asyncio.to_thread(add_phone, name, self.key_path)
+      try:
+        body = claim.reply(public, state.challenge, {"key": key.hex(), "id": phone_id, "adapterAddress": window["adapterAddress"],
+                                                      "adapterName": window["adapterName"]})
+        if not claim.finish(name or "Phone", phone_id, self.claim_path):
+          raise ValueError("Pairing window closed")
+      except Exception:
+        await asyncio.to_thread(remove_phone, phone_id, self.key_path)
+        raise
+    linked = await asyncio.to_thread(claim.take_link, self.claim_path)
+    if linked:
+      await asyncio.to_thread(link_address, linked[0], linked[1], self.key_path)
+    # The session now belongs to the new phone, so the key change does not close it before the reply is read.
+    state.phone = (phone_id, key)
+    frame = struct.pack(">I", len(body)) + body
+    state.notification_stream = False
+    state.notification_tag = b""
+    state.read_stream = True
+    state.response = list(packets(frame, state.packet_size))
+    state.index = 0
+    state.response_started = time.monotonic()
+    LOG.info("Phone claimed pairing window")
+    return True
 
   def open_request(self, state, data):
     candidates = [state.phone] if state.phone else list(self.keys.items())
@@ -202,6 +239,8 @@ class Gateway:
     try:
       self.refresh_key()
       if state.closed:
+        return
+      if await self.answer_claim(state, data):
         return
       request = self.open_request(state, data)
       counter = request.get("counter")
@@ -439,7 +478,7 @@ async def serve(args):
   clear_ready(key_path.parent)
   keys = load_keys(key_path)
   bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-  gateway = Gateway(keys, GalaxyProxy(args.galaxy_port), key_path)
+  gateway = Gateway(keys, GalaxyProxy(args.galaxy_port), key_path, claim.CLAIM_PATH)
   objects = {
       SERVICE_PATH: GattService(),
       SERVICE_PATH + "/rx": Characteristic(RX_UUID, ["write"], gateway, "rx"),

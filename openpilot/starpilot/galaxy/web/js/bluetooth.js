@@ -38,12 +38,17 @@ function validPairing(value) {
       typeof prompt.displayOnly === "boolean"))
 }
 
+function validClaim(value) {
+  return value === undefined || typeof value?.open === "boolean" && Number.isInteger(value.left) && value.left >= 0 && value.left <= 600 &&
+    typeof value.claimed === "string" && value.claimed.length <= 80 && typeof value.paired === "boolean"
+}
+
 export function validBluetoothStatus(value) {
   return value?.version === 1 && typeof value.available === "boolean" && typeof value.parked === "boolean" &&
     typeof value.powered === "boolean" && typeof value.discovering === "boolean" &&
     (value.errorCode === null || ["radio_unavailable", "adapter_unavailable", "service_unavailable", "radio_preference_unavailable"].includes(value.errorCode)) &&
     ["adapterAddress", "adapterName"].every((key) => value[key] === undefined || typeof value[key] === "string" && value[key].length <= 80) &&
-    validPairing(value.pairing ?? null) && Array.isArray(value.devices) && value.devices.length <= 64 && value.devices.every((device) =>
+    validClaim(value.claim) && validPairing(value.pairing ?? null) && Array.isArray(value.devices) && value.devices.length <= 64 && value.devices.every((device) =>
       ADDRESS.test(device?.address) && typeof device.name === "string" && device.name.length <= 80 &&
       [device.paired, device.connected, device.trusted].every((flag) => typeof flag === "boolean"))
 }
@@ -159,21 +164,24 @@ export class BluetoothFeed {
 export const BluetoothPage = {
   components: { GxState, GxNotice, ControllersPage },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
-  data: () => ({ status: null, busy: false, error: "", pairValue: "" }),
+  data: () => ({ status: null, busy: false, error: "", pairValue: "", now: Date.now(), claimAt: Date.now() }),
   mounted() {
     this.feed = new BluetoothFeed({ publish: (value) => Object.assign(this, value), unauthorized: this.unauthorized })
     this.visibility = () => document.hidden ? this.feed.stop(true) : this.feed.start()
     document.addEventListener("visibilitychange", this.visibility)
+    this.clock = setInterval(() => { this.now = Date.now() }, 1000)
     if (this.mode === "local" && !document.hidden) this.feed.start()
   },
-  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.feed?.stop(true) },
+  beforeUnmount() { clearInterval(this.clock); document.removeEventListener("visibilitychange", this.visibility); this.feed?.stop(true) },
   watch: {
     mode(value) { if (value === "local" && !document.hidden) this.feed?.start(); else this.feed?.stop(true) },
     'status.pairing.prompt.id'() { this.pairValue = "" },
+    'status.claim'() { this.claimAt = Date.now(); this.now = this.claimAt },
   },
   computed: {
     saved() { return this.status?.devices?.filter((device) => device.paired || device.trusted || device.connected) || [] },
     nearby() { return this.status?.devices?.filter((device) => !device.paired && !device.trusted && !device.connected) || [] },
+    claimLeft() { return Math.max(0, (this.status?.claim?.left ?? 0) - Math.floor((this.now - this.claimAt) / 1000)) },
     canAllowPair() { return validPairInput(this.status?.pairing?.prompt, this.pairValue) },
   },
   methods: {
@@ -202,9 +210,15 @@ export const BluetoothPage = {
             <div class="gx-driving__actions gx-actions"><button class="gx-btn" :disabled="!status.parked || !status.available" @click="action('power', {enabled: !status.powered})">Turn {{ status.powered ? 'Off' : 'On' }}</button>
 
               <button class="gx-btn gx-btn--tonal" :disabled="!status.powered" @click="action(status.discovering ? 'stop_scan' : 'scan')">{{ status.discovering ? 'Stop Search' : 'Search' }}</button>
-              <button class="gx-btn gx-btn--tonal" :disabled="!status.powered || !status.parked || status.discovering || status.pairing?.state === 'pairing'" @click="action('accept_pair')">Let a phone pair</button></div></div>
-          <div v-if="status.pairing" class="gx-card gx-driving__intro" role="status"><h3>{{ status.pairing.incoming ? (status.pairing.name ? 'Pairing ' + status.pairing.name : 'Let a phone pair') : 'Pairing ' + status.pairing.address }}</h3>
-            <p v-if="status.pairing.incoming && status.pairing.state === 'pairing' && !status.pairing.address">Open Bluetooth settings on your phone and tap <strong>{{ status.adapterName || 'this comma' }}</strong>. This stays open for two minutes and accepts only one phone.</p>
+              <button class="gx-btn gx-btn--tonal" :disabled="!status.powered || !status.parked || status.discovering || status.pairing?.state === 'pairing'" @click="action('accept_pair')">Pair phone</button></div></div>
+          <div v-if="status.claim?.open || status.claim?.claimed" class="gx-card gx-driving__intro" role="status"><h3>Pair phone</h3>
+            <p v-if="status.claim.open && !status.claim.claimed">Open the StarPilot app and tap <strong>Pair with comma</strong>. No app? Tap <strong>{{ status.adapterName || 'this comma' }}</strong> in your phone’s Bluetooth settings.</p>
+            <p v-else-if="status.claim.claimed && !status.claim.paired">App paired ({{ status.claim.claimed }}). iPhone: tap <strong>{{ status.adapterName || 'this comma' }}</strong> in Settings → Bluetooth to add music. Android pairs music on its own.</p>
+            <p v-else-if="status.claim.claimed">All set. {{ status.claim.claimed }} is paired for the app and music.</p>
+            <p>App: {{ status.claim.claimed || (status.claim.open ? 'waiting' : 'not paired') }} · Music: {{ status.claim.paired || status.pairing?.state === 'paired' ? 'paired' : (status.claim.open ? 'waiting' : 'not paired') }}</p>
+            <p v-if="status.claim.open && claimLeft > 0"><strong>{{ Math.floor(claimLeft / 60) }}:{{ String(claimLeft % 60).padStart(2, '0') }}</strong> left. Accepts one phone.</p></div>
+          <div v-if="status.pairing" class="gx-card gx-driving__intro" role="status"><h3>{{ status.pairing.incoming ? (status.pairing.name ? 'Pairing ' + status.pairing.name : 'Pair phone') : 'Pairing ' + status.pairing.address }}</h3>
+            <p v-if="status.pairing.incoming && status.pairing.state === 'pairing' && !status.pairing.address">Open Bluetooth settings on your phone and tap <strong>{{ status.adapterName || 'this comma' }}</strong>. </p>
             <p v-else-if="status.pairing.state === 'pairing'">Waiting for the device and any confirmation below.</p>
             <p v-else>{{ status.pairing.state === 'paired' ? 'Device paired.' : status.pairing.state === 'canceled' ? 'Pairing canceled.' : 'Pairing did not complete.' }}</p>
             <div v-if="status.pairing.prompt" class="gx-driving__intro"><p>{{ status.pairing.incoming && status.pairing.prompt.displayOnly && status.pairing.prompt.kind === 'confirmation' ? 'Accepted automatically. Tap Pair on your phone if it shows this code:' :

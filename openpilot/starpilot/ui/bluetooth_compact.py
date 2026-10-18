@@ -260,10 +260,15 @@ class BluetoothCompact(NavScroller):
         scan.set_click_callback(lambda: self._request("stop_scan" if scanning else "scan"))
         scan.set_enabled(lambda: self._ready() and bool(self.status and self.status.get("adapter")))
         cards.append(scan)
-    from openpilot.starpilot.galaxy_bluetooth.phone_ui import compact_phone_button
-    cards.append(compact_phone_button(self.phone_pairing_allowed))
+    from openpilot.starpilot.galaxy_bluetooth.phone_ui import compact_phone_cards
+    cards.extend(compact_phone_cards(self.phone_pairing_allowed))
     self._scroller.items.clear()
     self._scroller.add_widgets(cards)
+
+  def _forget(self, address: str):
+    from openpilot.starpilot.galaxy_bluetooth.phone_ui import forget_phone_keys
+    forget_phone_keys(self.phone_pairing_allowed, address)
+    self._request("forget", address=address, return_to_root=True)
 
   def _open_device(self, address: str):
     device = next((item for item in (self.status or {}).get("devices", ()) if item.get("address") == address), None)
@@ -282,7 +287,7 @@ class BluetoothCompact(NavScroller):
     cards.append(action)
     forget = BigButton("forget device", "remove saved device")
     forget.set_click_callback(lambda: gui_app.push_widget(BigConfirmationDialog(
-      "forget device", self.icon, lambda: self._request("forget", address=address, return_to_root=True), red=True)))
+      "forget device", self.icon, lambda: self._forget(address), red=True)))
     forget.set_enabled(self._ready)
     cards.append(forget)
     page._scroller.add_widgets(cards)

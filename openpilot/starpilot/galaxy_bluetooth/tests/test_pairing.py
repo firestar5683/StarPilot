@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "vendor"))
-from pairing import add_phone, ensure_store, forget_all, introduce, load_keys, load_phones, qr_payload, remove_phone, LEGACY_ID
+from pairing import app_only, link_address, remove_by_address, add_phone, ensure_store, forget_all, introduce, load_keys, load_phones, remove_phone, LEGACY_ID
 from server import Gateway
 from protocol import packets, seal
 from dbus_next import Variant, DBusError
@@ -40,7 +40,6 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
       iphone_id, iphone = add_phone("iPhone", path)
       _, android = add_phone("Android phone", path)
       self.assertNotEqual(iphone, android)
-      self.assertEqual(json.loads(qr_payload(iphone, iphone_id)), {"type": "galaxy-bluetooth", "version": 1, "key": iphone.hex(), "id": iphone_id})
 
       proxy = Proxy()
       gateway = Gateway(load_keys(path), proxy, path)
@@ -131,6 +130,30 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
       link.symlink_to(path)
       with self.assertRaises(OSError):
         load_keys(link)
+
+  def test_forgetting_a_bluetooth_device_forgets_its_app_key_only(self):
+    with tempfile.TemporaryDirectory() as directory:
+      path = Path(directory) / "pairing.json"
+      first_id, _ = add_phone("Pixel", path)
+      second_id, second = add_phone("iPhone", path)
+      self.assertFalse(link_address(first_id, "not an address", path))
+      self.assertTrue(link_address(first_id, "11:22:33:44:55:66", path))
+      self.assertEqual([phone["id"] for phone in app_only(path)], [second_id])
+      self.assertEqual(remove_by_address("aa:bb:cc:dd:ee:ff", path), 0)
+      self.assertEqual(remove_by_address("11:22:33:44:55:66", path), 1)
+      self.assertEqual(list(load_keys(path).values()), [second])
+
+  def test_address_survives_rewrites_and_is_never_trusted_when_malformed(self):
+    with tempfile.TemporaryDirectory() as directory:
+      path = Path(directory) / "pairing.json"
+      phone_id, _ = add_phone("Pixel", path)
+      link_address(phone_id, "11:22:33:44:55:66", path)
+      add_phone("Other", path)
+      self.assertEqual(load_phones(path)[0]["bt_address"], "11:22:33:44:55:66")
+      raw = json.loads(path.read_text())
+      raw["phones"][0]["bt_address"] = "garbage"
+      path.write_text(json.dumps(raw))
+      self.assertNotIn("bt_address", load_phones(path)[0])
 
 
 if __name__ == "__main__":

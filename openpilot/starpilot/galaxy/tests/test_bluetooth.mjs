@@ -102,5 +102,5 @@ assert.equal(validBluetoothStatus({ ...status,
 assert.equal(validBluetoothStatus({ ...status, pairing: { address: "", state: "pairing", prompt: null } }), false)
 assert.equal(validBluetoothStatus({ ...status, pairing: { address: "not-an-address", state: "pairing", prompt: null, incoming: true, name: "" } }), false)
 assert.equal(validBluetoothStatus({ ...status, adapterName: 5 }), false)
-assert.match(BluetoothPage.template, /Let a phone pair/)
+assert.match(BluetoothPage.template, /Pair phone/)
 assert.match(BluetoothPage.template, /action\('accept_pair'\)/)

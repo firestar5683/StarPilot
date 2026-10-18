@@ -5,7 +5,7 @@ import time
 import uuid
 
 from openpilot.starpilot.galaxy_bluetooth.bootstrap import setup_status
-from openpilot.starpilot.galaxy_bluetooth.phone_ui import large_phone_rows
+from openpilot.starpilot.galaxy_bluetooth.phone_ui import forget_phone_keys, large_phone_rows
 from openpilot.starpilot.bluetooth.owner import BluetoothOwner, BluetoothRejected, BluetoothUnavailable
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets import DialogResult, Widget
@@ -138,6 +138,10 @@ class BluetoothLarge(Widget):
     self.pending_session = getattr(self, "session", None)
     self.return_to_root = return_to_root
     self._rebuild()
+
+  def _forget(self, address: str) -> None:
+    forget_phone_keys(self.phone_pairing_allowed, address)
+    self._request("forget", address=address)
 
   def _tick(self):
     if self.pending is not None and self.pending.done():
@@ -281,7 +285,7 @@ class BluetoothLarge(Widget):
           callback=lambda a=address, op=operation: self._request(op, address=a), enabled=lambda: self.active and self._ready()))
         if device.get("paired"):
           rows.append(button_item("Forget " + device_label(device), "Forget", callback=lambda a=address:
-            self._confirm("Forget this Bluetooth device?", lambda: self._request("forget", address=a)),
+            self._confirm("Forget this Bluetooth device?", lambda: self._forget(a)),
             enabled=lambda: self.active and self._ready()))
     rows.extend(large_phone_rows(self.phone_pairing_allowed))
     previous = getattr(self, "_scroller", None)

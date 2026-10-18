@@ -23,6 +23,7 @@ LEGACY_ID = "legacy"
 LEGACY_LABEL = "Phones paired before update"
 UNUSED_GRACE = datetime.timedelta(hours=1)  # A code that was shown but never scanned.
 PHONE_ID = re.compile(r"[0-9a-f]{8}")
+BT_ADDRESS = re.compile(r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}")
 
 
 def clean_name(name):
@@ -69,8 +70,13 @@ def _read(path):
   for phone in value["phones"]:
     if not isinstance(phone, dict) or not isinstance(phone.get("id"), str) or not phone["id"]:
       raise ValueError("Invalid pairing file")
-    phones.append({"id": phone["id"], "key": _key(phone.get("key")), "label": str(phone.get("label", "Phone"))[:64],
-                   "added": str(phone.get("added", "")), "last_used": str(phone.get("last_used", ""))})
+    entry = {"id": phone["id"], "key": _key(phone.get("key")), "label": str(phone.get("label", "Phone"))[:64],
+             "added": str(phone.get("added", "")), "last_used": str(phone.get("last_used", ""))}
+    # The phone's Bluetooth address, set when its app and music pairing happen in one window.
+    address = str(phone.get("bt_address", "")).upper()
+    if BT_ADDRESS.fullmatch(address):
+      entry["bt_address"] = address
+    phones.append(entry)
   return phones
 
 
@@ -202,11 +208,37 @@ def describe(phone):
   return f"{phone['label']} · added {added}"
 
 
-def qr_payload(key, phone_id=None):
-  # "id" is new; older apps ignore it. Apps that keep it can name themselves and replace their old entry.
-  if len(key) != 32:
-    raise ValueError("Invalid pairing key")
-  value = {"type": "galaxy-bluetooth", "version": 1, "key": key.hex()}
-  if phone_id:
-    value["id"] = phone_id
-  return json.dumps(value, separators=(",", ":"))
+def link_address(phone_id, address, path=DEFAULT_KEY_PATH):
+  """Remember which Bluetooth device is this app's phone, so forgetting one forgets both."""
+  address = str(address).upper()
+  if not BT_ADDRESS.fullmatch(address):
+    return False
+  path = Path(path)
+  with _locked(path):
+    phones = _load_or_empty(path)
+    for phone in phones:
+      if phone["id"] == phone_id and phone["id"] != LEGACY_ID:
+        phone["bt_address"] = address
+        _write(path, phones)
+        return True
+  return False
+
+
+def remove_by_address(address, path=DEFAULT_KEY_PATH):
+  """Forget the app key of the phone that has this Bluetooth address. Returns how many were removed."""
+  address = str(address).upper()
+  path = Path(path)
+  with _locked(path):
+    phones = _load_or_empty(path)
+    kept = [phone for phone in phones if phone.get("bt_address") != address]
+    if len(kept) != len(phones):
+      _write(path, kept)
+    return len(phones) - len(kept)
+
+
+def app_only(path=DEFAULT_KEY_PATH):
+  """Phones that have an app key but no known Bluetooth device (older pairings, or the app only)."""
+  try:
+    return [phone for phone in load_phones(path) if "bt_address" not in phone]
+  except (OSError, ValueError):
+    return []

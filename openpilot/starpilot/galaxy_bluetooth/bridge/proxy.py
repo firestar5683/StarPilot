@@ -16,7 +16,7 @@ RESPONSE_HEADERS = {'content-type'}
 # direct Wi-Fi/LAN session; Bluetooth is never an uplink or media transport.
 WIFI_PATHS = ('/api/recordings', '/api/replay', '/api/cameras', '/api/maps/tiles', '/api/navigation/map/tiles',
               '/api/android-auto/upload', '/api/android-auto/apk', '/api/phone-internet',
-              '/api/companion/bluetooth', '/api/companion/uplink', '/api/companion/app.apk',
+              '/api/companion/uplink', '/api/companion/app.apk',
               '/api/auth/login', '/api/auth/logout', '/api/spotify/upload')
 
 

@@ -61,6 +61,34 @@ from openpilot.starpilot.audio.downloads import SoundDownloads, SoundDownloadErr
 
 WEB = Path(__file__).resolve().parent / 'web'
 INSTANCE = secrets.token_hex(8)
+
+
+def phone_claim_view():
+  from openpilot.starpilot.galaxy_bluetooth.bridge import claim
+  return claim.view(claim.CLAIM_PATH)
+
+
+def link_music_phone(address):
+  """Music paired in the window an app claimed (either order): remember which device is the app's phone."""
+  try:
+    from openpilot.starpilot.galaxy_bluetooth.bridge import claim, pairing
+    claim.note_paired(address)
+    linked = claim.take_link()
+    if linked:
+      pairing.link_address(*linked)
+  except (OSError, ValueError):
+    pass
+
+
+def forget_app_keys(address):
+  """Forgetting a Bluetooth device also forgets the app key that was paired with it."""
+  try:
+    from openpilot.starpilot.galaxy_bluetooth.bridge import pairing
+    pairing.remove_by_address(address)
+  except (OSError, ValueError):
+    pass
+
+
 def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashes=None, software=None, maps=None, models=None, settings=None,
                 plots=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
                 sentry_events=None, notifications=None, flm_operations=None, training_results=None, bluetooth=None, vehicle_selection=None,
@@ -321,7 +349,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         from openpilot.common.params import Params
         authority = context_source(Params())
         bluetooth_source = BluetoothOwner(authority.configuration_allowed, session_valid=bluetooth_session_valid,
-                                          on_paired=lambda address, name, uuids: spotify_owner().adopt_phone(address, name, uuids))
+                                          on_paired=lambda address, name, uuids: (link_music_phone(address), spotify_owner().adopt_phone(address, name, uuids)))
         server.bluetooth_authority = authority
         server.bluetooth_source = bluetooth_source
     return bluetooth_source
@@ -600,6 +628,17 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       finally:
         aa_source_registry().revoke_source(source)
 
+    def phone_claim(self, operation, result):
+      """The same window that lets a phone pair for music also lets the StarPilot app claim its key."""
+      from openpilot.starpilot.galaxy_bluetooth.bridge import claim
+      try:
+        if operation == 'cancel_pair':
+          claim.clear()
+        elif type(result) is dict:
+          claim.arm(result.get('adapterAddress', ''), result.get('adapterName', ''))
+      except OSError:
+        pass
+
     def aa_phone_window(self, identity, operation, payload=None):
       """The phone pairing window inside a running Android Auto projection; handled False when none holds the adapter."""
       registry = aa_source_registry()
@@ -622,6 +661,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         registry.revoke_source(source)
       found = delegated.get('bluetooth')
       paired = found.pop('windowPaired', None) if type(found) is dict else None
+      if type(paired) is dict:
+        link_music_phone(paired.get('address', ''))
       if type(paired) is dict and configuration_allowed():
         try:
           spotify_owner().adopt_phone(paired['address'], paired['name'], tuple(paired['uuids']))
@@ -919,6 +960,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           return
         try:
           result = bluetooth_owner().snapshot(session=identity)
+          result['claim'] = phone_claim_view()
           if result.get('pairing') is None and aa_setup_owner().enabled():
             delegated = self.aa_phone_window(identity, 'status')
             if delegated['handled'] and type(delegated.get('bluetooth')) is dict:
@@ -1536,7 +1578,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         finally:
           self.connection.settimeout(old_timeout)
         return
-      if path not in ('/api/companion/bluetooth', '/api/companion/uplink', '/api/companion/settings', '/api/companion/location',
+      if path not in ('/api/companion/uplink', '/api/companion/settings', '/api/companion/location',
                       '/api/connect/provider', '/api/developer/intense-logging', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
@@ -1592,24 +1634,6 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         return
       if path.startswith('/api/replay/'):
         replay_api.post(self, path, payload)
-        return
-      if path == '/api/companion/bluetooth':
-        if not self.direct_local() or getattr(self.server, 'remote_transport', False):
-          self.json(403, {'error': 'Pair over Galaxy Wi-Fi or a trusted LAN'})
-          return
-        if (not isinstance(payload, dict) or 'rotate' not in payload or set(payload) - {'rotate', 'name', 'replaces'}
-            or type(payload['rotate']) is not bool or not all(type(payload.get(key, '')) is str for key in ('name', 'replaces'))):
-          self.json(400, {'error': 'Expected rotate boolean'})
-          return
-        with effect_lock:
-          if not parked():
-            self.json(409, {'error': 'Park before pairing or forgetting phones'})
-            return
-          try:
-            from openpilot.starpilot.galaxy.companion import bluetooth_pairing
-            self.json(200, bluetooth_pairing(payload['rotate'], name=payload.get('name'), replaces=payload.get('replaces')))
-          except (OSError, ValueError):
-            self.json(503, {'error': 'Bluetooth pairing unavailable'})
         return
       if path == '/api/companion/location':
         if getattr(self.server, 'remote_transport', False) or not self.direct_local():
@@ -2533,6 +2557,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               result = bluetooth_owner().request(payload['operation'], address=payload.get('address'), enabled=payload.get('enabled'),
                                                  session=identity, prompt_id=payload.get('promptId'),
                                                  accepted=payload.get('accepted'), value=payload.get('value', ''))
+            if payload['operation'] in ('accept_pair', 'cancel_pair'):
+              self.phone_claim(payload['operation'], result)
+            elif payload['operation'] == 'forget':
+              forget_app_keys(payload['address'])
         except ValueError:
           if self.settings_session() == identity:
             self.json(400, {'error': 'Invalid Bluetooth request'})
