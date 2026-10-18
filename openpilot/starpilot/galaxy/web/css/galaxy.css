@@ -1166,7 +1166,7 @@ button.gx-chip:hover {
 @media (max-width: 600px) { .gx-home__hero { align-items: flex-start; flex-direction: column; } .gx-home__four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .gx-driving { width: 100%; margin: 0 auto; min-width: 0; }
 .gx-driving__intro { padding: var(--panel-padding); }
-.gx-driving__intro h2 { margin: 0 0 var(--sp-2); }
+.gx-driving__intro h2, .gx-driving__intro > h3 { margin: 0 0 var(--sp-2); }
 .gx-driving__intro p:last-child { margin-bottom: 0; color: var(--text-muted); }
 .gx-driving__actions { margin-block: var(--sp-3); }
 .gx-driving__group { margin-top: var(--sp-5); }
@@ -1710,6 +1710,17 @@ progress { max-width: 100%; accent-color: var(--primary); }
 .gx-details dd { margin: 0; overflow-wrap: anywhere; }
 .gx-driving .gx-row { flex-wrap: wrap; }
 .gx-driving .gx-row > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.gx-bt-adapter__actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.gx-bt-adapter__actions > .gx-btn { padding-inline: var(--sp-2); white-space: nowrap; }
+.gx-row__desc.gx-bt-device__state { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.gx-bt-device__state > .gx-status-dot { border: 1.5px solid currentColor; box-sizing: border-box; }
+.gx-bt-device__state.is-connected { color: var(--success); }
+.gx-bt-device__state.is-connected > .gx-status-dot { background: currentColor; }
+.gx-bt-device__actions { display: grid; grid-template-columns: repeat(2, 7.5rem); gap: var(--sp-2); }
+.gx-bt-device__actions > .gx-btn { padding-inline: var(--sp-2); }
+@media (max-width: 520px) {
+  .gx-bt-device__actions { grid-template-columns: repeat(2, minmax(0, 1fr)); flex: 1 1 100%; }
+}
 .gx-card-grid > .gx-card, .gx-settings__grid > .gx-card, .gx-favorites__slots > .gx-card, .gx-home__grid > .gx-card, .gx-home__pair > .gx-card { margin-bottom: 0; }
 @media (max-width: 600px) {
   .gx-details { grid-template-columns: 1fr; gap: var(--sp-1); }
