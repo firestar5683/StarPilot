@@ -916,15 +916,15 @@ struct StarPilotModelDataV2::VisionObservation {
   };
 };
 
-struct CustomReserved5 {
-  CustomReserved5() = delete;
+struct PhoneGps {
+  PhoneGps() = delete;
 
   class Reader;
   class Builder;
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(a5cd762cd951a455, 0, 0)
+    CAPNP_DECLARE_STRUCT_HEADER(a5cd762cd951a455, 0, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -6004,9 +6004,9 @@ private:
 };
 #endif  // !CAPNP_LITE
 
-class CustomReserved5::Reader {
+class PhoneGps::Reader {
 public:
-  typedef CustomReserved5 Reads;
+  typedef PhoneGps Reads;
 
   Reader() = default;
   inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
@@ -6021,6 +6021,9 @@ public:
   }
 #endif  // !CAPNP_LITE
 
+  inline bool hasGps() const;
+  inline  ::cereal::StarPilotCarState::Gps::Reader getGps() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -6033,9 +6036,9 @@ private:
   friend class ::capnp::Orphanage;
 };
 
-class CustomReserved5::Builder {
+class PhoneGps::Builder {
 public:
-  typedef CustomReserved5 Builds;
+  typedef PhoneGps Builds;
 
   Builder() = delete;  // Deleted to discourage incorrect usage.
                        // You can explicitly initialize to nullptr instead.
@@ -6049,6 +6052,13 @@ public:
   inline ::kj::StringTree toString() const { return asReader().toString(); }
 #endif  // !CAPNP_LITE
 
+  inline bool hasGps();
+  inline  ::cereal::StarPilotCarState::Gps::Builder getGps();
+  inline void setGps( ::cereal::StarPilotCarState::Gps::Reader value);
+  inline  ::cereal::StarPilotCarState::Gps::Builder initGps();
+  inline void adoptGps(::capnp::Orphan< ::cereal::StarPilotCarState::Gps>&& value);
+  inline ::capnp::Orphan< ::cereal::StarPilotCarState::Gps> disownGps();
+
 private:
   ::capnp::_::StructBuilder _builder;
   template <typename, ::capnp::Kind>
@@ -6059,14 +6069,15 @@ private:
 };
 
 #if !CAPNP_LITE
-class CustomReserved5::Pipeline {
+class PhoneGps::Pipeline {
 public:
-  typedef CustomReserved5 Pipelines;
+  typedef PhoneGps Pipelines;
 
   inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
   inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
       : _typeless(kj::mv(typeless)) {}
 
+  inline  ::cereal::StarPilotCarState::Gps::Pipeline getGps();
 private:
   ::capnp::AnyPointer::Pipeline _typeless;
   friend class ::capnp::PipelineHook;
@@ -19685,6 +19696,45 @@ inline  ::cereal::StarPilotModelDataV2::VisionObservation::Stream StarPilotModel
 inline void StarPilotModelDataV2::VisionObservation::Builder::setStream( ::cereal::StarPilotModelDataV2::VisionObservation::Stream value) {
   _builder.setDataField< ::cereal::StarPilotModelDataV2::VisionObservation::Stream>(
       ::capnp::bounded<22>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool PhoneGps::Reader::hasGps() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool PhoneGps::Builder::hasGps() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::StarPilotCarState::Gps::Reader PhoneGps::Reader::getGps() const {
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState::Gps>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::cereal::StarPilotCarState::Gps::Builder PhoneGps::Builder::getGps() {
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState::Gps>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::StarPilotCarState::Gps::Pipeline PhoneGps::Pipeline::getGps() {
+  return  ::cereal::StarPilotCarState::Gps::Pipeline(_typeless.getPointerField(0));
+}
+#endif  // !CAPNP_LITE
+inline void PhoneGps::Builder::setGps( ::cereal::StarPilotCarState::Gps::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState::Gps>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::StarPilotCarState::Gps::Builder PhoneGps::Builder::initGps() {
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState::Gps>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void PhoneGps::Builder::adoptGps(
+    ::capnp::Orphan< ::cereal::StarPilotCarState::Gps>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState::Gps>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::StarPilotCarState::Gps> PhoneGps::Builder::disownGps() {
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState::Gps>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 
 inline float CustomReserved6::Reader::getAccelerationJerk() const {

@@ -1,20 +1,22 @@
 import math
 
-GPS_SOURCES = {"gpsLocationExternal": "ublox", "gpsLocation": "qcomdiag", "starpilotCarState": "car"}
+GPS_SOURCES = {"gpsLocationExternal": "ublox", "gpsLocation": "qcomdiag", "starpilotCarState": "car", "phoneGps": "phone"}
+GPS_PRIORITY = {"gpsLocationExternal": 2, "gpsLocation": 2, "starpilotCarState": 1, "phoneGps": 0}
+WRAPPED_SOURCES = ("starpilotCarState", "phoneGps")
 GPS_MAX_AGE_NS = 2_500_000_000
 
 
 def observation(sm, service, now_ns):
   try:
-    gps = sm[service].gps if service == "starpilotCarState" else sm[service]
+    gps = sm[service].gps if service in WRAPPED_SOURCES else sm[service]
     envelope = int(sm.logMonoTime[service])
-    stamp = int(gps.sourceMonoTime) if service == "starpilotCarState" else envelope
+    stamp = int(gps.sourceMonoTime) if service in WRAPPED_SOURCES else envelope
     if (not sm.valid[service] or not gps.hasFix or
         not 0 < stamp <= envelope <= now_ns <= stamp + GPS_MAX_AGE_NS or
         not all(math.isfinite(v) for v in (gps.latitude, gps.longitude, gps.horizontalAccuracy)) or
         not (-90 <= gps.latitude <= 90 and -180 <= gps.longitude <= 180 and 0 < gps.horizontalAccuracy <= 25)):
       return None
-    if service != "starpilotCarState" and str(gps.source) != GPS_SOURCES[service]:
+    if service not in WRAPPED_SOURCES and str(gps.source) != GPS_SOURCES[service]:
       return None
     return stamp, gps
   except (AttributeError, KeyError, TypeError, ValueError, OverflowError, RuntimeError):
@@ -24,7 +26,9 @@ def observation(sm, service, now_ns):
 def select_location(sm, now_ns):
   native = [fix for service in ("gpsLocationExternal", "gpsLocation")
             if (fix := observation(sm, service, now_ns)) is not None]
-  return max(native, key=lambda fix: fix[0]) if native else observation(sm, "starpilotCarState", now_ns)
+  if native:
+    return max(native, key=lambda fix: fix[0])
+  return observation(sm, "starpilotCarState", now_ns) or observation(sm, "phoneGps", now_ns)
 
 
 def bearing(gps):

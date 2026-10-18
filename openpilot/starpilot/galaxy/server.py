@@ -69,10 +69,12 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
                 android_auto_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
                 local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None, toyota_tools=None, replay_client=None, replay_root=None,
-                spotify_setup=None, companion=None):
+                spotify_setup=None, companion=None, phone_location=None):
   from openpilot.starpilot.galaxy.companion import CompanionRegistry, APK_PATH
+  from openpilot.starpilot.gps.phone import PhoneGpsPublisher
   companion_source = companion if companion is not None else CompanionRegistry()
   training_results_source = training_results if training_results is not None else FlmTrainingResults()
+  phone_location_source = phone_location if phone_location is not None else PhoneGpsPublisher()
   cloud = cloud_provider
   hotspot_source = hotspot
   hotspot_source_lock = threading.Lock()
@@ -1534,8 +1536,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         finally:
           self.connection.settimeout(old_timeout)
         return
-      if path not in ('/api/companion/bluetooth', '/api/companion/uplink', '/api/companion/settings', '/api/connect/provider',
-                      '/api/developer/intense-logging', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
+      if path not in ('/api/companion/bluetooth', '/api/companion/uplink', '/api/companion/settings', '/api/companion/location',
+                      '/api/connect/provider', '/api/developer/intense-logging', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
                       '/api/replay/start', '/api/replay/control', '/api/replay/stop',
@@ -1608,6 +1610,15 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(200, bluetooth_pairing(payload['rotate'], name=payload.get('name'), replaces=payload.get('replaces')))
           except (OSError, ValueError):
             self.json(503, {'error': 'Bluetooth pairing unavailable'})
+        return
+      if path == '/api/companion/location':
+        if getattr(self.server, 'remote_transport', False) or not self.direct_local():
+          self.json(403, {'error': 'Phone location requires a direct local connection'})
+          return
+        try:
+          self.json(200, phone_location_source.publish(payload))
+        except ValueError as error:
+          self.json(400, {'error': str(error)})
         return
       if path in ('/api/companion/uplink', '/api/companion/settings'):
         if getattr(self.server, 'remote_transport', False) or not self.direct_local():

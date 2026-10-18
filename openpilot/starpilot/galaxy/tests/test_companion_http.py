@@ -163,3 +163,44 @@ def test_bluetooth_runtime_tracks_upstream_restart_and_blocks_replay(companion_h
       assert runtime['instance'] == instance
   for path in ('/api/replay/start', '/api/replay/media?sequence=1'):
     assert proxy.handle({'id': 'replay', 'method': 'POST', 'path': path})['status'] == 501
+
+
+def test_phone_location_needs_local_session(tmp_path):
+  access = GalaxyAccessOwner(tmp_path / 'access')
+  access.configure('password123', lambda: True)
+  phone = Mock()
+  phone.publish.side_effect = lambda payload: {'ok': True} if payload.get('ageMs', 0) <= 2000 else (_ for _ in ()).throw(ValueError('Location is too old'))
+  aa = Mock()
+  aa.enabled.return_value = False
+  server = make_server(port=0, owner=access, companion=CompanionRegistry(tmp_path / 's', tmp_path / 'l', tmp_path / 't'),
+                       parked=Mock(return_value=True), android_auto_setup=aa, phone_location=phone)
+  worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
+  worker.start()
+  origin = f'http://127.0.0.1:{server.server_port}'
+
+  def post(payload, cookie=''):
+    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+    try:
+      connection.request('POST', '/api/companion/location', json.dumps(payload),
+                         {'Cookie': cookie, 'Content-Type': 'application/json', 'Origin': origin})
+      response = connection.getresponse()
+      return response.status, json.loads(response.read())
+    finally:
+      connection.close()
+  try:
+    fix = {'latitude': 40., 'longitude': -110., 'horizontalAccuracy': 5., 'ageMs': 200}
+    assert post(fix)[0] == 401
+    with patch('openpilot.starpilot.galaxy.server.direct_local_connection', return_value=True):
+      connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+      connection.request('GET', '/api/auth/session')
+      cookie = connection.getresponse().getheader('Set-Cookie').split(';', 1)[0]
+      connection.close()
+      assert post(fix, cookie) == (200, {'ok': True})
+      assert post({**fix, 'ageMs': 5000}, cookie) == (400, {'error': 'Location is too old'})
+    server.remote_transport = True
+    assert post(fix, cookie)[0] == 403
+    assert phone.publish.call_count == 2
+  finally:
+    server.shutdown()
+    worker.join(timeout=2)
+    server.server_close()
