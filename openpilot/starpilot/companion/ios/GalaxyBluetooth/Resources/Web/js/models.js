@@ -150,10 +150,10 @@ function fileSizeText(model) {
 
 const actionPaths = { "select-small": "active", "select-big": "active", favorite: "preferences", unfavorite: "preferences",
   "enable-randomizer": "preferences", "disable-randomizer": "preferences", exclude: "preferences", include: "preferences",
-  download: "download", downloadAll: "download_all", cancel: "cancel", delete: "delete", refresh: "refresh_manifest", jetlink: "jetlink" }
+  download: "download", downloadAll: "download_all", cancel: "cancel", delete: "delete", refresh: "refresh_manifest" }
 const actionCapabilities = { "select-small": "select", "select-big": "select", favorite: "favorites", unfavorite: "favorites",
   "enable-randomizer": "randomizer", "disable-randomizer": "randomizer", exclude: "exclusions", include: "exclusions",
-  download: "download", downloadAll: "downloadAll", cancel: "cancel", delete: "delete", refresh: "refresh", jetlink: "jetlink" }
+  download: "download", downloadAll: "downloadAll", cancel: "cancel", delete: "delete", refresh: "refresh" }
 
 export function fitsModelProfile(model, profile) {
   return Array.isArray(model?.profiles) ? model.profiles.includes(profile) : profile === "big" ? model?.requiresGpu === true : model?.requiresGpu === false
@@ -162,7 +162,6 @@ export function fitsModelProfile(model, profile) {
 export function modelActionAllowed(data, action, model = null) {
   if (!data || data.capabilities?.[actionCapabilities[action]] !== true) return false
   if (data.isOnroad !== false && !["favorite", "unfavorite", "cancel"].includes(action)) return false
-  if (action === "jetlink") return data.jetlink !== undefined
   if (["select-small", "select-big"].includes(action)) {
     if (data.downloading || data.randomizer === true) return false
     if (action === "select-big" && model === null) return true
@@ -184,7 +183,7 @@ export class ModelManagerFeed {
     Object.assign(this, { publish, unauthorized, fetcher, later, cancel })
     this.active = false
     this.generation = 0
-    this.request = this.poll = this.expiry = null
+    this.request = this.poll = null
     this.data = null
     this.saving = false
     this.lastError = ""
@@ -196,8 +195,6 @@ export class ModelManagerFeed {
     this.request = null
     if (this.poll !== null) this.cancel(this.poll)
     this.poll = null
-    if (this.expiry !== null) this.cancel(this.expiry)
-    this.expiry = null
     this.data = null
     this.saving = false
     this.publish({ loading: false, data: null, error: "" })
@@ -265,20 +262,10 @@ export class ModelManagerFeed {
       } else {
         this.data = data
         this.lastError = ""
-        if (this.expiry !== null) this.cancel(this.expiry)
-        this.expiry = null
-        if (data.jetlink?.active === true) {
-          this.expiry = this.later(() => {
-            this.expiry = null
-            if (!this.active || this.data !== data) return
-            this.data = { ...data, jetlink: { ...data.jetlink, active: false, state: "checking execution", runtimeState: "unavailable" } }
-            this.publish({ loading: false, data: this.data, error: "" })
-          }, 1500)
-        }
         this.publish({ loading: false, data, error: "" })
       }
     }
-    if (this.poll === null) this.poll = this.later(() => this.load(), this.data?.jetlink?.mode !== "off" && this.data?.jetlink ? 1000 : 2000)
+    if (this.poll === null) this.poll = this.later(() => this.load(), 2000)
     return this.data
   }
   async action(action, model = null, extra = {}) {
@@ -290,7 +277,7 @@ export class ModelManagerFeed {
     if (!modelActionAllowed(this.data, action, model)) return null
     const data = this.data
     const key = model?.value || ""
-    let payload = action === "jetlink" ? extra : {}
+    let payload = {}
     if (action.startsWith("select-")) payload = { profile: action === "select-big" ? "big" : "small", model: key }
     else if (["favorite", "unfavorite"].includes(action)) {
       const userFavorites = data.models.filter(m => m.userFavorite && m.value !== key).map(m => m.value)
@@ -347,7 +334,6 @@ export const ModelsPage = {
       this.error = update.error
       this.selectionUncertain = !update.data
       this.capabilities = update.data?.capabilities || {}
-      if (!update.data && this.status.jetlink) this.status = { ...this.status, jetlink: { ...this.status.jetlink, active: false, state: "unavailable" } }
       if (update.data) {
         const p = update.data
         this.models = p.models
@@ -400,15 +386,6 @@ export const ModelsPage = {
       this.resolveDialog = null
       this.dialog = null
     },
-    async configureJetlink(mode, chargePhone = this.status.jetlink?.chargePhone === true) {
-      if (!this.canAction("jetlink")) return
-      this.pendingChoice = { action: "jetlink", value: mode }
-      this.busy = "jetlink:"
-      try {
-        const result = await this.manager.action("jetlink", null, { mode, chargePhone })
-        if (result) this.message = result.message
-      } finally { this.pendingChoice = null; this.busy = "" }
-    },
     async runAction(action, model = null) {
       if (this.disposed || !this.canAction(action, model)) return
       if (action.startsWith("select-")) this.pendingChoice = { action, value: model?.value || "" }
@@ -456,31 +433,6 @@ export const ModelsPage = {
           </div>
           <GxSummary :items="[{label: 'Installed', value: summary.installed}, {label: 'Missing', value: summary.missing}, {label: 'Total', value: summary.total}]" />
           <p class="gx-model-selection">Selected: <strong>{{ currentLabel }}</strong></p>
-        </section>
-
-        <section v-if="status.jetlink" class="gx-card">
-          <div class="gx-section__header"><i aria-hidden="true" class="bi bi-usb-symbol"></i><span class="gx-section__title">Jetlink</span></div>
-          <div class="gx-info-card">
-            <div class="gx-field-group">
-              <label for="gx-jetlink-mode" class="gx-row__label">Remote model connection</label>
-              <GalaxySelect id="gx-jetlink-mode" class="gx-field" :value="pendingChoice?.action === 'jetlink' ? pendingChoice.value : status.jetlink.mode" :disabled="!actionAvailable('jetlink')" @change="configureJetlink($event.target.value)">
-                <option value="off">Off</option>
-                <option value="usb" :disabled="!status.jetlink.supported || status.jetlink.chestnut">USB computer</option>
-                <option value="ios" :disabled="!status.jetlink.supported || status.jetlink.chestnut">iPhone / iPad</option>
-              </GalaxySelect>
-            </div>
-            <p class="gx-note" role="status"><span class="gx-chip">{{ status.jetlink.state }}</span><span v-if="status.jetlink.model && !status.jetlink.active"> · selected: {{ status.jetlink.model }}</span></p>
-            <p v-if="status.jetlink.progress">{{ status.jetlink.progress }}</p>
-            <p v-if="status.jetlink.reason" class="gx-model-reason">{{ status.jetlink.reason }}</p>
-            <p v-if="status.jetlink.chestnut" class="gx-model-reason">Chestnut is connected. Jetlink stays off while Chestnut is fitted.</p>
-            <p class="gx-model-reason">Prepared means the remote model is built, not active. The local Small model remains available. Small and Chestnut catalog selections are unchanged.</p>
-            <div v-if="status.jetlink.mode === 'ios'" class="gx-row">
-              <span class="gx-row__label">Charge phone over USB</span>
-              <button class="gx-btn gx-btn--tonal" type="button" :aria-pressed="status.jetlink.chargePhone" :disabled="!actionAvailable('jetlink')" @click="configureJetlink(status.jetlink.mode, !status.jetlink.chargePhone)">{{ status.jetlink.chargePhone ? 'On' : 'Off' }}</button>
-            </div>
-            <p class="gx-model-reason">Set up parked with a USB 3 data cable and separate power. Keep the computer awake; keep the iPhone app open and unlocked.</p>
-            <a href="https://github.com/firestar5683/StarPilot/blob/StarPilot/openpilot/starpilot/models/JETLINK.md" target="_blank" rel="noopener noreferrer">Jetlink setup guides</a>
-          </div>
         </section>
 
         <section class="gx-card">
@@ -604,12 +556,7 @@ export const ModelsPage = {
         </template>
         <section class="gx-card gx-model-runtime">
           <div class="gx-section__header"><i aria-hidden="true" class="bi bi-cpu"></i><span class="gx-section__title">Running model</span></div>
-          <div v-if="!selectionUncertain && status.jetlink?.active" class="gx-model-runtime__body">
-            <p>Active · Jetlink remote model</p>
-            <p v-if="status.jetlink.activeCheckpoint">{{ status.jetlink.activeCheckpoint }}</p>
-            <p v-if="status.jetlink.activeArtifactSha256">{{ status.jetlink.activeArtifactSha256.slice(0,16) }}…</p>
-          </div>
-          <div class="gx-model-runtime__body" v-else-if="runtime.status === 'ready' && runtime.data">
+          <div class="gx-model-runtime__body" v-if="runtime.status === 'ready' && runtime.data">
             <p>{{ runtime.data.health.replaceAll('-', ' ') }} · {{ runtime.data.loadedId ? (runtime.data.variant === 'chestnut' ? 'Chestnut big' : 'Small') : 'No verified load receipt' }}</p>
             <p v-if="runtime.data.loadedId">{{ runtime.data.loadedId }} · {{ runtime.data.artifactSha256.slice(0,16) }}…</p>
             <p v-if="runtime.data.pendingNextStart">A saved selection is waiting for the next start.</p>
