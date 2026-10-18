@@ -207,6 +207,11 @@ def test_supervisor_starts_server_then_player_and_redacts_key(layout, monkeypatc
   assert all('sk_live' not in line for line in sup.log)
   assert sup.handle({'command': 'control', 'action': 'pause', 'args': {}}) == {'ok': True}
   assert sup.client.sent == [('pause', {})]
+  assert sup.handle({'command': 'control', 'action': 'play_pause', 'args': {}}) == {'ok': True}
+  assert sup.client.sent[-1] == ('play', {})
+  sup.client.snapshot = lambda: {'status': 'playing'}
+  sup.handle({'command': 'control', 'action': 'play_pause', 'args': {}})
+  assert sup.client.sent[-1] == ('pause', {})
 
 
 def test_supervisor_stops_retrying_an_expired_build(layout, monkeypatch):

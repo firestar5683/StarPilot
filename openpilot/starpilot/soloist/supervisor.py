@@ -356,10 +356,11 @@ class Supervisor:
     if command == 'control':
       phone_prefs = self.phone_prefs
       if phone_prefs is not None:
-        if request.get('action') != 'pause' or request.get('args', {}) != {}:
+        action = request.get('action')
+        if action not in (*phone_audio.PLAYER_METHODS, 'play_pause') or request.get('args', {}) != {}:
           return {'ok': False, 'error': 'Use your phone for playback and volume controls'}
         try:
-          self.phone.pause(phone_prefs.phone_address)
+          self.phone.control(phone_prefs.phone_address, action)
           return {'ok': True}
         except (OSError, RuntimeError):
           return {'ok': False, 'error': 'Phone playback control is unavailable'}
@@ -369,7 +370,10 @@ class Supervisor:
       args = request.get('args', {})
       if not isinstance(args, dict):
         return {'ok': False, 'error': 'Invalid control'}
-      client.send(str(request.get('action')), args)
+      action = str(request.get('action'))
+      if action == 'play_pause':
+        action = 'pause' if client.snapshot().get('status') == 'playing' else 'play'
+      client.send(action, args)
       return {'ok': True}
     if command == 'prepare_phone_pairing':
       # A phone only offers the comma as an audio output if the receiving profile is advertised when it pairs.

@@ -24,7 +24,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from openpilot.starpilot.system.android_auto.touch import InputConfig, TouchEvent, TouchMapper, parse_input_config
+from openpilot.starpilot.system.android_auto.touch import InputConfig, KeyTracker, TouchEvent, TouchMapper, parse_input_config
 from openpilot.starpilot.system.android_auto.wire import describe, describe_fields, field, json_fields, one, parse_fields, signed
 
 MAX_MESSAGE = 2 * 1024 * 1024
@@ -530,6 +530,8 @@ class ProjectionSession(Session):
     self.input_events = 0
     self.touch: TouchMapper | None = None
     self.touch_events: deque[TouchEvent] = deque(maxlen=128)
+    self.keys = KeyTracker()
+    self.media_control: Callable[[str], None] | None = None  # non-blocking; set by the supervisor
     self.last_ping_sent = 0.0
     self.last_rx = time.monotonic()
     self.ping_responses = 0
@@ -578,7 +580,7 @@ class ProjectionSession(Session):
       self.send(channel["id"], INPUT_BINDING_REQUEST, b"".join(field(1, code) for code in config.keycodes))
       if self.mode is not None:
         self.touch = TouchMapper(config, self.mode.width, self.mode.height, self.mode.margin_width, self.mode.margin_height)
-      self.event("input_opened", channel=channel["id"], keycodes=len(config.keycodes),
+      self.event("input_opened", channel=channel["id"], keycodes=list(config.keycodes),
                  touch=f"{config.touch_width}x{config.touch_height}")
     except (TimeoutError, ValueError) as error:
       self.event("input_unavailable", error=str(error))
@@ -653,6 +655,14 @@ class ProjectionSession(Session):
             self.touch_events.extend(self.touch.decode(data))
           except ValueError as error:
             self.event("input_invalid", error=str(error))
+        # The driver may be on the car's own screen while Android Auto plays the music.
+        try:
+          for action in self.keys.decode(data):
+            self.event("media_key", action=action)
+            if self.media_control is not None:
+              self.media_control(action)
+        except ValueError as error:
+          self.event("input_invalid", error=str(error))
       elif kind == INPUT_BINDING_RESPONSE:
         self.event("input_bound", status=signed(one(fields, 1, 0)))
       else:

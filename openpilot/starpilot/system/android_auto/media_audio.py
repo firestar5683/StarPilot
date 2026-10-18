@@ -125,14 +125,18 @@ def music_routed() -> bool:
   return paths.enabled() and preferences.load().output == 'android_auto'
 
 
-def pause_music() -> None:
+def music_control(action: str) -> None:
   def worker():
     try:
       from openpilot.starpilot.galaxy.spotify_setup import SpotifyClient
-      SpotifyClient().call('control', action='pause', args={})
+      SpotifyClient().call('control', action=action, args={})
     except Exception:
       pass
-  threading.Thread(target=worker, name='aa_music_pause', daemon=True).start()
+  threading.Thread(target=worker, name=f'aa_music_{action}', daemon=True).start()
+
+
+def pause_music() -> None:
+  music_control('pause')
 
 
 class MediaAudio:
@@ -154,6 +158,7 @@ class MediaAudio:
     self.car_paused = False
     self.source_generation = getattr(source, 'generation', None)
     self.stats = {'chunks_sent': 0, 'acked': 0, 'dropped_ms': 0, 'focus': None}
+    self.track_info = None  # MediaStatus for the car's own displays, when the head unit offers it
 
   @classmethod
   def create(cls, session, log, *, source=None, routed: Callable[[], bool] = music_routed, **kwargs):
@@ -176,6 +181,8 @@ class MediaAudio:
 
   # ------------------------------------------------------------------ loop
   def service(self) -> None:
+    if self.track_info is not None:
+      self.track_info.service()
     now = self.clock()
     active = self.source.active(now)
     if not active:
@@ -265,6 +272,8 @@ class MediaAudio:
 
   # -------------------------------------------------------------- messages
   def handle(self, channel: int, kind: int, fields: dict) -> bool:
+    if self.track_info is not None and self.track_info.handle(channel, kind, fields):
+      return True
     if channel == 0 and kind == AUDIO_FOCUS_NOTIFICATION:
       self._focus(one(fields, 1), one(fields, 2, 0))
       return True
@@ -319,3 +328,5 @@ class MediaAudio:
 
   def close(self) -> None:
     self.source.close()
+    if self.track_info is not None:
+      self.track_info.close()

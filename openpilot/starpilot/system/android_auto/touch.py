@@ -27,6 +27,8 @@ ACTION_POINTER_UP = 6
 MAX_INPUT_BYTES = 16 * 1024
 MAX_KEYCODES = 256
 DEFAULT_TOUCH_SOCKET = "/tmp/starpilot-android-auto-touch.sock"
+# Android keycodes the head unit sends for the steering wheel and its own media buttons.
+MEDIA_KEYS = {85: "play_pause", 87: "next", 88: "previous", 126: "play", 127: "pause"}
 
 
 @dataclass(frozen=True)
@@ -143,6 +145,34 @@ class TouchMapper:
       elif action in (ACTION_DRAG, ACTION_POINTER_DOWN, ACTION_POINTER_UP):
         events.append(TouchEvent("move", *self._normalize(*tracked)))
     return events
+
+
+class KeyTracker:
+  """Media button presses, one action per press however long the button is held."""
+
+  def __init__(self):
+    self.held: set[int] = set()
+
+  def decode(self, data: bytes) -> list[str]:
+    if len(data) > MAX_INPUT_BYTES:
+      raise ValueError("Input message exceeds limit")
+    buttons = one(parse_fields(data), 4)
+    if not isinstance(buttons, bytes):
+      return []
+    actions = []
+    for raw in parse_fields(buttons).get(1, [])[:16]:
+      if not isinstance(raw, bytes):
+        continue
+      key = parse_fields(raw)
+      code = int(one(key, 1, 0) or 0)
+      if code not in MEDIA_KEYS:
+        continue
+      if not one(key, 2, 0):
+        self.held.discard(code)
+      elif code not in self.held:
+        self.held.add(code)
+        actions.append(MEDIA_KEYS[code])
+    return actions
 
 
 class TouchSender:

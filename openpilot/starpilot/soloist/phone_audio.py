@@ -19,6 +19,7 @@ from openpilot.starpilot.soloist.preferences import ADDRESS
 
 A2DP_SOURCE = '0000110a-0000-1000-8000-00805f9b34fb'
 MEDIA_PLAYER = 'org.bluez.MediaPlayer1'
+PLAYER_METHODS = {'play': 'Play', 'pause': 'Pause', 'next': 'Next', 'previous': 'Previous'}
 
 
 def profile(action: str) -> None:
@@ -91,6 +92,11 @@ class PhoneInput:
       return None
 
   def pause(self, address: str) -> None:
+    self.control(address, 'pause')
+
+  def control(self, address: str, action: str) -> None:
+    if action not in (*PLAYER_METHODS, 'play_pause'):
+      raise ValueError('Unsupported phone control')
     if self.client is None:
       return
     from openpilot.starpilot.bluetooth.owner import DEVICE
@@ -100,7 +106,9 @@ class PhoneInput:
     if device:
       for path, interfaces in objects.items():
         if path.startswith(device + '/') and MEDIA_PLAYER in interfaces:
-          self._call(path, MEDIA_PLAYER, 'Pause', timeout=2.0)
+          if action == 'play_pause':
+            action = 'pause' if str(interfaces[MEDIA_PLAYER].get('Status', '')).lower() == 'playing' else 'play'
+          self._call(path, MEDIA_PLAYER, PLAYER_METHODS[action], timeout=2.0)
           return
 
   def close(self):

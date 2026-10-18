@@ -13,10 +13,10 @@ CAR = 'AA:BB:CC:DD:EE:FF'
 
 class Phone:
   on = connected = True
-  def __init__(self): self.paused = []
+  def __init__(self): self.paused, self.controls = [], []
   def powered(self): return self.on
   def ready(self, address, now): return self.connected
-  def pause(self, address): self.paused.append(address)
+  def control(self, address, action): self.controls.append((address, action))
   def close(self): pass
 
 
@@ -41,9 +41,11 @@ def test_phone_without_spotify_package_or_key_and_pause_control(music):
   assert processes[1].argv[1:3] == ['-m', 'openpilot.starpilot.soloist.phone_audio']
   assert processes[1].kwargs['env']['PULSE_SERVER'].endswith('/pulse/native')
   assert processes[1].kwargs['env']['PYTHONPATH'] == str(Path(supervisor.__file__).resolve().parents[3])
-  assert sup.handle({'command': 'control', 'action': 'pause', 'args': {}})['ok']
-  assert sup.phone.paused == [PHONE]
-  assert not sup.handle({'command': 'control', 'action': 'next', 'args': {}})['ok']
+  for action in ('pause', 'next', 'previous', 'play_pause'):
+    assert sup.handle({'command': 'control', 'action': action, 'args': {}})['ok']
+  assert sup.phone.controls == [(PHONE, 'pause'), (PHONE, 'next'), (PHONE, 'previous'), (PHONE, 'play_pause')]
+  assert not sup.handle({'command': 'control', 'action': 'volume', 'args': {'volume': 5}})['ok']
+  assert not sup.handle({'command': 'control', 'action': 'next', 'args': {'x': 1}})['ok']
   sup.stop_children()
   assert profiles == ['acquire', 'release']
 
@@ -180,6 +182,16 @@ def test_phone_connects_only_paired_selected_audio_source_and_pauses_its_player(
   assert len(phone.client.calls) == 1
   phone.pause(PHONE)
   assert phone.client.calls[-1] == (path + '/player0', phone_audio.MEDIA_PLAYER, 'Pause')
+  phone.control(PHONE, 'next')
+  phone.control(PHONE, 'previous')
+  assert [call[2] for call in phone.client.calls[-2:]] == ['Next', 'Previous']
+  phone.control(PHONE, 'play_pause')
+  assert phone.client.calls[-1][2] == 'Play'
+  objects[path + '/player0'][phone_audio.MEDIA_PLAYER]['Status'] = 'playing'
+  phone.control(PHONE, 'play_pause')
+  assert phone.client.calls[-1][2] == 'Pause'
+  with pytest.raises(ValueError):
+    phone.control(PHONE, 'eject')
   props['Paired'] = False
   assert not phone.ready(PHONE, 200)
   props['Paired'] = True

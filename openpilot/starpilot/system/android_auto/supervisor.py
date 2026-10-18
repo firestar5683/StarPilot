@@ -1185,8 +1185,12 @@ class Supervisor:
     self._set(view=source.label, encoder=getattr(encoder, "backend", "libx264"), target_fps=fps)
     watch = LinkWatch(lease, self.log).start()
     try:
-      from openpilot.starpilot.system.android_auto.media_audio import MediaAudio
+      from openpilot.starpilot.system.android_auto.media_audio import MediaAudio, music_control
+      from openpilot.starpilot.system.android_auto.media_status import MediaStatus
+      session.media_control = music_control
       session.audio = MediaAudio.create(session, self.log)
+      if session.audio is not None:
+        session.audio.track_info = MediaStatus.create(session, self.log)
     except Exception as error:  # music is optional; projection must never depend on it
       self.log("media_audio_unavailable", error=str(error))
     try:
