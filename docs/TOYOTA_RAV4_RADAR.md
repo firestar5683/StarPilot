@@ -12,13 +12,18 @@ In Galaxy, open **Vehicle > RAV4 Radar (Experimental)** while parked:
 - **ACC Target + Summaries** publishes the ACC target plus up to two more moving
   cars within 40 m from the radar's own tracker (its target summaries), with each
   car's speed from its range over the last 8 radar cycles. In replay it brakes like
-  ACC Target and backs cut-ins with radar slightly earlier; it has no road record yet.
+  ACC Target and backs cut-ins with radar slightly earlier. Its points also carry
+  the radar's own relative acceleration and lateral speed (`aRel`, `yvRel`) for
+  code that reads them.
 
 Restart the device after changing the mode. The equivalent persistent parameter
 is `ToyotaRadarMode`: `0` for Off, `1` for ACC Target, and `2` for ACC Target + Summaries.
 The parser waits through the radar's delayed startup rather than requiring its
 object frames in the initial fingerprint. Once running, missing scans clear the
 tracks and report radar unavailability; healthy tracks are not cleared between scans.
+Both radar modes also report radar unavailability while the radar's own fault flag
+is held (two or more consecutive cycles), as it is while the radar declares itself
+blocked; its ACC target can then be missing for a lead it still sees.
 
 This setting does not enable Alpha Long, change longitudinal or lateral tuning,
 send new CAN commands, or alter the existing radar-disable procedure. Without a
@@ -33,6 +38,6 @@ cut-ins, and both stock ACC and Alpha Long configurations. Bookmark unexpected
 braking or lead loss. Do not deliberately approach an obstacle to test AEB.
 
 The parser is adapted from the [ARS510 radar reference](https://github.com/ds-sebastian/ars510-radar)
-at `de3da93527f3e5dba08c2ea872b1bd9ac4aaa41f`; attribution and its MIT notice are
+at `7ff9485a454130bc5765c9f715046d2694c655a6`; attribution and its MIT notice are
 preserved in `THIRD_PARTY_NOTICES.md`. Protocol and offline replay validation do
 not establish closed-loop performance on every trim, firmware, or harness.

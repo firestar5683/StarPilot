@@ -3,7 +3,7 @@
 LAT_DIST holds the low 12 bits of the radar's 13-bit lateral distance, so a target more than 20.95 m to the left (in turns
 and at junctions) reads 40.96 m too far right; ACC_TARGET_2's check byte tells when, and the 40.96 m is added back.
 
-Adapted from ds-sebastian/ars510-radar at de3da93527f3e5dba08c2ea872b1bd9ac4aaa41f.
+Adapted from ds-sebastian/ars510-radar at 7ff9485a454130bc5765c9f715046d2694c655a6.
 Copyright (c) 2026 ARS510 radar contributors. MIT license; see THIRD_PARTY_NOTICES.md.
 """
 from math import nan
@@ -36,6 +36,7 @@ class RadarInterface(RadarInterfaceBase):
     self.cycle = None
     self.last_record_t = None
     self.lat_wrapped = False
+    self.fault = 0  # consecutive cycles with the radar's fault flag (0x196 byte 1 bit 0) set
 
   def update(self, can_strings):
     self.frame += 1
@@ -46,6 +47,8 @@ class RadarInterface(RadarInterfaceBase):
       for addr, dat, src in frames:
         if addr == self.trigger_msg and src == 1 and len(dat) == 8:
           self.lat_wrapped = lat_dist_wrapped(dat)
+        elif addr == 0x196 and src == 1 and len(dat) >= 2:  # set every cycle while the radar declares itself blocked; once at power-up
+          self.fault = self.fault + 1 if dat[1] & 1 else 0
     t = can_strings[-1][0] * 1e-9 if can_strings else None
     cycle = self.rcp.vl["ACC_TARGET_3"]["TIMESTAMP"]
     clock_seen = bool(self.rcp.ts_nanos["ACC_TARGET_3"]["TIMESTAMP"])
@@ -63,6 +66,9 @@ class RadarInterface(RadarInterfaceBase):
     ret = RadarData()
     if not self.rcp.can_valid:
       ret.errors.canError = True
+      return ret
+    if self.fault >= 2:
+      ret.errors.radarUnavailableTemporary = True
       return ret
 
     target, position = self.rcp.vl["ACC_TARGET_1"], self.rcp.vl["ACC_TARGET_2"]

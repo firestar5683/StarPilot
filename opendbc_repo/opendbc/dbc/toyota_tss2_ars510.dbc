@@ -76,7 +76,7 @@ BO_ 405 EVENT_OBJECT: 8 XXX
  SG_ OBJECT_DIST : 50|11@0+ (0.05,0) [0|102.35] "m" XXX
 
 BO_ 406 EVENT_STATE: 8 XXX
- SG_ REQUIRED_DECEL : 7|8@0- (0.1,0) [-12.8|12.7] "m/s^2" XXX
+ SG_ REQUIRED_DECEL : 7|8@0- (0.095,0) [-12.16|12.065] "m/s^2" XXX
  SG_ RADAR_FAULT : 8|1@0+ (1,0) [0|1] "" XXX
 
 BO_ 514 RADAR_ALIVE: 5 XXX
@@ -164,8 +164,8 @@ CM_ SG_ 405 OBJECT_SPEED "Object longitudinal over-ground speed.";
 CM_ SG_ 405 EGO_TRAVEL_TO_TTC "Ego's predicted travel until the time to collision (v T + a T^2 / 2, T = distance / closing speed), clamped at 0.";
 CM_ SG_ 405 OBJECT_DIST "Object distance; on the ACC car the ACC distance rounded down to 0.05 m. 0 when idle.";
 CM_ BO_ 406 "Event state, paired with EVENT_OBJECT.";
-CM_ SG_ 406 REQUIRED_DECEL "Required deceleration for the event object while active (about 0.1 m/s^2 per code, approximate).";
-CM_ SG_ 406 RADAR_FAULT "Radar fault: sets 0.3-0.4 s after the object list stops and clears with it; also set for the first cycle after power-up, so require two or more consecutive cycles.";
+CM_ SG_ 406 REQUIRED_DECEL "Required deceleration for the event object while active: floor(a_req / 0.095) of a lead-moving / lead-stops formula with a 1.75 m margin.";
+CM_ SG_ 406 RADAR_FAULT "Radar fault: held while the radar declares itself blocked (car-bus 0x411 dust state; the object list keeps running) and after some object-list outages; also set for the single first cycle after power-up, so require two or more consecutive cycles.";
 CM_ BO_ 565 "ACC target, part 1: 50 Hz, content updated once per 60 ms radar cycle.";
 CM_ SG_ 565 CHECK_BYTE "CRC-8 (polynomial 0x1D, MSB first) over the frame's signals serialized as zero-padded 8, 16 or 32-bit integers, not over the raw bytes; linear, so a 56-column table over payload bits plus a constant computes it.";
 CM_ SG_ 565 STATE "5 = target present, 1 = idle (bytes 2-7 64 80 0B 24 00 FF), 15 = start-up.";
