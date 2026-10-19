@@ -247,7 +247,7 @@ class AnalyticsWorker:
       self.client.close()
 
 
-def start_optional_worker():
+def build_worker():
   from openpilot.common.hardware import COMMA_HARDWARE, HARDWARE
   if not COMMA_HARDWARE:
     return None
@@ -257,4 +257,24 @@ def start_optional_worker():
   metadata = get_build_metadata()
   return AnalyticsWorker(Params(), messaging.SubMaster(list(SERVICES)),
                          metadata={'branch': metadata.channel, 'device': HARDWARE.get_device_type(),
-                                   'metrics': {'commit': metadata.openpilot.git_commit}}).start()
+                                   'metrics': {'commit': metadata.openpilot.git_commit}})
+
+
+def start_optional_worker():
+  worker = build_worker()
+  return worker.start() if worker is not None else None
+
+
+def main():
+  # Own process so the manager's heap stays small when it forks the onroad daemons.
+  worker = build_worker()
+  if worker is None:
+    return
+  try:
+    worker.run()
+  except KeyboardInterrupt:
+    worker.client.close()
+
+
+if __name__ == "__main__":
+  main()
