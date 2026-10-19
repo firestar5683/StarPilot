@@ -43,7 +43,7 @@ class DeveloperSettingsOwner:
     android_auto_rows = () if enabled is None else (
       FeatureRow(AA_WIFI_KEY, "Android Auto: Stay on Wi-Fi", "On" if enabled else "Off", b"1" if enabled else b"0", ("Off", "On"),
                  available=parked, reason=AA_WIFI_DESCRIPTION if parked else "Park the vehicle to change this setting.",
-                 default_value="Off"),)
+                 default_value="On"),)
     summary = "Changes apply next drive. Panda firmware changes require a device restart." if firmware_rows else "Changes apply next drive."
     return FeatureSettingsState("developer", "Developer driving options", summary, (row, *firmware_rows, *android_auto_rows), parked)
 

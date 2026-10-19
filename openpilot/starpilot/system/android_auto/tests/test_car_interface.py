@@ -308,12 +308,12 @@ def test_supervisor_uses_dedicated_lease_only_when_enabled(monkeypatch, tmp_path
   from openpilot.starpilot.system.android_auto import identity, supervisor
   monkeypatch.setattr(car_interface, "DedicatedInterface", FakeInterface)
   config = identity.load_config(tmp_path / "missing.json")
-  assert config["dedicated_wifi_interface"] is False
+  assert config["dedicated_wifi_interface"] is True
   sup = supervisor.Supervisor.__new__(supervisor.Supervisor)
   sup.log, sup._lease_factory, sup.config, sup._dedicated_strikes = Log(), FakeLease, config, {}
-  assert isinstance(sup._lease(), FakeLease)
-  sup.config = {**config, "dedicated_wifi_interface": True}
   assert isinstance(sup._lease(), DedicatedLease)
+  sup.config = {**config, "dedicated_wifi_interface": False}
+  assert isinstance(sup._lease(), FakeLease)
 
 
 def test_supervisor_keeps_a_car_on_wlan0_after_repeated_aa0_failures(monkeypatch):

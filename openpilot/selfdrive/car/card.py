@@ -15,7 +15,6 @@ from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
-from openpilot.starpilot import intense_logging
 
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
@@ -1591,25 +1590,17 @@ class Car:
 
   def card_thread(self):
     self.configure_conditional_settings_worker()
-    timing = intense_logging.loop_timing() if not REPLAY else None
-    intense_logger = intense_logging.start('card', timing) if not REPLAY else None
     e = threading.Event()
     t = threading.Thread(target=self.params_thread, args=(e, ))
     try:
       t.start()
       while True:
-        if timing is not None:
-          timing.begin()
         self.vehicle_startup.check()
         self.step()
         self.rk.monitor_time()
-        if timing is not None:
-          timing.finish({'thread_id': threading.get_native_id()}, enabled=True)
     finally:
       e.set()
       t.join()
-      if intense_logger is not None:
-        intense_logger.stop()
       if self.ioniq6_keepalive is not None:
         self.ioniq6_long_lost = True
         self.ioniq6_keepalive.stop()

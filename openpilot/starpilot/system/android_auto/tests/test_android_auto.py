@@ -786,6 +786,7 @@ def test_supervisor_full_wireless_session(identity, tmp_path, monkeypatch):
   sup = supervisor_module.Supervisor(bluez_factory=FakeBluez, lease_factory=FakeLease,
                                      bluetooth_client=type("C", (), {"status": lambda s: type("St", (), {"selected_audio": ""})()})(),
                                      frame_path=frame_path)
+  sup.config["dedicated_wifi_interface"] = False  # this session uses the fake wlan0 lease
   sup.select_receiver("AA:BB:CC:DD:EE:01", "Civic")
   lease_holder = {}
   original_lease = sup._lease
@@ -851,6 +852,7 @@ def make_supervisor(identity, tmp_path, monkeypatch, rfcomm):
   client = type("C", (), {"status": lambda s: type("St", (), {"selected_audio": ""})()})()
   sup = supervisor_module.Supervisor(bluez_factory=FakeBluez, lease_factory=lease_factory, bluetooth_client=client,
                                      frame_path=str(tmp_path / "frames"))
+  sup.config["dedicated_wifi_interface"] = False  # these sessions use the fake wlan0 lease
   sup.select_receiver("AA:BB:CC:DD:EE:01", "Civic")
   return sup, leases
 

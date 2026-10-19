@@ -83,7 +83,7 @@ def load_identity(directory: Path | None = None, now: datetime | None = None) ->
                   expires.isoformat() if expires is not None else "unknown", days_left)
 
 
-CONFIG_VERSION = 5
+CONFIG_VERSION = 6
 # Before config versions, every save wrote these defaults, which pinned projection
 # at 12 fps / 4000 kbps. Unversioned files holding exactly them get today's defaults.
 LEGACY_DEFAULTS = {"fps": 12, "bitrate_kbps": 4000}
@@ -93,6 +93,8 @@ PIPELINE_RESET = ("gpu_nv12", "async_readback")
 # Before version 5 every save wrote verify_head_unit on, and some cars send certificates the root cannot parse.
 # Older files get today's default (off).
 VERIFY_RESET = ("verify_head_unit",)
+# Before version 6 every save wrote the old default (off) for staying on home Wi-Fi.
+DEDICATED_WIFI_RESET = ("dedicated_wifi_interface",)
 
 CONNECTIONS = ("wireless", "wired", "headunitpad", "openheadunit")
 
@@ -123,7 +125,7 @@ DEFAULT_CONFIG = {
   "render_profile": True,      # car view: always-on sampling profile in logs/render_profile.txt (and .1.txt)
   "render_profile_kb": 256,    # size cap per render_profile file
   "wifi_interface": "wlan0",
-  "dedicated_wifi_interface": False,  # join the car on its own aa0 station so wlan0 stays on home Wi-Fi
+  "dedicated_wifi_interface": True,   # join the car on its own aa0 station so wlan0 stays on home Wi-Fi
   "device_name": "StarPilot",
   "version_status": 0,         # WifiVersionResponse status (0 = success) for receivers that negotiate a version
   "phone_class": True,         # while pairing/connecting, present as a phone: HFP gateway + smartphone Class of Device
@@ -145,6 +147,8 @@ def load_config(path: Path | None = None) -> dict:
         stored = {key: value for key, value in stored.items() if key not in PIPELINE_RESET}
       if not isinstance(version, int) or version < 5:
         stored = {key: value for key, value in stored.items() if key not in VERIFY_RESET}
+      if not isinstance(version, int) or version < 6:
+        stored = {key: value for key, value in stored.items() if key not in DEDICATED_WIFI_RESET}
       config.update({key: value for key, value in stored.items() if key in DEFAULT_CONFIG and isinstance(value, type(DEFAULT_CONFIG[key]))})
   except (OSError, ValueError):
     pass

@@ -259,7 +259,7 @@ def test_config_v3_preserves_explicit_pipeline_preferences(tmp_path):
   path.write_text(json.dumps({"config_version": 3, "gpu_nv12": False, "async_readback": False, "bitrate_kbps": 5000}))
   config = identity_store.load_config(path)
   assert config["gpu_nv12"] is False and config["async_readback"] is False and config["bitrate_kbps"] == 5000
-  assert config["config_version"] == 5
+  assert config["config_version"] == 6
 
 
 def test_config_v4_resets_head_unit_verification(tmp_path):
@@ -272,11 +272,23 @@ def test_config_v4_resets_head_unit_verification(tmp_path):
   identity_store.save_config(config, path)
   # Saving and loading again keeps it off.
   saved = json.loads(path.read_text())
-  assert saved["config_version"] == 5 and saved["verify_head_unit"] is False
+  assert saved["config_version"] == 6 and saved["verify_head_unit"] is False
   assert identity_store.load_config(path)["verify_head_unit"] is False
   # From v5 on it is a real choice and stays as saved.
   path.write_text(json.dumps({**json.loads(path.read_text()), "verify_head_unit": True}))
   assert identity_store.load_config(path)["verify_head_unit"] is True
+
+
+def test_config_v5_turns_on_staying_on_home_wifi(tmp_path):
+  from openpilot.starpilot.system.android_auto import identity as identity_store
+  path = tmp_path / "config.json"
+  # Every v5 save wrote the old default (off); it was rarely chosen.
+  path.write_text(json.dumps({"config_version": 5, "dedicated_wifi_interface": False}))
+  config = identity_store.load_config(path)
+  assert config["dedicated_wifi_interface"] is True
+  identity_store.save_config({**config, "dedicated_wifi_interface": False}, path)
+  # From v6 on it is a real choice and stays as saved.
+  assert identity_store.load_config(path)["dedicated_wifi_interface"] is False
 
 
 @pytest.mark.parametrize("stored, verified", [({}, False), ({"verify_head_unit": False}, False), ({"verify_head_unit": True}, True)])
