@@ -18,6 +18,25 @@ SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
 
 
 class TestProjectionLayout(unittest.TestCase):
+  def test_jetlink_widget_migrates_and_preserves_placement_and_order(self):
+    document = default_layout(SCREEN)
+    expected = document['widgets'].pop('jetlink_status')
+    self.assertFalse(expected['enabled'])
+    document['widgetOrder'] = [key for key in layout_metadata(SCREEN)['widgetOrder'] if key != 'jetlink_status']
+    document['widgets']['current_speed']['x'] += 20
+    before = copy.deepcopy(document)
+    migrated = validate_layout(document, SCREEN)
+    self.assertEqual(document, before)
+    self.assertEqual(migrated['widgets']['jetlink_status'], expected)
+    self.assertEqual(migrated['widgetOrder'], [*before['widgetOrder'][:-1], 'jetlink_status', CAR_EXIT])
+    migrated['widgets']['jetlink_status'].update(enabled=True, x=700, y=500)
+    decoded = decode_layout(json.dumps(migrated).encode(), SCREEN)
+    base = default_document()
+    converted = projection_customization(decoded, base)
+    self.assertEqual(converted['layouts']['large']['jetlink_status'], migrated['widgets']['jetlink_status'])
+    self.assertNotIn('jetlink_status', base['layouts']['large'])
+    self.assertNotIn('jetlink_status', converted['layouts']['compact'])
+
   def test_exit_defaults_and_monitor_scaling_preserve_saved_appearance(self):
     document = default_layout(SCREEN)
     metadata = layout_metadata(SCREEN)

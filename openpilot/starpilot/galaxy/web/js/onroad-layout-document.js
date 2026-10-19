@@ -197,6 +197,7 @@ export function validSnapshot(data) {
         zone.x + zone.width > bounds.x + bounds.width || zone.y + zone.height > bounds.y + bounds.height) return false
     }
     for (const widget of Object.values(profile.widgets)) {
+      if (widget.available != null && (!projection || widget.kind !== "jetlink_status" || typeof widget.available !== "boolean")) return false
       const area = widget.bounds || bounds
       if (widget.visualInsetTop != null && (!Number.isFinite(widget.visualInsetTop) || widget.visualInsetTop < 0 || widget.visualInsetTop > area.height)) return false
       if (!object(widget.colors) || !Object.entries(widget.colors).every(([key, value]) =>
@@ -212,7 +213,7 @@ export function validSnapshot(data) {
         ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
         widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
         widget.opacity.default > widget.opacity.max)) return false
-      if (widget.opacity && (!projection || !["nav_map", "nav_home", "nav_work", "bookmark", "car_exit", "cruise_limits", "now_playing"].includes(widget.kind) ||
+      if (widget.opacity && (!projection || !["nav_map", "nav_home", "nav_work", "bookmark", "car_exit", "cruise_limits", "now_playing", "jetlink_status"].includes(widget.kind) ||
         !object(widget.opacity) || ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
         widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
         widget.opacity.default > widget.opacity.max)) return false

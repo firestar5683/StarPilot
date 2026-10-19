@@ -62,7 +62,7 @@ def test_legacy_projection_order_adds_upstream_mode_widget():
   migrated = validate_layout_for_viewport(projection, (2880, 1080))
   assert migrated['widgets'][MODE_WIDGET]['enabled'] is False
   assert migrated['widgetOrder'] == [*projection['widgetOrder'], MODE_WIDGET, 'nav_card', 'nav_map', 'nav_home', 'nav_work',
-                                     'bookmark', 'stopped_timer', CAR_EXIT]
+                                     'bookmark', 'stopped_timer', 'now_playing', 'jetlink_status', CAR_EXIT]
 
 
 def test_old_documents_keep_their_original_shape():
@@ -142,6 +142,8 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
     view.navigation = NS(render=lambda *args: seen.append('nav_card'))
     view.navigation_favorites = NS(render=lambda key, state: seen.append(key))
     view.projection_exit_layer = lambda state: seen.append(CAR_EXIT)
+    view.now_playing = NS(render=lambda state: seen.append('now_playing'))
+    view.jetlink_status = NS(render=lambda state: seen.append('jetlink_status'))
   document['widgetOrder'] = {profile: order}
   state = NS(customization=document, camera_available=True, viewport_width=1860, alert=NS(size='none'), stopped_duration_s=65,
              appearance=NS(camera_view='road'))

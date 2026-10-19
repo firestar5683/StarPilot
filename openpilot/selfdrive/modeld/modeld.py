@@ -397,6 +397,9 @@ def main(demo=False):
     # the joining model drives as small_model until the big model is ready
     model = HOOKS.attach(model, small_model, vipc_client_main.width, vipc_client_main.height)
     jetlink_model = model if model is not small_model else None
+    if jetlink_model is not None:
+      from openpilot.starpilot.models.jetlink_status import start_latency_writer
+      start_latency_writer(jetlink_model)
   params.put_bool("ChestnutLoading", False)
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
   release_compile_pool()

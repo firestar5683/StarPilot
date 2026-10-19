@@ -21,6 +21,19 @@ from openpilot.starpilot.ui.home_stats import DriveStatsDashboard
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 
 
+JETLINK_COLORS = {"plugged": rl.Color(160, 160, 160, 255), "connected": rl.Color(70, 200, 110, 255)}
+
+
+def draw_jetlink(rect: rl.Rectangle, state: str) -> None:
+  """Jetlink's home icon: a tablet outline with a link dot."""
+  color = JETLINK_COLORS.get(state)
+  if color is None:
+    return
+  body = rl.Rectangle(rect.x + rect.width * 0.18, rect.y, rect.width * 0.64, rect.height)
+  rl.draw_rectangle_rounded_lines_ex(body, 0.3, 8, max(2.0, rect.width * 0.08), color)
+  rl.draw_circle_v(rl.Vector2(body.x + body.width / 2, body.y + body.height * 0.8), max(2.0, rect.width * 0.07), color)
+
+
 def validate_home_asset(directory: Path, filename: str) -> Path:
   manifest = json.loads(Path(__file__).with_name("home-assets.json").read_text())
   entry = next((row for row in manifest["files"] if row["file"] == filename), None)
@@ -233,6 +246,9 @@ class HomeView:
       opacity = 0.35 + 0.65 * (0.5 - 0.5 * math.cos(rl.get_time() * 6)) if loading else 1.0
       self._icon("icons_mici/" + icon, 68 if failed else 54, 40, x, 197, opacity)
       x += 76
+    if state.jetlink in JETLINK_COLORS:
+      draw_jetlink(rl.Rectangle(x, 195, 40, 42), state.jetlink)
+      x += 58
     if state.recording_audio:
       self._icon("icons_mici/microphone.png", 32, 46, x, 193)
 

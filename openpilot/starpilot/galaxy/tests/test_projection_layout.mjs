@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { compile } from "../web/vendor/vue/vue.esm-browser.js"
 import { snapshot } from "./test_onroad_layout.mjs"
 import { editorSnapshot, projectionPayload } from "../web/js/projection-layout.js"
-import { OnroadLayoutFeed, OnroadLayoutPage, validSnapshot, validDocument } from "../web/js/onroad-layout.js"
+import { LayoutWidgetPreview, OnroadLayoutFeed, OnroadLayoutPage, validSnapshot, validDocument } from "../web/js/onroad-layout.js"
 
 const copy = (v) => JSON.parse(JSON.stringify(v))
 const native = snapshot()
@@ -18,7 +18,9 @@ metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96,
   opacity: { min: 25, max: 100, default: 75 }, backgroundToggle: true,
   note: "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
   default: { x: 30, y: 954, enabled: true, opacity: 75, background: false } }
-metadata.widgetOrder = [...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "car_exit"]
+metadata.widgets.jetlink_status = { label: "Jetlink status", kind: "jetlink_status", width: 420, height: 84, colors: {},
+  opacity: { min: 0, max: 100, default: 85 }, available: true, default: { x: 30, y: 650, enabled: false, opacity: 85 } }
+metadata.widgetOrder = [...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "jetlink_status", "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
 const doc = { version: 3, clock24Hour: false, largeUiGammaTrial: false, blindSpotBorder: false, signalBorder: false, blindSpotCamera: false, hidePersonalityAlerts: false, wheelPedalFeedback: false, leadIndicator: false, leadInfo: "Off", speedSources: false, speedSourcesCard: false, speedAlign: "left", canvas: { width: 2880, height: 1080 }, widgets }
@@ -29,6 +31,18 @@ const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
 const data = editorSnapshot(raw)
 assert.equal(validSnapshot(data), true)
 assert.equal(validDocument(data.document, data.metadata), true)
+assert.equal(data.document.layouts.large.jetlink_status.enabled, false)
+const jetlinkVm = { profile: data.metadata.profiles.large, layout: copy(data.document.layouts.large) }
+const widgetRows = () => OnroadLayoutPage.computed.widgets.call(jetlinkVm)
+assert.ok(widgetRows().some(widget => widget.id === 'jetlink_status'))
+jetlinkVm.profile.widgets.jetlink_status.available = false
+assert.ok(!widgetRows().some(widget => widget.id === 'jetlink_status'))
+jetlinkVm.layout.jetlink_status.enabled = true
+assert.ok(widgetRows().some(widget => widget.id === 'jetlink_status'), 'turning Jetlink off retains the placed widget')
+assert.equal(validDocument({...data.document, layouts: {large: jetlinkVm.layout}}, data.metadata), true)
+jetlinkVm.profile.widgets.jetlink_status.available = true
+assert.match(LayoutWidgetPreview.template, /24\.6/)
+compile(LayoutWidgetPreview.template, { decodeEntities: value => value.replaceAll("&amp;", "&") })
 assert.equal(data.document.layouts.large.car_exit.opacity, 75)
 assert.equal(data.document.layouts.large.car_exit.background, false)
 const resizedMonitor = copy(data.document)

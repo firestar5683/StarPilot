@@ -55,6 +55,31 @@ class FakeGraphics:
 
 
 class TestProjectionOnroad(unittest.TestCase):
+  def test_jetlink_feed_follows_placement_and_drive_and_closes(self):
+    from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport
+    from openpilot.starpilot.models.jetlink_status import JetlinkStatus
+    native, _ = self.dependencies()
+    native.ui_state.params = object()
+    feed = Mock()
+    feed.snapshot.return_value = JetlinkStatus('iPhone', 'active', 24.6)
+    native.jetlink_feed = Mock(return_value=feed)
+    layout = default_layout_for_viewport((2880, 1080))
+    view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080), customization=layout)
+    self.addCleanup(view.close)
+    view.onroad.jetlink_status = SimpleNamespace()
+    view.prepare()
+    feed.set_enabled.assert_called_with(False)
+    layout['widgets']['jetlink_status']['enabled'] = True
+    native.ui_state.started = True
+    view.prepare()
+    feed.set_enabled.assert_called_with(True)
+    self.assertEqual(view.onroad.jetlink_status.status, feed.snapshot.return_value)
+    native.ui_state.started = False
+    view.prepare()
+    feed.set_enabled.assert_called_with(False)
+    view.close()
+    feed.close.assert_called_once()
+
   def test_navigation_touch_owner_receives_coordinates_and_cancels_offroad(self):
     native, _ = self.dependencies()
     owner = Mock(document={'favorites': []}, error='')
