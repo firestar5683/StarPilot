@@ -5,6 +5,8 @@ Inputs are decoded custom evidence produced by actual owners; no Params/default
 controller selection is inferred here. Domain adapters qualify response inverse.
 """
 
+from typing import TypeGuard, cast
+
 from collections import Counter, OrderedDict, deque
 from openpilot.starpilot.flm.torque_eligibility import asynchronous_hint, bounded_context_output, exact_unclipped_pair, consumed_sources_current
 
@@ -30,8 +32,8 @@ MAX_WIRE_BYTES = 32768
 MAX_SNAPSHOT_WIRE_BYTES = 131072
 
 
-def finite(value):
-  return type(value) in (int, float) and math.isfinite(value)
+def finite(value: object) -> TypeGuard[int | float]:
+  return (type(value) is int or type(value) is float) and math.isfinite(value)
 
 
 def replay_values(value, bound):
@@ -217,6 +219,10 @@ class FullrateCollector:
     self.dropped += 1
     self.split('fullrate_overrun')
 
+  def _retains_controller_chatter(self, value):
+    # Legacy/custom collection never opts into the event-only trial contract.
+    return False
+
   def control(self, value, now_ns):
     if isinstance(value, ControlEvidence) and value.effect_trace is not None:
       try:
@@ -323,7 +329,7 @@ class FullrateCollector:
       or value.saturated
       or value.limited and not (getattr(self.adapter, 'raw_collection', False) and asynchronous_hint(value))
       or value.model_wobble
-      or value.controller_chatter
+      or value.controller_chatter and not self._retains_controller_chatter(value)
       or now_ns < self.excluded_until
     ):
       self.split('ineligible_control')
@@ -592,7 +598,8 @@ class FullrateCollector:
       control = self.raw_points[0].control
       self.blocks.append(
         RawBlock(
-          control.identity, f'{self.session}:{self.block_sequence}', self.cohort, control.stage_revision, control.response_revision, tuple(self.raw_points)
+          control.identity, f'{self.session}:{self.block_sequence}', cast(str, self.cohort),
+          control.stage_revision, control.response_revision, tuple(self.raw_points)
         )
       )
       self.block_sequence += 1

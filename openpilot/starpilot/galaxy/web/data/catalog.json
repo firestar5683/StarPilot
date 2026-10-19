@@ -73,9 +73,16 @@
     },
     {
       "name": "Plots & Analysis",
-      "path": "/tuning",
+      "path": "/tuning/plots",
       "icon": "bi-sign-turn-right",
-      "description": "Live steering and acceleration plots, and recorded-drive analysis",
+      "description": "Live steering and acceleration plots",
+      "availability": "local-only"
+    },
+    {
+      "name": "Auto Learn Results",
+      "path": "/tuning/flm",
+      "icon": "bi-sliders",
+      "description": "StarPilot learned steering corrections and fitting progress",
       "availability": "local-only"
     },
     {

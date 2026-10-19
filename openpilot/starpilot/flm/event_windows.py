@@ -2,7 +2,11 @@
 import hashlib
 import math
 
+from openpilot.starpilot.flm.physical_response import kinematic_accel
+
 from openpilot.starpilot.flm.controller_replay import MAX_FRAME_GAP_NS
+
+GROUPING_REVISION = 'whole-source-window-bundles-v3'
 
 
 def whole_event_windows(engine):
@@ -20,7 +24,7 @@ def whole_event_windows(engine):
     previous_window, last = window, frame.control_ns
     if window is None or not engine._frame_context(frame):
       continue
-    goal = frame.desired_physical_accel
+    goal = kinematic_accel(frame)
     if goal is None or not math.isfinite(goal):
       raise ValueError('whole episode actual goal missing')
     sign = 1 if goal > .03 else -1 if goal < -.03 else 0
@@ -71,7 +75,8 @@ def regroup_whole_events(engine, raw_packets, objective):
   """Accumulate entire cycles to sample support; never cut a physical event.
 
   Packet boundaries are intentionally ignored. Bundles are disjoint in source
-  time and cannot cross an omitted/rejected context window or event regime.
+  time and cannot cross an omitted/rejected original source window. Episode
+  kinds remain bound metadata; they do not define independent plant identities.
   Every original source, applied witness and physical timestamp is retained.
   """
   points = {}
@@ -89,12 +94,17 @@ def regroup_whole_events(engine, raw_packets, objective):
   previous_context = None
   consumed = set()
   for window, start, end, kind in whole_event_windows(engine):
-    context = window, kind
+    context = window
     if context != previous_context:
       pending, boundaries = [], []
     previous_context = context
     rows = [point for point in ordered if start <= point['control_ns'] <= end]
-    if not rows or len(rows) > 240:
+    if not rows:
+      # Zero measured rows confer zero support or boundary/ID membership.
+      # Keep existing support: complete replay from its first through final
+      # original boundary still includes every intervening source/native tick.
+      continue
+    if len(rows) > 240:
       pending, boundaries = [], []
       continue
     if len(pending) + len(rows) > 240:
@@ -109,9 +119,9 @@ def regroup_whole_events(engine, raw_packets, objective):
       if key in consumed:
         raise ValueError('event physical endpoint reused')
       consumed.add(key)
-    digest = hashlib.sha256(repr((engine.identity, engine.baseline_revision, objective.context_key,
+    digest = hashlib.sha256(repr((GROUPING_REVISION, engine.identity, engine.baseline_revision, objective.context_key,
                                   tuple(boundaries))).encode()).hexdigest()
-    blocks.append({'identity': engine.identity, 'block_id': 'event-v2:' + digest,
+    blocks.append({'identity': engine.identity, 'block_id': 'event-v3:' + digest, 'grouping_revision': GROUPING_REVISION,
                    'cohort': objective.required_cohorts[0], 'stage_revision': 'torque-selected-effect-v2',
                    'response_revision': 'event-independent-physical-v2', 'event_windows': tuple(boundaries), 'samples': tuple(pending)})
     pending, boundaries = [], []

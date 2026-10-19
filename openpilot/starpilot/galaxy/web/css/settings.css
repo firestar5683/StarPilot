@@ -202,7 +202,7 @@ input[type="range"].gx-slider {
   height: 8px;
   outline: none;
   -webkit-tap-highlight-color: transparent;
-  touch-action: none;
+  touch-action: pan-y;
   width: 100%;
 }
 

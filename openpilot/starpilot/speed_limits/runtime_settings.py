@@ -81,8 +81,7 @@ def parse(values: Mapping[str, object]) -> Settings:
     # Only accepted-history fallback belongs to this control domain. Saved set
     # speed and experimental fallback choices never create a source observation.
     confirmation = _bool(values, "SLCConfirmation")
-    policy = acc.Policy(confirm_lower=confirmation and _bool(values, "SLCConfirmationLower"),
-                        confirm_higher=confirmation and _bool(values, "SLCConfirmationHigher"),
+    policy = acc.Policy(confirm_lower=confirmation, confirm_higher=confirmation,
                         fallback_previous=fallback == 2, display_only=not control)
     offsets = (document if isinstance(document, od.OffsetDocument) else
                od.adopt_legacy(metric, tuple(_number(values, f"Offset{i + 1}") for i in range(7)))).schedule()
@@ -97,7 +96,7 @@ def parse(values: Mapping[str, object]) -> Settings:
 
 
 SAVED_KEYS = ("SpeedLimitController", "ShowSpeedLimits", "IsMetric", "SLCPriority1", "SLCPriority2",
-              "SLCFallback", "SLCOverride", "SLCConfirmation", "SLCConfirmationHigher", "SLCConfirmationLower",
+              "SLCFallback", "SLCOverride", "SLCConfirmation",
               *(f"Offset{i}" for i in range(1, 8)))
 
 

@@ -2,7 +2,8 @@ import hashlib
 
 from openpilot.starpilot.aol.vehicle import policy_for
 from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
-from openpilot.starpilot.controllers.wheel_actions import ACTIONS, DEFAULTS, KEYS, eligible
+from openpilot.starpilot.feature_capabilities import lateral_supported
+from openpilot.starpilot.controllers.wheel_actions import ACTIONS, DEFAULTS, KEYS, button_reported, eligible
 from openpilot.starpilot.saved_document import commit_exact
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow
@@ -38,19 +39,24 @@ class WheelFeature:
       from openpilot.starpilot.car.hyundai.settings import configuration_wheel_policy, configuration_media_supported
       policy = configuration_wheel_policy(cp) or policy
       media = configuration_media_supported(cp) or media
-    if key == "LKASButtonControl" and not policy.lkas_button_supported:
+    if not button_reported(cp, key):
       return ()
-    if key in KEYS[:2] and policy.fixed_cruise_buttons:
+    if key == "LKASButtonControl" and not (policy.lkas_button_supported or policy.auxiliary_lkas_supported):
       return ()
+    if key in KEYS[:2] and policy.fixed_cruise_buttons and not (
+        key == "LKASButtonControl" and policy.auxiliary_lkas_supported):
+      return ()
+    if key in KEYS[5:8] and cp.brand == 'gm':
+      from opendbc.car.gm.cancel_remap import supported
+      if supported(cp) and read_saved(self.owner.params, 'RemapCancelToDistance', 8) != (b'1', True):
+        return ()
     if key in KEYS[8:] and not media:
-      return ()
-    if key in KEYS[:5] and not policy.settings_supported:
       return ()
     codes = {0, 8, 11, 12, 13}
     if self.owner.longitudinal_available():
       codes.update((1, 2, 5, 10, 14))
       codes.add(6)
-    if media:
+    if lateral_supported(cp):
       codes.add(7)
     if not policy.fixed_cruise_buttons and policy.settings_supported:
       if key in KEYS[:5] or not policy.explicit_latch:

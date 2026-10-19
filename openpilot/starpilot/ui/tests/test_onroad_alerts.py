@@ -9,6 +9,30 @@ from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert
 from openpilot.starpilot.ui.presentation import FontRole, Profile
 
 
+@pytest.mark.parametrize('width', [1860, 2160])
+@pytest.mark.parametrize('text', ['Reverse\nGear', 'Reverse Gear'])
+def test_large_reverse_alert_centers_each_line_in_camera_view(width, text):
+  fonts = Mock(profile=Profile.LARGE)
+  def measure(text, role, size, **kwargs):
+    lines = text.split('\n')
+    return NS(width=max(len(line) for line in lines) * size * .5,
+              height=len(lines) * size + (len(lines) - 1) * 2)
+  fonts.measure.side_effect = measure
+  renderer = onroad_alerts.AlertRenderer(fonts)
+  bounds = rl.Rectangle(30, 30, width - 60, 1020)
+  with patch.object(rl, 'draw_rectangle'), patch.object(rl, 'draw_rectangle_gradient_v'):
+    renderer.render(bounds, OnroadAlert(AlertSize.FULL, text, alert_type='reverseGear/permanent'))
+  title = [call.args for call in fonts.draw.call_args_list if call.args[0]]
+  assert [args[0] for args in title] == text.split('\n')
+  for line, role, size, x, _y, _color in title:
+    assert x + measure(line, role, size).width / 2 == width / 2
+  top = title[0][4]
+  bottom = title[-1][4] + measure(title[-1][0], title[-1][1], title[-1][2]).height
+  assert (top + bottom) / 2 == bounds.y + bounds.height / 2
+  if len(title) > 1:
+    assert title[1][4] - top == title[0][2] + 2
+
+
 @pytest.mark.parametrize("personality", ["Relaxed", "Standard", "Aggressive"])
 def test_personality_banner_uses_name_and_consistent_large_type(personality):
   fonts = Mock(profile=Profile.COMPACT)

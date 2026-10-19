@@ -204,8 +204,14 @@ static void gm_emit_paddle_after_stock(uint32_t now_us, uint32_t addr, uint8_t d
   if (gm_paddle_sched && feed->valid) {
     const bool expired = safety_get_ts_elapsed(now_us, feed->last_feed_us) > 100000U;
     if (expired) { feed->valid = false; }  // Retain the command through its bounded host-feed lifetime.
+    bool applied = feed->bytes[0] == 0x20U;
+    if (addr != 0xBDU) {
+      applied = ((feed->bytes[3] & 0xFU) == (gm_bolt_gen2 ? 5U : 7U)) && (feed->bytes[5] == 2U);
+    }
+    const bool main_ready = (!(gm_pedal_acc || gm_cancel_remap_enabled) || gm_pedal_main_ready());
+    const bool inactive_release = gm_cancel_remap_enabled && !applied;
     if (!expired && gm_pedal_regen_gear_ready() && !regen_braking &&
-        (!gm_pedal_acc || gm_pedal_main_ready())) {
+        (main_ready || inactive_release)) {
       CANPacket_t packet = {0};
       packet.addr = addr;
       packet.bus = 0U;
@@ -390,7 +396,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       }
 
       // exit controls on cancel press
-      if (button == GM_BTN_CANCEL) {
+      if ((button == GM_BTN_CANCEL) && !gm_cancel_remap_enabled) {
         controls_allowed = false;
       }
 
@@ -421,7 +427,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
     if ((msg_matches(msg, 0xC9U, 0U)) && (((gm_hw == GM_CAM) && !gm_camera_gateway) || (gm_camera_gateway && !gm_camera_pedal_f1)) && (!gm_ascm_intercept || gm_ascm_brake_c9) &&
         (!gm_sdgm || gm_sdgm_brake_c9)) {
       brake_pressed = GET_BIT(msg, 40U);
-      if (gm_pedal_acc) {
+      if ((gm_pedal_acc || (gm_cancel_remap_enabled && gm_pedal_long)) && (GET_LEN(msg) == 8U)) {
         acc_main_on = GET_BIT(msg, 29U);
         gm_pedal_main_seen = true;
         gm_pedal_main_last_us = microsecond_timer_get();
@@ -611,6 +617,10 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
 
     bool steer_req = GET_BIT(msg, 3U);
 
+    if (gm_cancel_remap_enabled && ((desired_torque != 0) || steer_req) && !gm_pedal_main_ready()) {
+      tx = false;
+    }
+
     if ((gm_volt_cc_long && ((desired_torque != 0) || steer_req)) || (gm_ordinary_cc_long && (desired_torque != 0))) { tx &= gm_volt_cc_sources_current() && gm_volt_cc_main && (gm_volt_cc_active || gm_aol_lateral_allowed()) && gm_volt_cc_forward_gear; }
     if (steer_torque_cmd_checks(desired_torque, steer_req, gm_bolt_2017 ? GM_BOLT_2017_STEERING_LIMITS : GM_STEERING_LIMITS)) {
       tx = false;
@@ -664,7 +674,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     const int pair_delta = track1 - (2 * track2);
     const bool inactive = !enabled && (track1 == 0) && (track2 == 0);
     const bool active = enabled && gm_pedal_sensor_current() && gm_pedal_owns_longitudinal() && gm_pedal_drive_ready() &&
-                        (!gm_pedal_acc || gm_pedal_main_ready()) &&
+                        (!(gm_pedal_acc || gm_cancel_remap_enabled) || gm_pedal_main_ready()) &&
                         get_longitudinal_allowed() && !brake_pressed_prev && !regen_braking &&
                         (track1 >= 604) && (track1 <= 2633) && (track2 >= 304) && (track2 <= 1316) &&
                         (pair_delta >= -16) && (pair_delta <= 16);
@@ -682,7 +692,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     const bool applied = msg->data[0] == 0x20U;
     for (uint8_t i = 1U; i < 7U; i++) { if (msg->data[i] != 0U) { tx = false; } }
     if (!shape || (applied && !(gm_pedal_sensor_current() && gm_pedal_owns_longitudinal() &&
-                               (!gm_pedal_acc || gm_pedal_main_ready()) &&
+                               (!(gm_pedal_acc || gm_cancel_remap_enabled) || gm_pedal_main_ready()) &&
                                gm_pedal_regen_gear_ready() && !regen_braking && get_longitudinal_allowed()))) {
       tx = false;
     }
@@ -703,7 +713,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
                        (msg->data[3] == prndl) && (msg->data[4] == 0U) && (msg->data[6] == 1U) &&
                        (msg->data[7] == 0U) && (applied || released);
     if (!shape || (applied && !(gm_pedal_sensor_current() && gm_pedal_owns_longitudinal() &&
-                               (!gm_pedal_acc || gm_pedal_main_ready()) &&
+                               (!(gm_pedal_acc || gm_cancel_remap_enabled) || gm_pedal_main_ready()) &&
                                gm_pedal_regen_gear_ready() && !regen_braking && get_longitudinal_allowed()))) {
       tx = false;
     }

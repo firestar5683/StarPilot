@@ -143,7 +143,8 @@ class TestBoltManualFriction(unittest.TestCase):
             controls = Controls()
             self.assertEqual(controls.LaC.controller_mode, mode)
             self.assertEqual(controls.torque_host is not None, configured)
-            self.assertEqual(controls.torque_learning_allowed, mode == ControllerMode.STANDARD)
+            # GM retains no native scalar estimator in either selected mode.
+            self.assertFalse(controls.torque_learning_allowed)
 
   def test_host_friction_ff_fixed_factor_offset_and_live_precedence(self):
     for identity in BOLT_GENERATIONS:
@@ -165,7 +166,9 @@ class TestBoltManualFriction(unittest.TestCase):
             learned.logMonoTime['lateralTorqueParameters'] = stamp
             host.apply(controls.LaC, host.sample(learned, now_ns=stamp, lat_active=True))
           self.assertAlmostEqual(controls.LaC.torque_params.friction, friction, places=6)
-          self.assertAlmostEqual(controls.LaC.torque_params.latAccelOffset, .02 if mode == ControllerMode.STANDARD else basis[1], places=6)
+          self.assertAlmostEqual(controls.LaC.torque_params.latAccelOffset, basis[1], places=6)
+          self.assertFalse(host.allow_learning)
+          self.assertEqual(host.selected.source.value, 'user')
           if mode == ControllerMode.STARPILOT:
             self.assertEqual(controls.LaC.torque_from_lateral_accel(1., controls.LaC.torque_params),
                              controls.LaC.torque_from_lateral_accel(1., cp.lateralTuning.torque))
@@ -180,7 +183,7 @@ class TestBoltManualFriction(unittest.TestCase):
             learned.logMonoTime['lateralTorqueParameters'] = stamp
             host.apply(controls.LaC, host.sample(learned, now_ns=stamp, lat_active=True))
           self.assertAlmostEqual(controls.LaC.torque_params.friction, basis[2], places=6)
-          self.assertEqual(host.selected.source.value, 'learned' if mode == ControllerMode.STANDARD else 'vehicle')
+          self.assertEqual(host.selected.source.value, 'vehicle')
 
   def test_unscoped_legacy_and_custom_factor_need_review(self):
     with OpenpilotPrefix():

@@ -130,12 +130,15 @@ class TrafficOwnerTests(unittest.TestCase):
     self.assertEqual(verdict.source_mono_ns, self.sm.logMonoTime['modelV2'])
     self.assertFalse(verdict.requested)
 
-  def test_conditional_only_startup_does_not_admit_ordinary_profiles_on_other_cars(self):
+  def test_conditional_startup_uses_longitudinal_capability_without_media_buttons(self):
     honda = interfaces[HONDA_CAR.HONDA_CIVIC].get_non_essential_params(HONDA_CAR.HONDA_CIVIC)
-    self.assertFalse(profile_host_needed(honda, profile_enabled=False, conditional_enabled=True))
+    self.assertTrue(honda.openpilotLongitudinalControl)
+    self.assertTrue(profile_host_needed(honda, profile_enabled=False, conditional_enabled=True))
     self.assertFalse(profile_host_needed(self.cp, profile_enabled=False, conditional_enabled=False))
     self.assertTrue(profile_host_needed(self.cp, profile_enabled=False, conditional_enabled=True))
     self.assertTrue(profile_host_needed(honda, profile_enabled=True, conditional_enabled=False))
+    honda.openpilotLongitudinalControl = False
+    self.assertFalse(profile_host_needed(honda, profile_enabled=False, conditional_enabled=True))
 
   def test_profile_status_requires_post_update_application(self):
     target = object()

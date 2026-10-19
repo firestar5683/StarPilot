@@ -19,6 +19,7 @@ from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole
 from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
 from openpilot.starpilot.ui.wheel_feedback import WheelFeedbackFade
 from openpilot.starpilot.ui.speed_limit_pulse import SpeedLimitPulse
+from openpilot.starpilot.ui.unified_speed_presentation import displayed_limit_mps
 from openpilot.starpilot.ui.moon import draw_moon
 
 
@@ -206,9 +207,10 @@ class CompactHudRenderer:
     visible = visible and not compact_sign_obscured_by_actions(state)
     now = state.observed_ns / 1e9 if state.observed_ns else time.monotonic()
     self._speed_limit_pulse.update(state, now, visible=visible)
-    if not visible or observation.kind != ObservationKind.VALID or observation.speed_limit_mps is None:
+    limit = displayed_limit_mps(observation)
+    if not visible or limit is None:
       return
-    value = str(round(observation.speed_limit_mps * (3.6 if state.metric else 2.2369362921)))
+    value = str(round(limit * (3.6 if state.metric else 2.2369362921)))
     dx, dy = widget_offset(state.customization, "compact", "speed_limit")
     black = self._speed_limit_pulse.color(rl.BLACK, now)
     white = self._speed_limit_pulse.color(rl.WHITE, now)

@@ -59,16 +59,16 @@ class TestBigModelStatus(unittest.TestCase):
       self.assertEqual(drive.big_model_ready_t, 70.0)
       self.assertEqual(clock.call_count, 2)
 
-  def test_jetlink_hand_back_keeps_the_small_model_driving(self):
+  def test_unattributed_big_model_demotion_retains_native_failure(self):
     drive = fixture()
     drive.sm['modelV2'].big = True
     self.assertFalse(drive.update_big_model_status())
     self.assertTrue(drive.big_model_active)
     self.assertFalse(drive.big_model_chestnut)
     drive.sm['modelV2'].big = False
-    self.assertFalse(drive.update_big_model_status())
-    self.assertNotIn(EventName.bigModelFailed, drive.events.names)
-    self.assertFalse(drive.events.contains(ET.SOFT_DISABLE))
+    self.assertTrue(drive.update_big_model_status())
+    self.assertIn(EventName.bigModelFailed, drive.events.names)
+    self.assertTrue(drive.events.contains(ET.SOFT_DISABLE))
 
   def test_native_chestnut_loss_still_soft_disables(self):
     drive = fixture(True)
@@ -121,8 +121,8 @@ class TestBigModelStatus(unittest.TestCase):
         self.assertFalse(drive.update_big_model_status())
         self.assertTrue(drive.big_model_active)
         drive.sm['modelV2'].big = False
-        self.assertFalse(drive.update_big_model_status())
-        self.assertFalse(drive.events.contains(ET.SOFT_DISABLE))
+        self.assertTrue(drive.update_big_model_status())
+        self.assertTrue(drive.events.contains(ET.SOFT_DISABLE))
         self.assertTrue(drive.big_model_active)
         setattr(drive.sm['carControl'], axis, False)
         drive.update_big_model_status()
@@ -210,7 +210,8 @@ def jetlink_drive(chestnut=None, intent=None, axes=None):
   drive.enabled = drive.active = False
   drive.big_model_ready_t = 0.
   drive.jetlink_settling = drive.jetlink_link_lost = False
-  drive.jetlink_swaps = Hooks(jetlink_adapter.API, jetlink_adapter.adapter).swap_events(DT_CTRL)
+  drive.jetlink_hooks = Hooks(jetlink_adapter.API, jetlink_adapter.adapter)
+  drive.jetlink_swaps = drive.jetlink_hooks.swap_events(DT_CTRL)
   drive.aol_replay = drive.axis_transport_required = True
   drive.aol_axis_decision = axes or AxisDecision()
   drive.sm.frame = int(jetlink_adapter.AOL_GRACE_S / DT_CTRL)
@@ -221,14 +222,16 @@ def jetlink_drive(chestnut=None, intent=None, axes=None):
 
 def no_record(drive):
   """modeld's runtime record unreadable or stale: the tracker's own read of it finds none."""
-  drive.jetlink_swaps._hooks.runtime = lambda: None
+  drive.jetlink_hooks.runtime = lambda: None
 
 
 class TestJetlinkSwaps(unittest.TestCase):
   def swaps(self, drive, ticks, state, big):
     # state None: the tracker reads modeld's runtime record itself
     drive.sm['modelV2'].big = big
-    return [update_jetlink_swaps(drive, jetlink_in_control(drive), state=state) for _ in range(ticks)]
+    if state is not None:
+      drive.jetlink_hooks.runtime = lambda: SimpleNamespace(state=state, active=big)
+    return [update_jetlink_swaps(drive, jetlink_in_control(drive)) for _ in range(ticks)]
 
   def test_swap_in_refuses_engaging_then_settles(self):
     drive = jetlink_drive()
@@ -236,10 +239,10 @@ class TestJetlinkSwaps(unittest.TestCase):
     with patch('openpilot.selfdrive.selfdrived.helpers.time.monotonic', return_value=42.):
       flags = self.swaps(drive, 1, 'running', True)
     self.assertIn(EventName.bigModelLoading, drive.events.names)
-    self.assertEqual(drive.big_model_ready_t, 42.)
+    self.assertEqual(drive.big_model_ready_t, 0.)
     flags += self.swaps(drive, 149, 'running', True)
     self.assertTrue(flags[0].no_entry and not flags[-1].no_entry)
-    self.assertEqual(drive.big_model_ready_t, 42.)  # once per switch
+    self.assertEqual(drive.big_model_ready_t, 0.)  # no native grace restart
     self.assertFalse(drive.jetlink_link_lost)
 
   def test_hand_back_during_an_aol_pause_warns_and_never_disables(self):
@@ -304,3 +307,58 @@ class TestJetlinkSwaps(unittest.TestCase):
     drive, op = jetlink_drive(), rule(core={"selfdriveState": SimpleNamespace(enabled=True, active=True)})
     drive.enabled = drive.active = True
     self.assertEqual((jetlink_in_control(drive), op.in_control()), (True, True))
+
+
+class TestJetlinkAdapterValidation(unittest.TestCase):
+  def test_runtime_poll_is_bounded_and_not_duplicated_by_tracker(self):
+    drive = jetlink_drive()
+    runtime = SimpleNamespace(state='running', active=True)
+    with patch.object(drive.jetlink_hooks, 'runtime', return_value=runtime) as poll:
+      drive.sm['modelV2'].big = True
+      for _ in range(200):
+        update_jetlink_swaps(drive, False)
+      self.assertEqual(poll.call_count, 10)  # five polls per 100 control ticks
+    self.assertEqual(drive.big_model_ready_t, 0.)
+
+  def test_invalid_model_values_cannot_create_swaps_or_handbacks(self):
+    for field in ('seen', 'alive', 'valid'):
+      for previous_big in (False, True):
+        with self.subTest(field=field, previous_big=previous_big):
+          drive = jetlink_drive()
+          drive.enabled = drive.active = True
+          drive.jetlink_hooks.runtime = lambda: SimpleNamespace(state='running', active=True)
+          drive.sm['modelV2'].big = previous_big
+          for _ in range(200):
+            update_jetlink_swaps(drive, True)
+          getattr(drive.sm, field)['modelV2'] = False
+          drive.sm['modelV2'].big = not previous_big
+          for _ in range(100):
+            flags = update_jetlink_swaps(drive, True)
+            self.assertFalse(flags.no_entry or flags.link_lost or flags.settling)
+          self.assertEqual(drive.big_model_ready_t, 0.)
+
+  def test_runtime_gap_does_not_supply_demotion_provenance(self):
+    drive = jetlink_drive()
+    drive.enabled = drive.active = True
+    drive.jetlink_hooks.runtime = lambda: SimpleNamespace(state='running', active=True)
+    drive.sm['modelV2'].big = True
+    update_jetlink_swaps(drive, True)
+    self.assertFalse(drive.update_big_model_status())
+    drive.jetlink_hooks.runtime = lambda: None
+    drive._jetlink_runtime_ticks = 0
+    drive.sm['modelV2'].big = False
+    update_jetlink_swaps(drive, True)
+    self.assertTrue(drive.update_big_model_status())
+    self.assertIn(EventName.bigModelFailed, drive.events.names)
+
+  def test_missing_or_incompatible_api_has_no_demotion_exemption(self):
+    from jetlink.openpilot.hooks import Off
+    for hooks in (jetlink_adapter._NoJetlink('missing'), Off('incompatible API')):
+      with self.subTest(hooks=type(hooks).__name__):
+        drive = fixture()
+        drive.jetlink_hooks = hooks
+        drive.jetlink_swaps = hooks.swap_events(DT_CTRL)
+        drive.sm['modelV2'].big = True
+        self.assertFalse(drive.update_big_model_status())
+        drive.sm['modelV2'].big = False
+        self.assertTrue(drive.update_big_model_status())

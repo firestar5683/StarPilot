@@ -38,7 +38,7 @@ class MapSource:
         any(type(value) is not str or not 0 < len(value) <= 256 or not value.strip() or
             any(ord(c) < 32 for c in value) for value in (drive_session, car_fingerprint))):
       # Missing speed metadata, coverage/GPS loss and ambiguous/lookahead ways
-      # are incomplete evidence, not regulatory absence or previous-limit permission.
+      # are incomplete evidence, not a new limit or regulatory absence.
       return acc.Observation(acc.ObservationKind.UNKNOWN)
     identity = hashlib.sha256(json.dumps((drive_session, car_fingerprint, accepted.producer_session,
       accepted.generation, accepted.source, accepted.way_id), separators=(',', ':')).encode()).hexdigest()

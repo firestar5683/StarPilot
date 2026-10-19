@@ -111,7 +111,7 @@ def stock_lateral_off(cp, cs, native):
   return bool(cp.pcmCruise and cs.cruiseState.available and not cs.cruiseState.enabled and
     cs.canValid and not cs.canTimeout and not cs.steerFaultPermanent and not cs.steerFaultTemporary and
     not cs.accFaulted and not cs.doorOpen and not cs.seatbeltUnlatched and
-    not cs.brakePressed and not cs.regenBraking and not cs.gasPressed and not physical_cancel(cs) and
+    not cs.brakePressed and not cs.regenBraking and not cs.gasPressed and not physical_cancel(cs, cp) and
     native is not None and native.requestedLateral and native.lateralAllowed and not native.requestedLongitudinal)
 
 
@@ -286,7 +286,7 @@ class TransportPauseFeedback:
         not 0 < self.lateral_source_ns <= axis.sourceCarStateMonoTime <= axis.observedMonoTime <= now_ns or
         now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS or
         not cs.canValid or cs.canTimeout or cs.steerFaultTemporary or cs.steerFaultPermanent or cs.accFaulted or
-        cs.steeringDisengage or physical_cancel(cs) or
+        cs.steeringDisengage or physical_cancel(cs, cp) or
         not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
         not 0 < int(sm.logMonoTime['onroadEvents']) <= now_ns or
         now_ns - int(sm.logMonoTime['onroadEvents']) > 1_500_000_000 or
@@ -305,7 +305,7 @@ class TransportPauseFeedback:
   def _temporary_host_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer):
     """A fresh inactive proof may retain intent, never native/output authority."""
     from openpilot.starpilot.nostalgia import physical_cancel
-    if physical_cancel(cs) or cs.steeringDisengage:
+    if physical_cancel(cs, cp) or cs.steeringDisengage:
       return False
     events = sm['onroadEvents']
     faults = [event for event in events if event.immediateDisable or event.softDisable]

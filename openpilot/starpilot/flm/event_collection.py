@@ -53,6 +53,7 @@ class EventCollectionAdapter(TorqueCollectionAdapter):
       raise ValueError('explicit whole-map restore producer contract')
     self.restore_version = restore_version
     self.replay_version = replay_version
+    self.snapshot_readiness = None
     self._event_initialized = False
     super().__init__(cp, evidence, ('feedforward', 'high', 'steady'), source=source, event_capture=True)
     self._event_initialized = True
@@ -79,6 +80,8 @@ class EventCollectionAdapter(TorqueCollectionAdapter):
       raise ValueError('actual event group')
     unchanged = getattr(self, 'key', None) == key
     self.key = key
+    if not unchanged:
+      self.snapshot_readiness = None
     if unchanged and self.event_objective is not None:
       return
     if self.envelope is not None:
@@ -156,8 +159,9 @@ class EventCollectionAdapter(TorqueCollectionAdapter):
     return super().prepare_control(evidence)
 
   def physical_observable(self, value):
-    floor = 2 if self.key[1] in ('angle.assist', 'deadband.low') else 15
-    return value.speed_mps >= floor and abs(value.roll_rad) < .3
+    # Raw storage is shared by all scheduled groups, including crawl FF.
+    # Per-coordinate excitation and independent model/admission stay in child.
+    return value.speed_mps >= 2 and abs(value.roll_rad) < .3
 
   def cohort(self, control, physical):
     if self.envelope is None or control.identity != self.identity or control.source_epoch != self.source_epoch:
@@ -176,12 +180,25 @@ class EventCollectionAdapter(TorqueCollectionAdapter):
     return False
 
   def fit_job_snapshot(self, blocks, now_ns, sequence, prior, *, control, output, physical_context):
+    self.snapshot_readiness = None
     if self.envelope is None or self.event_objective is None or len(blocks) < 8:
+      self.snapshot_readiness = {'reason': 'event_objective_unavailable' if self.envelope is None or self.event_objective is None
+                                 else 'event_storage_packet_support', 'storageBlocks': len(blocks), 'requiredStorageBlocks': 8}
       return None
     from opendbc.car.steering_projection import projection_to_dict
     from openpilot.starpilot.flm.event_storage import select_whole_event_snapshot
     packets = tuple(asdict(block) for block in blocks)
-    rows, windows = select_whole_event_snapshot(self.replay, packets, self.event_objective)
+    diagnostics = {}
+    rows, windows = select_whole_event_snapshot(self.replay, packets, self.event_objective, diagnostics=diagnostics)
+    # Parent selection counts are not child physical-model or fit qualification.
+    self.snapshot_readiness = {
+      'reason': ('snapshot_preparing' if len(rows) >= 16 else
+                 'whole_event_export_support' if diagnostics['wholeBlocks'] >= 16 else 'whole_physical_event_support'),
+      'wholeBundles': diagnostics['wholeBlocks'], 'selectedBundles': len(rows),
+      'requiredBundles': 16, 'requiredCalibrationBundles': 8, 'requiredLaterBundles': 8,
+      'missingCheckpoint': diagnostics['missingCheckpoint'], 'frameBudget': diagnostics['frameBudget'],
+      'windowBudget': diagnostics['windowBudget'], 'childQualification': 'not_yet_evaluated',
+    }
     if len(rows) < 16:
       return None
     # Complete source windows include the original maneuver boundary and its
@@ -227,7 +244,9 @@ class EventCollectionAdapter(TorqueCollectionAdapter):
       'restoration_required_groups': list(envelope.restoration_groups) if operation == 'restore' else [],
       'replay': self.replay.to_snapshot(selected, event_windows=windows), 'raw_blocks': rows, 'control': asdict(control),
       'output': output_row, 'physical_context': tuple(physical_context)}
-    return {'version': 1, 'family': self.command_family, 'snapshot_b64': base64.b64encode(pack_primitive_snapshot(payload)).decode('ascii')}
+    snapshot = {'version': 1, 'family': self.command_family, 'snapshot_b64': base64.b64encode(pack_primitive_snapshot(payload)).decode('ascii')}
+    self.snapshot_readiness['reason'] = 'snapshot_ready'
+    return snapshot
 
   def install_fit(self, report, result, validation, *, physical_context):
     from openpilot.starpilot.flm.full_surface_profile import FullSurfaceEnvelope

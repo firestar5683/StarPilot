@@ -77,13 +77,16 @@ def test_recorded_turn_onset_and_exit_are_not_delayed_by_lane_change_pacing():
         shaping = smoother.factor(active=True, lane_change_state=getattr(log.LaneChangeState, state_name),
                                   speed=speed, minimum_speed=0., duration=duration,
                                   previous=previous, desired=desired, turn_assist=assist)
-        previous, _ = clip_curvature(speed, previous, limit_rate(speed, previous, desired, shaping), 0.)
+        output, _ = clip_curvature(speed, previous, limit_rate(speed, previous, desired, shaping), 0.)
+        if previous * (desired - previous) < 0.:
+          native, _ = clip_curvature(speed, previous, desired, 0.)
+          assert output == native
+        previous = output
         trace.append((time, previous))
       onset = next(time for time, curvature in trace if curvature < -.02)
       peak = min(range(len(trace)), key=lambda index: trace[index][1])
       exit_time = next(time for time, curvature in trace[peak:] if abs(curvature) < .01)
       tracks.append((onset, exit_time))
     results.append(tracks)
-  # First bookmark is the unwind complaint; second is late turn initiation.
-  assert results[0][0][1] - results[0][1][1] > 1.
+  assert results[0][0][1] == results[0][1][1]
   assert results[1][0][0] - results[1][1][0] > 2.

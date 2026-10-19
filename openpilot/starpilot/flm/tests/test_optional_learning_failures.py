@@ -1,5 +1,6 @@
 """Root-only actual Card/Controls boundaries; no optional failure masks core errors."""
 from types import SimpleNamespace
+from typing import cast
 from unittest import mock
 
 import pytest
@@ -49,17 +50,17 @@ def card_fixture():
   sm.update_msgs(NOW / 1e9, [control.as_reader(), pandas.as_reader()])
   card = Car.__new__(Car)
   card.CP, card.CI, card.sm = cp, ci, sm
-  card.pm = Sink()
+  cast(SimpleNamespace, card).pm = Sink()
   card.vehicle_startup = VehicleStartupOwner()
   card.ci_initialized, card.ioniq6_long_prearmed = True, False
   card.ioniq6_keepalive = None
   card.aol_replay = card.slc_replay = card.curve_replay = card.conditional_replay = False
   card.car_params_published = False
   card.can_rcv_cum_timeout_counter = 0
-  card.rk = SimpleNamespace(remaining=0.0)
+  cast(SimpleNamespace, card).rk = SimpleNamespace(remaining=0.0)
   card.can_log_mono_time = NOW
   card.last_actuators_output = structs.CarControl.Actuators()
-  card.v_cruise_helper = SimpleNamespace(slc_cruise_change=None)
+  cast(SimpleNamespace, card).v_cruise_helper = SimpleNamespace(slc_cruise_change=None)
   card.car_gps_publisher = CarGpsPublisher()
   card.learning_stamp_observer = card.record_learning_send_stamp
   card.learning_car_state_source_ns = NOW - 1_000_000

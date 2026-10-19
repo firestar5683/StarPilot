@@ -1,5 +1,6 @@
 """Registered torque-actuated PID replay; never reads inactive torque tuning."""
 import math
+from openpilot.starpilot.flm.physical_response import request_force_accel
 from types import SimpleNamespace
 
 PID_SNAPSHOT_REVISION = 'selected-pid-frozen-state-v1'
@@ -121,7 +122,9 @@ def pid_frame(evidence):
   stage = dict(evidence.stage_values)
   return ReplayFrame(evidence.control_ns, evidence.replay_inputs, evidence.requested, evidence.applied_coordinates,
     frame_sequence=int(dict(evidence.replay_inputs)['control_frame']), actual_lac_command=stage['selected_command'],
-    torque_values=(), actual_stage_residual=(0., 0.), centre_values=(0., 0.), desired_physical_accel=stage['setpoint'],
+    torque_values=(), actual_stage_residual=(0., 0.), centre_values=(0., 0.),
+    desired_physical_accel=request_force_accel(evidence.replay_inputs),
+    desired_kinematic_accel=stage['setpoint'],
     healthy=evidence.valid and not evidence.fault and not evidence.override, manual=evidence.manual, limited=evidence.limited,
     applied_parameter_names=tuple(evidence.applied_parameter_names), effect_trace=evidence.effect_trace,
     effect_prepare_ns=evidence.effect_prepare_ns, controller_domain='torque_pid')

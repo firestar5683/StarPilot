@@ -115,7 +115,7 @@ class LongitudinalInputs:
     if self.gm_start_enabled:
       self.gm_boot_offset_ns = None
       self.gm_source_floor_ns = 0
-      self.gm_traffic_state = TrafficLaunchState(self.params)
+      self.gm_traffic_state = TrafficLaunchState(self.params, cp=self.CP)
       self.gm_profile_host = ProfileHost(self.params) if feature_enabled(self.params, self.CP, 'profile', os.environ) else None
     if self.toyota_sienna_replay or self.toyota_sienna_production or self.toyota_corolla_stop:
       self.toyota_boot_offset_ns: int | None = None

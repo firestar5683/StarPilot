@@ -96,8 +96,7 @@ def select_limit(observations: Mapping[Source, Observation], policy: SelectionPo
     observation = observations[selected]
   else:
     kinds = {kind for _, kind in unavailable}
-    # Preserve incomplete evidence so an acceptance reducer cannot silently use
-    # previous-limit fallback after a stale/unknown producer was discarded here.
+    # Preserve source availability; acceptance independently owns previous-limit fallback.
     kind = (ObservationKind.UNKNOWN if ObservationKind.UNKNOWN in kinds else
             ObservationKind.STALE if ObservationKind.STALE in kinds else ObservationKind.ABSENT)
     observation = Observation(kind)

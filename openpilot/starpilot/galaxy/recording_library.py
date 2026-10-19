@@ -10,6 +10,7 @@ from typing import BinaryIO
 
 from openpilot.starpilot.galaxy.drive_history import DIR_FLAGS, FILES, _same_directory
 from openpilot.starpilot.galaxy.recording_media import MAX_SOURCE_BYTES, MediaLease, VerifiedRecording, RecordingMediaChanged, RecordingMediaUnsupported
+from openpilot.system.loggerd.storage_roots import legacy_recordings_present
 
 NAME_ATTR = 'user.galaxy.name'
 PRESERVE_ATTR = 'user.preserve'
@@ -46,6 +47,7 @@ class RecordingLibrary:
     self.history = history
 
   def describe(self, result):
+    result['legacyRecordingsPresent'] = legacy_recordings_present(self.history.root)
     for route in result['routes']:
       route['displayName'] = route['routeId']
       route['preserved'] = False

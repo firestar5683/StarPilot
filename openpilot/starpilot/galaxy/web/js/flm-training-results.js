@@ -1,9 +1,3 @@
-import { GxDialog } from "./dialog.js"
-import { GxState } from "./state.js"
-import { GxNotice } from "./notice.js"
-import { PollTimer, connectionError } from "./polling.js"
-import { requestJson } from "./startup.js"
-
 const text = (value, limit = 240) => typeof value === "string" && value.length <= limit
 const count = value => value === null || Number.isSafeInteger(value) && value >= 0
 const detailValue = (value, depth = 0) => value === null || typeof value === "boolean" ||
@@ -23,7 +17,9 @@ export function validTrainingResults(value) {
       ![row.fit.trainWindows, row.fit.heldoutWindows].every(count))) return false
   if (row.application !== null && (!row.application || typeof row.application.applied !== "boolean" || !text(row.application.reason))) return false
   return row.details === undefined || row.details && typeof row.details === "object" && !Array.isArray(row.details) &&
-    Object.keys(row.details).length <= 64 && Object.entries(row.details).every(([key, item]) => text(key, 80) && detailValue(item))
+    Object.keys(row.details).length <= 64 && Object.entries(row.details).every(([key, item]) => text(key, 80) &&
+      (["Full surface coordinates", "Actual full surface coordinates"].includes(key) ?
+        fullCoordinates(item) !== null : detailValue(item)))
 }
 const labels = { collecting: "Gathering driving examples", unavailable: "Waiting for usable driving data",
   qualifiedFit: "Fit passed validation", qualified: "Fit passed validation", rejected: "Fit did not pass validation",
@@ -34,6 +30,17 @@ const labels = { collecting: "Gathering driving examples", unavailable: "Waiting
   capturing_steering_evidence: "Recording eligible steering measurements",
   awaiting_different_maneuver: "Current maneuver captured; waiting for a different driving example",
   evaluating_collected_maneuvers: "Checking the collected driving examples",
+  whole_physical_event_support: "Too few complete independent event bundles for fitting",
+  whole_event_export_support: "Too few complete bundles fit the replay export budget",
+  event_storage_packet_support: "Waiting for enough retained storage packets",
+  snapshot_context_changed: "Collection context or objective changed; waiting for its next snapshot selection",
+  snapshot_preparing: "Complete bundles selected; export is not complete",
+  snapshot_not_attempted: "No snapshot selection has run for this collection context",
+  snapshot_ready: "Snapshot selected; child qualification is still required",
+  no_current_collection_context: "Waiting for a current collection context",
+  no_current_physical_context: "Waiting for a current physical context",
+  unchanged_storage_since_submission: "Waiting for new storage after the submitted fit",
+  event_snapshot_unavailable: "The snapshot could not be prepared",
   report_stale: "Current results are unavailable; this is an earlier report" }
 export const readable = value => labels[value] || String(value ?? "Not reported").replaceAll("_", " ")
 export const detailText = value => value === null ? "Not reported" : Array.isArray(value) ? value.map(detailText).join(", ") :
@@ -43,71 +50,56 @@ export const trainingSummary = (report, error = "") => error ? "Live update unav
   !report?.current ? "No training results have been reported yet." : !report.current.fresh ?
     "Saved report only. Current learning and application are unknown." : readable(report.current.status)
 
-export const FLMTrainingResults = {
-  name: "FLMTrainingResults",
-  components: { GxDialog, GxState, GxNotice },
-  props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
-  data: () => ({ open: false, report: null, error: "", loading: false, request: null }),
-  mounted() { this.activePage = true; this.poller = new PollTimer({ read: () => this.load(), interval: 3000 }) },
-  beforeUnmount() { this.close(); this.activePage = false },
-  computed: {
-    summary() { return trainingSummary(this.report, this.error) },
-    current() { return this.report?.current },
-    details() { return Object.entries(this.current?.details || {}) },
-    currentApplied() { return !this.error && this.current?.fresh && this.current.application?.applied === true },
-  },
-  methods: {
-    readable, detailText,
-    amount(value) { return value === null || value === undefined ? "Not reported" : value.toLocaleString() },
-    show() { if (this.mode !== "local") return; this.open = true; this.poller.start(); this.load() },
-    close() { this.open = false; this.poller?.stop(); this.request?.abort(); this.request = null; this.loading = false },
-    async load() {
-      if (!this.open || !this.activePage || this.mode !== "local" || this.request) return
-      const controller = new AbortController()
-      this.request = controller
-      this.loading = true
-      try {
-        const value = await requestJson("./api/flm/training-results", { request: { signal: controller.signal } })
-        if (this.request !== controller || !this.activePage || !this.open) return
-        if (!validTrainingResults(value)) throw new Error("The device returned an unsupported training report.")
-        this.report = value
-        this.error = ""
-      } catch (error) {
-        if (this.request !== controller || !this.activePage || !this.open) return
-        if (error.status === 401 || ["access_unavailable", "setup_required"].includes(error.code)) this.unauthorized()
-        else this.error = connectionError(error, "Training results could not be refreshed. Reconnecting automatically…")
-      } finally {
-        if (this.request === controller) { this.request = null; this.loading = false }
-      }
-    },
-  },
-  template: `<div class="gx-card">
-    <button type="button" class="gx-btn gx-btn--tonal" @click="show" :disabled="mode !== 'local'">View FLM training results</button>
-    <GxDialog v-if="open" class="gx-flm__panel" labelledby="gx-flm-results-title" describedby="gx-flm-results-summary" @close="close">
-      <h2 id="gx-flm-results-title">FLM training results</h2>
-      <p id="gx-flm-results-summary" role="status">{{ summary }}</p>
-      <GxNotice v-if="error" tone="danger">{{ error }}</GxNotice>
-      <GxState v-if="loading && !report" loading>Reading training results…</GxState>
-      <template v-if="current">
-        <p>Last controller report: {{ current.ageSeconds.toFixed(1) }} seconds old when read.</p>
-        <p>{{ readable(current.reason) }}</p>
-        <p>Auto Learn: {{ current.enabled === null ? 'Not reported' : current.enabled ? 'Enabled' : 'Off' }}.</p>
-        <dl><dt>Collected samples</dt><dd>{{ amount(current.progress.samples) }}</dd>
-          <dt>Completed driving blocks</dt><dd>{{ amount(current.progress.blocks) }}<template v-if="current.progress.requiredBlocks !== null"> / {{ amount(current.progress.requiredBlocks) }} minimum for evaluation</template></dd>
-          <dt>Last controller report</dt><dd>{{ currentApplied ? 'Correction reported applied' : current.fresh && !error && current.application ? 'No correction reported applied' : current.fresh && !error ? 'Not reported' : 'Application unknown — report is out of date' }}</dd>
-        </dl>
-        <p>Only eligible driving data counts. Reaching the minimum starts evaluation; a correction still has to pass validation.</p>
-        <p v-if="current.application">{{ readable(current.application.reason) }}</p>
-        <section v-if="current.fit"><h3>Latest evaluation</h3><p>{{ readable(current.fit.status) }}: {{ readable(current.fit.reason) }}</p>
-          <p>Training windows: {{ amount(current.fit.trainWindows) }} · Validation windows: {{ amount(current.fit.heldoutWindows) }}</p></section>
-        <details v-if="details.length"><summary>More training details</summary><dl>
-          <template v-for="[key, value] in details" :key="key"><dt>{{ readable(key) }}</dt><dd>{{ detailText(value) }}</dd></template>
-        </dl></details>
-      </template>
-      <section><h3>Recent history</h3><p v-if="!report?.history.length">No training history has been reported yet.</p>
-        <ol v-else><li v-for="(row, index) in report.history" :key="index">{{ row.time }} — {{ readable(row.status) }}: {{ readable(row.reason) }}<template v-if="row.applied"> · Adjustment applied at that time</template></li></ol></section>
-      <button type="button" class="gx-btn gx-btn--tonal" @click="load" :disabled="loading">Refresh</button>
-      <button type="button" class="gx-btn gx-btn--tonal" @click="close">Close</button>
-    </GxDialog>
-  </div>`,
+// Exact canonical order from canonical_surface_adapter.NAMES; no controller imports.
+export const SURFACE_NAMES = Object.freeze([
+  "ff_gain_left",
+  "ff_gain_right",
+  "turn_in_boost_left",
+  "turn_in_boost_right",
+  "unwind_taper_left",
+  "unwind_taper_right",
+  "center_taper_max",
+  "highway_center_taper_max",
+  "center_deadband_crawl_deg",
+  "center_deadband_low_deg",
+  "center_deadband_mid_deg",
+  "center_deadband_fast_deg",
+  "center_deadband_highway_deg",
+  "turn_in_threshold_reduction_left",
+  "turn_in_threshold_reduction_right",
+  "unwind_threshold_increase_left",
+  "unwind_threshold_increase_right",
+  "crawl_turn_in_ff_boost_left",
+  "crawl_turn_in_ff_boost_right",
+  "low_speed_angle_assist_max_torque",
+  "curvy_speed_min",
+  "curvy_speed_max",
+  "curvy_turn_in_trim_speed_min",
+  "curvy_turn_in_trim_speed_max",
+  "curvy_turn_in_trim_left",
+  "curvy_turn_in_trim_right",
+  "curvy_unwind_floor_relief_left",
+  "curvy_unwind_floor_relief_right",
+  "curvy_unwind_extra_reduction_left",
+  "curvy_unwind_extra_reduction_right"
+])
+export const PID_UNSUPPORTED = Object.freeze([
+  "turn_in_threshold_reduction_left", "turn_in_threshold_reduction_right",
+  "unwind_threshold_increase_left", "unwind_threshold_increase_right",
+])
+export function fullCoordinates(rows) {
+  if (!Array.isArray(rows) || rows.length !== SURFACE_NAMES.length || rows.some((row, i) =>
+    !Array.isArray(row) || row.length !== 2 || row[0] !== SURFACE_NAMES[i] ||
+    typeof row[1] !== "number" || !Number.isFinite(row[1]) || Math.abs(row[1]) > .25)) return null
+  return Object.fromEntries(rows)
 }
+export function surfaceRows(report, live = false) {
+  const details = report?.current?.details || {}
+  const learned = fullCoordinates(details["Full surface coordinates"])
+  const applied = live && report.current?.application?.applied === true ?
+    fullCoordinates(details["Actual full surface coordinates"]) : null
+  return SURFACE_NAMES.map(name => ({ name, baseline: 0, learned: learned?.[name] ?? null,
+    applied: applied?.[name] ?? null, pidSupported: !PID_UNSUPPORTED.includes(name) }))
+}
+export const coordinateText = value => value === null ? "Not reported" :
+  value === 0 ? "0" : Math.abs(value) < 1e-6 ? value.toExponential(3) : (value > 0 ? "+" : "") + value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")

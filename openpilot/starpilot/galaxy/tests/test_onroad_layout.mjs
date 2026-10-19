@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import * as documentHelpers from "../web/js/onroad-layout-document.js"
 import * as layoutModule from "../web/js/onroad-layout.js"
+import { ONROAD_LAYOUT_TEMPLATE } from "../web/js/onroad-layout-template.js"
 import { readFileSync } from "node:fs"
 import { LayoutWidgetPreview, OnroadLayoutFeed, OnroadLayoutPage, validSnapshot, validDocument, clampPlacement, previewPoint, withAlpha, widgetPalette,
   withDisplay, layoutDocument, previewDocument } from "../web/js/onroad-layout.js"
@@ -804,10 +805,13 @@ assert.ok(appSource.includes('@target="go($event ==='))
 assert.match(appSource, /goFromMenu\(path\)/)
 assert.match(appSource, /requestLeave\(proceed, presentation\)/)
 assert.match(appSource, /@click="goFromMenu\(item\.path\)"/)
-assert.match(editorSource, /<LayoutWidgetPreview :widget="widget"/)
-assert.doesNotMatch(editorSource, /<LayoutWidgetPreview v-if="!state\.preview\.url"/)
-assert.match(editorSource, /<image v-if="nativeBackdropReady" :href="state\.backdrop\.url"/)
+assert.equal(OnroadLayoutPage.template, ONROAD_LAYOUT_TEMPLATE, "the page uses the extracted template")
+assert.equal(OnroadLayoutPage.components.LayoutWidgetPreview, LayoutWidgetPreview, "the template preview uses the actual component")
+assert.match(OnroadLayoutPage.template, /<LayoutWidgetPreview :widget="widget"/)
+assert.doesNotMatch(OnroadLayoutPage.template, /<LayoutWidgetPreview v-if="!state\.preview\.url"/)
+assert.match(OnroadLayoutPage.template, /<image v-if="nativeBackdropReady" :href="state\.backdrop\.url"/)
 assert.doesNotMatch(editorSource, /devicePreviewOpen|gx-layout__device|selectPreview/)
+assert.doesNotMatch(OnroadLayoutPage.template, /devicePreviewOpen|gx-layout__device|selectPreview/)
 const loadedCatalog = await loadCatalog({ fetcher: async (url) => ({ ok: true,
   json: async () => url.endsWith("catalog.json") ? catalog : { schemaVersion: 1, monitor: "local" },
 }) })

@@ -249,7 +249,7 @@ class MapSourceTests(unittest.TestCase):
         self.assertEqual(tracker.step(valid, received=True, now_boot_ns=now+6).kind,
                          'matched_limit_unqualified')
 
-  def test_selection_and_accepted_fallback_remain_closed(self):
+  def test_unqualified_map_cannot_replace_accepted_fallback(self):
     result = ms.MapTracker().step(v2_frame(), received=True, now_boot_ns=456_100_000_000)
     observations = {source: acc.Observation(acc.ObservationKind.ABSENT) for source in sel.Source}
     observations[sel.Source.MAP] = result.observation
@@ -261,8 +261,10 @@ class MapSourceTests(unittest.TestCase):
     authority = acc.Authority(acc.Mode.COMBINED, acc.LongitudinalOwner.SYSTEM, True, True, False, False)
     decision = acc.step(acc.new_session('drive', prior), chosen.observation, authority,
                         acc.Policy(fallback_previous=True), now_ns=456_100_000_000)
-    self.assertIsNone(decision.control_target_mps)
-    self.assertEqual(decision.basis, 'unknown')
+    self.assertEqual(decision.control_target_mps, prior_candidate.speed_mps)
+    self.assertEqual(decision.basis, 'previous_accepted')
+    self.assertEqual(decision.state.accepted, prior)
+    self.assertIsNone(decision.history_write)
 
 
 if __name__ == '__main__':

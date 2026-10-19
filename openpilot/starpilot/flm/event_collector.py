@@ -17,8 +17,27 @@ class EventFullrateCollector(FullrateCollector):
     self._pending_storage = ()
     self._pending_storage_lineage = None
     self._storage_lineage = None
+    self.snapshot_attempts = self.snapshot_declines = 0
+    self.snapshot_readiness = None
+    self.snapshot_readiness_context = None
+
+  def _snapshot_context(self):
+    return (self.context, self.physical_context, getattr(self.adapter, 'key', None),
+            getattr(getattr(self.adapter, 'envelope', None), 'prior_full_profile_sha256', None))
+
+  def _clear_snapshot_readiness(self):
+    self.snapshot_readiness = self.snapshot_readiness_context = None
+    self.adapter.snapshot_readiness = None
+
+  def snapshot_readiness_report(self):
+    # A rotating objective/source/physical/prior cannot inherit another one's
+    # counts during the60-second cooldown. No regroup or source read occurs.
+    if self.snapshot_readiness is not None and self.snapshot_readiness_context != self._snapshot_context():
+      return {'reason': 'snapshot_context_changed'}
+    return dict(self.snapshot_readiness or {'reason': 'snapshot_not_attempted'})
 
   def _discard_storage(self, reason):
+    self._clear_snapshot_readiness()
     self._pending_storage = ()
     self._pending_storage_lineage = None
     self._storage_lineage = None
@@ -67,6 +86,7 @@ class EventFullrateCollector(FullrateCollector):
 
   def split(self, reason, *, reset=False):
     if reset:
+      self._clear_snapshot_readiness()
       self._pending_storage = ()
       self._pending_storage_lineage = None
       self._storage_lineage = None
@@ -84,6 +104,18 @@ class EventFullrateCollector(FullrateCollector):
       # alone groups complete cycles/turns into independent fit episodes.
       self.sealed = False
     return accepted
+
+  def _retains_controller_chatter(self, value):
+    # Capture the symptom under its existing child TRIAL contract. Original
+    # evidence flags and every current/application exclusion remain unchanged.
+    from openpilot.starpilot.flm.event_objective import EffectObjective
+    try:
+      objective = self.adapter.event_objective
+      return bool(isinstance(objective, EffectObjective) and
+        objective.context_key == value.source_epoch and
+        objective.retains_controller_chatter and self.adapter.restore_envelope is None)
+    except (AttributeError, TypeError, ValueError):
+      return False
 
   def _accepted_fit_target(self, value):
     """A known accepted result changes collection lineage, not live health."""
@@ -103,6 +135,7 @@ class EventFullrateCollector(FullrateCollector):
       return False
 
   def _rollover_training(self):
+    self._clear_snapshot_readiness()
     # The original active/native/source chronology remains intact. Training
     # endpoints and pending joins cannot cross an accepted target change.
     self.training_interruptions['accepted_full_effect_target_changed'] += 1
@@ -146,18 +179,37 @@ class EventFullrateCollector(FullrateCollector):
     return accepted
 
   def job_snapshot(self, now_ns):
-    if (self.context is None or self.block_sequence == self.fit_block_sequence or len(self.blocks) < 8 or
-        self.last_fit and now_ns - self.last_fit < 60_000_000_000 or not self.ready or self.physical_context is None):
+    # Guards are cheap. Whole-event reconstruction stays at the original60s
+    # cadence, including unsuccessful selections; reports only reuse its result.
+    if self.snapshot_readiness_context != self._snapshot_context():
+      self._clear_snapshot_readiness()
+    reason = ('no_current_collection_context' if self.context is None else
+              'unchanged_storage_since_submission' if self.block_sequence == self.fit_block_sequence else
+              'event_storage_packet_support' if len(self.blocks) < 8 else
+              'no_current_controller_evidence' if not self.ready else
+              'no_current_physical_context' if self.physical_context is None else None)
+    if reason is not None:
+      self.snapshot_readiness = {'reason': reason, 'storageBlocks': len(self.blocks), 'requiredStorageBlocks': 8}
+      self.snapshot_readiness_context = self._snapshot_context()
+      return None
+    if self.last_fit and now_ns - self.last_fit < 60_000_000_000:
       return None
     control, output = self.ready[-1]
     self.sequence += 1
-    # None is a completed selection attempt too. Reconstructing the same whole
-    # source history on every20Hz parent loop cannot create independent support.
-    # Retain the existing60s cadence for all expensive snapshot attempts.
+    self.snapshot_attempts += 1
     self.last_fit = now_ns
     try:
-      return self.adapter.fit_job_snapshot(tuple(self.blocks), now_ns=now_ns, sequence=self.sequence,
+      snapshot = self.adapter.fit_job_snapshot(tuple(self.blocks), now_ns=now_ns, sequence=self.sequence,
         prior=self.prior_coefficients, control=control, output=output, physical_context=self.physical_context)
+      self.snapshot_readiness = dict(getattr(self.adapter, 'snapshot_readiness', None) or
+        {'reason': 'snapshot_ready' if snapshot is not None else 'event_snapshot_unavailable'})
     except (ValueError, TypeError, OverflowError, MemoryError):
-      self.reason, self.last_fit = 'event_snapshot_unavailable', now_ns
-      return None
+      self.reason = 'event_snapshot_unavailable'
+      self.snapshot_readiness = dict(getattr(self.adapter, 'snapshot_readiness', None) or {})
+      self.snapshot_readiness['reason'] = self.reason
+      snapshot = None
+    if snapshot is None:
+      self.snapshot_declines += 1
+    self.snapshot_readiness_context = self._snapshot_context()
+    self.snapshot_readiness.update(observedMonoTime=now_ns, objective=str(getattr(self.adapter, 'key', ''))[:128])
+    return snapshot

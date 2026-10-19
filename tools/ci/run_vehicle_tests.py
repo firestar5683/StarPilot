@@ -74,6 +74,7 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_tesla.py::TestTeslaStockSafety",
   "opendbc_repo/opendbc/safety/tests/test_tesla_hw1.py",
   "opendbc_repo/opendbc/safety/tests/test_volvo_c1.py",
+  "opendbc_repo/opendbc/safety/tests/test_volvo_cma.py",
   "opendbc_repo/opendbc/safety/tests/test_mazda.py::TestMazdaSafety",
   "opendbc_repo/opendbc/safety/tests/test_toyota.py::TestToyotaStockLongitudinalTorque",
   "opendbc_repo/opendbc/safety/tests/test_toyota_auto_hold.py",

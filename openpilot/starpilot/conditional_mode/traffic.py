@@ -138,7 +138,7 @@ class TrafficOwner:
     if (self.cached_buttons is None or incoming_toggle or
         (incoming_map and incoming_map != self.map_fingerprint) or
         now_mono_ns - self.map_checked_ns >= 1_000_000_000):
-      buttons = read_button_map(params, include_ioniq_media=not gm_distance)
+      buttons = read_button_map(params, include_ioniq_media=not gm_distance, cp=cp)
       self.map_checked_ns = now_mono_ns
       if buttons is None:
         prior = self.requested

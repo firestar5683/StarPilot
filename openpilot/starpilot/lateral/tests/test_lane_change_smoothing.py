@@ -4,7 +4,7 @@ from dataclasses import replace
 from openpilot.cereal import log
 from openpilot.starpilot.lateral.lane_change_preferences import LaneChangePolicy, decode, to_value
 from openpilot.starpilot.lateral.lane_change_smoothing import LaneChangeSmoother, limit_rate
-from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
+from openpilot.selfdrive.controls.lib.drive_helpers import MAX_LATERAL_JERK, clip_curvature
 import json
 
 
@@ -52,6 +52,82 @@ def test_stock_duration_inactive_and_regular_driving_remain_exact():
                              previous=0., desired=.01)
     assert factor == 1.
     assert limit_rate(20., 0., .01, factor) == .01
+
+
+def test_unwind_and_reversal_use_native_limits_during_maneuver_and_release():
+  for sign in (-1., 1.):
+    for speed in (1., 10., 30.):
+      for duration in (3.1, 6., 8.):
+        for state in (log.LaneChangeState.laneChangeStarting, log.LaneChangeState.laneChangeFinishing,
+                      log.LaneChangeState.off):
+          for desired in (sign * .0005, 0., -sign * .01):
+            smoother = LaneChangeSmoother()
+            smoother.factor(active=True, lane_change_state=log.LaneChangeState.laneChangeStarting,
+                            speed=speed, minimum_speed=0., duration=duration, previous=0., desired=sign * .001)
+            previous = sign * .001
+            factor = smoother.factor(active=True, lane_change_state=state, speed=speed, minimum_speed=0.,
+                                     duration=duration, previous=previous, desired=desired)
+            assert factor < 1.
+            limited = limit_rate(speed, previous, desired, factor)
+            assert limited == desired
+            for roll in (-.03, 0., .03):
+              output, _ = clip_curvature(speed, previous, limited, roll)
+              native, _ = clip_curvature(speed, previous, desired, roll)
+              assert output == native
+              assert abs(output - previous) <= MAX_LATERAL_JERK / max(speed, 1.) ** 2 * .01 + 1e-12
+
+
+def test_release_does_not_disable_pacing_when_turn_request_builds_again():
+  for sign in (-1., 1.):
+    smoother = LaneChangeSmoother()
+    previous = sign * .001
+    for desired in (sign * .002, sign * .0005, sign * .002):
+      factor = smoother.factor(active=True, lane_change_state=log.LaneChangeState.laneChangeStarting,
+                               speed=30., minimum_speed=0., duration=8., previous=previous, desired=desired)
+      limited = limit_rate(30., previous, desired, factor)
+      native, _ = clip_curvature(30., previous, desired, 0.)
+      output, _ = clip_curvature(30., previous, limited, 0.)
+      if abs(desired) < abs(previous):
+        assert output == native
+      else:
+        assert abs(output - previous) < abs(native - previous)
+      previous = output
+
+
+def test_old_turn_clears_without_waiting_for_lane_change_to_finish():
+  for sign in (-1., 1.):
+    for desired in (0., -sign * .003):
+      smoother = LaneChangeSmoother()
+      previous = sign * .02
+      for _ in range(41):
+        factor = smoother.factor(active=True, lane_change_state=log.LaneChangeState.laneChangeStarting,
+                                 speed=10., minimum_speed=0., duration=8., previous=previous, desired=desired)
+        output, _ = clip_curvature(10., previous, limit_rate(10., previous, desired, factor), 0.)
+        native, _ = clip_curvature(10., previous, desired, 0.)
+        assert output == native
+        previous = output
+        if sign * previous <= 0.:
+          break
+      assert sign * previous <= 0.
+      assert smoother.release == 2.
+
+
+def test_volt_turn_exit_does_not_retain_old_right_request():
+  for sign in (-1., 1.):
+    smoother = LaneChangeSmoother()
+    smoother.factor(active=True, lane_change_state=log.LaneChangeState.laneChangeStarting,
+                    speed=7.211, minimum_speed=5 * .44704, duration=LaneChangePolicy().duration_s,
+                    previous=sign * .04962, desired=sign * .04386)
+    for speed, previous, desired in ((9.895, .028362, .000532), (10.733, .024924, .002056),
+                                     (12.172, .019012, -.001425), (13.178, .016756, -.006609)):
+      previous, desired = sign * previous, sign * desired
+      factor = smoother.factor(active=True, lane_change_state=log.LaneChangeState.laneChangeStarting,
+                               speed=speed, minimum_speed=5 * .44704, duration=LaneChangePolicy().duration_s,
+                               previous=previous, desired=desired)
+      output, _ = clip_curvature(speed, previous, limit_rate(speed, previous, desired, factor), 0.)
+      native, _ = clip_curvature(speed, previous, desired, 0.)
+      assert output == native
+      assert abs(output) < abs(previous)
 
 
 def test_intersection_exit_keeps_native_rate_after_crossing_lane_change_floor():

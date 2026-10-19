@@ -57,6 +57,7 @@ COMPACT_MENU = (
   (Destination.DEVICE, "Device", "icons_mici/settings/device_icon.png", 72, 58),
   (Destination.SOFTWARE, "Software", "icons_mici/settings/device/update.png", 64, 75),
   (Destination.DRIVING_MODEL, "Driving Model", "icons_mici/settings/device/lkas.png", 72, 56),
+  (Destination.DRIVING_CONTROLS, "Driving Controls", "icons_mici/settings/device/lkas.png", 72, 56),
   (Destination.APPEARANCE, "Visuals", "icons_mici/settings/device/cameras.png", 64, 64),
   (Destination.GALAXY, "Galaxy", "icons_mici/settings/galaxy.png", 64, 64),
   (Destination.PAIR, "Pair to Connect", "icons_mici/settings/comma_icon.png", 33, 60),

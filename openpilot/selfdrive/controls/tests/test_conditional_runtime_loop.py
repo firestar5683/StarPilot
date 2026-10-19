@@ -34,14 +34,20 @@ class TestConditionalRuntimeLoop(unittest.TestCase):
     with tempfile.TemporaryDirectory() as directory:
       params = Params(directory)
       params.put('CarParams', cp.to_bytes(), block=True)
+      params.put_bool('SpeedLimitController', False, block=True)
+      params.put_bool('ShowSpeedLimits', False, block=True)
+      params.put_bool('CurveSpeedController', False, block=True)
       for enabled in (False, True):
+        params.put('ConditionalModeConfig', json.loads(encode_preferences(SavedPreferences(
+          mode=ModeChoice.CEM if enabled else ModeChoice.STOCK))), block=True)
+        params.put_bool('SafeMode', not enabled, block=True)
         params.put_bool('UseStarPilotLongitudinalPlanner', enabled, block=True)
         with self.subTest(enabled=enabled):
           sm = Mock()
           sm.update.side_effect = EndLoop
-          settings = {'CONDITIONAL_MODE_REPLAY_RUNTIME': '1' if enabled else '0',
+          settings = {'CONDITIONAL_MODE_REPLAY_RUNTIME': '0',
                       'SLC_REPLAY_RUNTIME': '0', 'CURVE_REPLAY_RUNTIME': '0', 'LONG_PLANNER_REPLAY_RUNTIME': '0'}
-          with patch.dict(os.environ, settings), patch.object(plannerd, 'Params', return_value=params), \
+          with patch.dict(os.environ, settings, clear=True), patch.object(plannerd, 'Params', return_value=params), \
                patch.object(plannerd, 'config_realtime_process'), \
                patch.object(plannerd, 'ConditionalPlannerHost', wraps=ConditionalPlannerHost) as conditional_ctor, \
                patch.object(messaging, 'PubMaster') as publisher, \
@@ -52,9 +58,10 @@ class TestConditionalRuntimeLoop(unittest.TestCase):
             call('carState', conflate=False),
             call('slcAction', conflate=False),
             call('slcCruiseEvent', conflate=False)])
-          # The typed manual-mode owner publishes status even without CEM.
+          # Status and transport are reserved independently of saved SLC/CEM
+          # admission, so a later saved change can attach without restarting.
           self.assertEqual(publisher.call_args.args[0], ['longitudinalPlan', 'starpilotLongitudinalPlan',
-                                                       'driverAssistance', 'slcState'])
+                                                       'driverAssistance', 'slcState', 'slcCruiseCommand'])
           self.assertEqual(conditional_ctor.call_count, int(enabled))
           if enabled:
             self.assertIs(conditional_ctor.call_args.args[0], params)

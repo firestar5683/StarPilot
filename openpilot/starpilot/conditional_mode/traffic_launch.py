@@ -7,8 +7,9 @@ from openpilot.starpilot.conditional_mode.traffic_status import TrafficDisplayPr
 
 
 class TrafficLaunchState:
-  def __init__(self, params):
+  def __init__(self, params, *, cp=None):
     self.params = params
+    self.cp = cp
     self.settings = ConditionalSettingsOwner(params)
     self.projector = TrafficDisplayProjector()
     self.buttons = None
@@ -16,7 +17,7 @@ class TrafficLaunchState:
 
   def sample(self, sm, *, now_ns, boot_ns, drive_id):
     if now_ns < self.checked_ns or now_ns - self.checked_ns >= 1_000_000_000:
-      self.buttons = read_button_map(self.params)
+      self.buttons = read_button_map(self.params, cp=self.cp)
       self.checked_ns = now_ns
     if self.buttons is None:
       return None

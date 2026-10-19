@@ -81,12 +81,13 @@ def display_action(raw: bytes | None) -> tuple[str, tuple[str, ...], str]:
   return "Unsupported saved action", (), "Off"
 
 
-def runtime_map_ready(sources: ButtonSources) -> bool:
+def runtime_map_ready(sources: ButtonSources, *, cp=None) -> bool:
   """Mirror the runtime map's scalar admission using the already captured bytes."""
   if not sources.readable or any(raw is not None and raw not in _CANONICAL_ACTIONS
                                  for _, raw in sources.dependencies[2:]):
     return False
-  return all(sources.raw(key) != b"5" for key in
+  from opendbc.car.gm.cancel_remap import enabled as gm_cancel_remap_enabled
+  return gm_cancel_remap_enabled(cp) or all(sources.raw(key) != b"5" for key in
              ("CancelButtonControl", "LongCancelButtonControl", "VeryLongCancelButtonControl"))
 
 

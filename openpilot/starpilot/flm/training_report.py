@@ -1,4 +1,6 @@
 """Bounded read-only RAM telemetry; never restores a learned profile."""
+
+from typing import cast
 import json
 import math
 import os
@@ -132,6 +134,7 @@ class TrainingReporter:
     self.last_state = None
     self.fit_attempts = self.fit_results = 0
     self.last_fit = None
+    self.last_fit_rejection = None
 
   def reset(self, reason):
     self.control = None
@@ -141,6 +144,8 @@ class TrainingReporter:
   def fitted(self, result, objective):
     self.fit_results += 1
     self.last_fit = (str(result.status)[:64], str(result.reason)[:96], str(objective)[:128])
+    if result.profile is None:
+      self.last_fit_rejection = self.last_fit
 
   def publish(self, **kwargs):
     try:
@@ -224,6 +229,18 @@ class TrainingReporter:
       'Source receipt age seconds': None if source is None else max(0., (now_ns - source.observed_ns) / 1e9),
       'Collection duration seconds': (now_ns - self.started) / 1e9,
     }
+    if collector is not None and getattr(collector.adapter, 'event_collection', False):
+      readiness_reader = getattr(collector, 'snapshot_readiness_report', None)
+      readiness: dict[str, object] = readiness_reader() if callable(readiness_reader) else {'reason': 'snapshot_not_attempted'}
+      stamp = cast(int | None, readiness.pop('observedMonoTime', None))
+      readiness['ageSeconds'] = None if stamp is None else max(0., (now_ns - stamp) / 1e9)
+      details.update({'Snapshot readiness': readiness,
+        'Snapshot selection attempts (collector lifetime)': getattr(collector, 'snapshot_attempts', 0),
+        'Snapshot selections declined (collector lifetime)': getattr(collector, 'snapshot_declines', 0),
+        'Submitted fit jobs (reporter lifetime)': self.fit_attempts,
+        'Last unsuccessful fit': list(self.last_fit_rejection) if self.last_fit_rejection else [],
+        'Parent fit profile retained': bool(collector.fit_result is not None and collector.fit_result.profile is not None),
+        'Collector admission result retained': bool(collector.result is not None and collector.result.profile is not None)})
     if actual_full is not None:
       details.update({'Actual full surface coordinates': [[n,v] for n,v in actual_full.applied],
         'Actual full profile hash': actual_full.applied_full_profile_sha256,

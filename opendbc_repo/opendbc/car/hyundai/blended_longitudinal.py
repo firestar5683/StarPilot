@@ -97,11 +97,11 @@ class BlendedLongitudinalOwner:
     self.cp.openpilotLongitudinalControl = False
     self.cp.pcmCruise = True
 
-  def begin(self, can_recv, can_send, *, unpublished, admission):
+  def begin(self, can_recv, can_send, *, unpublished, admission, pending_publication=False):
     if self.phase is not Phase.IDLE or self.result is not None:
       raise RuntimeError('Takeover is single-use')
-    if unpublished is not True:
-      raise RuntimeError('Takeover must precede active CP publication')
+    if unpublished is not True and not (pending_publication is True and self.published):
+      raise RuntimeError('Takeover requires unpublished CP or explicitly sealed pending target')
     if admission is not True or not self.cp.openpilotLongitudinalControl:
       self._fallback()
       self.result = TakeoverResult(Outcome.STOCK_UNTOUCHED)
@@ -249,6 +249,7 @@ class BlendedStartup:
     self.source_floor_ns = 0
     self.controller = None
     self.last_tester_at = None
+    self.pending_target = False
     self.enable_gesture = None
     self.enable_credit = None
     self.enable_generation = 0
@@ -257,16 +258,37 @@ class BlendedStartup:
     self.cruise_resume_hint = None
 
   def prepare(self, *, admission):
+    if self.pending_target or self.owner.published or self.owner.phase is not Phase.IDLE or self.owner.result is not None:
+      raise RuntimeError('Mixed startup preparation is single-use')
     self.diagnostic_admission = admission
-    result = self.owner.begin(*self.callbacks, unpublished=True, admission=admission())
-    if not result.admissible:
-      raise RuntimeError('Mixed-CAN ECU state uncertain; abort before constructors/publication')
-    if result.outcome in (Outcome.STOCK, Outcome.STOCK_UNTOUCHED):
+    if admission() is not True:
+      self.owner._fallback()
+      self.owner.result = TakeoverResult(Outcome.STOCK_UNTOUCHED)
       return self.stock_cp
+    # This is the frozen requested configuration, not ECU ownership. No
+    # diagnostic suppression or command producer runs during host startup.
+    self.pending_target = True
+    return self.owner.cp
+
+  def commit_pending(self, ci, *, sources_current, control_current):
+    if (not self.pending_target or not self.owner.published or ci is not self.configured_ci or
+        not self.prepared_for(ci.CP) or not sources_current or not control_current):
+      raise RuntimeError('Mixed handoff requires the sealed pending target and current host sources')
+    self.check()
+    if self.diagnostic_admission is None or self.diagnostic_admission() is not True:
+      raise RuntimeError('Mixed pending handoff lost diagnostic admission')
+    try:
+      result = self.owner.begin(*self.callbacks, unpublished=False, admission=True, pending_publication=True)
+    finally:
+      self.pending_target = False
+    # A target CP was published. Even confirmed stock restoration cannot
+    # relabel that publication as an active stock configuration: abort Card.
+    if result.outcome is not Outcome.OWNED:
+      raise RuntimeError('Mixed pending handoff failed; abort published target')
     import time
     self.source_floor_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
     self.started_at = self.clock()
-    self._tester()  # Continuity starts before parser/controller construction.
+    self._tester()
     import threading
 
     def loop():
@@ -274,13 +296,12 @@ class BlendedStartup:
         self._tester()
     self.thread = threading.Thread(target=loop, name='blended-startup-tester', daemon=True)
     self.thread.start()
-    return self.owner.publication_cp()
 
   def _tester(self):
     from opendbc.car import make_tester_present_msg
     if self.started_at is None or self.fault is not None:
       return
-    if not self.handed_off and self.clock() - self.started_at >= 60.:
+    if not self.handed_off and self.clock() - self.started_at >= 1.:
       self.fault = 'Startup keepalive bound exceeded'
       self.owner.cancel()
       self.stop_event.set()
@@ -294,15 +315,16 @@ class BlendedStartup:
       self.stop_event.set()
 
   def prepared_for(self, cp):
-    return (not self.closed and self.fault is None and self.owner.active() and self.owner.result is not None and
-            self.owner.result.outcome is Outcome.OWNED and self.source_floor_ns > 0 and
+    pending = self.pending_target and self.owner.phase is Phase.IDLE and self.owner.result is None
+    owned = self.owner.active() and self.owner.result is not None and self.owner.result.outcome is Outcome.OWNED and self.source_floor_ns > 0
+    return (not self.closed and self.fault is None and (pending or owned) and
             self.owner.cp.to_dict() == (self.final_snapshot or self.candidate_snapshot) == cp.to_dict())
 
   def configure(self, ci):
     self.check()
     if self.closed or self.owner.published:
       raise RuntimeError("Mixed startup configuration is closed")
-    if self.owner.active():
+    if self.owner.active() or self.pending_target:
       self.controller = BlendedLongitudinalController(self.owner, ci.CC.packer, ci.CC.CAN)
       ci.CC.blended_longitudinal = self.controller
     self.configured_ci = ci
@@ -311,13 +333,13 @@ class BlendedStartup:
     self.check()
     if self.closed or self.owner.published or ci is not self.configured_ci:
       raise RuntimeError('Mixed AOL finalization requires configured unpublished startup')
-    if self.owner.active() and (self.controller is None or ci.CC.blended_longitudinal is not self.controller):
+    if (self.owner.active() or self.pending_target) and (self.controller is None or ci.CC.blended_longitudinal is not self.controller):
       raise RuntimeError('Mixed AOL finalization requires its installed controller')
     if self.final_snapshot is not None:
       if not self.prepared_for(ci.CP):
         raise RuntimeError('Mixed AOL final configuration is frozen')
       return
-    if not self.owner.active():
+    if not self.owner.active() and not self.pending_target:
       return
     expected = dict(self.candidate_snapshot)
     if ci.CP.alternativeExperience == 32:
@@ -331,22 +353,24 @@ class BlendedStartup:
 
   def seal_publication(self):
     self.check()
-    if self.owner.active() and not self.prepared_for(self.owner.cp):
+    if (self.owner.active() or self.pending_target) and not self.prepared_for(self.owner.cp):
       raise RuntimeError('Mixed alpha publication requires exact prepared final CP')
     self.owner.published = True
 
   def check(self):
     if self.fault is not None:
       raise RuntimeError(self.fault)
+    if self.pending_target and self.owner.phase is Phase.IDLE and self.owner.result is None:
+      return
     if self.owner.result is None or not self.owner.result.admissible:
       raise RuntimeError('Uncertain mixed-CAN ECU ownership')
 
   def sources_current(self, ci, now_ns, *, health_checked=False):
     from opendbc.car import Bus
     from opendbc.can.parser import MAX_BAD_COUNTER
-    if not self.owner.active():
+    if not self.owner.active() and not self.pending_target:
       return True
-    if self.source_floor_ns <= 0:
+    if self.source_floor_ns <= 0 and not self.pending_target:
       return False
     # Independent sources consumed after ECU suppression; SCC output is not a
     # takeover proof. Disabled SCC parser/source selection remains separate.
@@ -376,6 +400,9 @@ class BlendedStartup:
     cp = self.owner.cp
     if not self.owner.active():
       self.cruise_resume_hint = None
+      if self.pending_target:
+        state.buttonEnable = False
+        state.blockPcmEnable = True
       return
     state.buttonEnable = False
     exact = (is_blended(cp) and cp.openpilotLongitudinalControl and not cp.pcmCruise and

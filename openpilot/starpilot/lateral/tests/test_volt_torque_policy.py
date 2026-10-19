@@ -114,7 +114,8 @@ class TestVoltTorquePolicy(unittest.TestCase):
           controls = Controls()
           self.assertEqual(controls.LaC.controller_mode, mode)
           self.assertEqual(selected_policy(controls.LaC) is not None, mode == ControllerMode.STARPILOT)
-          self.assertEqual(controls.torque_learning_allowed, mode == ControllerMode.STANDARD)
+          # Native scalar estimation remains outside the GM brand scope.
+          self.assertFalse(controls.torque_learning_allowed)
           real_update = controls.VM.update_params
           for speed, live_ratio in ((0., 15.7), (20., 15.7), (20., 15.7), (35., 16.2)):
             self.enterContext(patch.object(controls, 'sm', {'carState': SimpleNamespace(vEgo=speed),

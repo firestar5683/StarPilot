@@ -37,8 +37,7 @@ from openpilot.starpilot.ui.feature_settings_state import (
 )
 from openpilot.starpilot.speed_limits.runtime_settings import MPH_TO_MPS
 from openpilot.starpilot.aol.vehicle import policy_for as aol_policy_for
-from openpilot.starpilot.longitudinal.ioniq6_start import eligible as ioniq6_long_eligible
-from opendbc.car.gm.feature_capabilities import longitudinal_supported as gm_longitudinal_supported
+from openpilot.starpilot.feature_capabilities import longitudinal_supported as feature_longitudinal_supported
 from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY, LEGACY_KEYS
 from openpilot.starpilot.ui.torque_feature import TorqueFeature
 from openpilot.starpilot.ui.controller_feature import ControllerFeature, SETUP_ACTION
@@ -75,9 +74,9 @@ from openpilot.starpilot.controllers.toyota_cruise import capability as toyota_c
 BOOL_DEFAULTS = {
   "GMPedalLongitudinal": False, "ForceStops": False, "AlwaysAllowUploads": False, "TurnAssist": True,
   "ReverseCruise": False, "ToyotaAutoHold": False, "VoltSNG": False, "GMAutoHold": False, "VoltOnePedalMode": False,
-  "LongPitch": True, "DisableOpenpilotLongitudinal": False,
+  "RemapCancelToDistance": False, "LongPitch": True, "DisableOpenpilotLongitudinal": False,
   "SpeedLimitController": False, "ShowSpeedLimits": True,
-  "SLCConfirmation": False, "SLCConfirmationHigher": False, "SLCConfirmationLower": False,
+  "SLCConfirmation": False,
   "PauseLateralOnSignal": False,
   "LaneCentering": False, "LaneCenteringPauseOnSignal": True,
   "CustomPersonalities": False, PLANNER_SELECTION_KEY: True,
@@ -151,6 +150,8 @@ class FeatureSettingsOwner:
                                       configuration_longitudinal=self.configuration_longitudinal)
     self.long_profiles = LongProfileFeature(self)
     self.tesla_screen = TeslaScreenFeature(self)
+    from openpilot.starpilot.ui.gm_cancel_remap_feature import GmCancelRemapFeature
+    self.gm_cancel_remap = GmCancelRemapFeature(self)
     self.gm_tune = GmTuneFeature(self)
     self.gm_truck = GmTruckFeature(self)
     self.gm_ev_preset = GmEvPresetFeature(self)
@@ -737,6 +738,7 @@ class FeatureSettingsOwner:
                   "native safety and ECU configuration are unchanged."),
           capability=radar_capability, default_value="Off"))
       rows.extend(self.tesla_screen.rows(parked))
+      rows.extend(self.gm_cancel_remap.rows(parked))
       rows.extend(self.gm_tune.rows(parked))
       rows.extend(self.gm_truck.rows(parked))
       rows.extend(self.gm_ev_preset.rows(parked))
@@ -809,7 +811,7 @@ class FeatureSettingsOwner:
       title = "Curve Speed Controller"
       allowed = configurable and system_long and self.authority("long")
       vehicle_cp = self.vehicle_params()
-      curve_supported = vehicle_cp is not None and (ioniq6_long_eligible(vehicle_cp) or gm_longitudinal_supported(vehicle_cp))
+      curve_supported = feature_longitudinal_supported(vehicle_cp)
       learning = learning_snapshot(self.params)
       document_raw = self._raw(CURVE_DOCUMENT_KEY)
       dependencies = ((CURVE_DOCUMENT_KEY, document_raw),)
@@ -927,11 +929,6 @@ class FeatureSettingsOwner:
       rows.append(self._bool_row("ShowSpeedLimits", "Show speed limit signs", self.authority("preferences"),
                                  reason="Display signs independently of Speed Limit Controller; does not change cruise speed"))
       rows.append(self._bool_row("SLCConfirmation", "Require confirmation", allowed))
-      confirmation, _, _ = self._value("SLCConfirmation")
-      rows.extend(replace(self._bool_row(key, label, allowed and confirmation == "1"),
-                          default_reset_available=allowed and parked and self._value(key)[2] and
-                          self._value(key)[0] in ("0", "1")) for key, label in (
-        ("SLCConfirmationLower", "Confirm lower limits"), ("SLCConfirmationHigher", "Confirm higher limits")))
       source_capability = self._source_capability()
       vision_dev, maps_available = source_capability
       source_allowed = configurable and self.authority("preferences")
@@ -943,8 +940,6 @@ class FeatureSettingsOwner:
         source = "Maps" if source == "Map Data" else source
         readable = self._readable(key)
         reason = "Saved source unreadable or too large" if not readable else help_text
-        if readable and vision_dev and system_long:
-          reason += "; camera signs require your confirmation before changing cruise speed"
         if source == "Maps" and not maps_available:
           reason = "Maps needs a verified provider and an installed offline map package"
         elif source == "Vision" and not vision_dev:
@@ -961,9 +956,9 @@ class FeatureSettingsOwner:
       rows.extend(offset_rows)
       title = "Speed Limit Controller"
     elif page == FeaturePage.LANE:
-      allowed = (configurable and lateral_context) or (not parked and self.authority("lane_live"))
       from openpilot.starpilot.lateral.lane_runtime import runtime_supported
       strength_supported = runtime_supported(self.vehicle_params())
+      allowed = strength_supported and ((configurable and lateral_context) or (not parked and self.authority("lane_live")))
       lane_enabled, _, _ = self._value("LaneCentering")
       rows.extend((self._bool_row("LaneCentering", "Enable Lane Centering", allowed),
                    replace(self._bool_row("LaneCenteringPauseOnSignal", "Pause on signal", allowed and lane_enabled == "1"),
@@ -1176,6 +1171,8 @@ class FeatureSettingsOwner:
       return self.controller.apply_setup(request)
     if key == 'ForceAutoTuneOff':
       return self.controller.apply_learning(request)
+    if key == "RemapCancelToDistance":
+      return self.gm_cancel_remap.apply(request)
     if key == "GMPedalLongitudinal":
       return self._apply_pedal_setup(request)
     if key in TESLA_SCREEN_KEYS:
@@ -1287,12 +1284,9 @@ class FeatureSettingsOwner:
           return False
         if (key != CURVE_MASTER_KEY or request.value != "Off") and not read_learning(self.params).valid:
           return False
-      if (key in ("SLCConfirmationLower", "SLCConfirmationHigher") and self._value("SLCConfirmation")[0] != "1" and
-          not (reset_default and request.value == "Off")):
-        return False
       if key in (SLC_PRIORITY, SLC_SECONDARY) and request.capability != self._source_capability():
         return False
-      if key == "LaneCenteringStrength":
+      if key in LANE_LIVE_KEYS:
         from openpilot.starpilot.lateral.lane_runtime import runtime_supported
         if not runtime_supported(self.vehicle_params()):
           return False
@@ -1416,7 +1410,7 @@ class FeatureSettingsOwner:
         if request.value not in self._source_choices():
           return False
         encoded = "Map Data" if request.value == "Maps" else request.value
-      if key == "LaneCenteringStrength":
+      if key in LANE_LIVE_KEYS:
         from openpilot.starpilot.lateral.lane_runtime import runtime_supported
         if not runtime_supported(self.vehicle_params()):
           return False

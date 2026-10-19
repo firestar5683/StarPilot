@@ -81,8 +81,11 @@ def update_big_model_status(owner) -> bool:
   if published_big and (big_active is True or owner.sm['deviceState'].chestnutPresent):
     owner.big_model_chestnut = True
   model_unavailable = owner.big_model_active and owner.sm.seen['modelV2'] and not fresh
-  # a big model Jetlink joined (no chestnut this drive) hands back to the small model, which drives on
-  jetlink = big_active is None and not owner.big_model_chestnut
+  # Only a positively observed Jetlink execution may hand back without the
+  # native big-model failure. Absence of a Chestnut marker is not provenance.
+  jetlink = (big_active is None and not owner.big_model_chestnut and
+             getattr(owner, '_jetlink_model_provenance', False) and
+             getattr(owner, '_jetlink_runtime_valid', False))
   demoted = owner.big_model_active and fresh and not published_big and not jetlink
   chestnut_lost = owner.big_model_active and owner.big_model_chestnut and not owner.sm['deviceState'].chestnutPresent
   load_mismatch = big_active is True and fresh and not published_big
@@ -99,6 +102,9 @@ def update_big_model_status(owner) -> bool:
   if not owner.enabled and not axis_active and not model_unavailable:
     owner.big_model_active = False
     owner.big_model_chestnut = False
+    owner._jetlink_model_provenance = False
+  if big_active is not None or owner.big_model_chestnut:
+    owner._jetlink_model_provenance = False
   return big_failed
 
 
@@ -120,11 +126,37 @@ def update_jetlink_swaps(owner, in_control, state=None):
   events. `state` is the joining model's; without it jetlink reads modeld's runtime record, and a gap in it holds
   the last state rather than reading as a switch."""
   model_ok = owner.sm.seen['modelV2'] and owner.sm.alive['modelV2'] and owner.sm.valid['modelV2']
-  swap = owner.jetlink_swaps.update(model_ok, model_ok and owner.sm['modelV2'].big, in_control, state=state)
+  if model_ok:
+    owner._jetlink_last_model_big = bool(owner.sm['modelV2'].big)
+  big = getattr(owner, '_jetlink_last_model_big', False)
+  if state is None:
+    # Own one bounded public-runtime poll instead of duplicating the vendor
+    # tracker's poll or reaching into its private cache. A missing record is
+    # unavailable evidence, never a positive hand-back exemption.
+    ticks = getattr(owner, '_jetlink_runtime_ticks', 0)
+    if ticks == 0:
+      try:
+        runtime = owner.jetlink_hooks.runtime()
+      except Exception:
+        runtime = None
+      owner._jetlink_runtime = runtime
+      owner._jetlink_runtime_valid = bool(runtime is not None and
+        getattr(runtime, 'state', None) in ('joining', 'retrying', 'ready', 'running', 'unavailable') and
+        type(getattr(runtime, 'active', None)) is bool)
+      if not owner._jetlink_runtime_valid:
+        owner._jetlink_model_provenance = False
+    owner._jetlink_runtime_ticks = (ticks + 1) % max(round(.2 / DT_CTRL), 1)
+    runtime = getattr(owner, '_jetlink_runtime', None)
+    runtime_valid = getattr(owner, '_jetlink_runtime_valid', False)
+    state = runtime.state if runtime_valid else 'none'
+    if model_ok and big and runtime_valid and runtime.state == 'running' and runtime.active:
+      owner._jetlink_model_provenance = True
+    model_ok = model_ok and runtime_valid
+  swap = owner.jetlink_swaps.update(model_ok, big, in_control, state=state)
   if swap.no_entry:
     owner.events.add(log.OnroadEvent.EventName.bigModelLoading)  # no engaging for the second after a swap
-  if swap.settling and not owner.jetlink_settling:
-    owner.big_model_ready_t = time.monotonic()  # a swap drops a frame: hold its comm and localizer errors
+  # Jetlink settling is bookkeeping only. It cannot restart the native
+  # five-second global communication/localization grace period.
   owner.jetlink_settling, owner.jetlink_link_lost = swap.settling, swap.link_lost
   return swap
 

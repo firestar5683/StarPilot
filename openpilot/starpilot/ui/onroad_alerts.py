@@ -21,8 +21,14 @@ class AlertRenderer:
   def _center(self, text: str, role: FontRole, size: int, rect: rl.Rectangle, y: float,
               color: rl.Color = rl.WHITE, *, letter_spacing: float = 0) -> None:
     spacing = size * letter_spacing
-    measured = self.fonts.measure(text, role, size, spacing=spacing)
-    self.fonts.draw(text, role, size, rect.x + (rect.width - measured.width) / 2, y, color, spacing=spacing)
+    lines = text.split('\n')
+    height = self.fonts.measure(text, role, size, spacing=spacing).height
+    # Preserve Raylib's measured newline spacing when drawing lines separately.
+    line_step = (height - self.fonts.measure(lines[0], role, size, spacing=spacing).height) / max(1, len(lines) - 1)
+    for line in lines:
+      measured = self.fonts.measure(line, role, size, spacing=spacing)
+      self.fonts.draw(line, role, size, rect.x + (rect.width - measured.width) / 2, y, color, spacing=spacing)
+      y += line_step
 
   def render(self, rect: rl.Rectangle, alert: OnroadAlert, *, signal_direction: int = 0) -> None:
     event_name = alert.alert_type.split('/', 1)[0]

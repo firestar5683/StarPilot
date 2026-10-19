@@ -71,7 +71,7 @@ def stock_lateral_fault_proof(self, CS, message, now_ns):
   samples = getattr(self, 'car_state_samples', ()) or ((CS, True),)
   if any(not valid or not sample.canValid or sample.canTimeout or sample.steerFaultPermanent or
       sample.steerFaultTemporary or sample.accFaulted or sample.doorOpen or sample.seatbeltUnlatched or
-      sample.brakePressed or sample.regenBraking or sample.gasPressed or physical_cancel(sample) or
+      sample.brakePressed or sample.regenBraking or sample.gasPressed or physical_cancel(sample, self.CP) or
       sample.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.sport,
         car.CarState.GearShifter.low, car.CarState.GearShifter.brake) for sample, valid in samples):
     return None
@@ -162,7 +162,7 @@ def ordinary_source_availability(self, CS, now_ns, native=None, *, replay: bool,
     bool(getattr(self, 'car_state_retained_valid', False) or held_metadata)),)
   if any(not valid or not sample.canValid or sample.canTimeout or sample.steerFaultPermanent or
          sample.steerFaultTemporary or sample.accFaulted or sample.doorOpen or sample.seatbeltUnlatched or
-         sample.brakePressed or sample.regenBraking or sample.gasPressed or physical_cancel(sample) or
+         sample.brakePressed or sample.regenBraking or sample.gasPressed or physical_cancel(sample, self.CP) or
          sample.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.sport,
                                    car.CarState.GearShifter.low, car.CarState.GearShifter.brake)
          for sample, valid in samples):
@@ -269,7 +269,7 @@ def fresh_ordinary_lag_continuation(self, CS, intent, native, now_ns):
   samples = getattr(self, 'car_state_samples', ()) or ((CS, True),)
   return not any(not valid or not sample.canValid or sample.canTimeout or sample.steerFaultPermanent or
     sample.steerFaultTemporary or sample.accFaulted or sample.doorOpen or sample.seatbeltUnlatched or
-    sample.brakePressed or sample.regenBraking or sample.gasPressed or physical_cancel(sample) or
+    sample.brakePressed or sample.regenBraking or sample.gasPressed or physical_cancel(sample, self.CP) or
     sample.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.sport,
                              car.CarState.GearShifter.low, car.CarState.GearShifter.brake)
     for sample, valid in samples)

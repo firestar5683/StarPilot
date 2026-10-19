@@ -35,6 +35,49 @@ def eligible(cp):
     return False
 
 
+def button_reported(cp, key):
+  """Expose only button events the current vehicle parser actually emits."""
+  brand = cp.brand
+  if key not in KEYS[:8]:
+    return True  # Physical media rows have their separate receiver contract.
+  if brand in ('body', 'byd', 'mg', 'mock', 'psa', 'rivian', 'subaru'):
+    return False
+  if brand == 'toyota':
+    from opendbc.car.toyota.values import CAR, ToyotaFlags
+    if key == 'MainCruiseButtonControl' or key in KEYS[5:8]:
+      return False
+    if key == 'LKASButtonControl':
+      return bool(cp.flags & (ToyotaFlags.TSS2 | ToyotaFlags.LONG_FILTER) or
+                  cp.carFingerprint == CAR.TOYOTA_PRIUS_RETROFIT)
+    return bool(cp.flags & ToyotaFlags.TSS2 and not cp.flags & (ToyotaFlags.RADAR_ACC | ToyotaFlags.SECOC) or
+                cp.flags & ToyotaFlags.LONG_FILTER or cp.carFingerprint in
+                (CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT, CAR.TOYOTA_SIENNA_4TH_GEN))
+  if brand == 'tesla':
+    from opendbc.car.tesla.values import CAR, TeslaFlags
+    if key == 'LKASButtonControl':
+      return bool(cp.carFingerprint not in (CAR.TESLA_MODEL_S_PREAP, CAR.TESLA_MODEL_S_HW1) and
+                  cp.flags & TeslaFlags.AOL_SCREEN_BUTTON)
+    return bool(key in KEYS[5:8] and cp.carFingerprint == CAR.TESLA_MODEL_S_PREAP)
+  if key == 'LKASButtonControl':
+    if brand in ('chrysler', 'gm', 'mazda', 'nissan', 'volkswagen', 'volvo'):
+      return False
+    if brand == 'hyundai':
+      from opendbc.car.hyundai.values import CAR, HyundaiFlags, is_blended
+      return bool(cp.flags & (HyundaiFlags.CANFD | HyundaiFlags.HAS_LDA_BUTTON) or
+                  cp.carFingerprint == CAR.HYUNDAI_ELANTRA_HEV_2024 or is_blended(cp))
+  if key == 'MainCruiseButtonControl' and brand in ('chrysler', 'ford', 'mazda', 'nissan', 'volkswagen'):
+    return False
+  if key in KEYS[5:8]:
+    if brand in ('chrysler', 'nissan'):
+      return False
+    if brand == 'ford':
+      return bool(cp.openpilotLongitudinalControl)
+    if brand == 'mazda':
+      from opendbc.car.mazda.aol import qualified
+      return qualified(cp, marked_only=True)
+  return True
+
+
 def cp_fingerprint(cp):
   reader = cp.as_reader() if hasattr(cp, "as_reader") else cp
   return hashlib.sha256(reader.as_builder().to_bytes()).hexdigest()
@@ -138,6 +181,11 @@ class WheelPublisher:
       state, media if ioniq6_media_eligible(cp) else None)]
     for tracker, source, keys in ((self.cancel_tracker, structs.CarState.ButtonEvent.Type.cancel, KEYS[5:8]),
                                    (self.main_tracker, structs.CarState.ButtonEvent.Type.mainCruise, KEYS[1:2])):
+      if source == structs.CarState.ButtonEvent.Type.cancel and cp.brand == 'gm':
+        from opendbc.car.gm.cancel_remap import enabled as gm_cancel_remap_enabled, supported as gm_cancel_remap_supported
+        if gm_cancel_remap_supported(cp) and not gm_cancel_remap_enabled(cp):
+          self.cancel_tracker = ButtonTracker()
+          continue
       if not any(mapping[key] in DELIVERED_ACTIONS for key in keys):
         continue
       copy = structs.CarState(canValid=state.canValid, canTimeout=state.canTimeout)
@@ -149,7 +197,7 @@ class WheelPublisher:
         if index < len(keys):
           gestures.append((keys[index], gesture))
     commands = [(key, mapping[key]) for key, _ in gestures if key is not None and key not in blocked_keys and
-                key not in self.axis_keys and mapping[key] in DELIVERED_ACTIONS and
+                key not in self.axis_keys and button_reported(cp, key) and mapping[key] in DELIVERED_ACTIONS and
                 (key != "MainCruiseButtonControl" or mapping[key] == 10)]
     if commands and not audit:
       current = capture(params)
@@ -226,7 +274,7 @@ class WheelConsumer:
       if action == 0:
         if key:
           return None
-      elif key not in KEYS or action not in DELIVERED_ACTIONS:
+      elif key not in KEYS or action not in DELIVERED_ACTIONS or not button_reported(cp, key):
         return None
       else:
         mapping = capture(params)

@@ -30,7 +30,7 @@
 .gx-navigation__panel .gx-navigation__search {margin:0}
 .gx-navigation__field {flex:1;display:flex;align-items:center;gap:8px;min-width:0;height:50px;padding:0 6px 0 16px;border-radius:25px}
 .gx-navigation__field>i {opacity:.6}
-.gx-navigation__field input {flex:1;min-width:0;height:100%;border:0;background:none;color:inherit;font:inherit;font-size:1rem;outline:none}
+.gx-navigation__field input {flex:1;min-width:0;height:100%;border:0;background:none;color:inherit;font:inherit;font-size:max(16px, 1rem);outline:none}
 .gx-navigation .gx-navigation__field input:focus-visible {outline:none;box-shadow:none}
 .gx-navigation__field:focus-within {border-color:var(--glass-text);box-shadow:0 0 0 1px var(--glass-border)}
 .gx-navigation__icon {display:inline-grid;place-items:center;flex:0 0 auto;width:44px;height:44px;border:0;border-radius:50%;background:none;color:inherit;font-size:1.05rem;cursor:pointer}

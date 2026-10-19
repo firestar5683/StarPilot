@@ -32,7 +32,7 @@ reduction, one planner-coordinate conversion, lead easing, then an optional
 a valid domain and positive coordinate; the caller cannot set that Boolean.
 Only the two active system-longitudinal modes can emit a ceiling. Stock ACC
 ownership has no system cap or stock setpoint command through this API.
-Display-only, source uncertainty, absent coordinates, missing driver set
+Display-only, unqualified source uncertainty, absent coordinates, missing driver set
 speed, force stop and force deceleration yield no ceiling. A qualified
 previous-limit fallback can emit the raw SLC cap without lead easing.
 
@@ -49,7 +49,8 @@ produced.
 
 Lead prior uses an internal control generation, not accepted-limit identity.
 It clears immediately on host loss, mode or owner change, force stop,
-force deceleration, missing cap and source loss. A resumed active path starts
+force deceleration and missing cap. Qualified retained history keeps its cap
+through source loss without lead easing. A resumed active path starts
 a new generation and cannot ease from the old one. The override reducer may
 retain selected driver intent through its own short inactivity policy, but
 neither that latent intent nor an old ceiling is output while the host gate is

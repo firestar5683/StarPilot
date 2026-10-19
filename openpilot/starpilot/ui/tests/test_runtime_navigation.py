@@ -37,7 +37,8 @@ class TestCompactSettingsNavigation(unittest.TestCase):
   def test_scrolled_device_and_developer_cards_emit_distinct_destinations(self):
     emitted = []
     touch = SettingsInput(Profile.COMPACT, emitted.append)
-    for index, destination in ((5, Destination.DEVICE), (9, Destination.GALAXY), (11, Destination.DEVELOPER)):
+    for destination in (Destination.DEVICE, Destination.GALAXY, Destination.DEVELOPER, Destination.DRIVING_CONTROLS):
+      index = next(index for index, item in enumerate(COMPACT_MENU) if item[0] == destination)
       state = SettingsState(compact_scroll_x=-422 * index)
       touch.press(45, 75, state)
       touch.release(45, 75, state)
@@ -52,10 +53,21 @@ class TestCompactSettingsNavigation(unittest.TestCase):
     touch.release(90, 75, state)
     self.assertEqual(emitted, [])
 
-  def test_compact_main_menu_matches_original_order(self):
+  def test_compact_main_menu_includes_shared_driving_controls(self):
     self.assertEqual([label.lower() for _, label, _, _, _ in COMPACT_MENU],
                      ["toggles", "network", "bluetooth", "force drive state", "vehicle", "device", "software",
-                      "driving model", "visuals", "galaxy", "pair to connect", "developer"])
+                      "driving model", "driving controls", "visuals", "galaxy", "pair to connect", "developer"])
+
+  def test_compact_driving_controls_opens_the_shared_feature_editor(self):
+    from openpilot.starpilot.ui.runtime_app import StarMiciMainLayout
+    from openpilot.starpilot.ui.feature_settings_state import FeaturePage
+    layout = StarMiciMainLayout.__new__(StarMiciMainLayout)
+    layout.star = Mock()
+    with patch('openpilot.starpilot.ui.feature_settings_compact.FeatureSettingsCompact') as editor:
+      layout._open_compact_destination(Destination.DRIVING_CONTROLS)
+    editor.assert_called_once_with(layout.star)
+    editor.return_value.open.assert_called_once_with(FeaturePage.HUB)
+    layout.star._unavailable.assert_not_called()
 
 
 class TestExistingToggleOwner(unittest.TestCase):

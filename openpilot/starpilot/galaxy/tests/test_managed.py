@@ -57,13 +57,16 @@ class Maps:
 def factory(port, host):
   assert host == '0.0.0.0'
   server = make_server(port=0, owner=owner, remote_pairing=pairing, monitor=Monitor(), maps=Maps())
-  (root / 'port').write_text(str(server.server_port))
+  # The parent treats existence as readiness, so publish the complete value.
+  (root / 'port.tmp').write_text(str(server.server_port))
+  (root / 'port.tmp').replace(root / 'port')
   return server
 
 managed.make_server = factory
 def remote_factory(local):
   remote = make_remote_server(local, port=0)
-  (root / 'remote-port').write_text(str(remote.server_port))
+  (root / 'remote-port.tmp').write_text(str(remote.server_port))
+  (root / 'remote-port.tmp').replace(root / 'remote-port')
   return remote
 managed.make_remote_server = remote_factory
 managed.default_remote_pairing = lambda: pairing

@@ -347,6 +347,11 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertTrue(VehicleStartupPreferences.read(self.params, enabled=True).turn_assist)
 
   def test_live_lane_owner_maps_only_explicit_keys(self):
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.toyota.values import CAR
+    cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
     self.owner.authority = lambda group: group == "lane_live"
     view = self.owner.snapshot("lane", parked=False, system_long=False, lateral_context=False, metric=False)
     row = next(row for row in view.rows if row.key == "LaneCentering")
@@ -425,6 +430,11 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertIsNone(self.params.get("CustomPersonalities"))
 
   def test_release_rechecks_parked_authority_and_source(self):
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.toyota.values import CAR
+    cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
     row = self._row("lane", "LaneCentering")
     request = required_change(row)
     self.assertIsNotNone(request)
@@ -463,13 +473,17 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertTrue(self._row("profiles", "LeadApproachBuffer").available)
 
   def test_parent_and_units_guards(self):
-    child = self._row("slc", "SLCConfirmationLower")
-    self.assertFalse(child.available)
-    self.assertFalse(self.owner.apply(FeatureSettingsRequest(child.key, child.source, "On", vehicle_fingerprint=child.vehicle_fingerprint)))
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.toyota.values import CAR
+    cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.assertFalse(any(row.key in ('SLCConfirmationLower', 'SLCConfirmationHigher') for row in
+                         self.owner.snapshot('slc', parked=True, system_long=True, lateral_context=True, metric=False).rows))
+    self.assertFalse(self.owner.apply(FeatureSettingsRequest('SLCConfirmationLower', None, 'On', vehicle_fingerprint=self.fingerprint)))
     parent = self._row("slc", "SLCConfirmation")
     self.assertTrue(self.owner.apply(required_change(parent)))
-    child = self._row("slc", "SLCConfirmationLower")
-    self.assertTrue(self.owner.apply(required_change(child)))
+    self.assertTrue(self.params.get_bool('SLCConfirmation'))
     authority = self._row("lane", "LaneCenteringE2EAuthority")
     self.assertEqual(authority.value, "100.0")
     self.assertTrue(self.owner.apply(required_change(authority, -1)))

@@ -115,8 +115,7 @@ def step(raw_cap_mps: float | None, *, source: SourceEvidence, lead: LeadEvidenc
   """Ease only a qualified cap; caller owns source, lead and control continuity."""
   if not _token(session_id) or not _token(continuity_id) or not isinstance(source, SourceEvidence) or not isinstance(source.kind, ObservationKind):
     return Result(None, None, "invalid_source", ("invalid source identity",))
-  if (type(source.cap_qualified) is not bool or source.kind in (ObservationKind.UNKNOWN, ObservationKind.STALE) or
-      not source.cap_qualified):
+  if type(source.cap_qualified) is not bool or not source.cap_qualified:
     return Result(None, None, "source_unavailable")
   if type(active_path) is not bool or not active_path or raw_cap_mps is None:
     return Result(None, None, "inactive_or_absent")
@@ -133,7 +132,7 @@ def step(raw_cap_mps: float | None, *, source: SourceEvidence, lead: LeadEvidenc
   if override_active:
     return Result(raw_cap_mps, None, "override")
   next_prior = PriorApplied(session_id, continuity_id, raw_cap_mps)
-  if source.kind is ObservationKind.ABSENT:
+  if source.kind is not ObservationKind.VALID:
     return Result(raw_cap_mps, next_prior, "fallback_source")
   if lead.kind is not LeadKind.VALID:
     return Result(raw_cap_mps, next_prior, "lead_unavailable")

@@ -109,6 +109,7 @@ def error_for_frame(parent, cs, baseline_error, *, active, limited):
   source = getattr(parent, 'automatic_flm_effects', None)
   if (
     source is None
+    or observation is None
     or frame is None
     or not getattr(parent, 'automatic_pid_stage_admitted', False)
     or not frame.valid()
@@ -222,6 +223,7 @@ def finish_frame(parent, cs, *, desired_angle_deg, actual_angle_deg, baseline_ou
   if (
     source is None
     or not getattr(parent, 'automatic_pid_stage_admitted', False)
+    or observation is None
     or frame is None
     or not frame.valid()
     or not active

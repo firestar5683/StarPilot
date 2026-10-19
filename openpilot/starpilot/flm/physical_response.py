@@ -2,6 +2,45 @@
 from dataclasses import dataclass
 import math
 
+from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
+
+
+def desired_force_accel(kinematic_accel, control_roll):
+  """Same-control-frame target in the measured speed*yaw - g*sin(roll) domain.
+
+  Never uses a later physical response/pose or controller FF/friction shaping.
+  Controller roll is its recorded estimate; this does not assert it equals the
+  independent calibrated pose estimate at the later measured-response stamp.
+  """
+  if any(type(value) not in (int, float) or not math.isfinite(value)
+         for value in (kinematic_accel, control_roll)):
+    raise ValueError('finite recorded kinematic goal/control roll required')
+  return float(kinematic_accel) - ACCELERATION_DUE_TO_GRAVITY * math.sin(float(control_roll))
+
+
+def request_force_accel(replay_inputs):
+  """Current original request paired with response AFTER the measured lag.
+
+  Stage setpoints may already be delayed/filter-shaped for present PID error.
+  Reusing them here would apply that delay twice. Maneuver geometry retains
+  its separate exact recorded stage setpoint; no future pose is consulted.
+  """
+  values = dict(replay_inputs)
+  if len(values) != len(replay_inputs):
+    raise ValueError('duplicate recorded request inputs')
+  curvature, speed, roll = (values[name] for name in ('desired_curvature', 'vEgo', 'roll'))
+  if any(type(value) not in (int, float) or not math.isfinite(value)
+         for value in (curvature, speed, roll)):
+    raise ValueError('finite original curvature/speed/control roll required')
+  return desired_force_accel(float(curvature) * float(speed)**2, roll)
+
+
+def kinematic_accel(frame):
+  # Explicit original stage setpoint preserves maneuver geometry. Legacy
+  # declared ReplayFrame fixtures retain their original goal convention.
+  value = getattr(frame, 'desired_kinematic_accel', None)
+  return frame.desired_physical_accel if value is None else value
+
 
 @dataclass(frozen=True)
 class PhysicalRow:
@@ -57,6 +96,7 @@ def fit_physical(identity, domain, context, rows, *, lag_ns, min_excitation, max
   for row in rows:
     if (not row.healthy or row.overridden or row.saturated or row.context != context or
         row.direction not in ('left', 'right') or
+        row.command > 0 and row.direction != 'left' or row.command < 0 and row.direction != 'right' or
         type(row.command_ns) is not int or type(row.response_ns) is not int or
         not 0 < row.command_ns <= row.response_ns <= now_ns or row.command_ns < now_ns - history_ns or not math.isfinite(row.command) or
         not math.isfinite(row.physical_response) or row.command_ns <= previous or
@@ -66,7 +106,8 @@ def fit_physical(identity, domain, context, rows, *, lag_ns, min_excitation, max
   train = [row for row in rows if row.block_id in train_ids]
   heldout = [row for row in rows if row.block_id in heldout_ids]
   for group in (train, heldout):
-    if any(len({row.block_id for row in group if row.direction == direction}) < 2 for direction in ('left', 'right')):
+    if any(len({row.block_id for row in group if (row.command > 0 if direction == 'left' else row.command < 0)}) < 2
+           for direction in ('left', 'right')):
       return None
   mean_x = sum(row.command for row in train) / len(train)
   mean_y = sum(row.physical_response for row in train) / len(train)

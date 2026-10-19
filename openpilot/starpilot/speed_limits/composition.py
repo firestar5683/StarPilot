@@ -133,8 +133,7 @@ def step(state: State, frame: Frame) -> Result:
       any(type(value) is not bool for value in (frame.acceptance_policy.confirm_lower,
                                                 frame.acceptance_policy.confirm_higher,
                                                 frame.acceptance_policy.fallback_previous,
-                                                frame.acceptance_policy.display_only,
-                                                frame.acceptance_policy.vision_driver_confirm)) or
+                                                frame.acceptance_policy.display_only)) or
       not isinstance(frame.selected_kind, sd.DomainStatus) or not isinstance(frame.ego_pair, sd.SpeedPair) or
       not isinstance(frame.lead, lr.LeadEvidence)):
     return Result(replace(state, lead_prior=None, reset_required=True), status="invalid_frame", errors=("invalid frame or clock",))

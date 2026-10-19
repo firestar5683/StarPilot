@@ -56,3 +56,30 @@ def test_local_model_does_not_extrapolate_or_accept_quiet_unidentified_input():
   unsupported = tuple(replace(row, command=row.command * 2, physical_response=row.physical_response * 2)
                       if row.block_id in ('4', '5', '6', '7') else row for row in rows)
   assert fit_event_physical('a' * 64, 'physical-context', unsupported, lag_ns=50_000_000, now_ns=unsupported[-1].response_ns) is None
+
+
+def test_zero_and_negative_zero_do_not_supply_negative_direction_support():
+  for zero in (0.0, -0.0):
+    for change_train in (True, False):
+      rows = tuple(replace(row, command=zero, physical_response=.002, direction='right')
+                   if row.command < 0 and (change_train or row.block_id in ('4', '5', '6', '7')) else row
+                   for row in episodes())
+      assert fit_event_physical('a' * 64, 'physical-context', rows,
+                                lag_ns=50_000_000, now_ns=rows[-1].response_ns) is None
+
+
+def test_tiny_positive_has_no_negative_direction_support_and_no_epsilon_is_used():
+  for tiny, expected in ((1e-15, False), (-1e-15, True)):
+    rows = tuple(replace(row, command=tiny, physical_response=1.98 * tiny + .002,
+                         direction='left' if tiny > 0 else 'right') if row.command < 0 else row
+                 for row in episodes())
+    model = fit_event_physical('a' * 64, 'physical-context', rows,
+                               lag_ns=50_000_000, now_ns=rows[-1].response_ns)
+    assert (model is not None) is expected
+
+
+def test_true_bilateral_original_control_still_qualifies():
+  rows = episodes()
+  assert any(row.command > 0 for row in rows) and any(row.command < 0 for row in rows)
+  assert fit_event_physical('a' * 64, 'physical-context', rows,
+                            lag_ns=50_000_000, now_ns=rows[-1].response_ns) is not None

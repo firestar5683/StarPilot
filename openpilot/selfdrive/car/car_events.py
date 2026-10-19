@@ -159,7 +159,8 @@ class CarEvents:
     for b in CS.buttonEvents:
       # Disable on rising and falling edge of cancel for both stock and OP long
       # TODO: only check the cancel button with openpilot longitudinal on all brands to match panda safety
-      if b.type == ButtonType.cancel and (allow_button_cancel or not self.CP.pcmCruise):
+      from opendbc.car.gm.cancel_remap import enabled as gm_cancel_remap_enabled
+      if b.type == ButtonType.cancel and not gm_cancel_remap_enabled(self.CP) and (allow_button_cancel or not self.CP.pcmCruise):
         events.add(EventName.buttonCancel)
 
     # Handle permanent and temporary steering faults

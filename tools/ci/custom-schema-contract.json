@@ -18,7 +18,16 @@
     "SpotMonitorState": "14672680772714322234",
     "StarPilotLateralState": "13989372750770471812",
     "StarPilotCarState": "17536106922917195458",
-    "StarPilotCarParams": "12601069073865356637"
+    "StarPilotCarParams": "12601069073865356637",
+    "LearningControlEvidence": "17457202784589378392",
+    "LearningAppliedEvidence": "13452521580936556142",
+    "AutomaticRuntimeProfile": "17237759581490659811",
+    "AutomaticLearningSourceReceipt": "11521001962468299081",
+    "LearningApplication": "9418936579825531581",
+    "FordLearningEvidence": "15123011525280866286",
+    "FordLearningEvent": "12859710833724959940",
+    "CentreApplicationWitness": "12325001751236334142",
+    "LearningTorqueProjection": "17327869370982877613"
   },
   "nodes": {
     "14441422469354927087": {
@@ -7833,6 +7842,5594 @@
           "discriminantValue": 65535,
           "ordinal": {
             "explicit": 0
+          }
+        }
+      }
+    },
+    "14771723949671444785": {
+      "kind": "struct",
+      "data_words": 1,
+      "pointers": 1,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "name",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "lowerBound",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        }
+      }
+    },
+    "17971603472362864058": {
+      "kind": "struct",
+      "data_words": 5,
+      "pointers": 2,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "name",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "stageRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "low",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "high",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "maxStep",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "slewPerS",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.01
+            }
+          },
+          "name": "excitationFloor",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        }
+      }
+    },
+    "14302220069023501027": {
+      "kind": "struct",
+      "data_words": 2,
+      "pointers": 3,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "baselineRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "physicalModelRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "noSaturationRegression",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "noSlewRegression",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "worstCohortImprovement",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "nativeBaselineValues",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        }
+      }
+    },
+    "15815011305880934903": {
+      "kind": "struct",
+      "data_words": 1,
+      "pointers": 1,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "name",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "value",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        }
+      }
+    },
+    "15881016934164214366": {
+      "kind": "struct",
+      "data_words": 1,
+      "pointers": 18,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "manifestSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "fullOriginalAnchor",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "trialAnchor",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "contextKey",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "cpSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "controllerRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "sourceEpoch",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "resetGeneration",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "selectedBaselineRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 9,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "priorFullProfileSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "fullProfileSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 11,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 15815011305880934903
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "priorCoordinates",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 12,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 15815011305880934903
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "coordinates",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        },
+        "14": {
+          "slot": {
+            "offset": 13,
+            "type": {
+              "list": {
+                "elementType": {
+                  "text": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "trialNames",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 14
+          }
+        },
+        "15": {
+          "slot": {
+            "offset": 14,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "persistentSourceEpoch",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 15
+          }
+        },
+        "16": {
+          "slot": {
+            "offset": 15,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "operation",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 16
+          }
+        },
+        "17": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "historyFullProfileSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 17
+          }
+        },
+        "18": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "restoreTransactionSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 18
+          }
+        }
+      }
+    },
+    "16694850328005731516": {
+      "kind": "struct",
+      "data_words": 1,
+      "pointers": 1,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "name",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "value",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        }
+      }
+    },
+    "15985785327448995907": {
+      "kind": "struct",
+      "data_words": 2,
+      "pointers": 2,
+      "is_group": false,
+      "union_count": 3,
+      "union_offset": 4,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "name",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "number",
+          "discriminantValue": 0,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "text",
+          "discriminantValue": 1,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "boolean",
+          "discriminantValue": 2,
+          "ordinal": {
+            "explicit": 3
+          }
+        }
+      }
+    },
+    "14540349846831803127": {
+      "kind": "struct",
+      "data_words": 3,
+      "pointers": 5,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "struct": {
+                "typeId": 15881016934164214366
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "00000000040000000000000002000100100000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "envelope",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "controlMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "previousMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "qualified",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 16694850328005731516
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "before",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 16694850328005731516
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "target",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 16694850328005731516
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "applied",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "appliedFullProfileSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        }
+      }
+    },
+    "17327869370982877613": {
+      "kind": "struct",
+      "data_words": 11,
+      "pointers": 10,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "family",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "fingerprint",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "flags",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "codecId",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "mappingKind",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "frame",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "requestedTorque",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "codecInputTorque",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "int32": null
+            },
+            "defaultValue": {
+              "int32": 0
+            }
+          },
+          "name": "unlimitedRaw",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "int32": null
+            },
+            "defaultValue": {
+              "int32": 0
+            }
+          },
+          "name": "finalRaw",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "effectiveMax",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "lookupX",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "lookupY",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        },
+        "14": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "limiterKind",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 14
+          }
+        },
+        "15": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "previousTorque",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 15
+          }
+        },
+        "16": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "measuredTorque",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 16
+          }
+        },
+        "17": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 16694850328005731516
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "limits",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 17
+          }
+        },
+        "18": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 15985785327448995907
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "shape",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 18
+          }
+        },
+        "19": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "steerRequested",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 19
+          }
+        },
+        "20": {
+          "slot": {
+            "offset": 11,
+            "type": {
+              "uint32": null
+            },
+            "defaultValue": {
+              "uint32": 0
+            }
+          },
+          "name": "canAddress",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 20
+          }
+        },
+        "21": {
+          "slot": {
+            "offset": 36,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "canBus",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 21
+          }
+        },
+        "22": {
+          "slot": {
+            "offset": 9,
+            "type": {
+              "data": null
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000d0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "canData",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 22
+          }
+        },
+        "23": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "reportedTorque",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 23
+          }
+        },
+        "24": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "unlimitedRawPresent",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 24
+          }
+        }
+      }
+    },
+    "12325001751236334142": {
+      "kind": "struct",
+      "data_words": 7,
+      "pointers": 5,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "identity",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "sourceEpoch",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "controlMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "profileSequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "actualCoordinates",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "baselineRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "physicalModelRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "originalObservedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "originalValidUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "baselineFriction",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "actualFriction",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        }
+      }
+    },
+    "12859710833724959940": {
+      "kind": "struct",
+      "data_words": 20,
+      "pointers": 6,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "eventMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "kind",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 15985785327448995907
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "inputs",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "appliedCoefficient",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "actualPending",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "actualCommand",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "controlMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "pendingControlMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "announcedControlMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "carStateMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 448,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "nativeAllowed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 449,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "fault",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 450,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "override",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        },
+        "14": {
+          "slot": {
+            "offset": 451,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "limited",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 14
+          }
+        },
+        "15": {
+          "slot": {
+            "offset": 452,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "hasWirePath",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 15
+          }
+        },
+        "16": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "actualWirePath",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 16
+          }
+        },
+        "17": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 15985785327448995907
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "checkpoint",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 17
+          }
+        },
+        "18": {
+          "slot": {
+            "offset": 9,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "checkpointSequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 18
+          }
+        },
+        "19": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceReceiptMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 19
+          }
+        },
+        "20": {
+          "slot": {
+            "offset": 11,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceValidUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 20
+          }
+        },
+        "21": {
+          "slot": {
+            "offset": 12,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "appliedProfileSequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 21
+          }
+        },
+        "22": {
+          "slot": {
+            "offset": 13,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "appliedProfileObservedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 22
+          }
+        },
+        "23": {
+          "slot": {
+            "offset": 14,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "appliedProfileValidUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 23
+          }
+        },
+        "24": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "nativeIdentity",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 24
+          }
+        },
+        "25": {
+          "slot": {
+            "offset": 15,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "nativeObservedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 25
+          }
+        },
+        "26": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "nativeValidUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 26
+          }
+        },
+        "27": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "nativeValidatedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 27
+          }
+        },
+        "28": {
+          "slot": {
+            "offset": 18,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "nativeCommandMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 28
+          }
+        },
+        "29": {
+          "slot": {
+            "offset": 19,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "announcedCoefficient",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 29
+          }
+        }
+      }
+    },
+    "15123011525280866286": {
+      "kind": "struct",
+      "data_words": 8,
+      "pointers": 11,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "identity",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "generation",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "sourceEpoch",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "baselineRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "baselineValues",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "controllerRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "cpSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "controllerMode",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "policy",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "conversionRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 9,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "stageRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceReceiptMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceValidUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        },
+        "14": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "enabled",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 14
+          }
+        },
+        "15": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "manual",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 15
+          }
+        },
+        "16": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 12859710833724959940
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "rows",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 16
+          }
+        },
+        "17": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "dropped",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 17
+          }
+        },
+        "18": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "appliedProfileSequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 18
+          }
+        },
+        "19": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "appliedProfileObservedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 19
+          }
+        },
+        "20": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "appliedProfileValidUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 20
+          }
+        }
+      }
+    },
+    "9418936579825531581": {
+      "kind": "struct",
+      "data_words": 3,
+      "pointers": 9,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "identity",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "profileSequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "observedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "status",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "actualCoordinates",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "reason",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "baselineRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "physicalModelRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "effectManifestSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "effectOriginalAnchor",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "effectAppliedProfileSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        }
+      }
+    },
+    "11521001962468299081": {
+      "kind": "struct",
+      "data_words": 3,
+      "pointers": 6,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "enabled",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "manual",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "resetGeneration",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "sourceEpoch",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "observedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "validUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "cpSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "calibrationBasis",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "calibrationGeneration",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "persistentSourceEpoch",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        }
+      }
+    },
+    "17237759581490659811": {
+      "kind": "struct",
+      "data_words": 6,
+      "pointers": 9,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "identity",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "observedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "validUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "policy",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 17971603472362864058
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "parameters",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "coefficients",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "list": {
+                "elementType": {
+                  "text": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "trainIds",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "list": {
+                "elementType": {
+                  "text": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "heldoutIds",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "baselineLoss",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "candidateLoss",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 14771723949671444785
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "cohortImprovements",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "struct": {
+                "typeId": 14302220069023501027
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "00000000040000000000000002000100100000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "replay",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        },
+        "14": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "struct": {
+                "typeId": 15881016934164214366
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "00000000040000000000000002000100100000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "fullSurface",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 14
+          }
+        }
+      }
+    },
+    "13452521580936556142": {
+      "kind": "struct",
+      "data_words": 7,
+      "pointers": 2,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "controlMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceStateMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "appliedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "domain",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "applied",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "valid",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "active",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 18,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "override",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 19,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "fault",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 20,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "limited",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 21,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "nativeAllowed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "struct": {
+                "typeId": 17327869370982877613
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "00000000040000000000000002000100100000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "projection",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "carrierFrame",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        },
+        "14": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "carrierObservedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 14
+          }
+        }
+      }
+    },
+    "17457202784589378392": {
+      "kind": "struct",
+      "data_words": 14,
+      "pointers": 19,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "identity",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "generation",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "controlMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceStateMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "domain",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "stageRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "responseRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "requested",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "features",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "baselinePrediction",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "enabled",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "manual",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 18,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "active",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        },
+        "14": {
+          "slot": {
+            "offset": 19,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "valid",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 14
+          }
+        },
+        "15": {
+          "slot": {
+            "offset": 20,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "override",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 15
+          }
+        },
+        "16": {
+          "slot": {
+            "offset": 21,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "fault",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 16
+          }
+        },
+        "17": {
+          "slot": {
+            "offset": 22,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "saturated",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 17
+          }
+        },
+        "18": {
+          "slot": {
+            "offset": 23,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "limited",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 18
+          }
+        },
+        "19": {
+          "slot": {
+            "offset": 24,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "modelWobble",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 19
+          }
+        },
+        "20": {
+          "slot": {
+            "offset": 25,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "controllerChatter",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 20
+          }
+        },
+        "21": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "stageSchemaRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 21
+          }
+        },
+        "22": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 16694850328005731516
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "stageValues",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 22
+          }
+        },
+        "23": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "appliedCoordinates",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 23
+          }
+        },
+        "24": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "sourceEpoch",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 24
+          }
+        },
+        "25": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceReceiptMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 25
+          }
+        },
+        "26": {
+          "slot": {
+            "offset": 9,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "controllerMode",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 26
+          }
+        },
+        "27": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "policy",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 27
+          }
+        },
+        "28": {
+          "slot": {
+            "offset": 11,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "baselineRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 28
+          }
+        },
+        "29": {
+          "slot": {
+            "offset": 12,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "baselineValues",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 29
+          }
+        },
+        "30": {
+          "slot": {
+            "offset": 13,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "controllerRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 30
+          }
+        },
+        "31": {
+          "slot": {
+            "offset": 14,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 15985785327448995907
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "replaySnapshot",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 31
+          }
+        },
+        "32": {
+          "slot": {
+            "offset": 15,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 15985785327448995907
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "replayInputs",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 32
+          }
+        },
+        "33": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "snapshotSequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 33
+          }
+        },
+        "34": {
+          "slot": {
+            "offset": 26,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "turnAssist",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 34
+          }
+        },
+        "35": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "list": {
+                "elementType": {
+                  "text": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "appliedParameterNames",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 35
+          }
+        },
+        "36": {
+          "slot": {
+            "offset": 27,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "nativeRequired",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 36
+          }
+        },
+        "37": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "nativeObservedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 37
+          }
+        },
+        "38": {
+          "slot": {
+            "offset": 9,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "nativeValidUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 38
+          }
+        },
+        "39": {
+          "slot": {
+            "offset": 28,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "nativeAllowed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 39
+          }
+        },
+        "40": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "nativeIdentity",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 40
+          }
+        },
+        "41": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "appliedProfileSequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 41
+          }
+        },
+        "42": {
+          "slot": {
+            "offset": 11,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "appliedProfileObservedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 42
+          }
+        },
+        "43": {
+          "slot": {
+            "offset": 12,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "appliedProfileValidUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 43
+          }
+        },
+        "44": {
+          "slot": {
+            "offset": 18,
+            "type": {
+              "struct": {
+                "typeId": 14540349846831803127
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "00000000040000000000000002000100100000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "effectTrace",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 44
+          }
+        },
+        "45": {
+          "slot": {
+            "offset": 13,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "effectPrepareMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 45
+          }
+        }
+      }
+    },
+    "15386814470115535835": {
+      "kind": "struct",
+      "data_words": 2,
+      "pointers": 1,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "slotIndex",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "hardwareSerial",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "safetyModel",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "safetyParam",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "alternativeExperience",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 64,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "controlsAllowed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 65,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "safetyRxChecksInvalid",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 66,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "heartbeatLost",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint32": null
+            },
+            "defaultValue": {
+              "uint32": 0
+            }
+          },
+          "name": "faults",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        }
+      }
+    },
+    "15726932412311988567": {
+      "kind": "enum",
+      "values": [
+        "unknown",
+        "none",
+        "transportPause",
+        "critical",
+        "availabilityPause"
+      ]
+    },
+    "14712614999054277729": {
+      "kind": "struct",
+      "data_words": 2,
+      "pointers": 1,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "carStateMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "cpFingerprint",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "engaged",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "notArmed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        }
+      }
+    },
+    "13058723409218510441": {
+      "kind": "struct",
+      "data_words": 7,
+      "pointers": 4,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "sessionId",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "observedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "validUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "driveStartMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "carFingerprint",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceCarControlMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint8": null
+            },
+            "defaultValue": {
+              "uint8": 0
+            }
+          },
+          "name": "actionCode",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "buttonKey",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceCarStateMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "carParamsFingerprint",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            }
+          },
+          "name": "targetSpeedMps",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        }
+      }
+    },
+    "13948552236903044890": {
+      "kind": "struct",
+      "data_words": 8,
+      "pointers": 3,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "sessionId",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "observedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "driveStartMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "settingsFingerprint",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "buttonMapFingerprint",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceEpoch",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceBootTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceCarStateMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "validUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "toggle",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "enum": {
+                "typeId": 13113724762475091543
+              }
+            },
+            "defaultValue": {
+              "enum": 0
+            }
+          },
+          "name": "button",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "enum": {
+                "typeId": 14804650046286238203
+              }
+            },
+            "defaultValue": {
+              "enum": 0
+            }
+          },
+          "name": "press",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        }
+      }
+    },
+    "14804650046286238203": {
+      "kind": "enum",
+      "values": [
+        "unknown",
+        "short",
+        "long",
+        "veryLong"
+      ]
+    },
+    "13113724762475091543": {
+      "kind": "enum",
+      "values": [
+        "unknown",
+        "mode",
+        "custom",
+        "distance"
+      ]
+    },
+    "10061592757358538409": {
+      "kind": "struct",
+      "data_words": 7,
+      "pointers": 3,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "sessionId",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "observedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "validUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "driveStartMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "settingsFingerprint",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "enum": {
+                "typeId": 11118026291192664612
+              }
+            },
+            "defaultValue": {
+              "enum": 0
+            }
+          },
+          "name": "choice",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "plannerSessionId",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceCarStateMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceSelfdriveStateMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "uint8": null
+            },
+            "defaultValue": {
+              "uint8": 0
+            }
+          },
+          "name": "expectedManualCode",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 40,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "expectedExperimental",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        }
+      }
+    },
+    "12075280373854838092": {
+      "kind": "struct",
+      "data_words": 1,
+      "pointers": 2,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "source",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "enabled",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "observationKind",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            }
+          },
+          "name": "speedLimit",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        }
+      }
+    },
+    "17691992740249111727": {
+      "kind": "struct",
+      "data_words": 6,
+      "pointers": 1,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "sessionId",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "observedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "validUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "driveStartMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "requested",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "effective",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceCarControlMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        }
+      }
+    },
+    "10162515128716918408": {
+      "kind": "struct",
+      "data_words": 7,
+      "pointers": 5,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "sessionId",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "observedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "validUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "driveStartMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceEpoch",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceBootTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "accepted",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "effective",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "reason",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "settingsFingerprint",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "buttonMapFingerprint",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 18,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "profileTargetReady",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        },
+        "14": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "profileReason",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 14
+          }
+        },
+        "15": {
+          "slot": {
+            "offset": 19,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "controllerSource",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 15
           }
         }
       }

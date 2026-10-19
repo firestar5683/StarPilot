@@ -1,4 +1,6 @@
 """Child-only canonical effect trials through complete selected controller/CAN history."""
+
+from typing import cast
 from collections.abc import Mapping
 import math
 
@@ -15,37 +17,39 @@ POLICY = 'event_effect_coordinate_v2'
 RESTORE_POLICY = 'event_effect_restore_v1'
 
 
-class _LazyControllerRequests(Mapping):
+class _LazyControllerRequests(Mapping[int, float]):
   """Only original native replay may pull this child-local controller iterator.
 
   Values are cached by their exact control timestamp. Native apply-order stays
   owned by EmissionHistory.rollout, including duplicate/older requested stamps.
   No result is successful until finish() exhausts all original controller guards.
   """
-  def __init__(self, values, frames):
-    self.values, self.frames = values, frames
+  _values: dict[int, float]
+
+  def __init__(self, values: dict[int, float], frames):
+    self._values, self.frames = values, frames
     self.finished = False
 
   def __contains__(self, stamp):
-    while stamp not in self.values and not self.finished:
+    while stamp not in self._values and not self.finished:
       try:
         next(self.frames)
       except StopIteration:
         self.finished = True
-    return stamp in self.values
+    return stamp in self._values
 
   def __getitem__(self, stamp):
     if stamp not in self:
       raise KeyError(stamp)
-    return self.values[stamp]
+    return self._values[stamp]
 
   def __iter__(self):
     self.finish()
-    return iter(self.values)
+    return iter(self._values)
 
   def __len__(self):
     self.finish()
-    return len(self.values)
+    return len(self._values)
 
   def close(self):
     self.frames.close()
@@ -247,7 +251,7 @@ class EventControllerReplay:
       not restore_target and restore_omit_group is None and _prefix_context is not None)
     build_prefix = bool(prefix_eligible and _prefix_context[1] and not shadow and tuple(coordinates) == self.reference)
     certificate = self.__dict__.get('_EventControllerReplay__controller_prefix') if prefix_eligible and not build_prefix else None
-    if certificate is not None and certificate[0] != _prefix_context[0]:
+    if certificate is not None and certificate[0] != cast(tuple[object, bool], _prefix_context)[0]:
       certificate = None
     prefix_requests, prefix_saturated, prefix_states = {}, {}, {}
 
@@ -359,7 +363,7 @@ class EventControllerReplay:
       # original final-window/tick guard must ALSO finish before any result exists.
       lazy_requests.finish()
       if build_prefix and prefix_requests and prefix_states:
-        self.__pending_controller_prefix = (_prefix_context[0], MappingProxyType(prefix_requests),
+        self.__pending_controller_prefix = (cast(tuple[object, bool], _prefix_context)[0], MappingProxyType(prefix_requests),
           MappingProxyType(prefix_saturated), MappingProxyType(prefix_states))
       return requests, encoded, saturated
     finally:

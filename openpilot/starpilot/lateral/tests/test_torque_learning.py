@@ -1,4 +1,4 @@
-"""Controller-specific learning is enforced by its producer and both consumers."""
+"""Native refinement respects saved OFF, manual precedence and startup latching."""
 
 import os
 from pathlib import Path
@@ -56,7 +56,8 @@ class TestTorqueLearning(unittest.TestCase):
           cp = cp_for(vehicle)
           params.remove(DOCUMENT_KEY)
           params.remove(LEARNING_OFF_KEY)
-          self.assertFalse(learning_allowed(params, cp))
+          # Both selected modes support native refinement without manual edits.
+          self.assertTrue(learning_allowed(params, cp))
           select(params, cp, ControllerMode.STANDARD)
           self.assertTrue(learning_allowed(params, cp))
           for saved in (b'1', b'invalid', b''):
@@ -69,7 +70,7 @@ class TestTorqueLearning(unittest.TestCase):
         self.assertFalse(learning_allowed(params, cp_for(vehicle)))
       self.assertFalse(learning_allowed(params, cp_for(TOYOTA.TOYOTA_RAV4_TSS2)))
 
-  def test_scoped_learning_choice_preserves_legacy_and_controller_compatibility(self):
+  def test_scoped_learning_choice_preserves_legacy_and_both_controller_modes(self):
     with OpenpilotPrefix():
       params, cp = Params(), cp_for(HYUNDAI.HYUNDAI_IONIQ_6)
       params.put_bool(LEARNING_OFF_KEY, True, block=True)
@@ -77,7 +78,7 @@ class TestTorqueLearning(unittest.TestCase):
       params.put(LEARNING_KEY, replace_preference(None, cp, True), block=True)
       self.assertTrue(read_preference(params, cp).enabled)
       self.assertEqual(read_preference(params, cp).source, 'scope')
-      self.assertFalse(learning_allowed(params, cp))  # Vehicle tune remains incompatible.
+      self.assertTrue(learning_allowed(params, cp))  # Scoped ON supports the vehicle controller too.
       select(params, cp, ControllerMode.STANDARD)
       self.assertTrue(learning_allowed(params, cp))
       other = cp_for(TOYOTA.TOYOTA_COROLLA_TSS2)
@@ -108,6 +109,9 @@ class TestTorqueLearning(unittest.TestCase):
         params.put('CarParams', cp.to_bytes(), block=True)
         cache = Path(params.get_param_path('LiveTorqueParameters'))
         cache.write_bytes(b'preserved previous learning')
+        # Disabled is an explicit saved user choice, independent of controller mode.
+        params.put_bool(LEARNING_OFF_KEY, True, block=True)
+        self.assertFalse(learning_allowed(params, cp))
         with mock.patch.object(torqued, 'get_cache') as restore:
           estimator = torqued.TorqueEstimator(cp, allow_learning=learning_allowed(params, cp))
           restore.assert_not_called()
@@ -170,7 +174,7 @@ class TestTorqueLearning(unittest.TestCase):
       fit.assert_called_once()
       self.assertTrue(message.valid)
 
-  def test_direct_controller_consumer_rejects_learned_messages_and_latches_policy(self):
+  def test_direct_controller_accepts_native_refinement_in_both_modes_and_latches_policy(self):
     now = 1_000_000_000
 
     def feed_learning(controls):
@@ -196,11 +200,12 @@ class TestTorqueLearning(unittest.TestCase):
         feed_learning(controls)
         with mock.patch.object(controls.LaC, 'update_torque_parameters') as update:
           controls.state_control()
-          self.assertEqual(update.call_count, 0 if vehicle in VEHICLES else 1)
+          update.assert_called_once()
           if vehicle in VEHICLES:
             select(params, cp, ControllerMode.STANDARD)
             controls.state_control()
-            update.assert_not_called()
+            self.assertEqual(update.call_count, 2)
+            self.assertTrue(controls.torque_learning_allowed)
             self.assertEqual(controls.LaC.controller_mode, ControllerMode.STARPILOT)
             next_drive = Controls()
             self.assertTrue(next_drive.torque_learning_allowed)
@@ -261,7 +266,7 @@ class TestTorqueLearning(unittest.TestCase):
       self.assertEqual(host._select(learned, now).source, TorqueSource.USER)
       self.assertFalse(TorqueHost(params, cp, allow_learning=learning_allowed(params, cp)).allow_learning)
 
-  def test_running_manual_host_latches_both_learning_directions_and_keeps_manual_edits(self):
+  def test_running_manual_host_keeps_native_disabled_after_manual_reset_and_keeps_edits(self):
     with OpenpilotPrefix(), mock.patch.dict(os.environ, ENV), \
          mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
       params, cp = Params(), cp_for(HYUNDAI.HYUNDAI_IONIQ_6)
@@ -270,12 +275,13 @@ class TestTorqueLearning(unittest.TestCase):
       select(params, cp, ControllerMode.STANDARD)
       params.put('SteerFriction', cp.lateralTuning.torque.friction * 1.2, block=True)
       controls = Controls()
+      self.assertFalse(controls.torque_learning_allowed)
       params.remove('SteerFriction')
       host, base = controls.torque_host, controls.torque_host.vehicle
       now = 1_000_000_000
       learned = LearnedFrame(now, factor=base.lat_accel_factor * 1.2, offset=0.03, friction=base.friction * 1.1)
       host.sample(learned, now_ns=now, lat_active=True)
-      self.assertEqual(host.selected.source, TorqueSource.LEARNED)
+      self.assertEqual(host.selected.source, TorqueSource.VEHICLE)
       select(params, cp, ControllerMode.STARPILOT)
       params.put_bool(LEARNING_OFF_KEY, True, block=True)
       for tick in range(1, 102):
@@ -283,14 +289,14 @@ class TestTorqueLearning(unittest.TestCase):
         learned.logMonoTime['lateralTorqueParameters'] = stamp
         host.sample(learned, now_ns=stamp, lat_active=True)
       self.assertEqual(controls.LaC.controller_mode, ControllerMode.STANDARD)
-      self.assertEqual(host.selected.source, TorqueSource.LEARNED)
+      self.assertEqual(host.selected.source, TorqueSource.VEHICLE)
       params.put('SteerLatAccel', base.lat_accel_factor * 1.1, block=True)
       assert host is not None
       host.last_refresh_ns = None
       host.sample(learned, now_ns=stamp + 10_000_000, lat_active=True)
       self.assertEqual(host.selected.source, TorqueSource.USER)
       self.assertAlmostEqual(host.selected.lat_accel_factor, base.lat_accel_factor * 1.1)
-      self.assertEqual(host.selected.friction, learned.state.frictionCoefficientFiltered)
+      self.assertEqual(host.selected.friction, base.friction)
 
       next_drive = Controls()
       disabled = next_drive.torque_host

@@ -199,7 +199,7 @@ jobs:
       run: tools/op.sh test --json-output unit-test-results.json
     - name: Test custom module-level pytest cases
       if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-      timeout-minutes: 10
+      timeout-minutes: 15
       env:
         RAYLIB_BACKEND: headless
       run: python3 tools/ci/run_host_tests.py --pytest

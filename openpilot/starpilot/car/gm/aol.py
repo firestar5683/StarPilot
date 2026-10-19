@@ -1,6 +1,7 @@
 """GM-owned AOL capabilities; exact CP admission lives with the vehicle."""
 
 import math
+from opendbc.car.gm.cancel_remap import aol_enabled, enabled as cancel_remap_enabled, supported as cancel_remap_supported
 
 from opendbc.car.structs import CarParams
 from opendbc.car.gm.values import CAR, control_flags, camera_acc_pedal_profile, is_volt_ascm_longitudinal
@@ -14,7 +15,7 @@ def policy_for(cp) -> AolVehiclePolicy:
   return AolVehiclePolicy(intent_supported=qualified, settings_supported=qualified,
                          runtime_supported=qualified, normal_runtime_supported=qualified,
                          lkas_button_supported=False,
-                         full_axis_runtime_required=qualified and int(cp.alternativeExperience) == GM_AOL_ALTERNATIVE_EXPERIENCE,
+                         full_axis_runtime_required=qualified and aol_enabled(cp),
                          alternative_experience_addition=GM_AOL_ALTERNATIVE_EXPERIENCE if qualified else 0)
 
 
@@ -23,7 +24,7 @@ def native_profile_supported(model: int, param: int) -> bool:
 
 
 def native_accepts_cp(cp, model: int, param: int) -> bool:
-  return (qualified_gm(cp) and int(cp.alternativeExperience) == GM_AOL_ALTERNATIVE_EXPERIENCE and
+  return (qualified_gm(cp) and aol_enabled(cp) and
           native_profile_supported(model, param))
 
 
@@ -39,6 +40,19 @@ class GmAolCardIntent(AolCardIntent):
     self._main_arm_ns = 0
     self.startup_calibration_pending = True
     self._startup_incomplete = False
+
+  def update_auxiliary(self, CS, *, media=None, media_eligible=False, fault_active=None):
+    semantic = CS
+    if (cancel_remap_supported(self.cp) and not cancel_remap_enabled(self.cp) and
+        any(str(event.type) == 'cancel' for event in CS.buttonEvents)):
+      semantic = CS.as_builder() if hasattr(CS, 'as_builder') else CS.as_reader().as_builder()
+      semantic.buttonEvents = [event for event in CS.buttonEvents if str(event.type) != 'cancel']
+    super().update_auxiliary(semantic, media=media, media_eligible=media_eligible, fault_active=fault_active)
+
+  @property
+  def main_action(self):
+    # GM MAIN reports a persistent physical level, not an independent AOL toggle.
+    return 0 if self.settings.main_action == AOL_TOGGLE else self.settings.main_action
 
   def update(self, CS, *, consumed_buttons=frozenset(), fault_active=None,
              now_ns=0, native_rejection_ns=0, standard_enabled=False):
@@ -64,7 +78,7 @@ class GmAolCardIntent(AolCardIntent):
 
   @property
   def main_arm_ns(self):
-    return (self._main_arm_ns if self.settings.enabled and self.settings.main_action != AOL_TOGGLE and
+    return (self._main_arm_ns if self.settings.enabled and self.main_action != AOL_TOGGLE and
             not self.pause_lateral and not self.pause_longitudinal else 0)
 
   def _arm_from_full_engagement(self, CS, *, source_ns):
@@ -87,7 +101,7 @@ class GmAolCardIntent(AolCardIntent):
         any(event.name == log.OnroadEvent.EventName.calibrationIncomplete for event in events))
     cold_readiness = bool(self.startup_calibration_pending and cold_safe and
       (prior_incomplete or self._startup_incomplete) and
-      self.settings.enabled and self.settings.main_action != AOL_TOGGLE and
+      self.settings.enabled and self.main_action != AOL_TOGGLE and
       not CS.steerFaultPermanent and not self._main_cycle_required)
     if cold_readiness:
       self._calibration_rearm_required = False
@@ -204,7 +218,7 @@ def physical_longitudinal_withdrawal_source(cp, cs, parser, observation, now_ns)
   from opendbc.car.structs import car
   try:
     if (not qualified_gm(cp) or not is_bolt_present_no_acc_pedal_profile(cp) or
-        int(cp.alternativeExperience) != GM_AOL_ALTERNATIVE_EXPERIENCE or
+        not aol_enabled(cp) or
         observation is None or observation[0] is not cs or not cs.canValid or cs.canTimeout):
       return 0
     fields = []
@@ -238,7 +252,7 @@ def retained_physical_longitudinal_intent(feedback, sm, cp, cs, axis, now_ns, *,
   from openpilot.starpilot.aol.transport_pause import independent_lateral_health
   occurrence = feedback.gm_withdrawal_ns or source_ns
   if (not qualified_gm(cp) or not is_bolt_present_no_acc_pedal_profile(cp) or
-      int(cp.alternativeExperience) != GM_AOL_ALTERNATIVE_EXPERIENCE or
+      not aol_enabled(cp) or
       not latched or feedback.failed or feedback.paused or feedback.pending_event or
       feedback.retention_started_ns or not feedback.session or str(axis.sessionId) != feedback.session or
       not feedback.healthy_feedback_ns or not 0 <= now_ns - feedback.healthy_feedback_ns <= AXIS_MAX_AGE_NS or
@@ -291,7 +305,7 @@ def physical_cancel_lateral_allowed(cp, cs, intent, native, *, source_ns, now_ns
   from openpilot.starpilot.aol.runtime import AXIS_MAX_AGE_NS, SAFETY_MAX_AGE_NS, native_inventory_matches_cp
   try:
     return bool(qualified_gm(cp) and is_bolt_present_no_acc_pedal_profile(cp) and
-      int(cp.alternativeExperience) == GM_AOL_ALTERNATIVE_EXPERIENCE and
+      aol_enabled(cp) and
       intent is not None and intent.settingsQualified and intent.allowedLatch and intent.lateralArmed and
       intent.producerSessionId and intent.carStateLogMonoTime == source_ns and
       0 < source_ns <= intent.observedMonoTime <= now_ns <= intent.validUntilMonoTime and
@@ -317,7 +331,7 @@ def seatbelt_lateral_soft_event_allowed(cp, cs, intent, native, event, *, source
   from openpilot.starpilot.aol.runtime import AXIS_MAX_AGE_NS, SAFETY_MAX_AGE_NS, native_inventory_matches_cp
   try:
     return bool(is_bolt_present_no_acc_pedal_profile(cp) and
-      int(cp.alternativeExperience) == GM_AOL_ALTERNATIVE_EXPERIENCE and
+      aol_enabled(cp) and
       event.name == log.OnroadEvent.EventName.seatbeltNotLatched and event.softDisable and
       event.noEntry and not event.immediateDisable and not event.userDisable and
       cs.seatbeltUnlatched and cs.canValid and not cs.canTimeout and not cs.accFaulted and not cs.doorOpen and

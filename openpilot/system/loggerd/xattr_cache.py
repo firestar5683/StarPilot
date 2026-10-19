@@ -8,6 +8,8 @@ if sys.platform == "darwin":
   _libc = ctypes.CDLL(None, use_errno=True)
   _libc.getxattr.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint32, ctypes.c_int]
   _libc.getxattr.restype = ctypes.c_ssize_t
+  _libc.fgetxattr.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint32, ctypes.c_int]
+  _libc.fgetxattr.restype = ctypes.c_ssize_t
   _libc.setxattr.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint32, ctypes.c_int]
   _libc.setxattr.restype = ctypes.c_int
 
@@ -50,6 +52,30 @@ def _setxattr(path: str, attr_name: str, attr_value: bytes) -> None:
     _raise_os_error(path)
 
 _cached_attributes: dict[tuple, bytes | None] = {}
+
+def getxattr_fd(fd: int, attr_name: str) -> bytes | None:
+  """Read the pinned inode now; descriptor numbers must never be cache keys."""
+  try:
+    if sys.platform != 'darwin':
+      return os.getxattr(fd, attr_name)
+    name = os.fsencode(attr_name)
+    while True:
+      size = _libc.fgetxattr(fd, name, None, 0, 0, 0)
+      if size == -1:
+        _raise_os_error(str(fd))
+      if size == 0:
+        return b''
+      value = ctypes.create_string_buffer(size)
+      result = _libc.fgetxattr(fd, name, value, size, 0, 0)
+      if result != -1:
+        return value.raw[:result]
+      if ctypes.get_errno() != errno.ERANGE:
+        _raise_os_error(str(fd))
+  except OSError as error:
+    if error.errno == errno.ENODATA or (hasattr(errno, 'ENOATTR') and error.errno == errno.ENOATTR):
+      return None
+    raise
+
 
 def getxattr(path: str, attr_name: str) -> bytes | None:
   key = (path, attr_name)

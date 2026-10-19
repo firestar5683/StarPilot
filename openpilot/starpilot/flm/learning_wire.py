@@ -1,11 +1,37 @@
 """Typed custom child snapshots; legacy Event fields and linear fit unchanged."""
 
+from typing import TypedDict, cast
+
+
 from functools import lru_cache
 
 from capnp.lib.capnp import _DynamicStructReader
 from openpilot.cereal import custom, messaging
 from openpilot.starpilot.flm.adaptive_profile import Parameter, Profile, ReplayValidation, replay_accepts
 from openpilot.starpilot.flm.fullrate_collector import ControlEvidence, AppliedEvidence, identity, finite
+
+
+class _FullSurfaceFields(TypedDict):
+  version: int
+  manifest_sha256: str
+  full_original_anchor: str
+  trial_anchor: str
+  context_key: str
+  cp_sha256: str
+  controller_revision: str
+  source_epoch: str
+  reset_generation: str
+  selected_baseline_revision: str
+  prior_full_profile_sha256: str
+  full_profile_sha256: str
+  prior_coordinates: tuple[tuple[str, float], ...]
+  coordinates: tuple[tuple[str, float], ...]
+  trial_names: tuple[str, ...]
+  persistent_source_epoch: str
+  operation: str
+  history_full_profile_sha256: str
+  restore_transaction_sha256: str
+
 
 VERSION = 1
 MAX_FIELDS = 8
@@ -70,7 +96,8 @@ def _read_effect_trace(row):
     raise ValueError('effect trace original envelope')
   values=[tuple((str(v.name),float(v.value)) for v in getattr(row,n)) for n in ('before','target','applied')]
   return FullEffectTrace(1,envelope,int(row.controlMonoTime),int(row.previousMonoTime),bool(row.qualified),
-    *values,str(row.appliedFullProfileSha256)).validate()
+    *cast(tuple[tuple[tuple[str, float], ...], tuple[tuple[str, float], ...], tuple[tuple[str, float], ...]], values),
+    str(row.appliedFullProfileSha256)).validate()
 
 
 def write_control(parent, evidence):
@@ -279,11 +306,11 @@ def _read_full_surface(row):
   try:
     if row.version not in (1, 2) or len(row.priorCoordinates) != 30 or len(row.coordinates) != 30 or not 1 <= len(row.trialNames) <= 4:
       return None
-    values = {field: str(getattr(row, wire)) for wire, field in _FULL_FIELDS}
+    values: dict[str, object] = {field: str(getattr(row, wire)) for wire, field in _FULL_FIELDS}
     values.update(version=int(row.version), prior_coordinates=tuple((str(point.name), float(point.value)) for point in row.priorCoordinates),
                   coordinates=tuple((str(point.name), float(point.value)) for point in row.coordinates),
                   trial_names=tuple(str(name) for name in row.trialNames))
-    return FullSurfaceEnvelope(**values).validate()
+    return FullSurfaceEnvelope(**cast(_FullSurfaceFields, values)).validate()
   except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
     return None
 

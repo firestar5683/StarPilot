@@ -57,6 +57,12 @@ def _unit_factor(metric: bool) -> float:
   return od.KPH_TO_MPS if metric else od.MPH_TO_MPS
 
 
+def _minimum_offset(document: od.OffsetDocument, index: int, metric: bool) -> float:
+  minimum = -150 if metric else -99
+  boundary = -document.bounds_mps[index + 1] / _unit_factor(metric)
+  return max(minimum, math.floor(boundary) + 1) if math.isfinite(boundary) else minimum
+
+
 def _display(value: float) -> str:
   return f"{value:.2f}".rstrip("0").rstrip(".")
 
@@ -141,22 +147,20 @@ class SlcOffsetOwner:
     if isinstance(snap.document, od.OffsetDocument) and snap.metric is not None:
       unit = "km/h" if snap.metric else "mph"
       scale = 1 / _unit_factor(snap.metric)
-      display_bounds = ((0, 25, 35, 45, 55, 65, 75, 100) if not snap.metric and snap.document.bounds_mps == od.IMPERIAL_BOUNDS else
-                        (0, 30, 50, 60, 80, 100, 120, 140) if snap.metric and snap.document.bounds_mps == od.METRIC_BOUNDS else
-                        tuple(round(bound * scale) for bound in snap.document.bounds_mps))
+      display_bounds = tuple(_display(bound * scale) for bound in snap.document.bounds_mps)
       for index in range(7):
         # Round presentation only: the stored SI boundaries remain authoritative.
-        label = f"{display_bounds[index]}–{display_bounds[index + 1]} {unit}"
+        label = f"{display_bounds[index]}–<{display_bounds[index + 1]} {unit}"
         value = _display(snap.document.offsets_mps[index] * scale)
         rows.append(FeatureRow(OFFSET_KEYS[index], label + " offset", value, snap.raw_document,
                                step=1 if snap.raw_document is not None else 0, unit=unit,
-                               minimum=-150 if snap.metric else -99, maximum=150 if snap.metric else 99,
+                               minimum=_minimum_offset(snap.document, index, snap.metric), maximum=150 if snap.metric else 99,
                                available=available and snap.raw_document is not None,
                                reason="Legacy value; adopt to edit" if snap.raw_document is None else
-                                      "Speed ranges are rounded for display; saved limits keep their exact values",
+                                      "Upper boundary excluded; ranges rounded to 2 decimals. Unsafe reductions use the unadjusted limit",
                                related_source=snap.raw_unit, capability=capable, dependencies=deps,
                                display_unit=unit, default_value="0"))
-      rows.append(FeatureRow("", "Above final band", "Zero offset"))
+      rows.append(FeatureRow("", f"{display_bounds[-1]} {unit} and above", "Zero offset"))
     else:
       for index, key in enumerate(OFFSET_KEYS, start=1):
         label = f"Band {index} offset (invalid saved units)" if snap.metric is None else f"Band {index} offset"
@@ -214,14 +218,14 @@ class SlcOffsetOwner:
             return False
           index = OFFSET_KEYS.index(request.key)
           current = snap.document.offsets_mps[index]
-          shown = current / _unit_factor(snap.metric)
-          candidate_display = float(request.value) if request.direction == 0 else shown + request.direction
-          low, high = (-150.0, 150.0) if snap.metric else (-99.0, 99.0)
-          if not math.isfinite(candidate_display) or not low <= candidate_display <= high:
+          low, high = _minimum_offset(snap.document, index, snap.metric), 150.0 if snap.metric else 99.0
+          factor = _unit_factor(snap.metric)
+          candidate = (float(request.value) * factor if request.direction == 0 else
+                       max(low * factor, min(high * factor, current + request.direction * factor)))
+          if not math.isfinite(candidate) or not low * factor <= candidate <= high * factor:
             return False
           new_offsets = list(snap.document.offsets_mps)
-          new_offsets[index] = (candidate_display * _unit_factor(snap.metric) if request.direction == 0 else
-                                current + request.direction * _unit_factor(snap.metric))
+          new_offsets[index] = candidate
           result = od.OffsetDocument(snap.document.bounds_mps, tuple(new_offsets))
         value = od.to_value(result)
         if not self._same(request, snap, require_capability=True):

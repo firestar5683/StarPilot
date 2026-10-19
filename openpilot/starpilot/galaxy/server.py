@@ -34,7 +34,6 @@ from openpilot.starpilot.galaxy.replay_http import ReplayHTTP, ReplayHTTPError
 from openpilot.starpilot.galaxy.route_inventory import CatalogError
 from openpilot.starpilot.galaxy.segment_summary import SegmentSummary, SegmentSummaryChanged, SegmentSummaryUnavailable
 from openpilot.starpilot.galaxy.flm_training_results import FlmTrainingResults
-from openpilot.starpilot.galaxy.flm_operations import FlmOperations, FlmOperationError, error_status, validate_action as validate_flm_action
 from openpilot.starpilot.galaxy.sentry_events import SentryEvents, SentryEventsUnavailable
 from openpilot.starpilot.sentry_mode.notifications import NotificationOwner, NotificationUnavailable
 from openpilot.starpilot.galaxy.map_status import MapStatus, MapUnavailable
@@ -91,7 +90,7 @@ def forget_app_keys(address):
 
 def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashes=None, software=None, maps=None, models=None, settings=None,
                 plots=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
-                sentry_events=None, notifications=None, flm_operations=None, training_results=None, bluetooth=None, vehicle_selection=None,
+                sentry_events=None, notifications=None, training_results=None, bluetooth=None, vehicle_selection=None,
                 model_manager=None, layouts=None, favorites=None,
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
@@ -207,8 +206,6 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   model_manager_source = model_manager
   plot_source = plots
   plots_lock = threading.Lock()
-  flm_source = flm_operations
-  flm_lock = threading.Lock()
   bluetooth_lock = threading.Lock()
   bluetooth_source = bluetooth
   aa_setup_source = android_auto_setup
@@ -410,15 +407,6 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         from openpilot.starpilot.system.android_auto.protocol import AndroidAutoClient
         aa_client_source = AndroidAutoClient()
     return aa_client_source
-
-  def flm_owner():
-    nonlocal flm_source
-    with flm_lock:
-      if flm_source is None:
-        from openpilot.common.params import Params
-        flm_source = FlmOperations(history.root, context=context_source(Params()))
-        server.flm_source = flm_source
-    return flm_source
 
   def plot_status():
     nonlocal plot_source
@@ -1239,36 +1227,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         result = training_results_source.snapshot()
         if self.require_session():
           self.json(200, result)
-      elif path in ('/api/flm/status', '/api/flm/report', '/api/flm/live'):
-        if not self.require_session():
-          return
-        try:
-          query = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=2)
-          if path.endswith('/live'):
-            if query:
-              raise ValueError('Unexpected query')
-            result = flm_owner().request('live')
-          elif path.endswith('/status'):
-            if query:
-              raise ValueError('Unexpected query')
-            result = flm_owner().request('status')
-          else:
-            if set(query) != {'operationId'} or len(query['operationId']) != 1:
-              raise ValueError('Invalid report identity')
-            payload = validate_flm_action('report', {'operationId': query['operationId'][0]})
-            result = flm_owner().request('report', payload)
-        except ValueError:
-          if self.require_session():
-            self.json(400, {'error': 'Invalid FLM request'})
-        except FlmOperationError as error:
-          if self.require_session():
-            self.json(error_status(error), {'error': 'FLM analysis is unavailable', 'code': error.code})
-        except (OSError, RuntimeError):
-          if self.require_session():
-            self.json(503, {'error': 'FLM analysis is unavailable', 'code': 'unavailable'})
-        else:
-          if self.require_session():
-            self.json(200, result)
+      elif path.startswith('/api/flm/'):
+        if self.require_session():
+          self.json(404, {'error': 'Not found'})
       elif path == '/api/sentry/notifications':
         if not self.require_session():
           return
@@ -1578,6 +1539,11 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         finally:
           self.connection.settimeout(old_timeout)
         return
+      if path.startswith('/api/flm/'):
+        self.close_connection = True
+        if self.require_session():
+          self.json(404, {'error': 'Not found'})
+        return
       if path not in ('/api/companion/uplink', '/api/companion/settings', '/api/companion/location',
                       '/api/connect/provider', '/api/developer/intense-logging', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
@@ -1589,8 +1555,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/android-auto/pairing/response', '/api/android-auto/pairing/cancel', '/api/android-auto/pairing/select',
                       '/api/spotify/enable', '/api/spotify/key', '/api/spotify/preferences', '/api/spotify/control', '/api/spotify/maintenance',
                       '/api/ui/layout', '/api/ui/layout/preview', '/api/favorites/slots',
-                      '/api/maps/start', '/api/maps/cancel', '/api/flm/start', '/api/flm/cancel', '/api/flm/live-action',
-                      '/api/flm/train', '/api/flm/recommend', '/api/flm/save-report',
+                      '/api/maps/start', '/api/maps/cancel',
                         '/api/bluetooth/action', '/api/controllers/action',
                       '/api/models/active', '/api/models/preferences', '/api/models/download', '/api/models/download_all',
                       '/api/models/cancel', '/api/models/delete', '/api/models/refresh_manifest', '/api/models/jetlink',
@@ -1601,7 +1566,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/toyota-tools/action', '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
         return
-      if (path.startswith(('/api/companion/', '/api/replay/', '/api/recordings/', '/api/connect/', '/api/developer/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/flm/', '/api/bluetooth/',
+      if (path.startswith(('/api/companion/', '/api/replay/', '/api/recordings/', '/api/connect/', '/api/developer/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/bluetooth/',
                            '/api/android-auto/', '/api/spotify/', '/api/controllers/', '/api/vehicle-selection/', '/api/toyota-tools/',
                            '/api/models/', '/api/ui/', '/api/favorites/', '/api/sounds/', '/api/software/',
                            '/api/drives/', '/api/navigation/', '/api/drive-state/', '/api/sentry/', '/api/crash-reports/')) and
@@ -2607,38 +2572,6 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           else:
             self.json(401, {'error': 'Sign in to Galaxy'})
         return
-      if path.startswith('/api/flm/'):
-        identity = self.settings_session()
-        if identity is None:
-          self.json(401, {'error': 'Sign in to Galaxy'})
-          return
-        operation = path.rsplit('/', 1)[1]
-        try:
-          validate_flm_action(operation, payload)
-          with effect_lock:
-            if self.settings_session() != identity:
-              self.json(401, {'error': 'Sign in to Galaxy'})
-              return
-            if operation in ('live-action', 'train', 'recommend', 'save-report'):
-              result = flm_owner().request(operation, payload, session_valid=lambda identity=identity: bluetooth_session_valid(identity),
-                                           session_guard=effect_lock)
-            else:
-              result = flm_owner().request(operation, payload)
-        except ValueError:
-          if self.require_session():
-            self.json(400, {'error': 'Invalid FLM operation'})
-        except FlmOperationError as error:
-          if self.require_session():
-            self.json(error_status(error), {'error': 'FLM operation was not accepted', 'code': error.code})
-        except (OSError, RuntimeError):
-          if self.require_session():
-            self.json(503, {'error': 'FLM analysis is unavailable', 'code': 'unavailable'})
-        else:
-          if self.settings_session() == identity:
-            self.json(200, result)
-          else:
-            self.json(401, {'error': 'Sign in to Galaxy'})
-        return
       if path.startswith('/api/maps/'):
         identity = self.settings_session()
         if identity is None:
@@ -2843,8 +2776,6 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   server.map_source = map_source
   if recording_media_source is not None:
     server.recording_media_source = recording_media_source
-  if flm_source is not None:
-    server.flm_source = flm_source
   if model_source is not None:
     server.model_source = model_source
   if plot_source is not None:

@@ -5,7 +5,10 @@ from opendbc.car.toyota.values import CAR, ToyotaFlags, ToyotaSafetyFlags, EPS_S
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
 from openpilot.starpilot.aol.intent import AolCardIntent, AOL_TOGGLE
 
-AOL_WORDS = frozenset((73, 585, 4169, 4681))
+AOL_WORDS = frozenset((73, 585, 4169, 4681, 2121))
+
+
+SECOC_TORQUE_CARS = frozenset((CAR.TOYOTA_SIENNA_4TH_GEN,))
 RADAR_TORQUE_CARS = frozenset((CAR.TOYOTA_CHR_TSS2, CAR.TOYOTA_RAV4_TSS2_2022))
 CAMERA_TORQUE_CARS = frozenset((
   CAR.TOYOTA_ALPHARD_TSS2, CAR.TOYOTA_AVALON_TSS2, CAR.TOYOTA_CAMRY_TSS2, CAR.TOYOTA_COROLLA_TSS2,
@@ -15,7 +18,24 @@ CAMERA_TORQUE_CARS = frozenset((
 ))
 
 
+def secoc_qualified(cp, *, marked_only=False):
+  required = ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU | ToyotaFlags.SECOC | ToyotaFlags.RAISED_ACCEL_LIMIT
+  allowed = required | ToyotaFlags.HYBRID | ToyotaFlags.HAS_BSM
+  if (cp is None or cp.brand != 'toyota' or cp.carFingerprint not in SECOC_TORQUE_CARS or
+      cp.notCar or cp.passive or cp.dashcamOnly or not cp.pcmCruise or not cp.openpilotLongitudinalControl or
+      not cp.secOcRequired or not cp.secOcKeyAvailable or
+      cp.steerControlType != structs.CarParams.SteerControlType.torque or len(cp.safetyConfigs) != 1 or
+      cp.alternativeExperience not in ((32,) if marked_only else (0, 32)) or
+      cp.flags & required != required or int(cp.flags) & ~int(allowed)):
+    return False
+  config = cp.safetyConfigs[0]
+  return (config.safetyModel == structs.CarParams.SafetyModel.toyota and
+          config.safetyParam == EPS_SCALE[cp.carFingerprint] | int(ToyotaSafetyFlags.SECOC))
+
+
 def qualified(cp, *, marked_only=False):
+  if cp is not None and cp.carFingerprint in SECOC_TORQUE_CARS:
+    return secoc_qualified(cp, marked_only=marked_only)
   from opendbc.car.toyota.prius_longitudinal import configured as prius_filter_configured
   if cp is not None and prius_filter_configured(cp):
     return cp.alternativeExperience in ((32,) if marked_only else (0, 32))
@@ -52,10 +72,14 @@ def qualified(cp, *, marked_only=False):
 
 
 def policy_for(cp):
+  from openpilot.starpilot.controllers.wheel_actions import button_reported, eligible
+
   admitted = qualified(cp)
+  auxiliary_lkas = bool(eligible(cp) and cp.brand == 'toyota' and button_reported(cp, 'LKASButtonControl'))
   return AolVehiclePolicy(intent_supported=admitted, settings_supported=admitted, runtime_supported=admitted,
                           normal_runtime_supported=admitted, ordinary_axis_ack_required=qualified(cp, marked_only=True),
                           full_axis_runtime_required=admitted, fixed_cruise_buttons=admitted, distance_pause_only=admitted,
+                          auxiliary_lkas_supported=auxiliary_lkas,
                           alternative_experience_addition=32 if admitted else 0)
 
 

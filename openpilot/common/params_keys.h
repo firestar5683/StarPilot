@@ -150,6 +150,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"StarButtonControl", {PERSISTENT, INT, "0"}},
     {"LongStarButtonControl", {PERSISTENT, INT, "0"}},
     {"VeryLongStarButtonControl", {PERSISTENT, INT, "0"}},
+    {"CancelButtonControlsMigrated", {PERSISTENT, BOOL, "0"}},
+    {"RemapCancelToDistance", {PERSISTENT, BOOL, "0"}},
     {"CancelButtonControl", {PERSISTENT, INT, "0"}},
     {"LongCancelButtonControl", {PERSISTENT, INT, "0"}},
     {"VeryLongCancelButtonControl", {PERSISTENT, INT, "0"}},

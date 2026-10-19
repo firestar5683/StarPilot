@@ -4,6 +4,8 @@ Parent record() copies bounded typed metadata only. CAN decoding, encoder/filter
 steps and finite differences belong to the child or existing bounded4Hz probe.
 """
 
+from typing import cast
+
 from collections import OrderedDict
 from dataclasses import dataclass, asdict
 from types import SimpleNamespace
@@ -247,7 +249,7 @@ class EncoderBranch:
     if witness.shape:
       from opendbc.car.honda.modified_civic_steering import get_civic_bosch_modified_steering_pressed
 
-      lpf, previous, filtered, was_pressed, speed, pressed, driver = shape
+      lpf, previous, filtered, was_pressed, speed, pressed, driver = cast(tuple[float, float, float, bool, float, bool, float], shape)
       filtered, pressed = get_civic_bosch_modified_steering_pressed(pressed, driver, float32(request), filtered, was_pressed)
       if pressed:
         raise ValueError('candidate driver override')

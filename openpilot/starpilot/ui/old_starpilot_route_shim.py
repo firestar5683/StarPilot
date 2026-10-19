@@ -15,6 +15,7 @@ reserved Event @113 slot in cereal/log.capnp for wire compatibility.
 import math
 
 from openpilot.starpilot.ui.onroad_state import ObservationKind, SpeedLimitObservation
+from openpilot.starpilot.ui.unified_speed_presentation import retaining_limit
 
 
 def _speed(value, *, positive=False):
@@ -27,7 +28,8 @@ def _speed(value, *, positive=False):
 
 def speed_limit_fallback(ui, observation, now_ns, *, cruise_kph, car, read_message):
   """Keep modern observations; adapt only fresh historical replay messages."""
-  if getattr(ui, 'replay_sample', None) is None or not ui.started or observation.kind == ObservationKind.VALID:
+  if (getattr(ui, 'replay_sample', None) is None or not ui.started or
+      observation.kind == ObservationKind.VALID or retaining_limit(observation)):
     return observation
   legacy = read_message(ui.sm, 'customReserved6', now_ns, after_frame=ui.started_frame)
   limit = _speed(legacy.slcSpeedLimit, positive=True) if legacy is not None else None

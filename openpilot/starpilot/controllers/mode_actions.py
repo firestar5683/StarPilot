@@ -4,7 +4,7 @@ import re
 import secrets
 
 from openpilot.cereal import messaging
-from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
+from openpilot.starpilot.feature_capabilities import lateral_supported
 from openpilot.starpilot.conditional_mode.ui_action import current_authority, fresh_service
 
 LIFETIME_NS = 250_000_000
@@ -20,7 +20,7 @@ def authority(sm, cp, now_ns: int, mode: str) -> bool:
     drive = int(sm['deviceState'].startedMonoTime)
     if mode in ('traffic', 'pulse'):
       return current_authority(sm, cp, drive, now_ns)
-    if mode == 'switchback' and not ioniq6_media_eligible(cp):
+    if mode == 'switchback' and not lateral_supported(cp):
       return False
     if mode == 'disengage' and not fresh_service(sm, 'selfdriveState', drive, now_ns):
       return False
@@ -206,9 +206,11 @@ class SwitchbackStatusOwner:
 
 
 def apply_switchback_gesture(owner, event, *, params, settings, sm, cp, now_ns: int, now_boot_ns: int, mode: str = 'switchback') -> bool:
-  from openpilot.starpilot.conditional_mode.manual import Button, Gesture, Press, read_button_map
+  from openpilot.starpilot.conditional_mode.manual import Button, Gesture, Press, read_button_map, ioniq6_media_eligible
   from openpilot.starpilot.conditional_mode.status import settings_fingerprint
   try:
+    if not ioniq6_media_eligible(cp):
+      return False
     drive = int(sm['deviceState'].startedMonoTime)
     if owner.drive != drive:
       owner.reset(drive)
@@ -221,7 +223,7 @@ def apply_switchback_gesture(owner, event, *, params, settings, sm, cp, now_ns: 
     snapshot = settings.refresh(now_ns)
     verdict = settings.verdict(snapshot, now_mono_ns=now_ns, drive_id=drive)
     fingerprint = settings_fingerprint(snapshot)
-    buttons = read_button_map(params, include_ioniq_media=True)
+    buttons = read_button_map(params, include_ioniq_media=True, cp=cp)
     if verdict.status != 'ready' or verdict.safe_mode is not False or fingerprint is None or buttons is None:
       return False
     session, sequence = str(wire.sessionId), int(wire.sequence)

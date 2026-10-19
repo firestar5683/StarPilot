@@ -130,7 +130,7 @@ class ToyotaLongIntegrationTests(TestCase):
         elif mutation == 'foreign_flags':
           bad.flags |= 1 << 30
         elif mutation == 'foreign_ae':
-          bad.alternativeExperience = 32
+          bad.alternativeExperience = 160
         else:
           bad.carFingerprint = CAR.TOYOTA_SIENNA
         self.assertFalse(production_enabled(bad), mutation)

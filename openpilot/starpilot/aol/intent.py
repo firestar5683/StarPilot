@@ -170,6 +170,10 @@ class AolCardIntent:
     self._aux_media_tracker = ButtonTracker()
 
   @property
+  def main_action(self) -> int:
+    return self.settings.main_action
+
+  @property
   def lkas_action(self) -> int:
     return self.settings.lkas_action if self.lkas_button_supported else 0
 
@@ -280,7 +284,7 @@ class AolCardIntent:
         self.pause_longitudinal = False
 
     lkas_managed = self.lkas_action == AOL_TOGGLE
-    main_managed = self.settings.main_action == AOL_TOGGLE
+    main_managed = self.main_action == AOL_TOGGLE
     if self.explicit_latch and CS.accFaulted:
       self._record_latch_clear('acc_fault')
       self.allowed_latch = False
@@ -315,7 +319,7 @@ class AolCardIntent:
         if button == int(ButtonType.mainCruise):
           if (independent_buttons and event.pressed and not self._main_held and
               button not in consumed_buttons and self.settings.enabled and not CS.accFaulted and not self._fault_inhibit):
-            self._perform(self.settings.main_action if not main_managed else 0)
+            self._perform(self.main_action if not main_managed else 0)
           self._main_held = bool(event.pressed)
         elif button == int(ButtonType.lkas):
           if (independent_buttons and event.pressed and not self._lkas_held and
@@ -358,7 +362,7 @@ class AolCardIntent:
       if button == int(ButtonType.lkas) and event.pressed:
         self._perform(self.lkas_action)
       elif button == int(ButtonType.mainCruise) and event.pressed:
-        self._perform(self.settings.main_action)
+        self._perform(self.main_action)
       elif button in self._held:
         if event.pressed:
           self._held[button] = True
@@ -390,7 +394,7 @@ class AolCardIntent:
         log.OnroadEvent.EventName.calibrationRecalibrating) for event in events)
     main = bool(CS.cruiseState.available)
     engaged = bool(CS.cruiseState.enabled or standard_enabled)
-    main_derived = not self.explicit_latch and self.lkas_action != AOL_TOGGLE and self.settings.main_action != AOL_TOGGLE
+    main_derived = not self.explicit_latch and self.lkas_action != AOL_TOGGLE and self.main_action != AOL_TOGGLE
     if not main_derived:
       self._calibration_rearm_required = False
     fresh_edge = ((main and not self._calibration_main) or (engaged and not self._calibration_engaged))

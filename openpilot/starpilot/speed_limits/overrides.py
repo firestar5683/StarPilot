@@ -177,8 +177,6 @@ def _acceptance_valid(decision: object, authority: object, policy: object, sessi
       decision.authority != authority or decision.policy != policy or
       not acc.observation_is_valid(decision.state.observation, session_id=session_id)):
     return False
-  if decision.state.observation.kind in (acc.ObservationKind.UNKNOWN, acc.ObservationKind.STALE):
-    return decision.control_target_mps is None
   if policy.display_only or not authority.can_control:
     return decision.control_target_mps is None
   if decision.control_target_mps is None:
@@ -187,9 +185,7 @@ def _acceptance_valid(decision: object, authority: object, policy: object, sessi
   if (accepted is None or not _token(accepted.session_id) or not _speed(accepted.candidate.speed_mps) or
       decision.control_target_mps != accepted.candidate.speed_mps):
     return False
-  if decision.state.observation.kind is acc.ObservationKind.ABSENT:
-    return policy.fallback_previous and decision.basis == "previous_accepted"
-  return decision.state.observation.kind is acc.ObservationKind.VALID
+  return decision.state.observation.kind is acc.ObservationKind.VALID or acc.previous_limit_is_qualified(decision)
 
 
 def step(state: State, acceptance: acc.Decision, authority: acc.Authority, policy: acc.Policy,
@@ -277,7 +273,6 @@ def step(state: State, acceptance: acc.Decision, authority: acc.Authority, polic
       adopted_now = True
 
   eligible = (authority.can_control and not policy.display_only and acceptance.control_target_mps is not None and
-              acceptance.state.observation.kind in (acc.ObservationKind.VALID, acc.ObservationKind.ABSENT) and
               selected.kind is EvidenceKind.VALID and pedal.kind is EvidenceKind.VALID and not domain_unavailable)
   if not eligible:
     # Only temporary inactivity under the same selected mode and owner gets a grace period.
@@ -285,7 +280,8 @@ def step(state: State, acceptance: acc.Decision, authority: acc.Authority, polic
                             authority.mode in (acc.Mode.LONGITUDINAL_ONLY, acc.Mode.COMBINED) and
                             authority.owner is acc.LongitudinalOwner.SYSTEM)
     if temporary_inactivity:
-      started = old.suspension_started_ns if old.suspension_started_ns is not None else now_ns
+      # A held accelerator pauses output; start recovery grace from its latest sample.
+      started = now_ns if pedal.pressed or old.suspension_started_ns is None else old.suspension_started_ns
       state = replace(state, suspension_started_ns=started)
       if now_ns - started >= SUSPENSION_NS:
         state = replace(state, persistent_selected_mps=None)
@@ -316,8 +312,10 @@ def step(state: State, acceptance: acc.Decision, authority: acc.Authority, polic
           old.active and old.context is not None and not rotate and change.context_id == old.context.context_id and
           change.started_at_ns is not None and old.context.issued_at_ns <= change.started_at_ns <= now_ns and
           change.selected_mps == selected.speed_mps):
-      state = replace(state, persistent_selected_mps=(change.selected_mps if
-                      effective_target is not None and change.selected_mps + selected_delta > effective_target else None))
+      if (change.selected_mps > change.previous_mps or
+          state.persistent_selected_mps is not None and change.selected_mps < state.persistent_selected_mps):
+        state = replace(state, persistent_selected_mps=(change.selected_mps if
+                        effective_target is not None and change.selected_mps + selected_delta > effective_target else None))
       receipt = replace(receipt, consumed=True, status="driver_intent")
     else:
       receipt = replace(receipt, status="unqualified_effect")

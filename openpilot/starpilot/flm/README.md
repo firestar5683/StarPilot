@@ -1,69 +1,9 @@
-# Offline Ioniq 6 FLM observations
+# StarPilot steering learning
 
-`offline.py` accepts at most five explicitly supplied, already decoded Cereal
-event streams. It does not discover files or read Params. Only a valid Ioniq 6
-torque `controlsState` joined to recent valid `carState` and `carControl` can
-produce a sample. The original steering-override exclusion is 0.35 seconds
-before and 1 second after a press; segment ends and data gaps split intervals.
-
-Reports contain bounded desired/actual lateral acceleration samples and
-contiguous observation windows (at least five eligible samples), counts of
-missing or ineligible data, and measured tracking error. Windows are measured
-intervals, not classified tuning events. `carOutput` is optional
-in frozen logs and never substitutes for the controller's measured acceleration.
-Each plotted point carries a continuity ID; a renderer must break lines when
-that ID changes, including a short invalid or inactive interval.
-These observations neither recommend a tune nor qualify steering behavior.
-
-## Desktop diagnostic tool
-
-Use the existing developer runner with an explicitly selected local recording
-directory and up to five closed segment names:
-
-```sh
-./dev python -m openpilot.starpilot.flm.analyze \
-  --log-root /absolute/local/recordings --output /absolute/new/report.json \
-  1234abcd--0123456789--0
-```
-
-The optional output file must not already exist. It avoids mixing the developer
-runner's build progress with the JSON report. The tool processes one segment at
-a time and returns no report if any selected segment fails admission, decoding
-or analysis. Full rlogs are required; a qlog is not silently substituted.
-
-Admission rechecks lock files, regular-file identity and modification metadata
-through a bounded read. The report identifies the exact compressed source hash.
-Compressed input is capped at 32 MiB and expanded input at 64 MiB per segment;
-complete zstd or bzip2 stream termination and every Event envelope must decode.
-Peak memory exceeds the expanded-input limit because verification buffers and
-Event readers coexist. Raw logs, images and locations are not copied into the
-report. The configured recording root is an explicit local path, never a URL.
-
-This command refuses device hardware. Use the parked Galaxy operation below
-for managed device analysis. Neither entry point writes settings, applies or
-recommends a tune, or claims vehicle qualification.
-
-## Parked Galaxy analysis
-
-The newest Vue Galaxy exposes Offline tracking under Tuning and Routes.
-Select up to five closed full-rlog segments from the local inventory. Exact
-segment basenames survive older route-name normalization and are revalidated
-when read. The report includes desired/actual plots with explicit gaps, source
-hashes, measured errors and exclusion counts. Missing samples remain missing.
-
-One owner runs a single isolated worker and retains one report in memory. It
-checks fresh parked evidence independently of browser polling, withholds results
-after authority loss, and stops/reaps the child on cancellation or shutdown.
-The long-lived monitor thread creates the worker so Linux parent-death signals
-do not follow a short-lived HTTP request thread. Workers also verify their
-parent identity before reading logs. Linux limits address space to 2 GiB and
-CPU time to 240 seconds; the parent enforces a five-minute wall deadline and a
-1 MiB report bound. The worker runs at reduced scheduling priority.
-
-Authenticated local access is required. Leaving or hiding the page stops its
-requests; it does not cancel the accepted operation. Cancel analysis explicitly
-or return to retrieve status. Reports are diagnostic observations only; saved
-FLM profiles, controller behavior and tune trial/apply/restore are separate work.
+Galaxy’s Auto Learn results at `/tuning/flm` read the existing bounded training
+report and live plots. `/tuning` and `/tuning/plots` show Live Plots directly.
+Recorded-log analysis, manual GM trial generation, their worker and CLI have
+been removed. Shared log readers remain for route summaries and downloads.
 
 ## Ioniq 6 torque-surface core
 

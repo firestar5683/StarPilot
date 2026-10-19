@@ -28,7 +28,7 @@ def known_fit(block_count=8):
       (-1 if block % 2 else 1) * (0.1 + j * 0.01),
       2 * (-1 if block % 2 else 1) * (0.1 + j * 0.01) + 0.01,
       'calibration-v1',
-      'left' if block % 2 else 'right',
+      'right' if block % 2 else 'left',
       True,
       False,
       False,

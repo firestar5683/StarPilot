@@ -41,7 +41,7 @@ def test_request_replay_expiry_wrong_vehicle_and_drive_never_toggle():
   sm, cp = fixture()
   owner = ModeActionOwner()
   msg = request(sm, cp)
-  with patch('openpilot.starpilot.controllers.mode_actions.ioniq6_media_eligible', return_value=True):
+  with patch('openpilot.starpilot.controllers.mode_actions.lateral_supported', return_value=True):
     assert owner.update(msg, sm, cp, now_ns=NOW)
     assert not owner.update(msg, sm, cp, now_ns=NOW + 100_000_000)
     assert owner.requested['traffic']
@@ -57,7 +57,7 @@ def test_request_replay_expiry_wrong_vehicle_and_drive_never_toggle():
 def test_temporary_authority_loss_pauses_effective_intent_without_stale_display():
   sm, cp = fixture()
   owner = ModeActionOwner()
-  with patch('openpilot.starpilot.controllers.mode_actions.ioniq6_media_eligible', return_value=True):
+  with patch('openpilot.starpilot.controllers.mode_actions.lateral_supported', return_value=True):
     assert owner.update(request(sm, cp), sm, cp, now_ns=NOW)
     assert owner.sample('traffic', sm, cp, now_ns=NOW).effective
     sm['carControl'].longActive = False
@@ -75,12 +75,12 @@ def test_switchback_allows_qualified_lateral_only_but_unknown_vehicle_denied():
   sm['carControl'].longActive = False
   sm['selfdriveState'].enabled = False
   cp.openpilotLongitudinalControl = False
-  with patch('openpilot.starpilot.controllers.mode_actions.ioniq6_media_eligible', return_value=True):
+  with patch('openpilot.starpilot.controllers.mode_actions.lateral_supported', return_value=True):
     assert owner.update(request(sm, cp, 'switchbackModeToggle'), sm, cp, now_ns=NOW)
     assert owner.sample('switchback', sm, cp, now_ns=NOW).effective
     assert not owner.update(request(sm, cp, sequence=2), sm, cp, now_ns=NOW + 100_000_000)
-  with patch('openpilot.starpilot.controllers.mode_actions.ioniq6_media_eligible', return_value=False):
-    assert not ModeActionOwner().update(request(sm, cp), sm, cp, now_ns=NOW)
+  with patch('openpilot.starpilot.controllers.mode_actions.lateral_supported', return_value=False):
+    assert not ModeActionOwner().update(request(sm, cp, 'switchbackModeToggle'), sm, cp, now_ns=NOW)
 
 
 def test_switchback_only_rate_limits_two_advisories_and_resets_per_drive():
@@ -131,6 +131,15 @@ def test_actual_alpha_off_wheel_switchback_mapping_and_replay_denial():
     assert owner.sample('switchback', f.sm, f.cp, now_ns=fixtures.NOW).effective
     assert not apply_switchback_gesture(owner, msg, params=f.params, settings=f.settings, sm=f.sm,
       cp=f.cp, now_ns=fixtures.NOW, now_boot_ns=fixtures.BOOT)
+    # Generic Switchback authority must not grant an Ioniq physical-media source.
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.toyota.values import CAR
+    from openpilot.starpilot.controllers.mode_actions import authority
+    other_cp = interfaces[CAR.TOYOTA_RAV4_TSS2].get_non_essential_params(CAR.TOYOTA_RAV4_TSS2)
+    other_cp.openpilotLongitudinalControl = False
+    assert authority(f.sm, other_cp, fixtures.NOW, 'switchback')
+    assert not apply_switchback_gesture(ModeActionOwner(), msg, params=f.params, settings=f.settings, sm=f.sm,
+      cp=other_cp, now_ns=fixtures.NOW, now_boot_ns=fixtures.BOOT)
     f.params.put('ModeButtonControl', 0, block=True)
     assert not apply_switchback_gesture(ModeActionOwner(), msg, params=f.params, settings=f.settings, sm=f.sm,
       cp=f.cp, now_ns=fixtures.NOW, now_boot_ns=fixtures.BOOT)
@@ -225,7 +234,7 @@ def test_controller_dispatch_requires_live_producer_and_binds_current_control_st
   from openpilot.starpilot.controllers.mode_actions import ModeActionPublisher, ModeIntent, publish_switchback
   sm, cp = fixture()
   publisher, sender = ModeActionPublisher(), Mock()
-  with patch('openpilot.starpilot.controllers.mode_actions.ioniq6_media_eligible', return_value=True):
+  with patch('openpilot.starpilot.controllers.mode_actions.lateral_supported', return_value=True):
     assert not publisher.dispatch('switchback', sm, cp, sender, now_ns=NOW)
     sender.send.assert_not_called()
     state = publish_switchback(None, ModeIntent(DRIVE, False, False), session='b' * 32, sequence=1,

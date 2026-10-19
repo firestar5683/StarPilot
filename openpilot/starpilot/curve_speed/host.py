@@ -46,7 +46,7 @@ def frame_from_submaster(sm, CP, now_ns: int, *, drive_id: int = 0) -> Frame:
     car_state, car_control = sm['carState'], sm['carControl']
     controls, selfdrive = sm['controlsState'], sm['selfdriveState']
     cruise_mps = float(car_state.vCruise) / 3.6
-    system_longitudinal = bool(CP.openpilotLongitudinalControl) and not bool(CP.pcmCruise)
+    system_longitudinal = bool(CP.openpilotLongitudinalControl) and not any(getattr(CP, flag, False) for flag in ('passive', 'dashcamOnly', 'notCar'))
     return Frame(now_ns=now_ns, model_ns=model_ns, inputs_fresh=current and bool(car_state.canValid) and not bool(car_state.canTimeout),
                  profile=profile, system_longitudinal=system_longitudinal, long_active=bool(car_control.longActive),
                  enabled=bool(selfdrive.enabled), force_decel=bool(controls.forceDecel), cruise_mps=cruise_mps,

@@ -27,6 +27,9 @@ class CustomSchemaEvolutionTest(unittest.TestCase):
       'AolAxisState.LaneChangeStatusWire', 'StarPilotModelDataV2', 'StarPilotRadarState',
       'StarPilotSelfdriveState', 'SpotMonitorState', 'StarPilotLateralState', 'StarPilotCarState',
       'StarPilotCarParams',
+      'LearningControlEvidence', 'LearningAppliedEvidence', 'AutomaticRuntimeProfile',
+      'AutomaticLearningSourceReceipt', 'LearningApplication', 'FordLearningEvidence',
+      'FordLearningEvent', 'CentreApplicationWitness', 'LearningTorqueProjection',
     })
     self.assertEqual(self.baseline['roots']['MapdExtendedOut'], str(0xa30662f84033036c))
     self.assertEqual(self.baseline['roots']['MapdIn'], str(0xc86a3d38d13eb3ef))
@@ -269,6 +272,53 @@ struct Sample @0xc889677671233ef3 {
       self.assertEqual(validate(contracts[3], contracts[0]), [])
       self.assertTrue(any('.child:' in issue for issue in validate(contracts[1], contracts[0])))
       self.assertTrue(any('.values:' in issue for issue in validate(contracts[2], contracts[0])))
+
+  def test_binary_data_defaults_are_serializable_lossless_and_protected(self):
+    source = '''@0xedeedaceefbcfbca;
+struct DataDefaults @0xc889677671233ef4 {
+  payload @0 :Data = 0x"DATA_DEFAULT";
+  implicitPayload @1 :Data;
+}
+'''
+    with TemporaryDirectory() as directory:
+      path = Path(directory) / 'data-defaults.capnp'
+      contracts = []
+      parsers = []
+      for hex_value in ('0001feff', '0002feff', '0001feff'):
+        path.write_text(source.replace('DATA_DEFAULT', hex_value))
+        parser = capnp.SchemaParser()
+        parsers.append(parser)
+        module = parser.load(str(path))
+        contract = describe(module, ['DataDefaults'])
+        # Neither an implicit empty Data default nor an explicit binary default
+        # may leak raw bytes into the committed JSON contract.
+        contract = json.loads(json.dumps(contract))
+        fields = contract['nodes'][str(0xc889677671233ef4)]['fields']
+        for ordinal in ('0', '1'):
+          self.assertEqual(set(fields[ordinal]['slot']['defaultValue']), {'schemaValueHex'})
+        contracts.append(contract)
+        message = module.DataDefaults.new_message()
+        with module.DataDefaults.from_bytes(message.to_bytes()) as reader:
+          self.assertEqual(reader.payload, bytes.fromhex(hex_value))
+          self.assertEqual(reader.implicitPayload, b'')
+      self.assertEqual(validate(contracts[2], contracts[0]), [])
+      self.assertTrue(any('.payload:' in issue for issue in validate(contracts[1], contracts[0])))
+
+  def test_preexisting_payload_helper_root_ids_are_preserved(self):
+    expected = {
+      'LearningControlEvidence': 0xf2447170bb68f358,
+      'LearningAppliedEvidence': 0xbab0f51a74ffee6e,
+      'AutomaticRuntimeProfile': 0xef38d302825641e3,
+      'AutomaticLearningSourceReceipt': 0x9fe2d23e75805149,
+      'LearningApplication': 0x82b6c8ea6a6efabd,
+      'FordLearningEvidence': 0xd1dfbadb6a811fee,
+      'FordLearningEvent': 0xb276dede9e6b2cc4,
+      'CentreApplicationWitness': 0xab0b33cac682523e,
+      'LearningTorqueProjection': 0xf078f562cbce49ad,
+    }
+    for name, type_id in expected.items():
+      self.assertEqual(self.baseline['roots'][name], str(type_id))
+      self.assertEqual(getattr(custom, name).schema.node.id, type_id)
 
 
 if __name__ == '__main__':

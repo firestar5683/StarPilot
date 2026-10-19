@@ -86,13 +86,64 @@ void queue(FakeTransport &transport, const aol_safety_health_t &before,
 
 int main() {
   for (uint32_t word = 0U; word <= 65535U; ++word) {
-    const bool expected = (word == 73U) || (word == 585U) || (word == 4169U) || (word == 4681U);
+    const bool expected = (word == 73U) || (word == 585U) || (word == 4169U) || (word == 4681U) || (word == 2121U);
     auto toyota = status();
     toyota.safety_mode = 2U;
     toyota.safety_param = static_cast<uint16_t>(word);
     assert(aol_capable(toyota, 2U, VEHICLE_REGISTRY) == expected);
     toyota.capability_flags = 0U;
     assert(!aol_capable(toyota, 2U, VEHICLE_REGISTRY));
+  }
+
+
+  {
+    auto sienna = status();
+    sienna.safety_mode = 2U;
+    sienna.safety_param = 2121U;
+    assert(aol_runtime_enabled(false, sienna, VEHICLE_REGISTRY));
+    auto release = sienna;
+    release.capability_flags = 0U;
+    assert(!aol_runtime_enabled(false, release, VEHICLE_REGISTRY));
+    for (const uint16_t word : {2120U, 2122U, 2633U, 3145U, 4169U}) {
+      auto different = sienna;
+      different.safety_param = word;
+      if (word != 4169U) assert(!aol_capable(different, 2U, VEHICLE_REGISTRY));
+    }
+    AolAxisNegotiator negotiator(VEHICLE_REGISTRY);
+    FakeTransport transport;
+    auto input = axis("sienna-secoc", true, true);
+    queue(transport, sienna, sienna);
+    auto neutral = run(negotiator, transport, input, NOW, 2U);
+    assert(neutral.plan.capable && neutral.plan.request_mask == 0U && neutral.outcome.compatible);
+    assert(neutral.outcome.session == "sienna-secoc");
+    auto active = sienna;
+    active.request_mask = active.permission_mask = 3U;
+    queue(transport, sienna, active);
+    auto engaged = run(negotiator, transport, input, NOW, 2U);
+    assert(engaged.plan.request_mask == 3U && engaged.outcome.compatible);
+    assert(engaged.outcome.status && engaged.outcome.status->permission_mask == 3U);
+    auto invalid = input;
+    invalid.qualified = false;
+    queue(transport, active, sienna);
+    assert(run(negotiator, transport, invalid, NOW, 2U).plan.request_mask == 0U);
+    auto expired = input;
+    expired.valid_until_ns = NOW - 1U;
+    queue(transport, sienna, sienna);
+    assert(run(negotiator, transport, expired, NOW, 2U).plan.request_mask == 0U);
+    auto future = input;
+    future.observed_ns = NOW + 1U;
+    queue(transport, sienna, sienna);
+    assert(run(negotiator, transport, future, NOW, 2U).plan.request_mask == 0U);
+    auto changed = sienna;
+    changed.safety_param = 73U;
+    queue(transport, sienna, changed);
+    assert(!run(negotiator, transport, input, NOW, 2U).outcome.compatible);
+    queue(transport, sienna, sienna);
+    auto renegotiated = run(negotiator, transport, input, NOW, 2U);
+    assert(renegotiated.plan.request_mask == 0U && renegotiated.outcome.compatible);
+    queue(transport, sienna, active);
+    transport.write_ok = false;
+    assert(!run(negotiator, transport, input, NOW, 2U).outcome.compatible);
   }
   for (uint32_t word = 0U; word <= 65535U; word++) {
     assert(mazda_aol_param(static_cast<uint16_t>(word)) == (word == 0U));

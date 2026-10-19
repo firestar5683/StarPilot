@@ -1,4 +1,8 @@
 """Actual child dispatch for canonical full30 event trials, never a helper-only path."""
+
+from typing import TypedDict, cast
+
+
 from openpilot.starpilot.flm.clipping_quality import event_clipping_quality
 from dataclasses import asdict
 import itertools
@@ -14,31 +18,60 @@ from openpilot.starpilot.flm.torque_emission_replay import delivered
 from openpilot.starpilot.flm.torque_raw_fit import output_from_dict
 
 
+class _EffectObjectiveFields(TypedDict):
+  group: str
+  names: tuple[str, ...]
+  anchor_digest: str
+  context_key: str
+
+
 def _identified(engine, raw):
-  features = []
+  # Selection uses actual feature support ONLY, before any target/loss. A
+  # globally excited column cannot qualify episodes that lack that column.
+  count = len(engine.objective.names)
+  if not 1 <= count <= 4:
+    raise ValueError('event feature coordinate bound')
+  episodes, ids = [], set()
   for block in raw:
+    if block['block_id'] in ids:
+      raise ValueError('event feature duplicate episode')
+    ids.add(block['block_id'])
+    features = []
     for point in block['samples']:
       output = output_from_dict(point['output'])
       if output.limited or output.apply_ns not in engine.projected:
         continue
       if delivered(output) != point['physical']['applied_command']:
         raise ValueError('event feature actual motor coordinate')
-      features.append(engine.projected[output.apply_ns][1])
-  if len(features) < 40:
-    return ()
-  count = len(engine.objective.names)
-  gram = [[sum(row[i] * row[j] for row in features) / len(features) for j in range(count)] for i in range(count)]
-  admissible = [i for i, parameter in enumerate(engine.objective.parameters) if gram[i][i] >= parameter.excitation_floor**2]
+      row = engine.projected[output.apply_ns][1]
+      if len(row) != count or any(not math.isfinite(value) for value in row):
+        raise ValueError('event feature encoded basis')
+      features.append(row)
+    if len(features) < 40:
+      continue
+    gram = tuple(tuple(sum(row[i] * row[j] for row in features) for j in range(count)) for i in range(count))
+    episodes.append((len(features), gram))
   candidates = []
-  for size in range(1, len(admissible) + 1):
-    for selected in itertools.combinations(admissible, size):
-      normalized = [[gram[i][j] / math.sqrt(gram[i][i] * gram[j][j]) for j in selected] for i in selected]
+  for size in range(1, count + 1):
+    for selected in itertools.combinations(range(count), size):
+      # These are exactly the whole episodes whose selected coordinates meet
+      # objective_excited's ORIGINAL per-episode RMS floor. Never pool absent
+      # columns across episodes or borrow conditioning from discarded rows.
+      eligible = tuple((length, gram) for length, gram in episodes if all(
+        gram[i][i] / length >= engine.objective.parameters[i].excitation_floor**2 for i in selected))
+      if len(eligible) < 8:
+        continue
+      length = sum(n for n, _ in eligible)
+      gram = [[sum(matrix[i][j] for _, matrix in eligible) / length for j in selected] for i in selected]
+      normalized = [[gram[i][j] / math.sqrt(gram[i][i] * gram[j][j]) for j in range(size)] for i in range(size)]
       try:
         if any(max(abs(value) for value in solve(normalized, [float(j == k) for j in range(size)])) > 100 for k in range(size)):
           continue
       except ValueError:
         continue
-      candidates.append((size, sum(gram[i][i] for i in selected), selected))
+      # Fixed cardinality, eligible-row mean energy, canonical index order;
+      # never tracking error, physical target, candidate loss or heldout gain.
+      candidates.append((size, sum(gram[i][i] for i in range(size)), selected))
   if not candidates:
     return ()
   selected = max(candidates)[2]
@@ -54,7 +87,7 @@ def fit_event_snapshot(payload, factory, replay_payload):
     raise ValueError('whole-map activation is restore-only')
   if payload['event_version'] == 3 and (payload.get('event_operation') != 'trial' or envelope.operation != 'trial'):
     raise ValueError('declared activation requires original trial operation')
-  objective = EffectObjective(**{**payload['event_objective'], 'names': tuple(payload['event_objective']['names'])})
+  objective = EffectObjective(**cast(_EffectObjectiveFields, {**payload['event_objective'], 'names': tuple(payload['event_objective']['names'])}))
   if (envelope.trial_names != objective.names or envelope.trial_anchor != objective.anchor_digest or
       envelope.context_key != objective.context_key or envelope.source_epoch != objective.context_key or
       envelope.selected_baseline_revision != replay_payload['baseline_revision']):

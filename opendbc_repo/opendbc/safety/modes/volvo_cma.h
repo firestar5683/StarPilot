@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/modes/volvo_cma_integrity.h"
 
@@ -62,7 +64,8 @@ static uint16_t volvo_cma_ecm_1_addr;
 static uint16_t volvo_cma_bus1_cruise_control_addr;
 
 static int volvo_cma_be_15(const CANPacket_t *msg, uint8_t byte) {
-  return (int)(((uint16_t)(msg->data[byte] & 0x7FU) << 8U) | msg->data[byte + 1U]);
+  const uint16_t raw = ((uint16_t)(msg->data[byte] & 0x7FU) << 8U) | msg->data[byte + 1U];
+  return (int)raw;
 }
 
 static int volvo_cma_pscm_angle(const CANPacket_t *msg) {
@@ -79,19 +82,7 @@ static int volvo_cma_lca_5_angle(const CANPacket_t *msg) {
 
 
 
-static const AngleSteeringLimits VOLVO_CMA_PORT_ANGLE_STEERING_LIMITS = {
-  .max_angle = VOLVO_CMA_PORT_MAX_ANGLE_CAN,
-  .angle_deg_to_can = VOLVO_CMA_PORT_ANGLE_DEG_TO_CAN,
-  .angle_rate_up_lookup = {
-    {0.0f, 5.0f, 25.0f},
-    {5.0f, 3.0f, 0.4f},
-  },
-  .angle_rate_down_lookup = {
-    {0.0f, 5.0f, 25.0f},
-    {10.0f, 4.0f, 0.6f},
-  },
-  .frequency = 50U,
-};
+
 
 
 
@@ -275,9 +266,6 @@ static uint8_t volvo_cma_lca2_counter(const CANPacket_t *msg) {
 // Bind every non-mutable field to the native RX which supplied this exact
 // receiver. This does not renew the original 100ms source age on host TX.
 static bool volvo_cma_source_projection(const CANPacket_t *msg) {
-  if (volvo_cma_exact_stock(msg)) {
-    return true;
-  }
   static const uint8_t mutable[9][8] = {
     {0xCFU, 0xFFU, 0x3FU, 0xFFU, 0xFFU, 0xC0U, 0x00U, 0xF0U},
     {0xFFU, 0xFFU, 0x00U, 0x00U, 0x00U, 0x00U, 0xFFU, 0x00U},
@@ -311,142 +299,162 @@ static bool volvo_cma_source_projection(const CANPacket_t *msg) {
     {0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U},
     {0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U},
   };
-  bool matched = false;
-  for (uint8_t i = 0U; i < VOLVO_CMA_RELAY_COUNT; i++) {
-    if (msg->addr == volvo_cma_relay_addr[i]) {
-      for (uint8_t j = 0U; j < 4U; j++) {
-        bool same = volvo_cma_relay_valid[i][j] &&
-          (safety_get_ts_elapsed(microsecond_timer_get(), volvo_cma_relay_ts[i][j]) <= 100000U);
-        for (uint8_t b = 0U; b < 8U; b++) {
-          same &= ((msg->data[b] ^ volvo_cma_relay_data[i][j][b]) & (uint8_t)~mutable[i][b]) == 0U;
-          same &= (msg->data[b] & fixed_mask[i][b]) == fixed_value[i][b];
+  bool matched = volvo_cma_exact_stock(msg);
+  if (!matched) {
+    for (uint8_t i = 0U; i < VOLVO_CMA_RELAY_COUNT; i++) {
+      if (msg->addr == volvo_cma_relay_addr[i]) {
+        for (uint8_t j = 0U; j < 4U; j++) {
+          bool same = volvo_cma_relay_valid[i][j] &&
+            (safety_get_ts_elapsed(microsecond_timer_get(), volvo_cma_relay_ts[i][j]) <= 100000U);
+          for (uint8_t b = 0U; b < 8U; b++) {
+            same &= ((msg->data[b] ^ volvo_cma_relay_data[i][j][b]) & (uint8_t)~mutable[i][b]) == 0U;
+            same &= (msg->data[b] & fixed_mask[i][b]) == fixed_value[i][b];
+          }
+          if (msg->addr == 0x17U) {
+            const uint8_t echo = msg->data[1] & 0xFU;
+            same &= (echo == 0U) || (echo == (volvo_cma_relay_data[i][j][1] & 0xFU));
+          }
+          matched |= same;
         }
-        if (msg->addr == 0x17U) {
-          const uint8_t echo = msg->data[1] & 0xFU;
-          same &= (echo == 0U) || (echo == (volvo_cma_relay_data[i][j][1] & 0xFU));
-        }
-        matched |= same;
       }
     }
-  }
-  if (msg->addr == 0x16U) {
-    matched &= ((msg->data[2] == 195U) && (msg->data[3] == 186U)) ||
-               ((msg->data[2] == 249U) && (msg->data[3] == 154U));
+    if (msg->addr == 0x16U) {
+      matched &= ((msg->data[2] == 195U) && (msg->data[3] == 186U)) ||
+                 ((msg->data[2] == 249U) && (msg->data[3] == 154U));
+    }
   }
   return matched;
 }
 
 static bool volvo_cma_tx_hook(const CANPacket_t *msg) {
+  static const AngleSteeringLimits VOLVO_CMA_PORT_ANGLE_STEERING_LIMITS = {
+    .max_angle = VOLVO_CMA_PORT_MAX_ANGLE_CAN,
+    .angle_deg_to_can = VOLVO_CMA_PORT_ANGLE_DEG_TO_CAN,
+    .angle_rate_up_lookup = {
+      {0.0f, 5.0f, 25.0f},
+      {5.0f, 3.0f, 0.4f},
+    },
+    .angle_rate_down_lookup = {
+      {0.0f, 5.0f, 25.0f},
+      {10.0f, 4.0f, 0.6f},
+    },
+    .frequency = 50U,
+  };
   // With native control withdrawn, only a recently received exact stock frame
   // can cross the harness. No host assertion, MAIN value, or companion spoof grants permission.
   // This shared helper reads actual RX status/age now; it grants no AOL
   // policy or intent and retains the existing health deadlines/tolerances.
+  bool tx;
   if (!controls_allowed || !volvo_cma_drive_current() || !aol_rx_healthy()) {
-    return volvo_cma_exact_stock(msg);
-  }
-  bool tx = volvo_cma_receiver_quality(msg) && volvo_cma_source_projection(msg);
-  if ((msg->addr == 0x69U) || (msg->addr == 0x67U) || (msg->addr == 0x17U)) {
-    tx &= volvo_cma_get_checksum(msg) == volvo_cma_compute_checksum(msg);
-  }
-
-
-
-  // LCA_5 carries the actual angle command used by the controller. The stock
-  // LCA frame also contains an angle-shaped field, but the imported controller
-  // deliberately leaves that field at the observed vehicle value.
-  if (msg->addr == VOLVO_CMA_PORT_LCA_5) {
-    if (volvo_cma_exact_stock(msg)) {
-      desired_angle_last = SAFETY_CLAMP(angle_meas.values[0], -VOLVO_CMA_PORT_MAX_ANGLE_CAN, VOLVO_CMA_PORT_MAX_ANGLE_CAN);
-    } else {
-      const int desired_angle = volvo_cma_lca_5_angle(msg);
-      tx &= SAFETY_ABS(desired_angle) <= VOLVO_CMA_PORT_MAX_ANGLE_CAN;
-      tx &= !steer_angle_cmd_checks(desired_angle, controls_allowed, VOLVO_CMA_PORT_ANGLE_STEERING_LIMITS);
+    tx = volvo_cma_exact_stock(msg);
+  } else {
+    tx = volvo_cma_receiver_quality(msg) && volvo_cma_source_projection(msg);
+    if ((msg->addr == 0x69U) || (msg->addr == 0x67U) || (msg->addr == 0x17U)) {
+      tx &= volvo_cma_get_checksum(msg) == volvo_cma_compute_checksum(msg);
     }
-  }
 
-  // Keep the two torque-authority arms and the companion LCA angle bounded even
-  // though these fields are not the primary steering command.
-  if (msg->addr == VOLVO_CMA_PORT_LCA_STEER) {
-    const int authority_pos = to_signed((int)(((uint16_t)(msg->data[0] & 0x07U) << 8U) | msg->data[1]), 11);
-    const int authority_neg = to_signed((int)(((uint16_t)(msg->data[2] & 0x07U) << 8U) | msg->data[3]), 11);
-    const int lca_angle = to_signed((int)(((uint16_t)(msg->data[5] & 0x3FU) << 8U) | msg->data[6]), 14);
-    tx &= authority_pos >= 0 && authority_pos <= 614;
-    tx &= authority_neg >= -614 && authority_neg <= 0;
-    tx &= SAFETY_ABS(lca_angle) <= VOLVO_CMA_PORT_MAX_ANGLE_CAN;
-  }
 
-  // PSCM is relayed back onto the main bus to preserve the stock hands-on-wheel
-  // path. Do not allow that relay to invent a steering-angle measurement.
-  if (msg->addr == VOLVO_CMA_PORT_PSCM) {
-    const int relayed_angle = volvo_cma_pscm_angle(msg);
-    const int measured_max = SAFETY_CLAMP(angle_meas.max + VOLVO_CMA_PORT_RELAY_ANGLE_TOLERANCE,
-                                          -VOLVO_CMA_PORT_MAX_ANGLE_CAN, VOLVO_CMA_PORT_MAX_ANGLE_CAN);
-    const int measured_min = SAFETY_CLAMP(angle_meas.min - VOLVO_CMA_PORT_RELAY_ANGLE_TOLERANCE,
-                                          -VOLVO_CMA_PORT_MAX_ANGLE_CAN, VOLVO_CMA_PORT_MAX_ANGLE_CAN);
-    tx &= !safety_max_limit_check(relayed_angle, measured_max, measured_min);
-  }
 
-  // NOTE: the wrong-bus rejections below are unreachable defense-in-depth:
-  // safety_tx_hook() only calls this hook after the message passes the
-  // VOLVO_CMA_PORT_TX_MSGS allowlist, which already pins each TX address to a single
-  // bus (and VOLVO_CMA_PORT_DRIVER_INPUT/VOLVO_CMA_PORT_SAS are not TX'able on any bus).
-  // Hence the GCOV_EXCL markers, following the defaults.h convention.
-  // test_volvo.py's test_tx_hook_wrong_bus_blocked pins down the blocked
-  // wrong-bus TX behavior at the safety_tx_hook() level.
-  if (msg->addr == VOLVO_CMA_PORT_LCA_STEER) {
-    // LCA message flows: VCU1 (main bus) -> PSCM (party bus)
-    // We're acting as VCU1, so we send LCA message to party bus (bus 2)
-    // GCOV_EXCL_START
-    // Unreachable by design (allowlist pins VOLVO_CMA_PORT_LCA_STEER to the party bus)
-    if (msg->bus != VOLVO_CMA_PORT_PARTY_BUS) {
-      tx = false;  // Wrong bus
+    // LCA_5 carries the actual angle command used by the controller. The stock
+    // LCA frame also contains an angle-shaped field, but the imported controller
+    // deliberately leaves that field at the observed vehicle value.
+    if (msg->addr == VOLVO_CMA_PORT_LCA_5) {
+      if (volvo_cma_exact_stock(msg)) {
+        desired_angle_last = SAFETY_CLAMP(angle_meas.values[0], -VOLVO_CMA_PORT_MAX_ANGLE_CAN, VOLVO_CMA_PORT_MAX_ANGLE_CAN);
+      } else {
+        const int desired_angle = volvo_cma_lca_5_angle(msg);
+        tx &= SAFETY_ABS(desired_angle) <= VOLVO_CMA_PORT_MAX_ANGLE_CAN;
+        tx &= !steer_angle_cmd_checks(desired_angle, controls_allowed, VOLVO_CMA_PORT_ANGLE_STEERING_LIMITS);
+      }
     }
-    // GCOV_EXCL_STOP
-  }
 
-  if (msg->addr == VOLVO_CMA_PORT_PSCM) {
-    // PSCM message: we relay from party bus (bus 2) to main bus (bus 0)
-    // So we TX on main bus (bus 0)
-    // GCOV_EXCL_START
-    // Unreachable by design (allowlist pins VOLVO_CMA_PORT_PSCM to the main bus)
-    if (msg->bus != VOLVO_CMA_PORT_MAIN_BUS) {
-      tx = false;  // Wrong bus
+    // Keep the two torque-authority arms and the companion LCA angle bounded even
+    // though these fields are not the primary steering command.
+    if (msg->addr == VOLVO_CMA_PORT_LCA_STEER) {
+      const uint16_t authority_pos_raw = ((uint16_t)(msg->data[0] & 0x07U) << 8U) | msg->data[1];
+      const int authority_pos = to_signed((int)authority_pos_raw, 11);
+      const uint16_t authority_neg_raw = ((uint16_t)(msg->data[2] & 0x07U) << 8U) | msg->data[3];
+      const int authority_neg = to_signed((int)authority_neg_raw, 11);
+      const uint16_t lca_angle_raw = ((uint16_t)(msg->data[5] & 0x3FU) << 8U) | msg->data[6];
+      const int lca_angle = to_signed((int)lca_angle_raw, 14);
+      tx &= (authority_pos >= 0) && (authority_pos <= 614);
+      tx &= (authority_neg >= -614) && (authority_neg <= 0);
+      tx &= SAFETY_ABS(lca_angle) <= VOLVO_CMA_PORT_MAX_ANGLE_CAN;
     }
-    // GCOV_EXCL_STOP
-  }
 
-  if (msg->addr == VOLVO_CMA_PORT_DRIVER_INPUT) {
-    // Driver input message: we relay from party bus (bus 2) to main bus (bus 0)
-    // So we TX on main bus (bus 0)
-    // GCOV_EXCL_START
-    // Unreachable by design (VOLVO_CMA_PORT_DRIVER_INPUT is not in VOLVO_CMA_PORT_TX_MSGS)
-    if (msg->bus != VOLVO_CMA_PORT_MAIN_BUS) {
-      tx = false;  // Wrong bus
+    // PSCM is relayed back onto the main bus to preserve the stock hands-on-wheel
+    // path. Do not allow that relay to invent a steering-angle measurement.
+    if (msg->addr == VOLVO_CMA_PORT_PSCM) {
+      const int relayed_angle = volvo_cma_pscm_angle(msg);
+      const int measured_max = SAFETY_CLAMP(angle_meas.max + VOLVO_CMA_PORT_RELAY_ANGLE_TOLERANCE,
+                                            -VOLVO_CMA_PORT_MAX_ANGLE_CAN, VOLVO_CMA_PORT_MAX_ANGLE_CAN);
+      const int measured_min = SAFETY_CLAMP(angle_meas.min - VOLVO_CMA_PORT_RELAY_ANGLE_TOLERANCE,
+                                            -VOLVO_CMA_PORT_MAX_ANGLE_CAN, VOLVO_CMA_PORT_MAX_ANGLE_CAN);
+      tx &= !safety_max_limit_check(relayed_angle, measured_max, measured_min);
     }
-  }
-  // GCOV_EXCL_STOP
 
-  if (msg->addr == VOLVO_CMA_PORT_SAS) {
-    // SAS message: we relay from party bus (bus 2) to main bus (bus 0)
-    // So we TX on main bus (bus 0)
-    // GCOV_EXCL_START
-    // Unreachable by design (VOLVO_CMA_PORT_SAS is not in VOLVO_CMA_PORT_TX_MSGS)
-    if (msg->bus != VOLVO_CMA_PORT_MAIN_BUS) {
-      tx = false;  // Wrong bus
+    // NOTE: the wrong-bus rejections below are unreachable defense-in-depth:
+    // safety_tx_hook() only calls this hook after the message passes the
+    // VOLVO_CMA_PORT_TX_MSGS allowlist, which already pins each TX address to a single
+    // bus (and VOLVO_CMA_PORT_DRIVER_INPUT/VOLVO_CMA_PORT_SAS are not TX'able on any bus).
+    // Hence the GCOV_EXCL markers, following the defaults.h convention.
+    // test_volvo.py's test_tx_hook_wrong_bus_blocked pins down the blocked
+    // wrong-bus TX behavior at the safety_tx_hook() level.
+    if (msg->addr == VOLVO_CMA_PORT_LCA_STEER) {
+      // LCA message flows: VCU1 (main bus) -> PSCM (party bus)
+      // We're acting as VCU1, so we send LCA message to party bus (bus 2)
+      // GCOV_EXCL_START
+      // Unreachable by design (allowlist pins VOLVO_CMA_PORT_LCA_STEER to the party bus)
+      if (msg->bus != VOLVO_CMA_PORT_PARTY_BUS) {
+        tx = false;  // Wrong bus
+      }
+      // GCOV_EXCL_STOP
     }
-  }
-  // GCOV_EXCL_STOP
 
-  if (msg->addr == VOLVO_CMA_PORT_LCA_2) {
-    // LCA_2 -> PSCM
-    // GCOV_EXCL_START
-    // Unreachable by design (allowlist pins VOLVO_CMA_PORT_LCA_2 to the party bus)
-    if (msg->bus != VOLVO_CMA_PORT_PARTY_BUS) {
-      tx = false;  // Wrong bus
+    if (msg->addr == VOLVO_CMA_PORT_PSCM) {
+      // PSCM message: we relay from party bus (bus 2) to main bus (bus 0)
+      // So we TX on main bus (bus 0)
+      // GCOV_EXCL_START
+      // Unreachable by design (allowlist pins VOLVO_CMA_PORT_PSCM to the main bus)
+      if (msg->bus != VOLVO_CMA_PORT_MAIN_BUS) {
+        tx = false;  // Wrong bus
+      }
+      // GCOV_EXCL_STOP
+    }
+
+    if (msg->addr == VOLVO_CMA_PORT_DRIVER_INPUT) {
+      // Driver input message: we relay from party bus (bus 2) to main bus (bus 0)
+      // So we TX on main bus (bus 0)
+      // GCOV_EXCL_START
+      // Unreachable by design (VOLVO_CMA_PORT_DRIVER_INPUT is not in VOLVO_CMA_PORT_TX_MSGS)
+      if (msg->bus != VOLVO_CMA_PORT_MAIN_BUS) {
+        tx = false;  // Wrong bus
+      }
     }
     // GCOV_EXCL_STOP
-  }
 
+    if (msg->addr == VOLVO_CMA_PORT_SAS) {
+      // SAS message: we relay from party bus (bus 2) to main bus (bus 0)
+      // So we TX on main bus (bus 0)
+      // GCOV_EXCL_START
+      // Unreachable by design (VOLVO_CMA_PORT_SAS is not in VOLVO_CMA_PORT_TX_MSGS)
+      if (msg->bus != VOLVO_CMA_PORT_MAIN_BUS) {
+        tx = false;  // Wrong bus
+      }
+    }
+    // GCOV_EXCL_STOP
+
+    if (msg->addr == VOLVO_CMA_PORT_LCA_2) {
+      // LCA_2 -> PSCM
+      // GCOV_EXCL_START
+      // Unreachable by design (allowlist pins VOLVO_CMA_PORT_LCA_2 to the party bus)
+      if (msg->bus != VOLVO_CMA_PORT_PARTY_BUS) {
+        tx = false;  // Wrong bus
+      }
+      // GCOV_EXCL_STOP
+    }
+
+  }
   return tx;
 }
 
@@ -455,13 +463,19 @@ static bool volvo_cma_tx_hook(const CANPacket_t *msg) {
 // mode entry. H7 already reserves AXI SRAM for native CAN state; its NOLOAD
 // section must never be assumed to contain startup zeroes.
 #define VOLVO_CMA_RX_CHECK_COUNT 17U
+
+
+static RxCheck *volvo_cma_rx_checks_workspace(void) {
 #if defined(STM32H7)
-static RxCheck volvo_cma_rx_workspace[VOLVO_CMA_RX_CHECK_COUNT] __attribute__((section(".axisram")));
+  static RxCheck volvo_cma_rx_workspace[VOLVO_CMA_RX_CHECK_COUNT] __attribute__((section(".axisram")));
 #else
-static RxCheck volvo_cma_rx_workspace[VOLVO_CMA_RX_CHECK_COUNT];
+  static RxCheck volvo_cma_rx_workspace[VOLVO_CMA_RX_CHECK_COUNT];
 #endif
+  return volvo_cma_rx_workspace;
+}
 
 static safety_config volvo_cma_init(uint16_t param) {
+  RxCheck *const rx_workspace = volvo_cma_rx_checks_workspace();
   volvo_cma_lca2_phase_valid = false;
   volvo_cma_lca2_phase_one = 0U;
   volvo_cma_lca2_phase_two = 0U;
@@ -554,9 +568,17 @@ static safety_config volvo_cma_init(uint16_t param) {
     selected = volvo_cma_rx_checks_spa;
   }
   for (uint8_t i = 0U; i < VOLVO_CMA_RX_CHECK_COUNT; i++) {
-    volvo_cma_rx_workspace[i] = selected[i];
+    rx_workspace[i] = selected[i];
   }
-  return BUILD_SAFETY_CFG(volvo_cma_rx_workspace, VOLVO_CMA_PORT_TX_MSGS);
+  const size_t tx_msgs_count = sizeof(VOLVO_CMA_PORT_TX_MSGS) / sizeof(VOLVO_CMA_PORT_TX_MSGS[0]);
+  const safety_config config = {
+    .rx_checks = rx_workspace,
+    .rx_checks_len = (int)VOLVO_CMA_RX_CHECK_COUNT,
+    .tx_msgs = VOLVO_CMA_PORT_TX_MSGS,
+    .tx_msgs_len = (int)tx_msgs_count,
+    .disable_forwarding = false,
+  };
+  return config;
 }
 
 const safety_hooks volvo_cma_hooks = {

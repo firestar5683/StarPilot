@@ -394,5 +394,6 @@ extern const safety_hooks psa_hooks;
 extern const safety_hooks byd_hooks;
 extern const safety_hooks mg_hooks;
 
+extern const safety_hooks volvo_cma_hooks;
 extern const safety_hooks volvo_c1_hooks;
 extern const safety_hooks volvo_dispatch_hooks;

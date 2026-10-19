@@ -5,10 +5,40 @@ import tempfile
 import unittest
 
 from openpilot.common.params import Params
+from openpilot.starpilot.speed_limits import acceptance as acc
 from openpilot.starpilot.speed_limits.runtime_settings import MPH_TO_MPS, parse, read_params
 
 
 class RuntimeSettingsTests(unittest.TestCase):
+  def test_confirmation_master_controls_both_directions_regardless_of_legacy_flags(self):
+    for enabled in (False, True):
+      for legacy in ({}, {'SLCConfirmationLower': False, 'SLCConfirmationHigher': False},
+                     {'SLCConfirmationLower': True, 'SLCConfirmationHigher': False},
+                     {'SLCConfirmationLower': False, 'SLCConfirmationHigher': True}):
+        with self.subTest(enabled=enabled, legacy=legacy):
+          settings = parse({'SpeedLimitController': True, 'SLCConfirmation': enabled, **legacy})
+          self.assertFalse(settings.errors)
+          self.assertEqual((settings.acceptance.confirm_lower, settings.acceptance.confirm_higher), (enabled, enabled))
+
+  def test_confirmation_on_never_autoaccepts_first_changed_or_disengaged_limits(self):
+    active = acc.Authority(acc.Mode.COMBINED, acc.LongitudinalOwner.SYSTEM, True, True, False, False)
+    stopped = acc.Authority(acc.Mode.COMBINED, acc.LongitudinalOwner.SYSTEM, False, False, False, True)
+    policy = parse({'SpeedLimitController': True, 'SLCConfirmation': True}).acceptance
+    for source in ('dashboard', 'map', 'vision', 'online'):
+      previous = acc.Candidate(source, acc.ObservationIdentity(acc.IdentityKind.GEOGRAPHIC, value='accepted'), 20.)
+      history = acc.AcceptedLimit(previous, 'drive', 0)
+      for authority in (active, stopped):
+        for accepted in (None, history):
+          for speed in (15., 25.):
+            with self.subTest(source=source, authority=authority, accepted=accepted, speed=speed):
+              candidate = acc.Candidate(source, acc.ObservationIdentity(acc.IdentityKind.GEOGRAPHIC, value='new'), speed)
+              result = acc.step(acc.new_session('drive', accepted), acc.Observation(acc.ObservationKind.VALID, candidate),
+                                authority, policy, now_ns=1)
+              self.assertEqual(result.state.accepted, accepted)
+              self.assertIsNone(result.history_write)
+              self.assertIsNotNone(result.state.pending)
+              self.assertEqual(result.control_target_mps, 20. if accepted is not None and authority.can_control else None)
+
   def test_fresh_vision_display_default_preserves_explicit_saved_choices(self):
     from openpilot.starpilot.speed_limits.selection import Source
     with tempfile.TemporaryDirectory() as directory:

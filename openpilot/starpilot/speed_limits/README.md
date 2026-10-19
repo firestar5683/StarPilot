@@ -7,16 +7,17 @@ clock and control authority. Replay flags remain available for isolated tests.
 
 SLC defaults off. Supported dashboard parsers provide OEM observations when the
 vehicle supplies the required messages. Missing, stale and explicitly absent
-observations remain distinct. Map, navigation and online providers are not yet
-connected as control sources.
+observations remain distinct. Maps supplies qualified current-road limits;
+navigation and online providers are not yet connected as control sources.
 
 Vision uses the pinned camera-sign models when Vision is selected and either
 Speed Limit Controller or Show Speed Limits is on. Registered Ioniq 6 and GM
 sessions can display camera signs. Speed control additionally requires a
-registered system-longitudinal owner, an enabled SLC preference and fresh driver
-confirmation for each new sign episode or changed limit. Factory-cruise and
-display-only sessions never gain speed authority. Source loss clears an accepted
-limit; old dashboard episodes are never adopted as new-drive observations.
+registered system-longitudinal owner and an enabled SLC preference. Vision follows
+the same saved confirmation policy as Dashboard and Maps. Factory-cruise and
+display-only sessions never gain speed authority. With previous-limit fallback
+enabled, an accepted limit survives source loss and pending replacements. Old
+dashboard episodes are never adopted as new-drive observations.
 
 Saved preferences are decoded strictly before use. A malformed Boolean, source,
 number or unreadable setting disables SLC without rewriting the saved bytes.
@@ -34,9 +35,15 @@ it is the only numeric offset authority: old `Offset*` bytes and `IsMetric` are
 ignored for control, even if malformed. A malformed document or the explicit
 `needs_review` state disables SLC without falling back to legacy values or
 rewriting the saved control bit. The document helper exposes strict decoding,
-serialization and pure adoption of a currently valid legacy schedule. Native
-settings UI adoption and display-unit writes are a separate pending integration;
-this backend does not write Params.
+serialization and pure adoption of a currently valid legacy schedule. The shared
+native editor is available under Driving Controls on both screens. It shows the
+saved half-open boundaries, rounded to two decimals, without changing them.
+Offset-only edits preserve the drive session's accepted and rejected limits,
+renew pending action IDs, and apply the new adjustment on the next frame after
+the saved-settings refresh. Other configuration changes still replace the session.
+The editor disallows reductions that cannot produce a positive target anywhere
+in the band. At runtime, an offset that would remove the ceiling is ignored for
+that limit, retaining its unadjusted target instead.
 
 All transport additions use cereal's reserved custom messages. The official
 vehicle schema is unchanged. Slot 9 retains its six historical model-status fields
@@ -62,9 +69,9 @@ publishes a typed observation. Source selection does not change stock engagement
 The runtime distinguishes source availability, display permission and speed
 control permission. A display-only source can populate the sign widget but
 cannot create a planner ceiling or cruise command. Controlling a detected limit
-requires current longitudinal authority and matching driver confirmation, even
-if general SLC confirmation is off. Unqualified replay observations remain
-isolated from normal speed control.
+requires current longitudinal authority and acceptance under the shared SLC
+confirmation policy. Unqualified replay observations remain isolated from normal
+speed control.
 
 Camera EOF uses CLOCK_BOOTTIME; Python receipt and inference completion use
 CLOCK_MONOTONIC. The adapter checks paired clocks, including after suspend,
@@ -95,8 +102,15 @@ The four observation kinds have different meanings:
 | --- | --- | --- |
 | `VALID` | A source has an eligible, normalized candidate | Previous accepted limit is held while a new candidate awaits a decision or remains rejected |
 | `ABSENT` | Eligible sources explicitly have no current candidate | Only when `fallback_previous` is enabled |
-| `UNKNOWN` | Evidence is incomplete or cannot be classified | No control target |
-| `STALE` | Available evidence fails the caller's freshness contract | No control target |
+| `UNKNOWN` | Evidence is incomplete or cannot be classified | Only when `fallback_previous` is enabled |
+| `STALE` | Available evidence fails the caller's freshness contract | Only when `fallback_previous` is enabled |
+
+Fallback uses only the last accepted limit, without a source-gap timeout, until
+another candidate is accepted or the runtime session resets. Live source status
+remains unchanged. Current control authority, coordinates, offsets, driver MAX
+and overrides still govern application; malformed reducer inputs cannot authorize
+fallback. A fresh publisher reporting retained control keeps the accepted value
+visible as "Using previous limit"; stale publisher transport cannot do so.
 
 Only `VALID` carries a `Candidate(source, observation_identity, speed_mps)`.
 `ObservationIdentity` explicitly distinguishes three forms:
@@ -148,16 +162,20 @@ axes alone do not imply full disengagement.
 A control target or consumed driver action requires active system longitudinal
 authority in longitudinal-only or combined mode. Stock ACC never gains a target
 through this reducer. Explicit full disengagement accepts an eligible candidate
-without a button or control output, unless that candidate was rejected. With no
+without a button or control output only when confirmation is disabled and that
+candidate was not rejected. With no
 longitudinal authority and no full disengagement, history is preserved and any
 required confirmation is paused. `display_only` shows a valid candidate but emits
 no target, acceptance, fallback or consumed action, and clears pending confirmation.
 
-Lower and higher limits have independent confirmation settings. The first limit
-uses `confirm_higher` as an explicit initial-limit policy. Exactly equal speeds
-need no directional confirmation even if source/identity changes; accepting the new
-identity can still propose a history update. Adjacent representable unequal
-floating-point values are changes and follow the corresponding direction policy.
+The saved `SLCConfirmation` switch requires approval for the first limit and every
+higher or lower limit, including while disengaged. Legacy lower/higher settings
+are ignored and are no longer offered in the UI. Both reducer direction flags
+are set from that one switch. An unchanged accepted speed continues under its
+existing approval without accepting a different source/identity automatically;
+this includes new Vision episodes at that same speed. With confirmations off,
+qualified limits may be accepted automatically. Adjacent representable unequal
+floating-point values are changes and follow confirmation policy.
 
 Confirmation expires after 30 seconds of accumulated authoritative active-long
 time. An interval counts only when the same pending decision exists and both

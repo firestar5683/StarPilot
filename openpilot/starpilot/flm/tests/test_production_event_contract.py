@@ -44,7 +44,7 @@ def capture(controls):
         startup_rejections += 1
         continue
       return evidence, source, startup_rejections
-  pytest.fail('actual source-bound controller checkpoint was not captured')
+  raise pytest.fail.Exception('actual source-bound controller checkpoint was not captured')
 
 
 @pytest.mark.parametrize('platform,mode,domain', [

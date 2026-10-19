@@ -2,6 +2,8 @@
 import hashlib
 import math
 
+from openpilot.starpilot.flm.physical_response import kinematic_accel
+
 from openpilot.starpilot.flm.controller_replay import MAX_FRAME_GAP_NS
 
 
@@ -13,14 +15,17 @@ def tracking_episodes(engine, raw_blocks, model, objective):
   phase slice. Missing source/native/controller context resets lineage. Counts
   select when to attempt a fit and confer no actuation permission.
   """
+  frames = {frame.control_ns: frame for frame in engine.records}
   points = {}
   for block in raw_blocks:
     for point in block['samples']:
       stamp = point['control_ns']
       if stamp in points:
         raise ValueError('event duplicated physical endpoint')
-      stage = dict(point['control']['stage_values'])
-      points[stamp] = (block['block_id'], abs(stage['setpoint'] - point['physical']['lateral_accel']))
+      frame = frames.get(stamp)
+      if frame is None or frame.desired_physical_accel is None or not math.isfinite(frame.desired_physical_accel):
+        raise ValueError('event exact control-frame physical target absent')
+      points[stamp] = (block['block_id'], abs(frame.desired_physical_accel - point['physical']['lateral_accel']))
   windows = tuple(engine.replay_windows)
   episodes = []
   start = last = neutral_start = 0
@@ -56,7 +61,7 @@ def tracking_episodes(engine, raw_blocks, model, objective):
     last = frame.control_ns
     if window is None or not engine._frame_context(frame):
       continue
-    goal = frame.desired_physical_accel
+    goal = kinematic_accel(frame)
     speed = dict(frame.inputs)['vEgo']
     if goal is None or not all(math.isfinite(value) for value in (goal, speed)):
       raise ValueError('event actual physical target/speed absent')

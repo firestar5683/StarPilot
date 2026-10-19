@@ -139,6 +139,20 @@ class PresentationTest(unittest.TestCase):
       p = m.resolve_unified_speed(state(kind=kind, pending_speed_limit_mps=25))
       self.assertEqual((p.mode, p.posted_text, p.pending, p.source), ('split' if kind == 'stale' else 'max_only', '–', False, 'none'))
 
+  def test_qualified_retention_keeps_source_offset_and_override_feedback(self):
+    for kind in ('unknown', 'stale', 'absent'):
+      for metric, posted, target, offset in ((True, '72', '79', '+7'), (False, '45', '49', '+4')):
+        s = state(kind=kind, metric=metric, session_id='drive', effective_cap_mps=22,
+                  accepted_adjusted_limit_mps=22, pending_speed_limit_mps=30)
+        p = m.resolve_unified_speed(s)
+        self.assertEqual((p.posted_text, p.limit_text, p.offset_text, p.source, p.pending, p.status),
+                         (posted, target, offset, 'dashboard', False, 'Using previous limit'))
+        s.speed_limit.driver_override_active = True
+        s.speed_limit.override_basis = 'pedal'
+        self.assertEqual(m.resolve_unified_speed(s).status, 'Using accelerator')
+        s.speed_limit.effective_cap_mps = None
+        self.assertEqual(m.resolve_unified_speed(s).status, 'Unavailable')
+
   def test_imperial_and_hidden_max(self):
     p = m.resolve_unified_speed(state(metric=False, cruise_kph=None))
     self.assertEqual((p.max_text, p.posted_text, p.offset_text, p.unit), ('–', '45', '+4', 'mph'))

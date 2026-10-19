@@ -1,5 +1,7 @@
 """Shared actual-selected controller identities; physical fitting stays in learner."""
 
+from typing import cast
+
 from dataclasses import dataclass, field, replace
 import hashlib
 import json
@@ -24,11 +26,12 @@ def implementation_revision(controller_type, interface_type):
   values. Formatting changes conservatively discard stored priors too.
   """
   here = Path(__file__).resolve().parent
-  controller_root = Path(importlib.import_module(controller_type.__module__).__file__).resolve().parent
-  brand_root = Path(importlib.import_module(interface_type.__module__).__file__).resolve().parent
+  controller_root = Path(cast(str, importlib.import_module(controller_type.__module__).__file__)).resolve().parent
+  brand_root = Path(cast(str, importlib.import_module(interface_type.__module__).__file__)).resolve().parent
   common_root = here.parents[1] / 'common'
   inherited_roots = tuple(
-    Path(importlib.import_module(base.__module__).__file__).resolve().parent for base in controller_type.__mro__ if base.__module__.startswith('openpilot.')
+    Path(cast(str, importlib.import_module(base.__module__).__file__)).resolve().parent
+    for base in controller_type.__mro__ if base.__module__.startswith('openpilot.')
   )
   roots = (here, here.parent / 'lateral', controller_root, brand_root, brand_root.parent, common_root, *inherited_roots)
   files = tuple(sorted({path for root in roots for path in root.glob('*.py')}))
@@ -239,13 +242,14 @@ class SourceState:
   persistent_source_epoch: str = ''
   # Optional-process-only selected configuration; never added to controls IPC.
   manual_baseline: tuple[float, ...] = field(default=(), compare=False, repr=False)
+  # Internal only: absent current configuration proof is not an explicit OFF.
+  configuration_known: bool = True
 
 
 def read_source(cp, params, *, now_ns, cp_sha256=None, calibration=(), vehicle_session="", calibration_generation=''):
   """Only startup/separate-process settings work; errors disable learning."""
   cp_sha256 = car_params_digest(cp) if cp_sha256 is None else cp_sha256
   try:
-    preference = read_preference(params, cp)
     keys = tuple(dict.fromkeys((PREFERENCE_KEY, 'ForceAutoTuneOff', DOCUMENT_KEY, 'AutoSteeringLearningReset', 'LateralControllerSelection', *LEGACY_KEYS)))
     snapshots = []
     for key in keys:
@@ -254,6 +258,10 @@ def read_source(cp, params, *, now_ns, cp_sha256=None, calibration=(), vehicle_s
         raise ValueError('unreadable source')
       snapshots.append((key, raw))
     raw_by_key = dict(snapshots)
+    preference = read_preference(params, cp, preference_snapshot=(raw_by_key[PREFERENCE_KEY], True),
+      legacy_snapshot=(raw_by_key['ForceAutoTuneOff'], True))
+    if not preference.valid:
+      raise ValueError('invalid learning preference')
     from openpilot.starpilot.lateral.controller_selection import selection_from_bytes
 
     if selection_from_bytes(cp, raw_by_key['LateralControllerSelection']).source == 'invalid':
@@ -299,6 +307,11 @@ def read_source(cp, params, *, now_ns, cp_sha256=None, calibration=(), vehicle_s
         if legacy.factor is not None or legacy.friction is not None:
           fixed_manual = (float(tune.latAccelFactor) if legacy.factor is None else legacy.factor, float(tune.latAccelOffset),
                           float(tune.friction) if legacy.friction is None else legacy.friction)
+    if not preference.enabled or manual:
+      # Honor an independently parsed explicit OFF/manual even when physical
+      # calibration is unavailable. This cannot authorize collection or output.
+      return SourceState(False, manual, reset, '', now_ns,
+                         now_ns + SOURCE_LEASE_NS, cp_sha256, manual_baseline=fixed_manual)
     calibration = tuple(calibration)
     if len(calibration) != 3 or not all(math.isfinite(v) for v in calibration):
       raise ValueError("uncertain calibration")
@@ -323,7 +336,7 @@ def read_source(cp, params, *, now_ns, cp_sha256=None, calibration=(), vehicle_s
                        now_ns + SOURCE_LEASE_NS, cp_sha256, calibration=calibration, calibration_generation=calibration_generation,
                        persistent_source_epoch=persistent_epoch, manual_baseline=fixed_manual)
   except (AttributeError, UnicodeError, TypeError, ValueError, OSError, OverflowError):
-    return SourceState(False, False, '', '', now_ns, now_ns + SOURCE_LEASE_NS, cp_sha256)
+    return SourceState(False, False, '', '', now_ns, now_ns + SOURCE_LEASE_NS, cp_sha256, configuration_known=False)
 
 
 @dataclass(frozen=True)

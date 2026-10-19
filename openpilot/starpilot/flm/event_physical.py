@@ -39,10 +39,11 @@ def fit_event_physical(identity, context, rows, *, lag_ns, now_ns, min_excitatio
   # never creates another independent observation or another heldout ID.
   for group in (train, heldout):
     for direction in ('left', 'right'):
-      supporting = {row.block_id for row in group if row.direction == direction}
-      if sum(row.direction == direction for row in group) < 80:
+      selected = tuple(row for row in group if (row.command > 0 if direction == 'left' else row.command < 0))
+      supporting = {row.block_id for row in selected}
+      if len(selected) < 80:
         return None
-      if sum(sum(row.block_id == block and row.direction == direction for row in group) >= 20 for block in supporting) < 2:
+      if sum(sum(row.block_id == block for row in selected) >= 20 for block in supporting) < 2:
         return None
   mean_x = sum(row.command for row in train) / len(train)
   mean_y = sum(row.physical_response for row in train) / len(train)

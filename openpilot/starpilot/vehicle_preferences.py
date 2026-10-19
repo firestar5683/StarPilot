@@ -34,6 +34,7 @@ class VehicleStartupPreferences:
   toyota_lock_doors: bool = False
   toyota_unlock_doors: bool = False
   toyota_radar_mode: int = 0
+  gm_cancel_remap: bool = False
 
   @classmethod
   def read(cls, params, *, enabled: bool):
@@ -87,6 +88,8 @@ class VehicleStartupPreferences:
                                      read_saved(params, "LockDoors", 8) == (b"1", True)),
                toyota_unlock_doors=bool(enabled and readable and safe in (None, b"0") and
                                        read_saved(params, "UnlockDoors", 8) == (b"1", True)),
+               gm_cancel_remap=bool(enabled and not disable_bolt and readable and safe in (None, b"0") and
+                                    read_saved(params, "RemapCancelToDistance", 8) == (b"1", True)),
                volt_sng=volt_sng, gm_auto_hold=gm_auto_hold, volt_one_pedal=volt_one_pedal,
                gm_camera_pedal=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
                toyota_filter=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
@@ -154,6 +157,8 @@ class VehicleStartupPreferences:
     self._prepare_camera_pedal(cp)
     apply_gm_auto_hold(cp, self.gm_auto_hold)
     apply_volt_one_pedal(cp, self.volt_one_pedal and not self.disable_bolt_long, self.gm_auto_hold)
+    from opendbc.car.gm.cancel_remap import prepare as prepare_cancel_remap
+    prepare_cancel_remap(cp, self.gm_cancel_remap)
     if cp.brand == "toyota":
       apply_toyota_auto_hold(cp, self.toyota_auto_hold)
       from opendbc.car.toyota.ars510_preferences import apply_radar_mode
@@ -179,6 +184,8 @@ class VehicleStartupPreferences:
     self._prepare_camera_pedal(cp)
     apply_gm_auto_hold(cp, self.gm_auto_hold and admitted_hold)
     apply_volt_one_pedal(cp, self.volt_one_pedal and admitted_one_pedal and not self.disable_bolt_long, self.gm_auto_hold and admitted_hold)
+    from opendbc.car.gm.cancel_remap import prepare as prepare_cancel_remap
+    prepare_cancel_remap(cp, self.gm_cancel_remap)
     if cp.brand == "toyota":
       admitted = bool(cp.flags & ToyotaFlags.AUTO_BRAKE_HOLD)
       apply_toyota_auto_hold(cp, self.toyota_auto_hold and admitted)

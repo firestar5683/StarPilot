@@ -76,12 +76,12 @@ def _lead(sm, now_ns: int) -> lr.LeadEvidence:
   return lr.LeadEvidence(lr.LeadKind.VALID, True, True, float(lead.dRel), float(lead.vLeadK), float(lead.aLeadK))
 
 
-def _authority(CP, sm, host_long: bool, lateral: bool) -> acc.Authority:
+def _authority(CP, sm, host_long: bool, lateral: bool, *, long_enabled: bool) -> acc.Authority:
   car_state = sm["carState"]
   stock = not bool(CP.openpilotLongitudinalControl) and bool(car_state.cruiseState.enabled)
-  if bool(CP.openpilotLongitudinalControl) and host_long:
+  if bool(CP.openpilotLongitudinalControl) and (host_long or long_enabled):
     return acc.Authority(acc.Mode.COMBINED if lateral else acc.Mode.LONGITUDINAL_ONLY,
-                         acc.LongitudinalOwner.SYSTEM, lateral, True, False, False)
+                         acc.LongitudinalOwner.SYSTEM, lateral, host_long, False, False)
   if stock:
     return acc.Authority(acc.Mode.LATERAL_ONLY if lateral else acc.Mode.OFF,
                          acc.LongitudinalOwner.STOCK, lateral, False, True, False)
@@ -180,6 +180,15 @@ class Runtime:
     self.command_expected_mps = 0.0
     self.command_target_mps = 0.0
     self.command_card_producer = ''
+
+  def update_offsets(self, offsets: sd.OffsetSchedule) -> None:
+    self.settings = replace(self.settings, offsets=offsets)
+    # Renew action IDs when the adjusted target changes, keeping accepted/rejected limits.
+    acceptance = replace(self.state.acceptance, observation=acc.Observation(acc.ObservationKind.UNKNOWN),
+                         pending=None, presentation=None, timer_running=False)
+    self.state = replace(self.state, acceptance=acceptance)
+    self._ui_receipt = None
+    self.command_status = ''
 
   def _event_current(self, event: CruiseEvent, sm, now_ns: int) -> bool:
     return (bool(event.producer_session) and 0 < event.observed_ns <= now_ns and
@@ -330,8 +339,10 @@ class Runtime:
     long_active = str(controls.longControlState) != "off" if controls_fresh else False
     host_long = bool(CP.openpilotLongitudinalControl and long_active and car_control_fresh and sm['carControl'].longActive and
                      selfdrive.enabled and car_fresh and selfdrive_fresh)
+    long_enabled = bool(car_fresh and controls_fresh and selfdrive_fresh and car_control_fresh and
+                        selfdrive.enabled and sm['carControl'].enabled)
     lateral = bool(car_control_fresh and sm['carControl'].latActive and selfdrive_fresh)
-    authority = _authority(CP, sm, host_long, lateral)
+    authority = _authority(CP, sm, host_long, lateral, long_enabled=long_enabled)
     selected = float(car_state.vCruise) if car_fresh and _number(car_state.vCruise) else 0.0
     selected_cluster = float(car_state.vCruiseCluster) if car_fresh and _number(car_state.vCruiseCluster) else None
     ego_valid = car_fresh and _number(car_state.vEgo) and _number(car_state.vEgoCluster)
@@ -339,10 +350,8 @@ class Runtime:
            if ego_valid else sd.SpeedPair(sd.DomainStatus.STALE if sm.logMonoTime.get("carState", 0) else sd.DomainStatus.UNKNOWN))
     host = comp.HostState(bool(CP.openpilotLongitudinalControl), host_long, bool(selfdrive.enabled and selfdrive_fresh),
                           bool(controls.forceDecel) if controls_fresh else True, False, selected, selected_cluster)
-    acceptance_policy = (replace(self.settings.acceptance, vision_driver_confirm=True)
-                         if self.vision_control_qualified else self.settings.acceptance)
     return comp.Frame(now_ns, self._observations(sm, CP, now_ns, now_boot_ns), self.settings.selection, authority,
-                      acceptance_policy, self.settings.offsets,
+                      self.settings.acceptance, self.settings.offsets,
                       sd.DomainStatus.VALID if car_fresh and selected_cluster is not None else sd.DomainStatus.STALE,
                       ego, bool(car_state.gasPressed) if car_fresh and self.settings.manual_override else False,
                       _lead(sm, now_ns), self.settings.lead_policy, host, action=action, adopt=adopt,
@@ -395,12 +404,12 @@ class Runtime:
       completed = arb.step(self.ledger, arb.CompleteAction(self.session_id, action_id), now_ns=now_ns)
       self.ledger = completed.state
     command = self._command(result, sm, CP, now_ns, old_accepted, old_pending, action, adopt)
-    message = self._message(now_ns, result, sm, frame.observations)
+    message = self._message(now_ns, result, sm, frame)
     if command is not None:
       self._command_ui_sequence = request.sequence_id if request is not None else 0
     message.slcState.commandActionSequenceId = getattr(self, '_command_ui_sequence', 0)
-    if action_result is not None and action_result.status == 'resolved' and request is not None:
-      self._ui_receipt = (request.sequence_id, str(message.slcState.actionStatus))
+    if action_result is not None and action_result.status == 'resolved':
+      self._ui_receipt = (request.sequence_id, str(message.slcState.actionStatus)) if request is not None else None
     receipt = getattr(self, '_ui_receipt', None)
     if receipt is not None:
       message.slcState.actionSequenceId, message.slcState.actionStatus = receipt
@@ -456,7 +465,7 @@ class Runtime:
     record.targetMps = target
     return command
 
-  def _message(self, now_ns: int, result: comp.Result, sm, observations=None):
+  def _message(self, now_ns: int, result: comp.Result, sm, frame: comp.Frame):
     message = messaging.new_message("slcState")
     message.logMonoTime = now_ns
     message.valid = not result.errors
@@ -469,7 +478,7 @@ class Runtime:
       enabled_sources.add(sel.Source.ONLINE)
     rows = state.init('sourceReadings', len(sel.Source))
     for row, source in zip(rows, sel.Source, strict=True):
-      observation = (observations or {}).get(source)
+      observation = frame.observations.get(source)
       row.source = source.value
       row.enabled = bool(self.settings.display and source in enabled_sources)
       row.observationKind = observation.kind.value if observation is not None else 'unknown'
@@ -510,16 +519,19 @@ class Runtime:
     state.overrideBasis = (result.override.basis if state.driverOverrideActive else 'none')
     state.retainedOverride = bool(result.state.override.persistent_selected_mps is not None)
     shown = result.state.acceptance.presentation
-    if state.observationKind == 'valid':
-      for candidate, value_field, flag_field in (
-        (accepted.candidate if accepted is not None else None, 'acceptedAdjustedLimit', 'hasAcceptedAdjustedLimit'),
-        (pending.candidate if pending is not None else None, 'pendingAdjustedLimit', 'hasPendingAdjustedLimit'),
-        (shown.candidate if shown is not None else None, 'presentationAdjustedLimit', 'hasPresentationAdjustedLimit'),
-      ):
-        value = sd.adjusted_limit(candidate.speed_mps, self.settings.offsets) if candidate is not None else None
-        if value is not None:
-          setattr(state, value_field, value)
-          setattr(state, flag_field, True)
+    ego = frame.ego_pair
+    ego_delta = (max(0.0, ego.cluster_mps - ego.raw_mps)
+                 if ego.status is sd.DomainStatus.VALID and ego.cluster_mps is not None and ego.raw_mps is not None else 0.0)
+    for candidate, value_field, flag_field in (
+      (accepted.candidate if accepted is not None else None, 'acceptedAdjustedLimit', 'hasAcceptedAdjustedLimit'),
+      (pending.candidate if pending is not None else None, 'pendingAdjustedLimit', 'hasPendingAdjustedLimit'),
+      (shown.candidate if shown is not None else None, 'presentationAdjustedLimit', 'hasPresentationAdjustedLimit'),
+    ):
+      value = (sd.adjusted_limit(candidate.speed_mps, self.settings.offsets, minimum_target_mps=ego_delta)
+               if candidate is not None else None)
+      if value is not None:
+        setattr(state, value_field, value)
+        setattr(state, flag_field, True)
     if shown is not None:
       state.presentationId = shown.presentation_id
     state.status = result.status

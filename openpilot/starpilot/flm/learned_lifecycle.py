@@ -1,5 +1,8 @@
 """Bounded historical profile storage and current application display."""
 
+from collections.abc import Callable
+from typing import cast
+
 from openpilot.starpilot.flm.adaptive_profile import ApplicationOutcome
 import json
 import hashlib
@@ -65,7 +68,7 @@ def decode(raw):
         or len(parameter) != 2
         or any(type(x) is not str or not x or len(x) > 128 for x in parameter)
         or parameter[0] in names
-        or type(value) not in (int, float)
+        or (type(value) is not int and type(value) is not float)
         or not math.isfinite(value)
       ):
         raise ValueError('Invalid stored coordinate')
@@ -239,7 +242,7 @@ class ProducerPersistence:
         return False
 
     def authorized():
-      return current_sources() == captured and (full_binding is None or current_full_binding() == full_binding)
+      return current_sources() == captured and (full_binding is None or cast(Callable[[], object], current_full_binding)() == full_binding)
 
     committed = self.storage.save(profile, reset=reset, replay_validation=replay_validation, authorized=authorized, full_binding=full_binding)
     if committed:

@@ -23,7 +23,10 @@ def paddle_cancel(cp, cs, *, enabled: bool, saved: bool) -> bool:
               any(event.type == ButtonType.altButton2 and event.pressed for event in cs.buttonEvents))
 
 
-def physical_cancel(cs) -> bool:
+def physical_cancel(cs, cp=None) -> bool:
+  from opendbc.car.gm.cancel_remap import enabled as gm_cancel_remap_enabled
+  if cp is not None and gm_cancel_remap_enabled(cp):
+    return False
   return any(event.type == ButtonType.cancel for event in cs.buttonEvents)
 
 

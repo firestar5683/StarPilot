@@ -6,6 +6,7 @@ from opendbc.car.tests.routes import non_tested_cars, routes, unrecorded_route_g
 from opendbc.car.gm.values import CAR as GM
 from opendbc.car.tesla.values import CAR as TESLA
 from opendbc.car.toyota.values import CAR as TOYOTA
+from opendbc.car.volvo.values import CAR as VOLVO
 
 
 class TestRoutes(unittest.TestCase):
@@ -19,6 +20,7 @@ class TestRoutes(unittest.TestCase):
   def test_explicit_unrecorded_configuration_gaps(self):
     self.assertEqual(set(unrecorded_route_gaps), {
       GM.CHEVROLET_VOLT_CC, GM.CHEVROLET_MALIBU_HYBRID_CC, TOYOTA.TOYOTA_PRIUS_RETROFIT, TESLA.TESLA_MODEL_S_HW1,
+      VOLVO.VOLVO_XC40_RECHARGE, VOLVO.VOLVO_S60_RECHARGE, VOLVO.POLESTAR_2,
     })
     self.assertFalse(set(unrecorded_route_gaps) & {route.car_model for route in routes})
     self.assertTrue(set(unrecorded_route_gaps) <= set(non_tested_cars))

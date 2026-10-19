@@ -60,6 +60,14 @@ class SpeedDomainTests(unittest.TestCase):
     self.assertEqual(pedal.cap_mps, 25.0)
     self.assertEqual(pedal.cluster_target_mps, 26.0)
 
+  def test_unsafe_negative_offsets_keep_the_unadjusted_ceiling(self):
+    for offset, delta in ((-20.0, 0.0), (-30.0, 0.0), (-19.0, 2.0)):
+      with self.subTest(offset=offset, delta=delta):
+        schedule = sd.OffsetSchedule((sd.OffsetBand(0.0, None, offset),))
+        _, coordinate = self.frame(0, schedule=schedule, ego_cluster=20.0 + delta)
+        self.assertEqual(coordinate.cluster_target_mps, 20.0)
+        self.assertEqual(coordinate.cap_mps, 20.0 - delta)
+
   def test_effective_threshold_blocks_early_intent_and_cluster_only_pedal_can_cross(self):
     offset_three = sd.OffsetSchedule((sd.OffsetBand(0.0, None, 3.0),))
     first, _ = self.frame(0, selected_raw=20.0, ego_raw=20.0, schedule=offset_three)
@@ -92,14 +100,27 @@ class SpeedDomainTests(unittest.TestCase):
 
   def test_negative_offset_can_retain_raw_intent_below_raw_accepted_limit(self):
     lower = sd.OffsetSchedule((sd.OffsetBand(0.0, None, -5.0),))
-    first, _ = self.frame(0, schedule=lower)
+    first, _ = self.frame(0, selected_raw=16.0, schedule=lower)
     self.decision(1)
-    effect = self.intent(1, 20.0, 18.0, first.context)
+    effect = self.intent(1, 16.0, 18.0, first.context)
     armed, _ = self.frame(1, selected_raw=18.0, schedule=lower, change=effect)
     self.assertEqual(armed.state.persistent_selected_mps, 18.0)
     self.decision(2)
     retained, _ = self.frame(2, selected_raw=18.0, schedule=lower)
     self.assertEqual(retained.contribution_mps, 18.0)
+
+  def test_decrease_preserves_adjusted_ceiling_with_cluster_deltas(self):
+    for offset in (-5.0, 0.0, 2.0):
+      with self.subTest(offset=offset):
+        self.setUp()
+        schedule = sd.OffsetSchedule((sd.OffsetBand(0.0, None, offset),))
+        first, before = self.frame(0, selected_raw=30.0, selected_cluster=31.0, ego_cluster=20.5, schedule=schedule)
+        self.decision(1)
+        effect = self.intent(1, 30.0, 29.0, first.context)
+        result, after = self.frame(1, selected_raw=29.0, selected_cluster=30.0, ego_cluster=20.5, schedule=schedule, change=effect)
+        self.assertIsNone(result.contribution_mps)
+        self.assertIsNone(result.state.persistent_selected_mps)
+        self.assertEqual(after.cap_mps, before.cap_mps)
 
   def test_cluster_delta_jitter_does_not_rotate_causal_context(self):
     first, _ = self.frame(0, selected_raw=20.0, selected_cluster=20.5)
@@ -161,6 +182,22 @@ class SpeedDomainTests(unittest.TestCase):
         result = sd.resolve(decision, SCHEDULE, pair, pair)
         self.assertEqual(result.status, sd.DomainStatus.INVALID)
         self.assertIsNone(result.context)
+
+  def test_retained_target_requires_enabled_policy_and_matching_accepted_history(self):
+    self.decision(1, source=acc.ObservationKind.UNKNOWN)
+    pair = sd.SpeedPair(sd.DomainStatus.VALID, 20.0, 20.0, SESSION, 1)
+    self.assertEqual(sd.resolve(self.accepted, SCHEDULE, pair, pair).status, sd.DomainStatus.VALID)
+    for forged in (replace(self.accepted, basis='accepted'),
+                   replace(self.accepted, policy=replace(POLICY, fallback_previous=False)),
+                   replace(self.accepted, control_target_mps=21.0),
+                   replace(self.accepted, state=replace(self.accepted.state, accepted=None))):
+      with self.subTest(forged=forged):
+        self.assertEqual(sd.resolve(forged, SCHEDULE, pair, pair).status, sd.DomainStatus.INVALID)
+        assert forged.policy is not None
+        override = ov.step(ov.new_session(SESSION), forged, ACTIVE, forged.policy,
+                           ov.SelectedEvidence(ov.EvidenceKind.VALID, 20.0), PEDAL_OFF, now_ns=1)
+        self.assertTrue(override.errors)
+        self.assertIsNone(override.contribution_mps)
 
   def test_cluster_measurements_below_raw_clamp_both_deltas_to_zero(self):
     _, coordinate = self.frame(0, selected_raw=20.0, selected_cluster=19.0,

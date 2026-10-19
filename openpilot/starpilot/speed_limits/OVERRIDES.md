@@ -5,9 +5,9 @@ returns a proposed contribution in m/s, not a vehicle command or final planner
 target. It requires the actual `acceptance.Decision` from the same session and
 monotonic timestamp. The decision carries the authority and policy snapshot used
 by acceptance; a mismatch, invalid decision, or inconsistent accepted target is
-an error and yields no contribution. `UNKNOWN` and `STALE` observations have no
-target. Explicit `ABSENT` may use only the actual acceptance decision's qualified
-previous-limit fallback. The selected-speed and pedal observations carry explicit
+an error and yields no contribution. `ABSENT`, `UNKNOWN` and `STALE` observations
+may use only the actual acceptance decision's qualified previous-limit fallback.
+Source gaps do not interrupt an otherwise qualified driver override. The selected-speed and pedal observations carry explicit
 validity; missing or stale evidence suppresses output. Valid ego speed may be
 zero at standstill; selected and accepted limit speeds remain positive.
 
@@ -22,6 +22,10 @@ event was observed; `consumed` means qualified intent changed override state.
 Automatic, unresolved, consumed, foreign, replayed and completed effects never
 arm persistence. The action ledger supplies causal classification; the override
 reducer never guesses a physical button association or time window.
+
+A qualified selected-speed increase above the effective limit can start a
+persistent override. A decrease cannot start or raise one; it only lowers an existing
+override, clearing it at or below the effective limit.
 
 The reducer rotates context on accepted numeric target change, temporary
 inactivity and re-enable, mode or owner change, and each new consumed adoption.
@@ -39,10 +43,14 @@ The current valid pedal press contributes the current ego speed when above the
 accepted target, temporarily preceding persistent intent. Releasing the pedal
 reveals retained persistence. Pedal speed is never latched. Temporary inactive
 system-longitudinal authority suppresses output immediately and invalidates the
-origin context. Persistent intent remains latent for less than 750 ms in the same
-mode and owner; at or after 750 ms it clears before a resumed output. Mode or
-owner changes clear immediately. Display-only never contributes or consumes an
-effect. Stock setpoint buttons are a separate capability and output domain.
+origin context. Fresh enabled engagement retains system ownership while the
+accelerator pauses longitudinal output. A valid held pedal renews the suspension
+timestamp without producing a contribution or ceiling during that pause. After
+the last held-pedal sample, persistent intent remains latent for less than 750 ms
+in the same mode and owner; at or after 750 ms it clears before a resumed output.
+Normal disengagement, stale engagement evidence, and mode or owner changes clear
+immediately. Display-only never contributes or consumes an effect. Stock setpoint
+buttons are a separate capability and output domain.
 
 Malformed evidence, a reversed clock, or an invalid acceptance snapshot clears
 intent and origin context, then latches `reset_required`. Further calls in that

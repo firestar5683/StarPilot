@@ -5,6 +5,8 @@
 No saved tune/PID/native writes; admission remains in the controls runtime.
 """
 
+from typing import cast
+
 from dataclasses import dataclass
 import math
 from openpilot.starpilot.flm.adaptive_profile import ProfileOwner, ReplayValidation
@@ -43,7 +45,7 @@ class EffectTrial:
     expected = original_anchor(self.selected_baseline_revision, names)
     if self.objective.anchor_digest != expected:
       raise ValueError('recentered or foreign effect objective')
-    payload = self.original_anchor
+    payload = cast(dict[str, object], self.original_anchor)
     fields = {
       'version',
       'manifest_sha256',
@@ -71,7 +73,7 @@ class EffectTrial:
       or payload['selected_baseline_revision'] != self.selected_baseline_revision
     ):
       raise ValueError('effect full-profile context')
-    entries = payload['accumulated']
+    entries = cast(tuple[tuple[str, float], ...], payload['accumulated'])
     if type(entries) is not tuple or len(entries) != len(NAMES) or tuple(n for n, _ in entries) != NAMES:
       raise ValueError('exact full30 prior profile required')
     accumulated = dict(entries)

@@ -35,6 +35,17 @@ def native_state(*, pending: bool = True, session: str = "drive-session", decisi
 
 
 class TestSlcTouch(unittest.TestCase):
+  def test_both_profiles_name_the_adjusted_apply_and_keep_targets(self):
+    for metric, factor in ((False, .44704), (True, 1 / 3.6)):
+      current = state()
+      current = replace(current, metric=metric, speed_limit=replace(current.speed_limit,
+        pending_speed_limit_mps=45 * factor, pending_adjusted_limit_mps=50 * factor,
+        accepted_speed_limit_mps=35 * factor, accepted_adjusted_limit_mps=40 * factor))
+      for profile in Profile:
+        controls = slc_controls(profile, current)
+        self.assertEqual([control.label for control in controls], ['Apply 50', 'Keep 40'])
+        self.assertEqual(controls[0].request.candidate_speed_mps, 45 * factor)
+
   def test_shell_routes_visible_card_action_as_typed_slc_request(self):
     emitted: list[ShellRequest] = []
     shell = ShellInput(Profile.LARGE, emitted.append)

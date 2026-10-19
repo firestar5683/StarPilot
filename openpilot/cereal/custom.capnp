@@ -1118,7 +1118,7 @@ struct MapdOut @0xa4f1eb3323f5f582 {
 
 # Automatic FLM adds children only to existing reserved fork carriers.
 # All evidence clocks are explicitly MONOTONIC; default/version0 is invalid.
-struct LearningControlEvidence {
+struct LearningControlEvidence @0xf2447170bb68f358 {
   version @0 :UInt16;
   identity @1 :Text;
   generation @2 :UInt64;
@@ -1182,7 +1182,7 @@ struct LearningControlEvidence {
   }
   struct StageValue { name @0 :Text; value @1 :Float64; }
 }
-struct LearningAppliedEvidence {
+struct LearningAppliedEvidence @0xbab0f51a74ffee6e {
   version @0 :UInt16;
   controlMonoTime @1 :UInt64;
   sourceStateMonoTime @2 :UInt64;
@@ -1200,7 +1200,7 @@ struct LearningAppliedEvidence {
   carrierFrame @13 :UInt64;
   carrierObservedMonoTime @14 :UInt64;
 }
-struct AutomaticRuntimeProfile {
+struct AutomaticRuntimeProfile @0xef38d302825641e3 {
   version @0 :UInt16;
   identity @1 :Text;
   sequence @2 :UInt64;
@@ -1264,7 +1264,7 @@ struct AutomaticRuntimeProfile {
   }
 }
 
-struct AutomaticLearningSourceReceipt {
+struct AutomaticLearningSourceReceipt @0x9fe2d23e75805149 {
   version @0 :UInt16;
   enabled @1 :Bool;
   manual @2 :Bool;
@@ -1278,7 +1278,7 @@ struct AutomaticLearningSourceReceipt {
   persistentSourceEpoch @10 :Text;
 }
 
-struct LearningApplication {
+struct LearningApplication @0x82b6c8ea6a6efabd {
   version @0 :UInt16;
   identity @1 :Text;
   profileSequence @2 :UInt64;
@@ -1294,7 +1294,7 @@ struct LearningApplication {
 }
 
 
-struct FordLearningEvidence {
+struct FordLearningEvidence @0xd1dfbadb6a811fee {
   version @0 :UInt16;
   identity @1 :Text;
   generation @2 :UInt64;
@@ -1318,7 +1318,7 @@ struct FordLearningEvidence {
   appliedProfileValidUntilMonoTime @20 :UInt64;
 }
 
-struct FordLearningEvent {
+struct FordLearningEvent @0xb276dede9e6b2cc4 {
   eventMonoTime @0 :UInt64;
   sequence @1 :UInt64;
   kind @2 :Text;
@@ -1352,7 +1352,7 @@ struct FordLearningEvent {
 }
 
 
-struct CentreApplicationWitness {
+struct CentreApplicationWitness @0xab0b33cac682523e {
   version @0 :UInt16;
   identity @1 :Text;
   sourceEpoch @2 :Text;
@@ -1367,7 +1367,7 @@ struct CentreApplicationWitness {
   actualFriction @11 :Float64;
 }
 
-struct LearningTorqueProjection {
+struct LearningTorqueProjection @0xf078f562cbce49ad {
   version @0 :UInt16;
   family @1 :Text;
   fingerprint @2 :Text;

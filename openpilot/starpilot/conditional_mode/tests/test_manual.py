@@ -30,9 +30,10 @@ class ManualSettingsTests(unittest.TestCase):
       original = read_button_map
       calls = []
 
-      def read_once(source, *, include_ioniq_media=False):
+      def read_once(source, *, include_ioniq_media=False, cp=None):
+        self.assertIsNone(cp)
         calls.append(include_ioniq_media)
-        return original(source, include_ioniq_media=include_ioniq_media)
+        return original(source, include_ioniq_media=include_ioniq_media, cp=cp)
 
       def packet(mode, custom, stamp, now):
         media = MediaObservation((MediaSample(mode, custom, stamp),), stamp, 0, True)

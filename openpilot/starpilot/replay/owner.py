@@ -194,7 +194,7 @@ class ReplayOwner:
       result['export'] = {key: value for key, value in self.export.items() if key != 'expires'}
       result['export']['owned'] = client == self.export_client
       if 'expires' in self.export:
-        result['export']['expiresInSeconds'] = max(0., self.export['expires'] - self.clock())
+        result['export']['expiresInSeconds'] = max(0., cast(float, self.export['expires']) - self.clock())
     if not owned:
       for key in ('framePath', 'media', 'codec'):
         result.pop(key, None)
@@ -202,9 +202,9 @@ class ReplayOwner:
 
   def _expire_export(self, *, replace=False):
     if (self.export is None or self.worker is not None and self.status.get('purpose') == 'export' or
-        not replace and self.clock() < self.export.get('expires', float('inf'))):
+        not replace and self.clock() < cast(float, self.export.get('expires', float('inf')))):
       return True
-    directory = self.root / 'exports' / self.export['id']
+    directory = self.root / 'exports' / cast(str, self.export['id'])
     path = directory / 'replay.mp4'
     try:
       fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)

@@ -662,13 +662,13 @@ class StarShellSession:
       if group == "lane_change":
         return not cp.notCar and not cp.passive and not cp.dashcamOnly
       if group == "switchback_wheel":
-        from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
-        return bool(ioniq6_media_eligible(cp) and not cp.notCar and not cp.passive and not cp.dashcamOnly)
+        from openpilot.starpilot.feature_capabilities import lateral_supported
+        return lateral_supported(cp)
       if group in ("conditional", "conditional_wheel", "long_output", "slc"):
         return bool(cp.openpilotLongitudinalControl and not cp.notCar and not cp.passive and not cp.dashcamOnly)
       if group in ("aol_wheel", "lane", "torque", "aol"):
         return not cp.notCar and not cp.passive and not cp.dashcamOnly
-      return bool(cp.openpilotLongitudinalControl and not cp.pcmCruise and not cp.notCar and
+      return bool(cp.openpilotLongitudinalControl and not cp.notCar and
                   not cp.passive and not cp.dashcamOnly)
     return False
 
@@ -2114,6 +2114,10 @@ class StarMiciMainLayout(MiciMainLayout):
     if destination == Destination.DRIVING_MODEL:
       from openpilot.starpilot.ui.models_compact import ModelsCompact
       ModelsCompact(self.star).open()
+      return
+    if destination == Destination.DRIVING_CONTROLS:
+      from openpilot.starpilot.ui.feature_settings_compact import FeatureSettingsCompact
+      FeatureSettingsCompact(self.star).open(FeaturePage.HUB)
       return
     if destination == Destination.APPEARANCE:
       from openpilot.starpilot.ui.appearance_compact import AppearanceCompact

@@ -1,5 +1,7 @@
 """Exact bounded CarController emission metadata; no permission or plant claim."""
 
+from typing import cast
+
 FIELDS = (
   ('version', 'version'),
   ('family', 'family'),
@@ -30,7 +32,7 @@ def write_projection(value):
   from opendbc.car.steering_projection import projection_to_dict
   from openpilot.starpilot.flm.learning_wire import _named_values
 
-  data = projection_to_dict(value)
+  data = cast(dict[str, object], projection_to_dict(value))
   result = {wire: data[key] for wire, key in FIELDS}
   # Honda's normalized limiter can have no unlimited integer command: its
   # lookup encoder runs AFTER limiting. Preserve absence rather than inventing
@@ -38,8 +40,8 @@ def write_projection(value):
   result['version'] = 2
   result['unlimitedRawPresent'] = data['unlimited_raw'] is not None
   result['unlimitedRaw'] = 0 if data['unlimited_raw'] is None else data['unlimited_raw']
-  result['limits'] = [{'name': name, 'value': amount} for name, amount in data['limits']]
-  result['shape'] = _named_values(tuple((str(index), item) for index, item in enumerate(data['shape'])))
+  result['limits'] = [{'name': name, 'value': amount} for name, amount in cast(tuple[tuple[str, float], ...], data['limits'])]
+  result['shape'] = _named_values(tuple((str(index), item) for index, item in enumerate(cast(tuple[float | bool, ...], data['shape']))))
   return result
 
 

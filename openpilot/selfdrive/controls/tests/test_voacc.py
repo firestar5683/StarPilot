@@ -97,7 +97,7 @@ class VoaccTest(unittest.TestCase):
         return result
 
       with patch.object(radard, 'Params', return_value=params), \
-           patch.object(radard, 'config_realtime_process'), patch.object(radard, 'set_core_affinity'), \
+           patch.object(radard, 'config_realtime_process'), patch.object(radard, 'set_core_affinity') as affinity, \
            patch.object(radard, 'feature_enabled', return_value=False), \
            patch.object(radard.messaging, 'log_from_bytes', return_value=cp), \
            patch.object(radard.messaging, 'SubMaster', return_value=source), \
@@ -106,6 +106,7 @@ class VoaccTest(unittest.TestCase):
            patch.object(radard, 'RadarD', side_effect=create):
         with self.assertRaises(StopIteration):
           radard.main()
+      affinity.assert_called_once_with([3, 5])
       read.assert_called_once_with(params, cp)
       self.assertTrue(instances[0].use_voacc)
       self.assertFalse(instances[0].radar_state.leadOne.radar)

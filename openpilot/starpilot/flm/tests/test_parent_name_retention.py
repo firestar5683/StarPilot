@@ -28,7 +28,8 @@ def test_actual_wire_parent_recorder_retains_shared_keys_and_exact_values():
   )
   for tick in range(80):
     stamp = first_ns + tick * 10_000_000
-    inputs = (('control_frame', float(tick + 1)), ('signed_zero', -0.0), ('flag', False), ('label', 'unchanged'))
+    inputs = (('control_frame', float(tick + 1)), ('roll', 0.0), ('desired_curvature', .001), ('vEgo', 20.0),
+              ('signed_zero', -0.0), ('flag', False), ('label', 'unchanged'))
     evidence = ControlEvidence(
       identity='1' * 64, generation=0, control_ns=stamp, state_ns=stamp,
       domain='normalized_torque', stage_revision='retention-only', response_revision='retention-only',

@@ -59,7 +59,7 @@ class LaneChangeSmoother:
 
 
 def limit_rate(speed, previous, desired, factor):
-  if factor >= 1.:
+  if factor >= 1. or previous * (desired - previous) < 0.:
     return desired
   step = MAX_LATERAL_JERK / max(speed, MIN_SPEED) ** 2 * DT_CTRL * factor
   return max(previous - step, min(previous + step, desired))

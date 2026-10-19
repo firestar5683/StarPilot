@@ -4,7 +4,8 @@ import math
 
 import pyray as rl
 
-from openpilot.starpilot.ui.onroad_state import ObservationKind, OnroadState
+from openpilot.starpilot.ui.onroad_state import OnroadState
+from openpilot.starpilot.ui.unified_speed_presentation import displayed_limit_mps
 
 
 class SpeedLimitPulse:
@@ -22,9 +23,9 @@ class SpeedLimitPulse:
     if not visible:
       self.start_time = -math.inf
       return
-    if observation.kind != ObservationKind.VALID or observation.speed_limit_mps is None:
+    limit = displayed_limit_mps(observation)
+    if limit is None:
       return
-    limit = observation.speed_limit_mps
     conversion = 3.6 if state.metric else 2.2369362921
     if round(limit * conversion) != round(self.last_limit * conversion):
       self.start_time = now

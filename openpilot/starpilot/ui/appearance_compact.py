@@ -22,8 +22,6 @@ class AppearanceSession(Protocol):
 SLC_VISUAL_LABELS = {
   "ShowSpeedLimits": "show speed limits",
   "SLCConfirmation": "confirm new speed limits",
-  "SLCConfirmationLower": "confirm lower limits",
-  "SLCConfirmationHigher": "confirm higher limits",
 }
 
 
@@ -50,10 +48,7 @@ class AppearanceCompact:
     rows = list(state.rows)
     if page_name == "appearance":
       slc = self.session.feature_snapshot("slc")
-      confirmation = next((row for row in slc.rows if row.key == "SLCConfirmation"), None)
-      visible = [row for row in slc.rows if row.key in SLC_VISUAL_LABELS and
-                 (row.key not in ("SLCConfirmationLower", "SLCConfirmationHigher") or
-                  (confirmation is not None and confirmation.value == "On"))]
+      visible = [row for row in slc.rows if row.key in SLC_VISUAL_LABELS]
       rows[-1:-1] = visible
     for row in rows:
       if row.key == "CameraView" and row.available:

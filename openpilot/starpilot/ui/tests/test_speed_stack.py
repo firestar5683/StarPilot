@@ -25,7 +25,7 @@ def test_offset_proposals_use_their_own_band_and_reject_invalid_values():
   assert adjusted_limit(19, schedule) == 20
   assert adjusted_limit(20, schedule) == 23
   assert adjusted_limit(float('nan'), schedule) is None
-  assert adjusted_limit(10, OffsetSchedule((OffsetBand(0, None, -20),))) is None
+  assert adjusted_limit(10, OffsetSchedule((OffsetBand(0, None, -20),))) == 10
 
 
 def test_numeric_card_and_sources_row_are_not_tap_targets_while_pending():

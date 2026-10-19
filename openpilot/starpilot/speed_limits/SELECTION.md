@@ -38,14 +38,14 @@ sources cannot create uncertainty in that choice.
 If no eligible alternative exists, the result retains unknown or stale state.
 Unknown takes precedence over stale, which takes precedence over absence; the
 full per-source statuses remain available. Explicit absence, exclusion below the
-minimum or an empty configured source set produces an absent result. This distinction prevents the
-acceptance reducer from treating discarded stale data as permission for a
-previous-limit fallback. Malformed input produces `invalid_input`, errors and
+minimum or an empty configured source set produces an absent result. Acceptance
+independently applies the saved previous-limit policy without changing those
+source statuses. Malformed input produces `invalid_input`, errors and
 an unknown observation without selecting a source.
 
 The tests include composition through the acceptance reducer: accepted 65 mph,
 proposed 45, driver rejection, then source loss and reconnect. Last accepted
 history remains 65 for both longitudinal-only and combined authority. Unknown
-or stale sources suppress that fallback, and lateral-only or stock ownership
+or stale sources retain that limit only when fallback is enabled; lateral-only or stock ownership
 cannot turn a selected speed into a system longitudinal target. These are
 deterministic policy tests, not native producer, planner, CAN or vehicle evidence.

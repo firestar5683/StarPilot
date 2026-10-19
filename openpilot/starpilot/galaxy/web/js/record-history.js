@@ -97,6 +97,7 @@ export const LocalRecordingsPage = {
         <GxState v-if="status === 'loading'" loading>Finding local drives…</GxState><GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
         <template v-if="status === 'ready' && data">
           <GxNotice v-if="data.scanIncomplete" tone="warn">This scan was incomplete. More local segments may exist.</GxNotice>
+          <GxNotice v-if="data.legacyRecordingsPresent === true" tone="info">Older StarPilot recordings also use device storage. Eligible recordings from the previous installation are included in automatic cleanup when space is low.</GxNotice>
           <section class="gx-card gx-recordings__list">
             <p v-if="!routeCards.length" class="gx-recordings__empty">{{ data.routes.length ? 'No drives match your filters.' : 'No saved drives found on this device.' }}</p>
             <article v-for="route in routeCards" :key="route.routeId" class="gx-recordings__row" :class="{'gx-recordings__row--preserved': route.preserved}">

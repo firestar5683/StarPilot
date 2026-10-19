@@ -294,20 +294,21 @@ class LaneRuntimeTests(unittest.TestCase):
         self.assertIsNone(host.sample(Frame(now), now_ns=now, lateral_active=True, longitudinal_active=False))
 
 
-  def test_normal_reader_admission_keeps_exact_vehicle_and_saved_preference_gates(self):
+  def test_normal_reader_admission_uses_steering_and_saved_preference_gates(self):
     with OpenpilotPrefix(), mock.patch.dict(os.environ, {'LANE_CENTERING_REPLAY_RUNTIME': '0'}):
       params = Params()
       for alternate in (False, True):
         with self.subTest(alternate=alternate):
           stock, tagged = ioniq_candidate(alternate=alternate)
-          self.assertFalse(runtime_supported(stock))
+          self.assertTrue(runtime_supported(stock))
           self.assertTrue(runtime_supported(tagged))
           self.assertFalse(read_settings(params).enabled)
           params.put_bool('LaneCentering', True, block=True)
           self.assertTrue(read_settings(params).enabled)
-          self.assertFalse(runtime_supported(interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)))
-          tagged.safetyConfigs[0].safetyParam = 0
-          self.assertFalse(runtime_supported(tagged))
+          self.assertTrue(runtime_supported(interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)))
+          for safety_model in ('noOutput', 'silent', 'allOutput'):
+            tagged.safetyConfigs[0].safetyModel = safety_model
+            self.assertFalse(runtime_supported(tagged))
           params.put_bool('LaneCentering', False, block=True)
       _, tagged = ioniq_candidate()
       params.put_bool('LaneCentering', True, block=True)
@@ -348,7 +349,7 @@ class LaneRuntimeTests(unittest.TestCase):
       self.assertIsNone(controls.last_lane_centering_result)
       self.assertEqual(controls.lane_centering_applied, 0.0)
       params.put('CarParams', stock.to_bytes(), block=True)
-      self.assertIsNone(Controls().lane_centering_host)
+      self.assertIsNotNone(Controls().lane_centering_host)
 
   def test_tagged_ioniq_four_axes_and_stale_reset(self):
     with OpenpilotPrefix(), mock.patch.dict(os.environ, {'LANE_CENTERING_REPLAY_RUNTIME': '0', 'REPLAY': '1',
@@ -490,7 +491,8 @@ class LaneRuntimeTests(unittest.TestCase):
             baseline = Controls()
           with mock.patch.dict(os.environ, {'LANE_CENTERING_REPLAY_RUNTIME': '1'}):
             candidate = Controls()
-          self.assertIsNone(baseline.lane_centering_host)
+          self.assertIsNotNone(baseline.lane_centering_host)
+          baseline.lane_centering_host = None  # Explicit no-feature reference; Toyota now uses the normal host.
           previous = 0.0
           for tick in range(120):
             now = 1_000_000_000 + tick * 10_000_000

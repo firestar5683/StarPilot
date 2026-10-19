@@ -8,7 +8,7 @@ from openpilot.cereal.services import SERVICE_LIST
 from openpilot.common.realtime import DT_CTRL
 from openpilot.common.params import UnknownKeyName
 from openpilot.starpilot.lateral.lane_centering import ControlMode, LaneCenteringRequest, LaneCenteringSettings, STRENGTH_BASELINE, STRENGTH_MAX
-from openpilot.starpilot.longitudinal.ioniq6_start import eligible as ioniq6_long_eligible
+from openpilot.starpilot.feature_capabilities import lateral_supported
 
 
 def read_settings(params) -> LaneCenteringSettings:
@@ -43,11 +43,8 @@ def read_settings(params) -> LaneCenteringSettings:
 
 
 def runtime_supported(CP) -> bool:
-  """Keep the preference reader available when a supported drive starts Off."""
-  from openpilot.starpilot.lateral.bolt_policy import supported_cp as bolt_supported_cp
-  from opendbc.car.gm.lateral import lane_centering_supported as gm_supported_cp
-  return (os.getenv('LANE_CENTERING_REPLAY_RUNTIME') == '1' or
-          ioniq6_long_eligible(CP) or (CP is not None and bolt_supported_cp(CP)) or gm_supported_cp(CP))
+  """Keep the preference reader available for every configured steering owner."""
+  return os.getenv('LANE_CENTERING_REPLAY_RUNTIME') == '1' or lateral_supported(CP)
 
 
 class LaneCenteringHost:

@@ -7,7 +7,6 @@ import { OnroadLayoutPage } from "./onroad-layout.js"
 import { FavoritesPage } from "./favorites.js"
 import { SoundPacks } from "./sound-packs.js"
 import { CloudProviderPage } from "./cloud-provider.js"
-import { FLMTrainingResults } from "./flm-training-results.js"
 import { GxNotice } from "./notice.js"
 
 const post = (fetcher, path, body, signal) => fetcher(path, {
@@ -249,7 +248,7 @@ export class SettingsFeed {
 
 export const SettingsPage = {
   emits: ["nested"],
-  components: { GxDialog, GxState, GalaxySettingRow, OnroadLayoutPage, FavoritesPage, SoundPacks, CloudProviderPage, FLMTrainingResults, GxNotice },
+  components: { GxDialog, GxState, GalaxySettingRow, OnroadLayoutPage, FavoritesPage, SoundPacks, CloudProviderPage, GxNotice },
   props: {
     mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     initialPage: { type: String, default: "hub" }, title: { type: String, default: "Toggles" },
@@ -425,7 +424,6 @@ export const SettingsPage = {
       <GxState v-if="mode !== 'local'">Local settings are unavailable in preview.</GxState>
       <template v-else>
         <CloudProviderPage ref="cloudProvider" v-if="state.developerOpen" :mode="mode" :unauthorized="unauthorized" />
-        <FLMTrainingResults v-if="state.developerOpen" :mode="mode" :unauthorized="unauthorized" />
         <Teleport to="body">
           <p class="gx-settings__save-status gx-settings__save-status--animated"
             :class="{ 'is-visible': saveStatusVisible }"

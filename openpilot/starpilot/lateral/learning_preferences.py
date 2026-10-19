@@ -60,8 +60,8 @@ def _decode(raw):
   return document
 
 
-def read_preference(params, CP, *, legacy_snapshot=None) -> LearningPreference:
-  raw, readable = read_saved(params, KEY, MAX_BYTES)
+def read_preference(params, CP, *, legacy_snapshot=None, preference_snapshot=None) -> LearningPreference:
+  raw, readable = read_saved(params, KEY, MAX_BYTES) if preference_snapshot is None else preference_snapshot
   try:
     if not readable:
       raise ValueError('Unreadable preferences')

@@ -104,27 +104,54 @@ class TestGmVisionSource(unittest.TestCase):
         self.assertNotEqual(stale.message.slcState.observationKind, 'valid')
         self.assertFalse(stale.message.slcState.hasCeiling)
 
-  def test_gm_control_requires_current_sign_confirmation_and_axis_authority(self):
+  def test_gm_control_uses_saved_confirmation_and_axis_authority(self):
     with OpenpilotPrefix():
       params = Params()
       self.requests(params, True)
       cp = configured(params, CAR.CHEVROLET_VOLT_CC)
-      sm = self.bus()
-      runtime = Runtime(slc_runtime_settings(params, cp, {}), session_id='drive', vision_enabled=True,
-                        vision_control_qualified=vision_control_enabled(params, cp))
-      first = runtime.step(sm, cp, now_ns=2_000_000_000, now_boot_ns=6_000_000_000)
-      self.assertTrue(first.message.slcState.hasPending)
-      self.assertFalse(first.message.slcState.hasCeiling)
-      sm.advance(2_020_000_000)
-      accepted = runtime.step(sm, cp, now_ns=2_020_000_000, now_boot_ns=6_020_000_000,
-                              request=Action('drive', 1, first.message.slcState.decisionId,
-                                             first.message.slcState.presentationId, 'accept'))
-      self.assertTrue(accepted.message.slcState.hasCeiling)
-      sm.data['carControl'].longActive = False
-      sm.advance(2_040_000_000)
-      inactive = runtime.step(sm, cp, now_ns=2_040_000_000, now_boot_ns=6_040_000_000)
-      self.assertFalse(inactive.message.slcState.hasCeiling)
-      self.assertIsNone(inactive.command)
+      for confirmation in (False, True):
+        for next_mph in (45, 65):
+          with self.subTest(confirmation=confirmation, next_mph=next_mph):
+            params.put_bool('SLCConfirmation', confirmation, block=True)
+            sm = self.bus()
+            runtime = Runtime(slc_runtime_settings(params, cp, {}), session_id='drive', vision_enabled=True,
+                              vision_control_qualified=vision_control_enabled(params, cp))
+            first = runtime.step(sm, cp, now_ns=2_000_000_000, now_boot_ns=6_000_000_000)
+            self.assertEqual(first.message.slcState.hasPending, confirmation)
+            self.assertEqual(first.message.slcState.hasCeiling, not confirmation)
+            accepted = first
+            if confirmation:
+              sm.advance(2_020_000_000)
+              accepted = runtime.step(sm, cp, now_ns=2_020_000_000, now_boot_ns=6_020_000_000,
+                                      request=Action('drive', 1, first.message.slcState.decisionId,
+                                                     first.message.slcState.presentationId, 'accept'))
+            self.assertTrue(accepted.message.slcState.hasCeiling)
+            approved = accepted.result.state.acceptance.accepted
+            evidence = sm.data['slcVisionObservation'].vision
+            evidence.episode += 1
+            evidence.frameId += 1
+            sm.advance(2_040_000_000)
+            repeated = runtime.step(sm, cp, now_ns=2_040_000_000, now_boot_ns=6_040_000_000)
+            self.assertFalse(repeated.message.slcState.hasPending)
+            self.assertTrue(repeated.message.slcState.hasCeiling)
+            if confirmation:
+              self.assertEqual(repeated.result.state.acceptance.accepted, approved)
+              self.assertIsNone(repeated.result.acceptance.history_write)
+            evidence.speedMps = next_mph * .44704
+            evidence.episode += 1
+            evidence.frameId += 1
+            sm.advance(2_060_000_000)
+            changed = runtime.step(sm, cp, now_ns=2_060_000_000, now_boot_ns=6_060_000_000)
+            self.assertEqual(changed.message.slcState.hasPending, confirmation)
+            self.assertTrue(changed.message.slcState.hasCeiling)
+            self.assertAlmostEqual(changed.message.slcState.acceptedSpeedLimit,
+                                   55 * .44704 if confirmation else next_mph * .44704, places=4)
+            self.assertEqual(changed.result.acceptance.policy, runtime.settings.acceptance)
+            sm.data['carControl'].longActive = False
+            sm.advance(2_080_000_000)
+            inactive = runtime.step(sm, cp, now_ns=2_080_000_000, now_boot_ns=6_080_000_000)
+            self.assertFalse(inactive.message.slcState.hasCeiling)
+            self.assertIsNone(inactive.command)
 
   def test_actual_planner_and_manager_start_display_producer(self):
     from openpilot.selfdrive.controls import plannerd

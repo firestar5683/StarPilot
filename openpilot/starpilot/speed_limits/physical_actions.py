@@ -4,6 +4,7 @@ import math
 
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.selfdrive.car.cruise import SlcPendingConfirmation
+from openpilot.starpilot.speed_limits.selection import Source
 
 
 STATE_MAX_AGE_NS = int(2e9 / SERVICE_LIST['slcState'].frequency)
@@ -29,25 +30,33 @@ def source_matches(state, observation, producer_session: str, now_ns: int) -> bo
           abs(float(state.speedLimit) - float(observation.speed_mps)) <= 0.02)
 
 
-def state_current(sm, observation, producer_session: str, now_ns: int):
+def _current_state(sm, now_ns: int):
   if not (sm.valid['slcState'] and sm.alive['slcState'] and
           0 < int(sm.logMonoTime['slcState']) <= now_ns and
           now_ns - int(sm.logMonoTime['slcState']) <= STATE_MAX_AGE_NS):
     return None
   state = sm['slcState']
-  if not (state.enabled and str(state.sessionId) and state.frameMonoTime <= now_ns and
-          int(state.frameMonoTime) <= int(sm.logMonoTime['slcState']) and
-          source_matches(state, observation, producer_session, now_ns)):
+  if not (state.enabled and not state.displayOnly and str(state.sessionId) and
+          0 < int(state.frameMonoTime) <= int(sm.logMonoTime['slcState']) and
+          now_ns - int(state.frameMonoTime) <= STATE_MAX_AGE_NS and
+          str(state.observationKind) == 'valid' and str(state.source) in tuple(Source) and finite_speed(state.speedLimit)):
     return None
   return state
 
 
-def pending_confirmation(sm, observation, producer_session: str, now_ns: int,
-                         *, long_active: bool, pcm_cruise: bool) -> SlcPendingConfirmation | None:
+def state_current(sm, observation, producer_session: str, now_ns: int):
+  state = _current_state(sm, now_ns)
+  return state if state is not None and source_matches(state, observation, producer_session, now_ns) else None
+
+
+def pending_confirmation(sm, now_ns: int, *, long_active: bool, pcm_cruise: bool,
+                         after_ns: int = 0) -> SlcPendingConfirmation | None:
   if not long_active or pcm_cruise:
     return None
-  state = state_current(sm, observation, producer_session, now_ns)
-  if state is None or not state.hasPending or int(state.decisionId) <= 0 or int(state.presentationId) <= 0:
+  # The planner owns pending choices for every source; only cruise commands need local Dashboard evidence.
+  state = _current_state(sm, now_ns)
+  if (state is None or int(state.frameMonoTime) <= after_ns or not state.hasPending or
+      int(state.decisionId) <= 0 or int(state.presentationId) <= 0):
     return None
   if not finite_speed(state.pendingSpeedLimit) or abs(float(state.pendingSpeedLimit) - float(state.speedLimit)) > 0.02:
     return None

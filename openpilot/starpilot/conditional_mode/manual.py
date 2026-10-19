@@ -102,8 +102,8 @@ def _action(params, key: str) -> int | None:
   return int(raw)
 
 
-def read_button_map(params, *, include_ioniq_media: bool = False) -> ButtonMap | None:
-  """Read registered slots; frozen GM-only cancel remap stays inert here."""
+def read_button_map(params, *, include_ioniq_media: bool = False, cp=None) -> ButtonMap | None:
+  """Read non-Cancel slots; the exact GM owner dispatches remapped Cancel separately."""
   keys = ('LKASButtonControl', 'DistanceButtonControl', 'LongDistanceButtonControl',
           'VeryLongDistanceButtonControl', 'CancelButtonControl', 'LongCancelButtonControl',
           'VeryLongCancelButtonControl')
@@ -115,7 +115,8 @@ def read_button_map(params, *, include_ioniq_media: bool = False) -> ButtonMap |
     return None
   assert all(value is not None for value in values)
   # Cancel-to-distance is GM Pedal-only; this gesture source must not reinterpret cancel.
-  if EXPERIMENTAL_MODE_ACTION in values[4:7]:
+  from opendbc.car.gm.cancel_remap import enabled as gm_cancel_remap_enabled
+  if EXPERIMENTAL_MODE_ACTION in values[4:7] and not gm_cancel_remap_enabled(cp):
     return None
   return ButtonMap(*(cast(int, value) for value in (*values[:4], *values[7:])))
 
@@ -128,8 +129,9 @@ class WheelMapCache:
   consumer can interpret that source packet.
   """
 
-  def __init__(self, *, include_ioniq_media=True):
+  def __init__(self, *, include_ioniq_media=True, cp=None):
     self.include_ioniq_media = include_ioniq_media
+    self.cp = cp
     self.buttons: ButtonMap | None = None
     self.checked_ns = 0
     self.held: tuple[bool, ...] | None = None
@@ -169,7 +171,7 @@ class WheelMapCache:
       self.last_sample_ns = sample.source_boot_ns
     if (changed_epoch or self.checked_ns == 0 or edge or boundary or
         now_ns < self.checked_ns or now_ns - self.checked_ns >= 1_000_000_000):
-      self.buttons = read_button_map(params, include_ioniq_media=self.include_ioniq_media)
+      self.buttons = read_button_map(params, include_ioniq_media=self.include_ioniq_media, cp=self.cp)
       self.checked_ns = now_ns
     return self.buttons
 

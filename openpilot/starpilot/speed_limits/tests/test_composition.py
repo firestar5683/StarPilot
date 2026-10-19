@@ -68,7 +68,7 @@ class CompositionTests(unittest.TestCase):
     self.assertEqual(result.ceiling.authority, ACTIVE)
     self.assertEqual(result.state.control_generation, 1)
 
-  def test_unknown_stale_source_and_qualified_absent_fallback(self):
+  def test_all_source_gaps_use_only_qualified_previous_limit(self):
     self.run_frame(frame(0))
     absent = self.run_frame(frame(1, source_kind=acc.ObservationKind.ABSENT))
     self.assertEqual(absent.acceptance.basis, "previous_accepted")
@@ -76,8 +76,12 @@ class CompositionTests(unittest.TestCase):
     self.assertEqual(absent.ceiling.speed_mps, 17.0)
     for now, kind in ((2, acc.ObservationKind.UNKNOWN), (3, acc.ObservationKind.STALE)):
       result = self.run_frame(frame(now, source_kind=kind))
-      self.assertIsNone(result.ceiling)
-      self.assertIsNone(result.state.lead_prior)
+      self.assertEqual(result.ceiling.speed_mps, 17.0)
+      self.assertEqual(result.relaxation.status, 'fallback_source')
+      self.assertEqual(result.acceptance.state.observation.kind, kind)
+      disabled = self.run_frame(frame(now + 1, source_kind=kind, policy=replace(POLICY, fallback_previous=False)))
+      self.assertIsNone(disabled.ceiling)
+      self.assertIsNone(disabled.state.lead_prior)
 
   def test_uninitialized_driver_and_missing_coordinates_suppress(self):
     unset = self.run_frame(frame(0, host=replace(HOST, driver_v_cruise_kph=255.0)))

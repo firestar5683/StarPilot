@@ -13,9 +13,9 @@ module does not infer that qualification from a bare number.
 
 `SourceEvidence` distinguishes `VALID`, `ABSENT`, `UNKNOWN` and `STALE` using
 the acceptance observation kind. A valid cap from an explicitly qualified
-previous-limit fallback may be `ABSENT`; it passes through raw without easing.
-`UNKNOWN`, `STALE`, an unqualified cap, no cap or an inactive control path
-returns no contribution and clears the previous target. The caller must mark
+previous-limit fallback may be `ABSENT`, `UNKNOWN` or `STALE`; it passes through
+raw without easing. An unqualified cap of any kind, no cap or an inactive control
+path returns no contribution and clears the previous target. The caller must mark
 force-stop and inactive system-longitudinal paths inactive. It must also rotate
 `continuity_id` on mode, longitudinal-owner or force-deceleration discontinuity.
 `PriorApplied` binds the previous *output* to drive session and control

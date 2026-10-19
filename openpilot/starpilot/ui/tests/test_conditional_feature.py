@@ -314,11 +314,20 @@ class ConditionalFeatureTests(unittest.TestCase):
     with patch.object(shell, "confirmed_offroad", return_value=True), \
          patch.object(runtime_app.ui_state, "CP", self.cp):
       self.assertTrue(shell._feature_authority("conditional"))
-      self.assertFalse(shell._feature_authority("long"))
+      self.assertTrue(shell._feature_authority("long"))
       assert self.cp is not None
       self.cp.openpilotLongitudinalControl = False
       self.assertFalse(shell._feature_authority("conditional"))
+      self.assertFalse(shell._feature_authority("long"))
       self.assertTrue(shell._feature_authority("preferences"))
+      self.cp.openpilotLongitudinalControl = True
+      for field in ('passive', 'dashcamOnly', 'notCar'):
+        with self.subTest(field=field):
+          setattr(self.cp, field, True)
+          self.assertFalse(shell._feature_authority("conditional"))
+          self.assertFalse(shell._feature_authority("long"))
+          self.assertTrue(shell._feature_authority("preferences"))
+          setattr(self.cp, field, False)
 
   def test_native_saved_actions_use_settings_mode_and_supported_current_car(self):
     from openpilot.starpilot.ui import runtime_app

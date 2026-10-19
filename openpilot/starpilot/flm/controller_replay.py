@@ -523,6 +523,7 @@ class ReplayFrame:
   effect_trace: object | None = None
   effect_prepare_ns: int = 0
   controller_domain: str = 'torque'
+  desired_kinematic_accel: float | None = None
 
 
 @dataclass(frozen=True)
@@ -573,7 +574,7 @@ class ControllerReplay:
     self.recent_states = OrderedDict()
     self.cached_validation = None
     self.cached_key = None
-    self.replay_windows = ()
+    self.replay_windows: tuple[tuple[int, int], ...] = ()
     self.raw_mode = False
     self.actual_centre_friction_values = OrderedDict()
     from openpilot.starpilot.flm.torque_emission_replay import EmissionHistory
@@ -1106,7 +1107,7 @@ class ControllerReplay:
         return None
       calibration_ids = set(model.train_blocks + model.heldout_blocks)
       gains = {'left': [], 'right': []}
-      points = {'left': 0, 'right': 0}
+      points: dict[str, float] = {'left': 0, 'right': 0}
       baseline_controller, baseline_vm = self.factory.create()
       candidate_controller, candidate_vm = self.factory.create()
       total_frames = 0
@@ -1368,11 +1369,11 @@ class ControllerReplay:
     except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
       return False
 
-  def to_snapshot(self, blocks=None, *, event_windows=None):
+  def to_snapshot(self, blocks=None, *, event_windows: tuple[tuple[int, int], ...] | None = None):
     """Primitive child-fitter payload, outside all100Hz controller processes."""
     from dataclasses import asdict
 
-    windows = []
+    windows: list[tuple[int, int]] = []
     if blocks is not None:
       if not 8 <= len(blocks) <= 24:
         raise ValueError('fit job maneuver bound')

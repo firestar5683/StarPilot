@@ -39,12 +39,12 @@ class OverrideTests(unittest.TestCase):
     self.state = result.state
     return result
 
-  def classified(self, *, effect=1, now=2, chosen=25.0, context=None, disposition=arb.Disposition.DRIVER_INTENT):
+  def classified(self, *, effect=1, now=2, previous=20.0, chosen=25.0, context=None, disposition=arb.Disposition.DRIVER_INTENT):
     ledger = arb.new_ledger(SESSION)
     context = self.first.context if context is None else context
     ledger = arb.step(ledger, arb.BeginAction(SESSION, 1, arb.Origin.DRIVER_CRUISE, context.context_id), now_ns=1).state
     ledger = arb.step(ledger, arb.ResolveAction(SESSION, 1, disposition), now_ns=1).state
-    result = arb.step(ledger, arb.CruiseChange(SESSION, effect, 1, 20.0, chosen), now_ns=now)
+    result = arb.step(ledger, arb.CruiseChange(SESSION, effect, 1, previous, chosen), now_ns=now)
     return result.change
 
   def arm(self, now=2, chosen=25.0):
@@ -63,6 +63,27 @@ class OverrideTests(unittest.TestCase):
     self.assertIsNone(self.reduce(4, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps)
     self.decision(5, candidate=LOW)
     self.assertIsNone(self.reduce(5, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps)
+
+  def test_decrease_only_reduces_an_existing_override(self):
+    for existing, previous, chosen, expected in (
+      (False, 30.0, 29.0, None), (False, 30.0, 20.0, None), (False, 30.0, 19.0, None),
+      (True, 25.0, 24.0, 24.0), (True, 25.0, 20.0, None), (True, 25.0, 19.0, None),
+      (True, 30.0, 29.0, 25.0), (True, 30.0, 25.0, 25.0),
+    ):
+      with self.subTest(existing=existing, chosen=chosen):
+        self.setUp()
+        if existing:
+          self.arm()
+        self.decision(2)
+        self.reduce(2, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, previous))
+        self.decision(3)
+        result = self.reduce(3, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, chosen),
+                             change=self.classified(effect=2, now=3, previous=previous, chosen=chosen))
+        self.assertFalse(result.errors)
+        self.assertTrue(result.event_receipt.consumed)
+        self.assertEqual(result.state.persistent_selected_mps, expected)
+        self.assertEqual(result.contribution_mps, expected)
+        self.assertEqual(self.accepted.control_target_mps, HIGH.speed_mps)
 
   def test_higher_target_preserves_until_it_catches_up_and_same_speed_source_keeps_it(self):
     self.arm(chosen=25.0)
@@ -115,13 +136,18 @@ class OverrideTests(unittest.TestCase):
     self.decision(5, policy=display)
     self.assertIsNone(self.reduce(5, policy=display, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps)
 
-  def test_absent_uses_only_actual_fallback_decision(self):
-    self.arm()
-    fallback = acc.Policy(confirm_lower=False, confirm_higher=False, fallback_previous=True)
-    self.decision(3, source=acc.ObservationKind.ABSENT, policy=fallback)
-    self.assertEqual(self.reduce(3, policy=fallback, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps, 25.0)
-    self.decision(4, source=acc.ObservationKind.ABSENT)
-    self.assertIsNone(self.reduce(4, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps)
+  def test_source_gaps_preserve_override_only_with_actual_fallback_decision(self):
+    for kind in (acc.ObservationKind.ABSENT, acc.ObservationKind.UNKNOWN, acc.ObservationKind.STALE):
+      with self.subTest(kind=kind):
+        self.setUp()
+        self.arm()
+        fallback = acc.Policy(confirm_lower=False, confirm_higher=False, fallback_previous=True)
+        self.decision(3, source=kind, policy=fallback)
+        result = self.reduce(3, policy=fallback, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0))
+        self.assertEqual(result.contribution_mps, 25.0)
+        self.assertEqual(result.context, self.first.context)
+        self.decision(4, source=kind)
+        self.assertIsNone(self.reduce(4, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps)
 
   def test_delayed_acceptance_consumed_effect_cannot_arm_after_release(self):
     pending_policy = acc.Policy(confirm_lower=True, confirm_higher=True)

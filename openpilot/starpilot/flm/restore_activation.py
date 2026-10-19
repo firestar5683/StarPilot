@@ -1,4 +1,8 @@
 """Restore-only fixed-map declaration; no finite differences or live authority."""
+
+from typing import TypedDict, cast
+
+
 from dataclasses import asdict, dataclass
 import hashlib
 import json
@@ -9,6 +13,19 @@ from openpilot.starpilot.flm.clipping_quality import (
 )
 from openpilot.starpilot.flm.event_activation import EventActivationPlan, EXACT_EMISSION_ACTIVATION_VERSION, build_activation_plan
 from openpilot.starpilot.flm.full_surface_profile import FullSurfaceEnvelope
+
+
+class _ActivationFields(TypedDict):
+  version: str
+  identity: str
+  baseline_revision: str
+  source_epoch: str
+  physical_context: str
+  calibration_train_blocks: tuple[str, ...]
+  calibration_heldout_blocks: tuple[str, ...]
+  cutoff_ns: int
+  stage_blocks: tuple[str, ...]
+  windows: tuple[tuple[int, int, int, int], ...]
 
 
 def restore_envelope_digest(envelope):
@@ -29,7 +46,7 @@ class WholeMapRestorePlan(EventActivationPlan):
       raise ValueError('whole-map restore plan version/envelope')
     # Reuse only the chronology/lineage validator; never decode this as a trial.
     fields = {name: getattr(self, name) for name in EventActivationPlan.__dataclass_fields__}
-    EventActivationPlan(**{**fields, 'version': EXACT_EMISSION_ACTIVATION_VERSION}).validate()
+    EventActivationPlan(**cast(_ActivationFields, {**fields, 'version': EXACT_EMISSION_ACTIVATION_VERSION})).validate()
     return self
 
   @property

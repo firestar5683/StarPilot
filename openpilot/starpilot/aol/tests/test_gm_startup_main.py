@@ -76,13 +76,15 @@ def cases():
   yield sdgm_params(alpha=True)
 
 
+@pytest.mark.parametrize('main_action', [0, 9])
 @pytest.mark.parametrize('index', range(8))
 @pytest.mark.parametrize('availability', [None, 'commIssue', 'commIssueAvgFreq'])
-def test_cold_parser_main_readiness_then_actual_commands_without_main_edge(index, availability):
+def test_cold_parser_main_readiness_then_actual_commands_without_main_edge(index, availability, main_action):
   cp = list(cases())[index]
   with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
     params = Params()
     params.put_bool('AlwaysOnLateral', True, block=True)
+    params.put('MainCruiseButtonControl', main_action, block=True)
     selected = gm_fixtures.TestGmAol.card(cp, params)
     selected.aol_process_fault_context = AolProcessFaultContext()
     selected.ci_initialized = True  # Skip ECU I/O; no native permission is fabricated.
@@ -262,7 +264,7 @@ def test_cold_mixed_or_critical_fault_never_uses_readiness_exception(fault):
   assert intent_disarming_fault(cp, events.to_msg(), cs, startup_calibration_pending=True)
 
 
-def test_explicit_off_and_managed_toggle_do_not_gain_startup_authority():
+def test_explicit_off_stays_off_and_gm_main_mapping_follows_physical_level():
   with OpenpilotPrefix():
     params = Params()
     params.put_bool('AlwaysOnLateral', False, block=True)
@@ -279,6 +281,10 @@ def test_explicit_off_and_managed_toggle_do_not_gain_startup_authority():
     owner = create_intent(cp, read_settings(params), policy)
     owner.update(cs, fault_active=False)
     owner.observe_calibration(cs, events=[])
+    assert owner.output(cs)[0]
+    assert params.get('MainCruiseButtonControl') == 9
+    cs.cruiseState.available = False
+    owner.update(cs, fault_active=False)
     assert not owner.output(cs)[0]
     cs.cruiseState.available = False
     cs.buttonEvents = [structs.CarState.ButtonEvent(type='mainCruise', pressed=True)]

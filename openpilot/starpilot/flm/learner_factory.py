@@ -1,6 +1,10 @@
 """Raw parent recordings, one bounded child fit, real selected-controller replay."""
 
+from typing import TypedDict, cast
+
+
 import base64
+from openpilot.starpilot.flm.physical_response import request_force_accel
 from itertools import islice
 from dataclasses import asdict
 from openpilot.starpilot.flm.runtime_adapter_registry import (
@@ -21,6 +25,14 @@ from openpilot.starpilot.flm.controller_replay import (
   unpack_primitive_snapshot,
   factory_from_snapshot,
 )
+
+
+class _EffectObjectiveFields(TypedDict):
+  group: str
+  names: tuple[str, ...]
+  anchor_digest: str
+  context_key: str
+
 
 RAW_TORQUE = 'torque-selected-stage-snapshot-v1'
 FF_KEYS = tuple(('feedforward', speed, phase) for speed in ('low', 'high') for phase in ('steady', 'turn_in', 'unwind'))
@@ -69,7 +81,8 @@ def _frame(evidence):
     torque_values=tuple((key, stage[key]) for key in ('effective_factor', 'offset', 'friction', 'pid_pos_limit', 'pid_neg_limit')),
     actual_stage_residual=(stage['actual_delta_ff'], stage['actual_delta_threshold']),
     centre_values=(stage.get('centre_threshold_delta', 0.0), stage.get('centre_extra_deadband_deg', 0.0)),
-    desired_physical_accel=stage['setpoint'],
+    desired_physical_accel=request_force_accel(evidence.replay_inputs),
+    desired_kinematic_accel=stage['setpoint'],
     healthy=evidence.valid and not evidence.fault and not evidence.override,
     manual=evidence.manual,
     limited=evidence.limited,
@@ -462,7 +475,7 @@ def fit_snapshot(snapshot):
   if event_job:
     from openpilot.starpilot.flm.event_objective import EffectObjective
     objective_row = payload['event_objective']
-    event_objective = EffectObjective(**{**objective_row, 'names': tuple(objective_row['names'])})
+    event_objective = EffectObjective(**cast(_EffectObjectiveFields, {**objective_row, 'names': tuple(objective_row['names'])}))
     # A fixed historical full-map restore is not a friction-only trial. It
     # must retain independent qualification for every active group, including
     # FF; choosing a friction protocol marker cannot bypass its noise gate.

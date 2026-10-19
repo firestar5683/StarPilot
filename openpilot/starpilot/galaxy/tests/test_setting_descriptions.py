@@ -60,10 +60,10 @@ def test_real_warning_kept_after_purpose_and_false_blanket_next_drive_removed():
   assert 'pending vehicle configuration' not in description(replace(pending, reason='Keep steering assistance available'))
   assert 'below' in purpose(FeatureRow('conditional:cem:speed_mps', 'Speed', '20'))
   assert 'at or above' in purpose(FeatureRow('conditional:ccm:speed_mps', 'Speed', '20'))
-  confirmation = FeatureRow('SLCPriority1', 'Primary source', 'Vision',
-                            reason='Use this source first; camera signs require your confirmation before changing cruise speed')
-  assert description(confirmation).startswith(purpose(confirmation))
-  assert 'require your confirmation' in description(confirmation)
+  camera = FeatureRow('SLCPriority1', 'Primary source', 'Vision',
+                      reason='Camera signs are unavailable; choose a connected source')
+  assert description(camera).startswith(purpose(camera))
+  assert camera.reason in description(camera)
   ownership = FeatureRow('ForceAutoTuneOff', 'Use StarPilot Auto Learn', 'On',
                          reason='Saved for this vehicle. StarPilot Controller uses its vehicle tune; automatic learning is currently unavailable.')
   assert 'StarPilot Controller uses its vehicle tune' in description(ownership)

@@ -1,6 +1,7 @@
 """Independent lateral axes for exact source-qualified Bolt and Volt owners."""
 
 import math
+from opendbc.car.gm.cancel_remap import aol_enabled, valid_alternative_experience
 
 from opendbc.car.structs import CarParams
 from opendbc.car.gm.values import (malibu_hybrid_profile, volt_cc_pedal_profile, control_flags,
@@ -44,7 +45,7 @@ def qualified_gm(cp) -> bool:
         cp.steerControlType != CarParams.SteerControlType.torque or
         len(cp.safetyConfigs) != 1 or cp.safetyConfigs[0].safetyModel != CarParams.SafetyModel.gm or
         int(cp.safetyConfigs[0].safetyParam) not in GM_AOL_WORDS or
-        int(cp.alternativeExperience) not in (0, GM_AOL_ALTERNATIVE_EXPERIENCE) or
+        not valid_alternative_experience(cp) or
         cp.lateralTuning.which() not in ('pid', 'torque')):
       return False
     if cp.lateralTuning.which() == 'torque':
@@ -95,7 +96,7 @@ def qualified_gm(cp) -> bool:
 
 def lateral_request(cp, cc) -> bool:
   """Only a finalized independent-axis owner may relax its cruise-active lateral gate."""
-  return (qualified_gm(cp) and int(cp.alternativeExperience) == GM_AOL_ALTERNATIVE_EXPERIENCE and cc.latActive)
+  return (qualified_gm(cp) and aol_enabled(cp) and cc.latActive)
 
 
 def native_bootstrap_supported(cp) -> bool:

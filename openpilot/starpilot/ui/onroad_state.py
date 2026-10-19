@@ -252,19 +252,19 @@ def _default_slc_controls(profile: Profile, state: OnroadState) -> tuple[SlcCont
     def request(kind: SlcActionKind) -> SlcUiRequest:
       return SlcUiRequest(kind, observation.session_id or "", observation.decision_id or 0,
                           observation.presentation_id or 0, pending)
+    target = observation.pending_adjusted_limit_mps
+    label = f'Apply {round(target * (3.6 if state.metric else 2.2369362921))}' if target is not None and target > 0 else 'Apply'
+    # Name the speed each choice leaves you at: the new target, or the limit already in use.
+    current = observation.accepted_adjusted_limit_mps
+    keep = f'Keep {round(current * (3.6 if state.metric else 2.2369362921))}' if current is not None and current > 0 else 'Keep'
     if profile == Profile.LARGE:
       from openpilot.starpilot.ui.large_speed_geometry import WIDTH, ACTION_HEIGHT, ACTION_X, ACTION_Y, ACTION_HEADER_HEIGHT
-      target = observation.pending_adjusted_limit_mps
-      label = f'Apply {round(target * (3.6 if state.metric else 2.2369362921))}' if target is not None and target > 0 else 'Apply'
-      # Name the speed each choice leaves you at: the new target, or the limit already in use.
-      current = observation.accepted_adjusted_limit_mps
-      keep = f'Keep {round(current * (3.6 if state.metric else 2.2369362921))}' if current is not None and current > 0 else 'Keep'
       return (SlcControl(request(SlcActionKind.ACCEPT), label,
                          (ACTION_X, ACTION_Y + ACTION_HEADER_HEIGHT, ACTION_X + WIDTH // 2 - 6, ACTION_Y + ACTION_HEIGHT)),
               SlcControl(request(SlcActionKind.REJECT), keep,
                          (ACTION_X + WIDTH // 2 + 6, ACTION_Y + ACTION_HEADER_HEIGHT, ACTION_X + WIDTH, ACTION_Y + ACTION_HEIGHT)))
-    return (SlcControl(request(SlcActionKind.ACCEPT), "ACCEPT", (174, 180, 310, 234)),
-            SlcControl(request(SlcActionKind.REJECT), "REJECT", (320, 180, 456, 234)))
+    return (SlcControl(request(SlcActionKind.ACCEPT), label, (174, 180, 310, 234)),
+            SlcControl(request(SlcActionKind.REJECT), keep, (320, 180, 456, 234)))
   if (pending is None and observation.speed_limit_mps is not None and
       observation.presentation_id is not None and observation.presentation_id > 0):
     if profile == Profile.COMPACT:
@@ -435,24 +435,27 @@ def speed_limit_from_message(message: SlcStateMessage | None) -> SpeedLimitObser
     kind = ObservationKind(message.observationKind)
   except (ValueError, AttributeError):
     return SpeedLimitObservation(kind=ObservationKind.UNKNOWN, status="Invalid SLC observation kind")
-  if kind != ObservationKind.VALID:
+  if kind != ObservationKind.VALID and not (getattr(message, 'hasAccepted', False) and
+                                           getattr(message, 'hasCeiling', False) and
+                                           getattr(message, 'hasEffectiveClusterTarget', False)):
     return SpeedLimitObservation(kind=kind, source=message.source, status=message.status,
                                  source_readings=source_readings_from_message(message))
   try:
-    return SpeedLimitObservation(kind=kind, source=message.source, speed_limit_mps=message.speedLimit,
+    live = kind == ObservationKind.VALID
+    return SpeedLimitObservation(kind=kind, source=message.source, speed_limit_mps=message.speedLimit if live else None,
                                  source_readings=source_readings_from_message(message),
                                  offset_mps=message.offset,
-                                 pending_speed_limit_mps=message.pendingSpeedLimit if message.hasPending else None,
+                                 pending_speed_limit_mps=message.pendingSpeedLimit if live and message.hasPending else None,
                                  effective_cap_mps=message.effectiveCap if message.hasCeiling else None,
                                  accepted_speed_limit_mps=message.acceptedSpeedLimit if message.hasAccepted else None,
                                  accepted_source=str(getattr(message, "acceptedSource", "none")) or "none",
-                                 pending_source=str(getattr(message, "pendingSource", "none")) or "none",
+                                 pending_source=(str(getattr(message, "pendingSource", "none")) or "none") if live else "none",
                                  effective_cluster_target_mps=(getattr(message, "effectiveClusterTarget", None)
                                    if getattr(message, "hasEffectiveClusterTarget", False) else None),
                                  limiting_max_set=bool(getattr(message, "isLimitingMaxSet", False)),
                                  driver_override_active=bool(getattr(message, "driverOverrideActive", False)),
-                                 session_id=message.sessionId, decision_id=message.decisionId,
-                                 presentation_id=message.presentationId, status=message.status,
+                                 session_id=message.sessionId, decision_id=message.decisionId if live else None,
+                                 presentation_id=message.presentationId if live else None, status=message.status,
                                  action_enabled=bool(getattr(message, "enabled", False)),
                                  action_sequence_id=int(getattr(message, "actionSequenceId", 0)),
                                  action_status=str(getattr(message, "actionStatus", "")),

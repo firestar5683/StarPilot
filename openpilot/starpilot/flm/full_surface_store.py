@@ -5,6 +5,8 @@ updates use prior-full-hash CAS and native Params byte-exact commit. Never retur
 an active Profile, publication lease, native permission or restored fit receipt.
 """
 
+from typing import cast
+
 from dataclasses import dataclass, replace
 import hashlib
 from openpilot.starpilot.flm.full_surface_profile import (
@@ -91,7 +93,7 @@ def remember_full(raw, profile, *, validation_sha256):
   # to full surface coordinates or treated as live/accepted new-policy evidence.
   if doc['version'] == 1:
     doc = {'version': 2, 'profiles': doc['profiles'], NAMESPACE: {}}
-  rows = doc[NAMESPACE]
+  rows = cast(dict[str, dict[str, object]], doc[NAMESPACE])
   # Stable settings hashes are opaque: a different reset may also represent a
   # different saved configuration. Never evict another scope by guessing that
   # only reset changed; the fixed store bound fails closed when full.
@@ -119,7 +121,7 @@ def remember_full(raw, profile, *, validation_sha256):
     raise ValueError('full profile store full')
   rows[envelope.scope()] = {
     'current': envelope_dict(envelope),
-    'previous': None if previous is None else {'envelope': envelope_dict(previous), 'validation': row['validation']},
+    'previous': None if previous is None else {'envelope': envelope_dict(previous), 'validation': cast(dict[str, object], row)['validation']},
     'validation': validation_sha256,
   }
   return encode(doc)

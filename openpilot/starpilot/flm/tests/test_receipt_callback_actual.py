@@ -111,12 +111,13 @@ def test_parent_renews_actual_source_and_retains_real_collector_block(tmp_path, 
     # Admission guards have run; stop before any fitting/publication work.
     raise StopIteration
 
+  persistence = Mock()
   with patch.object(steerlearnerd, 'FullrateCollector', side_effect=factory), \
        patch.object(steerlearnerd, 'drain', drain), \
        patch('openpilot.starpilot.flm.native_health.current_native_health', native):
     with pytest.raises(StopIteration):
       steerlearnerd.run(cp, sm, control_socket, output_socket, Mock(), Mock(return_value=Adapter()), Mock(),
-                        reader, lambda row: ('ff',), lambda row: 'ff', Mock(), Mock(), fitter, Mock(), clock=lambda: current[0])
+                        reader, lambda row: ('ff',), lambda row: 'ff', Mock(), persistence, fitter, Mock(), clock=lambda: current[0])
   assert len(reads) == 2  # Rejected receipt is not reread repeatedly this loop.
   assert metadata_reads
   assert any(call.args == (0,) for call in sm.update.call_args_list)
@@ -125,9 +126,25 @@ def test_parent_renews_actual_source_and_retains_real_collector_block(tmp_path, 
     assert len(instances[0].blocks) == 1
     assert instances[0].ready  # Genuine admitted control/output join survived.
     assert fitter.cancel.call_count == 0  # Same-source renewal leaves pending fitting alive.
+  elif change in ('expired', 'future', 'slow_read') or (change is None and not queued_calibration):
+    # An unavailable receipt/calibration is uncertainty, not an explicit reset.
+    # Preserve only the genuine historical block; withdraw every current proof.
+    collector = instances[0]
+    assert len(collector.blocks) == 1
+    assert not collector.ready and not collector.controls and not collector.applied
+    assert not collector.raw_points and collector.active_since == 0
+    assert collector.last_qualified_response == 0
+    assert collector.fit_result is None and collector.fit_validation is None
+    assert collector.result is None and collector.last_validation is None
+    assert collector.adapter.fit_profile is None
+    assert not collector.adapter.current_physical_valid
+    assert collector.adapter.last_physical_ns == 0
+    assert fitter.cancel.call_count >= 1
   else:
+    # Fresh explicit off/manual/configuration changes still destroy history.
     assert not instances[0].blocks
     assert fitter.cancel.call_count >= 1
+  persistence.save_current.assert_not_called()
   assert len(reads) == 2  # Rejected receipt is not reread repeatedly this loop.
 
 
@@ -138,5 +155,5 @@ def test_old_command_cannot_enter_collector_after_receipt_renewal():
   assert not collector.controls and not collector.ready
 
 
-def test_parent_expired_receipt_without_queued_valid_calibration_discards_blocks(tmp_path):
+def test_parent_expired_receipt_without_queued_valid_calibration_keeps_only_history(tmp_path):
   test_parent_renews_actual_source_and_retains_real_collector_block(tmp_path, 'output', None, queued_calibration=False)

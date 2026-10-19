@@ -19,9 +19,8 @@ class TrainingResultsHTTPTest(unittest.TestCase):
     self.results = mock.Mock()
     self.results.snapshot.return_value = {'version': 1, 'current': {'fresh': True, 'progress': {'blocks': 3}}, 'history': []}
     self.parked = mock.Mock(return_value=False)
-    self.operations = mock.Mock()
     self.server = make_server(port=0, owner=self.access, training_results=self.results,
-                              flm_operations=self.operations, parked=self.parked)
+                              parked=self.parked)
     self.thread = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
     self.thread.start()
     self.addCleanup(self.stop)
@@ -67,7 +66,6 @@ class TrainingResultsHTTPTest(unittest.TestCase):
       assert status == 200 and body == self.results.snapshot.return_value
       assert headers['Cache-Control'] == 'no-store'
     self.parked.assert_not_called()
-    self.operations.request.assert_not_called()
     assert self.results.snapshot.call_count == 2
 
   def test_queries_and_cross_origin_are_rejected_before_report_read(self):
@@ -76,6 +74,15 @@ class TrainingResultsHTTPTest(unittest.TestCase):
       assert self.request(path)[0] == 400
     assert self.request(origin='http://foreign.invalid')[0] == 403
     self.results.snapshot.assert_not_called()
+
+  def test_removed_manual_flm_workflow_is_unavailable(self):
+    self.login()
+    for name in ('status', 'report', 'live', 'start', 'cancel', 'live-action', 'train', 'recommend', 'save-report'):
+      for payload in (None, {}):
+        status, _, _ = self.request('/api/flm/' + name, payload=payload)
+        assert status == 404
+    self.results.snapshot.assert_not_called()
+    self.parked.assert_not_called()
 
   def test_logout_during_snapshot_discards_report(self):
     self.login()

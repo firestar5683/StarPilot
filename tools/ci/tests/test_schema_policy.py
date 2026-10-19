@@ -54,7 +54,13 @@ class SchemaPolicyTest(unittest.TestCase):
     self.assertIn(original, self.schemas['openpilot/cereal/custom.capnp'])
     self.assertIn(b'aolAxisState @142 :Custom.AolAxisState;', self.schemas['openpilot/cereal/log.capnp'])
     self.schemas['openpilot/cereal/custom.capnp'] = self.schemas['openpilot/cereal/custom.capnp'].replace(
-      original, b'struct FixtureState @0xfc6241ed8877b611 {\n  note @12 :Text = "{fixture}";')
+      original, b'struct FixtureState @0xfc6241ed8877b611 {')
+    # AolAxisState already occupies @0..17. Append a genuinely fresh ordinal;
+    # the parser must continue rejecting the old duplicate-@12 fixture.
+    occupied_tail = b'intentIntegrityEpoch @17 :UInt64;'
+    self.assertIn(occupied_tail, self.schemas['openpilot/cereal/custom.capnp'])
+    self.schemas['openpilot/cereal/custom.capnp'] = self.schemas['openpilot/cereal/custom.capnp'].replace(
+      occupied_tail, occupied_tail + b'\n  note @18 :Text = "{fixture}";', 1)
     self.schemas['openpilot/cereal/log.capnp'] = self.schemas['openpilot/cereal/log.capnp'].replace(
       b'aolAxisState @142 :Custom.AolAxisState;', b'fixtureState @142 :Custom.FixtureState;')
     self.assertEqual(validate(self.schemas, self.policy, self.sync), [])
@@ -271,3 +277,160 @@ class SchemaPolicyTest(unittest.TestCase):
         changed = self.schemas.copy()
         changed[path] = changed[path].replace(original, after)
         self.assertTrue(validate(changed, self.policy, self.sync))
+
+  def test_recursive_historical_appends_preserve_existing_scopes(self):
+    path = 'openpilot/cereal/custom.capnp'
+    mutations = (
+      (b'controllerRevision @11 :Text;', b'controllerRevision @11 :Text;\n      futureIdentity @12 :Text;'),
+      (b'qualifiedFit @4;', b'qualifiedFit @4; futureStatus @5;'),
+      (b'runtimeProfile @2;', b'runtimeProfile @2; futureFamily @3;'),
+    )
+    for before, after in mutations:
+      with self.subTest(after=after):
+        changed = self.schemas.copy()
+        changed[path] = changed[path].replace(before, after, 1)
+        self.assertEqual(validate(changed, self.policy, self.sync), [])
+
+  def test_reviewed_payload_children_have_exact_existing_ids_and_bodies(self):
+    expected = {
+      'LearningControlEvidence': '0xf2447170bb68f358',
+      'LearningAppliedEvidence': '0xbab0f51a74ffee6e',
+      'AutomaticRuntimeProfile': '0xef38d302825641e3',
+      'AutomaticLearningSourceReceipt': '0x9fe2d23e75805149',
+      'LearningApplication': '0x82b6c8ea6a6efabd',
+      'FordLearningEvidence': '0xd1dfbadb6a811fee',
+      'FordLearningEvent': '0xb276dede9e6b2cc4',
+      'CentreApplicationWitness': '0xab0b33cac682523e',
+      'LearningTorqueProjection': '0xf078f562cbce49ad',
+    }
+    self.assertEqual({name: child['type_id'] for name, child in self.policy['reviewed_payload_children'].items()}, expected)
+    path = 'openpilot/cereal/custom.capnp'
+    for name, type_id in expected.items():
+      declaration = f'struct {name} @{type_id} {{'.encode()
+      original = self.policy['reviewed_payload_children'][name]['body'].encode()
+      for body in (original.replace(b'@0', b'@99', 1), original + b'\n  futureChild @99 :Text;',
+                   original.replace(b'UInt16', b'UInt32', 1) if b'UInt16' in original else original.replace(b'UInt64', b'UInt32', 1)):
+        with self.subTest(name=name, body=body[:60]):
+          changed = self.schemas.copy()
+          changed[path] = changed[path].replace(declaration + original, declaration + body, 1)
+          self.assertTrue(any('reviewed payload child' in error for error in validate(changed, self.policy, self.sync)))
+      for replacement in (f'struct {name} {{'.encode(), f'struct {name} @0xf000000000000001 {{'.encode(),
+                          f'struct Other{name} @{type_id} {{'.encode()):
+        with self.subTest(name=name, replacement=replacement):
+          changed = self.schemas.copy()
+          changed[path] = changed[path].replace(declaration, replacement, 1)
+          self.assertTrue(validate(changed, self.policy, self.sync))
+
+  def test_helper_nested_union_defaults_and_field_names_are_immutable(self):
+    path = 'openpilot/cereal/custom.capnp'
+    for before, after in (
+      (b'union { number @1 :Float64; text @2 :Text; boolean @3 :Bool; }',
+       b'number @1 :Float64; text @2 :Text; boolean @3 :Bool;'),
+      (b'excitationFloor @6 :Float64 = 0.01;', b'excitationFloor @6 :Float64 = 0.02;'),
+      (b'struct FullEffectTrace {', b'struct FullEffectTrace @0xc9c9b325ca50aaf7 {'),
+      (b'struct NamedValue {', b'struct OtherNamedValue {'),
+      (b'effectPrepareMonoTime @45 :UInt64;', b''),
+      (b'effectPrepareMonoTime @45 :UInt64;', b'unrelatedTime @45 :UInt64;'),
+    ):
+      with self.subTest(after=after):
+        self.assertIn(before, self.schemas[path])
+        changed = self.schemas.copy()
+        changed[path] = changed[path].replace(before, after, 1)
+        self.assertTrue(any('reviewed payload child' in error for error in validate(changed, self.policy, self.sync)))
+
+  def test_helpers_cannot_gain_new_carriers_or_change_pointer_shape(self):
+    path = 'openpilot/cereal/custom.capnp'
+    cases = (
+      (b'active @0 :Bool;\n  frictionThreshold', b'foreignChild @99 :LearningControlEvidence;\n  active @0 :Bool;\n  frictionThreshold'),
+      (b'learningEvidence @9 :LearningControlEvidence;', b'learningEvidence @9 :List(LearningControlEvidence);'),
+      (b'learningApplication @36 :LearningApplication;', b'learningApplication @36 :LearningControlEvidence;'),
+      (b'learningEvidence @9 :LearningControlEvidence;', b''),
+    )
+    for before, after in cases:
+      with self.subTest(after=after):
+        self.assertIn(before, self.schemas[path])
+        changed = self.schemas.copy()
+        changed[path] = changed[path].replace(before, after, 1)
+        self.assertTrue(any('carrier references changed' in error for error in validate(changed, self.policy, self.sync)))
+
+  def test_unknown_helper_alias_and_helper_event_retargeting_are_rejected(self):
+    path = 'openpilot/cereal/custom.capnp'
+    for addition in (b'\nstruct UnknownHelper @0xf000000000000001 {}\n',
+                     b'\nstruct UnknownImplicitHelper {}\n',
+                     b'\nusing ExtraAlias = LearningControlEvidence;\n'):
+      changed = self.schemas.copy()
+      changed[path] += addition
+      self.assertTrue(validate(changed, self.policy, self.sync))
+    changed = self.schemas.copy()
+    changed['openpilot/cereal/log.capnp'] = changed['openpilot/cereal/log.capnp'].replace(
+      b'autoSteeringLearning @108 :Custom.StarPilotCarParams;',
+      b'autoSteeringLearning @108 :Custom.AutomaticRuntimeProfile;')
+    self.assertTrue(any('event @108' in error for error in validate(changed, self.policy, self.sync)))
+
+  def test_recursive_historical_parser_rejects_shadowing_and_unknown_syntax(self):
+    path = 'openpilot/cereal/custom.capnp'
+    for after in (b'controllerRevision @11 :Text;\n      shadow @11 :UInt64;',
+                  b'controllerRevision @11 :Text;\n      using Hidden = Text;',
+                  b'controllerRevision @11 :Text;\n      payload @12 :union { x @13 :Text; }'):
+      changed = self.schemas.copy()
+      changed[path] = changed[path].replace(b'controllerRevision @11 :Text;', after, 1)
+      self.assertTrue(validate(changed, self.policy, self.sync))
+
+  def test_recursive_source_contract_preserves_quoted_default_content(self):
+    from tools.ci.schema_policy import preserves_scope, source_scope
+
+    original = 'label @0 :Text = "{# original value }"; enum Mode { first @0; }'
+    historical = source_scope(original)
+    appended = source_scope(original.replace('first @0;', 'first @0; second @1;'))
+    self.assertTrue(preserves_scope(appended, historical))
+    for replacement in ('{# originalvalue }', '{# changed value }', '{# original value}'):
+      changed = source_scope(original.replace('{# original value }', replacement))
+      self.assertFalse(preserves_scope(changed, historical))
+
+
+  def test_helpers_in_unreferenced_nested_owner_are_not_reachable(self):
+    path = 'openpilot/cereal/custom.capnp'
+    original = b'learning @9 :AutoSteeringLearning;'
+    self.assertIn(original, self.schemas[path])
+    # Keep the existing nested owner and its exact three helper fields intact.
+    # Its enclosing reserved root has no field pointing to that scope anymore;
+    # merely visiting its lexical declaration must not grant helper ownership.
+    for replacement in (b'', b'learning @9 :Text;'):
+      with self.subTest(replacement=replacement):
+        changed = self.schemas.copy()
+        changed[path] = changed[path].replace(original, replacement, 1)
+        errors = validate(changed, self.policy, self.sync)
+        self.assertTrue(any('must remain reachable from reserved carriers' in error for error in errors))
+        self.assertTrue(any('historical occupied prefix changed' in error for error in errors))
+
+  def test_literal_learning_field_keeps_name_ordinal_and_nested_type(self):
+    path = 'openpilot/cereal/custom.capnp'
+    original = b'learning @9 :AutoSteeringLearning;'
+    self.assertIn(original, self.schemas[path])
+    for replacement in (b'otherLearning @9 :AutoSteeringLearning;',
+                        b'learning @10 :AutoSteeringLearning;',
+                        b'learning @9 :List(AutoSteeringLearning);',
+                        b'learning @9 :Text;', b''):
+      with self.subTest(replacement=replacement):
+        changed = self.schemas.copy()
+        changed[path] = changed[path].replace(original, replacement, 1)
+        self.assertTrue(any('historical occupied prefix changed' in error
+                            for error in validate(changed, self.policy, self.sync)))
+
+  def test_duplicate_historical_ordinal_reports_occupied_prefix_violation(self):
+    path = 'openpilot/cereal/custom.capnp'
+    original = b'slcSpeedLimit @24 :Float32;'
+    self.assertIn(original, self.schemas[path])
+    self.assertIn(b'slcSpeedLimitOffset @25 :Float32;', self.schemas[path])
+    changed = self.schemas.copy()
+    changed[path] = changed[path].replace(original, b'slcSpeedLimit @25 :Float32;', 1)
+    errors = validate(changed, self.policy, self.sync)
+    self.assertTrue(any('historical occupied prefix changed: Duplicate member name or ordinal' in error for error in errors))
+
+  def test_duplicate_existing_aol_ordinal_remains_rejected(self):
+    path = 'openpilot/cereal/custom.capnp'
+    original = b'struct AolAxisState @0xfc6241ed8877b611 {'
+    self.assertIn(b'optionalSetRelease @12 :Bool;', self.schemas[path])
+    changed = self.schemas.copy()
+    changed[path] = changed[path].replace(original, original + b'\n  duplicate @12 :Text;', 1)
+    self.assertTrue(any('Duplicate member name or ordinal' in error for error in validate(changed, self.policy, self.sync)))

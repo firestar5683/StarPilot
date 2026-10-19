@@ -87,17 +87,21 @@ class UpdaterProcess:
     except (OSError, ValueError, IndexError):
       raise SoftwareOperationError("Updater process identity is unavailable", 503) from None
 
-  def available(self) -> bool:
+  def current_identity(self) -> tuple[int, int] | None:
     with self.lock:
       try:
         pid = self._manager_pid()
         start = self._proc_identity(pid)
-        return bool(self._manager_pid() == pid and self._proc_identity(pid) == start and
-                    self.control.available(pid, start))
+        if self._manager_pid() == pid and self._proc_identity(pid) == start and self.control.available(pid, start):
+          return pid, start
       except (SoftwareOperationError, UpdaterControlError, OSError, RuntimeError, ValueError):
-        return False
+        pass
+      return None
 
-  def send(self, action: str, *, branch=None, commit=None, selected_commit=None) -> None:
+  def available(self) -> bool:
+    return self.current_identity() is not None
+
+  def send(self, action: str, *, branch=None, commit=None, selected_commit=None) -> tuple[int, int]:
     if action not in ("check", "download", "update", "fast", "rollback", "versions", "version"):
       raise SoftwareOperationError("Invalid updater command", 400)
     with self.lock:
@@ -114,6 +118,7 @@ class UpdaterProcess:
           self.control.send(pid, start, action)
       except (UpdaterControlError, OSError, RuntimeError, ValueError):
         raise SoftwareOperationError("Updater control is unavailable", 503) from None
+      return pid, start
 
   def close(self) -> None:
     with self.lock:
@@ -167,6 +172,7 @@ class SoftwareOperations:
     self._baseline: tuple | None = None
     self._started = 0.0
     self._fast_commit = None
+    self._request_owner = None
 
   def _param(self, key: str, limit: int = 256) -> str | None:
     try:
@@ -240,7 +246,7 @@ class SoftwareOperations:
       return False
     return True
 
-  def _refresh_request(self, status: dict) -> None:
+  def _refresh_request(self, status: dict, current_owner=None, *, parked=False) -> None:
     request = self.request
     if self._baseline is None or request is None or request["state"] != "pending" or request["action"] == "install":
       return
@@ -275,6 +281,14 @@ class SoftwareOperations:
         request.update(state="complete", error=None)
       else:
         request.update(state="failed", error="No new download was reported for this branch")
+    if request["state"] != "pending":
+      return
+    if (state == "idle" and self._flag("DoReboot") is False and current_owner is not None and
+          ((self._request_owner is not None and current_owner != self._request_owner) or
+           (self._request_owner is None and parked and
+            status["updater"].get("fast") == {"stage": "error", "detail":
+              "Update process restarted before completion; check the installed version and retry."}))):
+      request.update(state="failed", error="Update was interrupted when the updater stopped. Retry while parked.")
     elif self.clock() - self._started > 900:
       request.update(state="failed", error="Updater did not report completion")
 
@@ -295,8 +309,9 @@ class SoftwareOperations:
         status = self.status.snapshot()
       except SoftwareUnavailable:
         raise SoftwareOperationError("Updater status is unavailable", 503) from None
-      process = self.process.available()
-      self._refresh_request(status)
+      identity_reader = getattr(self.process, "current_identity", None)
+      current_owner = identity_reader() if callable(identity_reader) else None
+      process = current_owner is not None if callable(identity_reader) else self.process.available()
       try:
         fresh = self.refresh is None or self.refresh() is True
       except (OSError, RuntimeError, ValueError, TypeError):
@@ -309,6 +324,7 @@ class SoftwareOperations:
         admission = {'allowed': self._parked(),
                      'reason': 'Switch the device Offroad and confirm the vehicle is parked before updating'}
       parked = bool(admission['allowed'])
+      self._refresh_request(status, current_owner, parked=parked)
       branches = self._branches()
       updater_idle = status["updater"]["state"] == "idle"
       pending = self.request is not None and self.request["state"] == "pending"
@@ -461,6 +477,7 @@ class SoftwareOperations:
         self.params.put("UpdaterTargetBranch", branch, block=True)
         self.selected_target = branch
         return self.snapshot()
+      accepted_owner = None
       if action == "install":
         status = self.status.snapshot()
         if not self._ready(status, branch) or self._flag("DoReboot") is not False:
@@ -483,17 +500,18 @@ class SoftwareOperations:
           self._fast_commit = status["installed"]["commit"]
         if action in SOURCE_ACTIONS:
           if action == 'version':
-            self.process.send(action, branch=branch, commit=identity[1], selected_commit=payload['selectedCommit'])
+            accepted_owner = self.process.send(action, branch=branch, commit=identity[1], selected_commit=payload['selectedCommit'])
           else:
-            self.process.send(action, branch=branch, commit=identity[1])
+            accepted_owner = self.process.send(action, branch=branch, commit=identity[1])
         else:
-          self.process.send(action)
+          accepted_owner = self.process.send(action)
       self.request = {"id": secrets.token_hex(8), "action": action,
                       "target": branch if branch is not None else status["updater"]["targetBranch"],
                       "state": "pending", "error": None}
       if action == 'version':
         self.request['selectedCommit'] = payload['selectedCommit']
       self._baseline = baseline if action != "install" else None
+      self._request_owner = accepted_owner
       self._started = self.clock()
       return self.snapshot()
 

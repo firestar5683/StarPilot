@@ -431,7 +431,7 @@ ul { list-style: none; margin: 0; padding: 0; }
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-full);
   color: var(--on-surface);
-  font-size: var(--fs-sm);
+  font-size: max(16px, var(--fs-sm));
   height: 40px;
   outline: none;
   padding: 0 var(--sp-4);
@@ -1025,7 +1025,7 @@ button.gx-chip:hover {
 }
 
 
-.gx-field { min-width: 0; max-width: 100%; min-height: var(--touch-target); padding: 9px 12px; border: 1px solid var(--glass-border); border-radius: var(--radius-sm); background: var(--surface-container-high); color: var(--on-surface); font: inherit; }
+.gx-field { min-width: 0; max-width: 100%; min-height: var(--touch-target); padding: 9px 12px; border: 1px solid var(--glass-border); border-radius: var(--radius-sm); background: var(--surface-container-high); color: var(--on-surface); font: inherit; font-size: max(16px, 1em); }
 .gx-btn--tonal:hover:not(:disabled) { background: var(--glass-active-bg); }
 .gx-btn--tonal { background: var(--primary-container); color: var(--on-primary-container); box-shadow: none; }
 .gx-crash-controls { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-3); }
@@ -1762,3 +1762,11 @@ progress { max-width: 100%; accent-color: var(--primary); }
 .gx-spotify-now__controls { align-items: center; flex-wrap: wrap; }
 .gx-spotify-now__play { min-width: 64px; font-size: 1.4rem; }
 .gx-spotify-now__volume { display: flex; flex: 1 1 160px; align-items: center; gap: var(--sp-2); min-width: 0; }
+/* Auto Learn results use existing cards and plot colors. */
+.gx-flm__facts { display: flex; flex-wrap: wrap; gap: 1rem 2rem; }
+.gx-flm__facts dd { margin: .3rem 0 0; }
+.gx-flm__table-wrap { overflow-x: auto; max-width: 100%; }
+.gx-flm__table { width: 100%; border-collapse: collapse; text-align: left; }
+.gx-flm__table th, .gx-flm__table td { padding: .65rem; border-bottom: 1px solid var(--outline-variant); vertical-align: top; }
+.gx-flm__table td:nth-child(2), .gx-flm__table td:nth-child(3), .gx-flm__table td:nth-child(4) { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gx-flm__table tbody th { font-weight: 500; min-width: 12rem; }

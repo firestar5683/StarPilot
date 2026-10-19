@@ -90,7 +90,8 @@ class TestNativeInferredTorque(unittest.TestCase):
           selected = read_selection(params, cp)
           baseline = LatControlTorque(cp.as_reader(), ci, DT_CTRL, controller_mode=selected.mode)
           expected_learning = learning_allowed(params, cp, selection=selected)
-          self.assertEqual(expected_learning, mode == ControllerMode.STANDARD)
+          # Native refinement is available with either selected controller.
+          self.assertTrue(expected_learning)
           params.put('SteerLatAccel', float(cp.lateralTuning.torque.latAccelFactor), block=True)
           params.put('SteerFriction', float(cp.lateralTuning.torque.friction), block=True)
           self.assertFalse(runtime_enabled(cp, params))

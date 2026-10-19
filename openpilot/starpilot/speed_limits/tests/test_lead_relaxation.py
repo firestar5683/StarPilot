@@ -68,20 +68,16 @@ class LeadRelaxationTests(unittest.TestCase):
                  replace(LEAD, accel_mps2=-0.251)):
       self.assertEqual(relax(lead=lead).cap_mps, 20.0)
 
-  def test_source_unknown_stale_and_unqualified_fallback_suppress_cap(self):
-    for source in (
-      lr.SourceEvidence(ObservationKind.UNKNOWN, True),
-      lr.SourceEvidence(ObservationKind.STALE, True),
-      lr.SourceEvidence(ObservationKind.ABSENT, False),
-      lr.SourceEvidence(ObservationKind.VALID, False),
-    ):
-      with self.subTest(source=source):
-        result = relax(source=source)
+  def test_only_qualified_caps_survive_and_retained_limits_are_not_eased(self):
+    for kind in ObservationKind:
+      with self.subTest(kind=kind):
+        result = relax(source=lr.SourceEvidence(kind, False))
         self.assertIsNone(result.cap_mps)
         self.assertIsNone(result.next_prior)
-    fallback = relax(source=lr.SourceEvidence(ObservationKind.ABSENT, True))
-    self.assertEqual(fallback.cap_mps, 20.0)
-    self.assertEqual(fallback.status, "fallback_source")
+        if kind is not ObservationKind.VALID:
+          fallback = relax(source=lr.SourceEvidence(kind, True))
+          self.assertEqual(fallback.cap_mps, 20.0)
+          self.assertEqual(fallback.status, "fallback_source")
 
   def test_no_cap_inactive_force_stop_and_override_reset_prior(self):
     for kwargs in ({"raw_cap": None}, {"active": False}, {"override": True}):

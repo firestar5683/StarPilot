@@ -3,6 +3,14 @@
 static void gm_cruise_status_clear(void);
 
 #define GM_ALT_EXP_ALWAYS_ON_LATERAL 32U
+#define GM_ALT_EXP_REMAP_CANCEL_TO_DISTANCE 64U
+
+static bool gm_cancel_remap_enabled = false;
+
+static bool gm_cancel_remap_word(uint16_t word) {
+  return (word == 0xBDU) || (word == 0x9DU) || (word == 0x19DU) || (word == 0x1CDU) ||
+         (word == 0xE700U) || (word == 0xE701U) || (word == 0xE702U) || (word == 0xE703U);
+}
 #define GM_AOL_MAIN_TIMEOUT_US 300000U
 
 static bool gm_aol_enabled = false;
@@ -44,7 +52,7 @@ static uint8_t gm_aol_permission_mask(void) {
     if (main_current && gear_current) {
       permission = request & 0x1U;
     }
-    if (!gm_aol_stock_only && controls_allowed && ((request & 0x2U) != 0U)) {
+    if (!gm_aol_stock_only && controls_allowed && (!gm_cancel_remap_enabled || main_current) && ((request & 0x2U) != 0U)) {
       permission |= 0x2U;
     }
   }
@@ -79,7 +87,8 @@ static void gm_aol_observe(const CANPacket_t *msg) {
 // The caller supplies exact profile acceptance after its normal mode initialization.
 static void gm_aol_initialize(bool profile_supported) {
   gm_aol_reset();
-  gm_aol_enabled = profile_supported && ((unsigned int)alternative_experience == GM_ALT_EXP_ALWAYS_ON_LATERAL);
+  gm_aol_enabled = profile_supported && (((unsigned int)alternative_experience == GM_ALT_EXP_ALWAYS_ON_LATERAL) ||
+    (gm_cancel_remap_enabled && ((unsigned int)alternative_experience == (GM_ALT_EXP_ALWAYS_ON_LATERAL | GM_ALT_EXP_REMAP_CANCEL_TO_DISTANCE))));
   if (gm_aol_enabled) {
     static const AolSafetyPolicy gm_aol_policy = {
       .reset = gm_aol_reset,

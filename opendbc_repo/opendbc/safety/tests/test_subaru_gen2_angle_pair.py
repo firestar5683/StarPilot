@@ -264,9 +264,8 @@ class TestSubaruGen2AnglePair(unittest.TestCase):
             self.assertNotEqual(seen[-1][1][5:7], b'\x00\x00')
 
   def test_firmware_complete_partial_and_mixed(self):
-    # The two identities stay manual-only: the production exact matcher treats
-    # multiple observed versions at one ECU address as alternatives. A mixed
-    # ABS observation can otherwise select a sibling with false confidence.
+    # Complete supported identities select automatically; partial and
+    # contradictory ECU evidence must not select either angle identity.
     e = structs.CarParams.Ecu
     versions = {
       CARS[0]: [(e.abs, 0x7b0, b'\xa2 $\x15\x05'), (e.fwdCamera, 0x787, b'\x1d!\x08\x00F\x14!\x08\x00='),
@@ -281,7 +280,10 @@ class TestSubaruGen2AnglePair(unittest.TestCase):
               for ecu, addr, version in entries]
 
     for car in CARS:
-      for entries in (versions[car], versions[car][:1], versions[car][1:2]):
+      exact, matches = match_fw_to_car(records(versions[car]), '00000000000000000', log=False)
+      self.assertTrue(exact)
+      self.assertEqual(matches, {car})
+      for entries in (versions[car][:1], versions[car][1:2]):
         _, matches = match_fw_to_car(records(entries), '00000000000000000', log=False)
         self.assertNotIn(car, matches)
     mixed = versions[CARS[0]][:1] + versions[CARS[1]]

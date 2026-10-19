@@ -46,6 +46,9 @@ class ClockedBoundaryAdapter(BoundaryAdapter, EventCollectionAdapter):
   raw_collection = False
   decisions = None
 
+  def physical_observable(self, row=None, *, value=None):
+    return super().physical_observable(row if value is None else value)
+
   def current_admission(self, profile, control, output, context, *, now_ns=None):
     self.decisions = now_ns
     return BoundaryAdapter.current_admission(self, profile, control, output, context)

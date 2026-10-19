@@ -44,19 +44,20 @@ class TestRecoveryHttp(TestCase):
     rows = self.request('/api/settings/non-defaults', cookie=cookie)[1]['rows']
     self.assertNotIn('Wheel brake and acceleration colors', [row['label'] for row in rows])
 
-  def test_disabled_children_are_visible_and_all_reset_uses_canonical_defaults(self):
+  def test_confirmation_reset_uses_only_master_and_preserves_legacy_flags(self):
     for key in ('SLCConfirmation', 'SLCConfirmationLower', 'SLCConfirmationHigher'):
       self.params.put_bool(key, True, block=True)
     cookie = self.login()
-    payload = self.selection(cookie, ['Require confirmation', 'Confirm lower limits', 'Confirm higher limits'])
+    payload = self.selection(cookie, ['Require confirmation'])
     status, pending, _ = self.request('/api/settings/recovery/preview', cookie=cookie, payload=payload)
     self.assertEqual(status, 200)
     result = self.request('/api/settings/recovery/confirm', cookie=cookie,
                           payload={'intent': pending['intent'], 'confirmed': True})
     self.assertEqual(result[0], 200)
     self.assertTrue(result[1]['saved'])
-    for key in ('SLCConfirmation', 'SLCConfirmationLower', 'SLCConfirmationHigher'):
-      self.assertFalse(self.params.get_bool(key))
+    self.assertFalse(self.params.get_bool('SLCConfirmation'))
+    for key in ('SLCConfirmationLower', 'SLCConfirmationHigher'):
+      self.assertTrue(self.params.get_bool(key))
 
   def test_wrong_selection_and_unconfirmed_requests_are_rejected(self):
     self.params.put_bool('ShowBrakeStatus', True, block=True)

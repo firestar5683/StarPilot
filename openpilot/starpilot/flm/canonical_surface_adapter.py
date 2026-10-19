@@ -117,7 +117,7 @@ def canonical_names(names):
 _RAW_BY_NAME = MappingProxyType({name: (value, limits) for name, value, limits in RAW_DOMAINS})
 
 
-def _coordinate_bounds_static(name):
+def _coordinate_bounds_static(name) -> tuple[float, float]:
   if name not in NAMES:
     raise ValueError('unknown canonical coordinate')
   original, (raw_low, raw_high) = _RAW_BY_NAME[name]
@@ -134,7 +134,7 @@ def _coordinate_bounds_static(name):
 _COORDINATE_BOUNDS = MappingProxyType({name: _coordinate_bounds_static(name) for name in NAMES})
 
 
-def coordinate_bounds(name):
+def coordinate_bounds(name) -> tuple[float, float]:
   if type(name) is not str or name not in _COORDINATE_BOUNDS:
     raise ValueError('unknown canonical coordinate')
   return _COORDINATE_BOUNDS[name]

@@ -19,7 +19,8 @@ from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, Onro
 from openpilot.starpilot.ui.brand import DISPLAY_VERSION, home_description
 from openpilot.starpilot.curve_speed.status import observation as curve_observation
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
-from openpilot.starpilot.conditional_mode.manual import TRAFFIC_MODE_ACTION, ioniq6_media_eligible, read_button_map
+from openpilot.starpilot.conditional_mode.manual import TRAFFIC_MODE_ACTION, read_button_map
+from openpilot.starpilot.feature_capabilities import lateral_supported, longitudinal_supported
 from openpilot.starpilot.conditional_mode.projection import paired_clocks_ns
 from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
@@ -42,7 +43,7 @@ from openpilot.starpilot.models.jetlink_status import JetlinkStatusFeed
 from openpilot.starpilot.ui.onroad_state import conditional_lead_from_message
 from openpilot.starpilot.ui.onroad_state import (AlertSize, BorderSignals, ObservationKind, OnroadAlert,
                                                 OnroadState, SpeedLimitObservation, is_personality_notice, speed_limit_from_message)
-from openpilot.starpilot.ui.unified_speed_presentation import displayed_adjusted_limit_mps, displayed_limit_mps, positive
+from openpilot.starpilot.ui.unified_speed_presentation import displayed_adjusted_limit_mps, displayed_limit_mps, positive, retaining_limit
 from openpilot.starpilot.ui.onroad_stopped_timer import StoppedTimer
 from openpilot.starpilot.ui.onroad_lane_alerts import lateral_lane_alert
 from openpilot.starpilot.ui.onroad_camera import ReverseDriverCamera
@@ -502,16 +503,17 @@ class RuntimeSnapshotAdapter:
     traffic_eligible = False
     if getattr(traffic_wire, 'version', 0) == 1 and cp is not None:
       try:
-        traffic_eligible = bool(ioniq6_media_eligible(cp) and cp.openpilotLongitudinalControl and not cp.passive)
+        traffic_eligible = longitudinal_supported(cp)
       except (AttributeError, TypeError, ValueError):
         pass  # A partial or unreadable CP never qualifies a display receipt.
     if traffic_eligible:
       if (self._traffic_context_ns is None or now_ns < self._traffic_context_ns or
           now_ns - self._traffic_context_ns >= 1_000_000_000):
-        buttons = read_button_map(params, include_ioniq_media=True)
+        buttons = read_button_map(params, include_ioniq_media=True, cp=cp)
         self._traffic_map_fingerprint = buttons.fingerprint() if buttons is not None else None
         self._traffic_map_assigned = bool(buttons is not None and TRAFFIC_MODE_ACTION in
-                                          (buttons.mode, buttons.mode_long, buttons.mode_very_long,
+                                          (buttons.lkas, buttons.distance, buttons.distance_long, buttons.distance_very_long,
+                                           buttons.mode, buttons.mode_long, buttons.mode_very_long,
                                            buttons.custom, buttons.custom_long, buttons.custom_very_long))
         try:
           self._traffic_profile_valid = read_traffic_settings(params).valid
@@ -564,11 +566,13 @@ class RuntimeSnapshotAdapter:
       cruise = None
     stock_cruise = bool(display_car_valid and
                         bool(getattr(getattr(display_car, "cruiseState", None), "enabled", False)) and
-                        cp is not None and (not cp.openpilotLongitudinalControl or cp.pcmCruise))
+                        cp is not None and not cp.openpilotLongitudinalControl)
     observation = speed_limit_from_message(slc) if slc is not None and (slc.enabled or slc.displayOnly) else SpeedLimitObservation()
     if slc is None and started:
       observation = SpeedLimitObservation(kind=ObservationKind.STALE)
     if mode != ShellMode.ONROAD or drive_key is None:
+      self._slc_sign_cache = None
+    elif retaining_limit(observation):
       self._slc_sign_cache = None
     elif observation.kind == ObservationKind.VALID and slc is not None:
       shown_mps = displayed_limit_mps(observation)
@@ -596,7 +600,8 @@ class RuntimeSnapshotAdapter:
         self._slc_sign_cache = None
     else:
       self._slc_sign_cache = None
-    if (slc is not None and (slc.enabled or slc.displayOnly) and observation.kind != ObservationKind.VALID):
+    if (slc is not None and (slc.enabled or slc.displayOnly) and observation.kind != ObservationKind.VALID and
+        not retaining_limit(observation)):
       # SLC is on but has no limit right now: keep the limit half of the card (as "–")
       # instead of letting it come and go with the source.
       observation = SpeedLimitObservation(kind=ObservationKind.STALE, source=observation.source, status=observation.status,
@@ -640,7 +645,7 @@ class RuntimeSnapshotAdapter:
                          experimental_available=bool(ui.has_longitudinal_control),
                          experimental_enabled=observed_experimental,
                          personality=list(Personality).index(persona),
-                         switchback_mode=bool(cp is not None and ioniq6_media_eligible(cp) and display_control is not None and display_control.latActive and
+                         switchback_mode=bool(lateral_supported(cp) and display_control is not None and display_control.latActive and
                            self._switchback.sample(slc, drive_id=drive_id, now_ns=now_ns,
                              event_ns=int(sm.logMonoTime['slcState']))),
                          traffic_mode=bool(traffic is not None and traffic.state == 'active'),

@@ -186,7 +186,8 @@ class TestSourceSelection(unittest.TestCase):
       selected = select_limit(supplied, source_policy)
       decision = step(accepted.state, selected.observation, system, acceptance_policy, now_ns=1)
       self.assertEqual(decision.state.accepted, accepted.state.accepted)
-      self.assertIsNone(decision.control_target_mps)
+      self.assertEqual(decision.control_target_mps, 20)
+      self.assertEqual(decision.state.observation.kind, kind)
     for authority in (Authority(Mode.LATERAL_ONLY, LongitudinalOwner.NONE, True, False, False, False),
                       Authority(Mode.LATERAL_ONLY, LongitudinalOwner.STOCK, True, False, True, False),
                       Authority(Mode.OFF, LongitudinalOwner.NONE, False, False, False, True)):

@@ -1,5 +1,8 @@
 """Immutable bounded caches preserve original digest and reject mutated maps."""
 
+from collections.abc import MutableMapping
+from typing import cast
+
 import hashlib
 from unittest.mock import patch
 import pytest
@@ -75,7 +78,7 @@ def test_immutable_parameter_tuple_cache_and_fixed_bounds():
   with pytest.raises((AttributeError, TypeError)):
     first[0].high = 0.9
   with pytest.raises(TypeError):
-    a._COORDINATE_BOUNDS['center_taper_max'] = (0.0, 0.9)
+    cast(MutableMapping[str, tuple[float, float]], a._COORDINATE_BOUNDS)['center_taper_max'] = (0.0, 0.9)
   assert a.coordinate_bounds('center_taper_max') == (0.0, 0.18)
 
 

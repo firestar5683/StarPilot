@@ -357,7 +357,9 @@ class TestVision(unittest.TestCase):
     self.assertEqual(accepted.message.slcState.sourceProducerSessionId, 'camera-a')
     sm.advance(2_300_000_000)
     expired = confirmed.step(sm, cp, now_ns=2_300_000_000, now_boot_ns=6_300_000_000)
-    self.assertFalse(expired.message.slcState.hasCeiling)
+    self.assertTrue(expired.message.slcState.hasCeiling)
+    self.assertEqual(expired.result.acceptance.basis, 'previous_accepted')
+    self.assertEqual(expired.result.acceptance.state.accepted, accepted.result.acceptance.state.accepted)
     self.assertIs(confirmed.vision_diagnostic.kind, ObservationKind.STALE)
 
     dashboard.producerSessionId = 'card-a'
@@ -376,4 +378,6 @@ class TestVision(unittest.TestCase):
     dashboard.status = 'unknown'
     sm.advance(2_350_000_000)
     missing = fallback.step(sm, cp, now_ns=2_350_000_000, now_boot_ns=6_350_000_000)
-    self.assertFalse(missing.message.slcState.hasCeiling)
+    self.assertTrue(missing.message.slcState.hasCeiling)
+    self.assertEqual(missing.result.acceptance.basis, 'previous_accepted')
+    self.assertEqual(missing.result.acceptance.state.accepted, chosen.result.acceptance.state.accepted)

@@ -2,14 +2,15 @@
 import os
 import time
 import math
+from dataclasses import dataclass
 import numpy as np
 from openpilot.cereal import log
 from opendbc.car.interfaces import ACCEL_MIN, ACCEL_MAX
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.swaglog import cloudlog
 # WARNING: imports outside of constants will not trigger a rebuild
-from openpilot.selfdrive.modeld.constants import index_function
-from openpilot.selfdrive.controls.radard import _LEAD_ACCEL_TAU
+from openpilot.selfdrive.modeld.constants import index_function, ModelConstants
+from openpilot.selfdrive.controls.radard import _LEAD_ACCEL_TAU, RADAR_TO_CAMERA
 
 if __name__ == '__main__':  # generating code
   from acados.acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
@@ -57,6 +58,188 @@ T_DIFFS = np.diff(T_IDXS, prepend=[0.])
 COMFORT_BRAKE = 2.5
 STOP_DISTANCE = 6.0
 MIN_X_LEAD_FACTOR = 0.5
+LEAD_T_IDXS_MODEL = np.asarray(ModelConstants.LEAD_T_IDXS, dtype=np.float64)
+MODEL_LEAD_TRAJECTORY_MAX_LEAD_BRAKE = 0.5
+MODEL_LEAD_TRAJECTORY_MAX_CLOSING_TTC = 7.0
+
+def build_model_lead_trajectory(model_lead, radar_lead, v_ego, model_v_ego=None):
+  if model_lead is None or radar_lead is None or not bool(getattr(radar_lead, "present", False)):
+    return None
+
+  try:
+    if not np.isfinite(float(model_lead.prob)) or float(model_lead.prob) <= 0.5:
+      return None
+    model_x = np.asarray(model_lead.x, dtype=np.float64)
+    model_v = np.asarray(model_lead.v, dtype=np.float64)
+    model_y = np.asarray(model_lead.y, dtype=np.float64)
+    model_t = np.asarray(model_lead.t, dtype=np.float64)
+  except (AttributeError, TypeError, ValueError):
+    return None
+
+  expected_len = len(LEAD_T_IDXS_MODEL)
+  if any(value.shape != (expected_len,) for value in (model_x, model_v, model_y, model_t)):
+    return None
+  if (any(not np.all(np.isfinite(value)) for value in (model_x, model_v, model_y, model_t)) or
+      not np.array_equal(model_t, LEAD_T_IDXS_MODEL) or not lead_horizon_matches(model_lead, radar_lead, v_ego, model_v_ego)):
+    return None
+
+  raw_d_rel = float(getattr(radar_lead, "dRel", float("nan")))
+  raw_v_lead = float(getattr(radar_lead, "vLead", float("nan")))
+  if not np.isfinite(raw_d_rel) or not np.isfinite(raw_v_lead):
+    return None
+
+  raw_accel = float(getattr(radar_lead, "aLeadK", float("nan")))
+  if not np.isfinite(raw_accel) or not np.isfinite(v_ego):
+    return None
+  raw_lead_brake = max(0.0, -raw_accel)
+  closing_speed = max(0.0, float(v_ego) - raw_v_lead)
+  ttc = raw_d_rel / max(closing_speed, 1e-3) if closing_speed > 0.1 else float("inf")
+  if (raw_lead_brake > MODEL_LEAD_TRAJECTORY_MAX_LEAD_BRAKE or
+      (closing_speed > 0.75 and ttc < MODEL_LEAD_TRAJECTORY_MAX_CLOSING_TTC)):
+    return None
+
+  x_lead_traj = raw_d_rel + (model_x - model_x[0])
+  v_lead_traj = raw_v_lead + (model_v - model_v[0])
+  v_lead_traj = np.clip(v_lead_traj, 0.0, 1e8)
+
+  v_ego = float(v_ego)
+  min_x_lead = (MIN_X_LEAD_FACTOR * (v_ego + v_lead_traj[0])) * (v_ego - v_lead_traj[0]) / (-ACCEL_MIN * 2.0)
+  x_lead_traj[0] = max(x_lead_traj[0], min_x_lead)
+
+  x_lead_mpc = np.maximum.accumulate(np.interp(T_IDXS, LEAD_T_IDXS_MODEL, x_lead_traj))
+  v_lead_mpc = np.interp(T_IDXS, LEAD_T_IDXS_MODEL, v_lead_traj)
+  return np.column_stack((x_lead_mpc, v_lead_mpc))
+
+def lead_horizon_matches(model_lead, lead, v_ego, model_v_ego):
+  try:
+    values = tuple(float(value) for value in (model_lead.prob, lead.modelProb, model_lead.x[0], model_lead.y[0],
+      model_lead.v[0], lead.dRel, lead.yRel, lead.vLead, v_ego, model_v_ego))
+    if not all(math.isfinite(value) for value in values):
+      return False
+    probability, matched_probability, model_x, model_y, model_v, distance, lateral, speed, ego, model_ego = values
+    if not .5 < probability <= 1. or not .5 < matched_probability <= 1. or distance <= 0. or speed < 0.:
+      return False
+    expected_distance = model_x - RADAR_TO_CAMERA
+    expected_speed = ego + model_v - model_ego
+    if type(lead.radar) is not bool or type(lead.radarTrackId) is not int:
+      return False
+    if lead.radar:
+      return bool(lead.radarTrackId >= 0 and
+        abs(distance - expected_distance) < max(5., .25 * expected_distance) and
+        abs(lateral + model_y) < 1. and abs(speed - expected_speed) < 2.)
+    return bool(lead.radarTrackId == -1 and abs(distance - expected_distance) <= .001 and
+      abs(lateral + model_y) <= .001 and math.isfinite(float(lead.vRel)) and
+      abs(float(lead.vRel) - (model_v - model_ego)) <= .001)
+  except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
+    return False
+
+
+def _model_lead_clock_pair_ns():
+  clock = getattr(time, 'CLOCK_BOOTTIME', None)
+  if clock is None:
+    return None
+  try:
+    before = time.monotonic_ns()
+    boot = time.clock_gettime_ns(clock)
+    after = time.monotonic_ns()
+  except OSError:
+    return None
+  return ((before + after) // 2, boot) if 0 <= after - before <= 1_000_000 else None
+
+
+@dataclass(frozen=True)
+class LeadHorizon:
+  prob: float
+  x: tuple[float, ...]
+  y: tuple[float, ...]
+  v: tuple[float, ...]
+  t: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class HorizonVelocity:
+  x: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class ModelHorizon:
+  stamp: int
+  receipt: int
+  timestampEof: int
+  velocity: HorizonVelocity
+  leadsV3: tuple[LeadHorizon, ...]
+
+
+class ModelLeadHistory:
+  def __init__(self):
+    self.frames = {}
+    self.latest_stamp = 0
+
+  def clear(self):
+    self.frames.clear()
+    self.latest_stamp = 0
+
+  def observe(self, model, stamp, receipt):
+    if stamp < self.latest_stamp:
+      self.clear()
+    if stamp == self.latest_stamp:
+      return
+    self.latest_stamp = stamp
+    self.frames = {key: value for key, value in self.frames.items() if stamp - key <= 150_000_000}
+    if len(model.leadsV3) < 2:
+      return
+    leads = []
+    for index in range(2):
+      lead = model.leadsV3[index]
+      if any(len(getattr(lead, field)) != len(LEAD_T_IDXS_MODEL) for field in ('x', 'y', 'v', 't')):
+        return
+      leads.append(LeadHorizon(float(lead.prob), *(tuple(float(v) for v in getattr(lead, field)) for field in ('x', 'y', 'v', 't'))))
+    self.frames[stamp] = ModelHorizon(stamp, receipt, int(model.timestampEof),
+      HorizonVelocity((float(model.velocity.x[0]),)), tuple(leads))
+    while len(self.frames) > 4:
+      del self.frames[min(self.frames)]
+
+
+def qualified_model_leads(sm, now_ns, history=None):
+  try:
+    pair = _model_lead_clock_pair_ns()
+    if (type(now_ns) is not int or type(pair) is not tuple or len(pair) != 2 or
+        any(type(value) is not int or value <= 0 for value in pair) or not 0 <= pair[0] - now_ns <= 150_000_000):
+      return None
+    for name in ('modelV2', 'radarState', 'carState'):
+      if not all(getattr(sm, field, {}).get(name) is True for field in ('valid', 'alive', 'freq_ok')):
+        return None
+      stamp = sm.logMonoTime.get(name, 0)
+      received = sm.recv_time.get(name, float('nan'))
+      if type(received) not in (int, float) or not math.isfinite(received):
+        return None
+      receipt = int(received * 1e9)
+      if type(stamp) is not int or not 0 < stamp <= receipt <= pair[0] or pair[0] - stamp > 150_000_000:
+        return None
+    model, radar, car = sm['modelV2'], sm['radarState'], sm['carState']
+    eof = model.timestampEof
+    eof_mono = eof - (pair[1] - pair[0])
+    if (not car.canValid or car.canTimeout or any(radar.radarErrors.to_dict().values()) or
+        radar.mdMonoTime <= 0 or radar.mdMonoTime > sm.logMonoTime['radarState'] or
+        type(eof) is not int or not 0 < eof <= pair[1] or pair[1] - eof > 150_000_000 or
+        not 0 < eof_mono <= sm.logMonoTime['modelV2'] or len(model.velocity.x) < 1 or
+        not math.isfinite(float(model.velocity.x[0]))):
+      return None
+    if history is None:
+      return model if radar.mdMonoTime == sm.logMonoTime['modelV2'] else None
+    history.observe(model, sm.logMonoTime['modelV2'], int(sm.recv_time['modelV2'] * 1e9))
+    selected = history.frames.get(int(radar.mdMonoTime))
+    if selected is None:
+      return None
+    selected_eof_mono = selected.timestampEof - (pair[1] - pair[0])
+    if (not 0 < selected.stamp <= selected.receipt <= pair[0] or pair[0] - selected.stamp > 150_000_000 or
+        not 0 < selected.timestampEof <= pair[1] or pair[1] - selected.timestampEof > 150_000_000 or
+        not 0 < selected_eof_mono <= selected.stamp):
+      return None
+    return selected
+  except (AttributeError, IndexError, KeyError, TypeError, ValueError, OverflowError, OSError):
+    return None
+
 
 def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
   if personality==log.LongitudinalPersonality.relaxed:
@@ -318,8 +501,11 @@ class LongitudinalMpc:
     lead_xv = np.column_stack((x_lead_traj, v_lead_traj))
     return lead_xv
 
-  def process_lead(self, lead):
+  def process_lead(self, lead, model_lead=None, *, model_v_ego=None):
     v_ego = self.x0[1]
+    model_path = build_model_lead_trajectory(model_lead, lead, v_ego, model_v_ego)
+    if model_path is not None:
+      return model_path
     if lead is not None and lead.present:
       x_lead = lead.dRel
       v_lead = lead.vLead
@@ -342,13 +528,16 @@ class LongitudinalMpc:
     return lead_xv
 
   def update(self, radarstate, personality=log.LongitudinalPersonality.standard,
-             *, follow_seconds: float | None = None, acceleration_max: float | None = None, stop_line_m: float | None = None):
+             *, follow_seconds: float | None = None, acceleration_max: float | None = None, stop_line_m: float | None = None, modelV2=None):
     t_follow = get_T_FOLLOW(personality)
     if follow_seconds is not None and math.isfinite(follow_seconds) and 0.5 <= follow_seconds <= 3.0:
       t_follow = follow_seconds
 
-    lead_xv_0 = self.process_lead(radarstate.leadOne)
-    lead_xv_1 = self.process_lead(radarstate.leadTwo)
+    model_leads = getattr(modelV2, "leadsV3", ()) if modelV2 is not None else ()
+    velocity = getattr(getattr(modelV2, 'velocity', None), 'x', ()) if modelV2 is not None else ()
+    model_v_ego = velocity[0] if len(velocity) else None
+    lead_xv_0 = self.process_lead(radarstate.leadOne, model_leads[0] if len(model_leads) > 0 else None, model_v_ego=model_v_ego)
+    lead_xv_1 = self.process_lead(radarstate.leadTwo, model_leads[1] if len(model_leads) > 1 else None, model_v_ego=model_v_ego)
 
     # To estimate a safe distance from a moving lead, we calculate how much stopping
     # distance that lead needs as a minimum. We can add that to the current distance

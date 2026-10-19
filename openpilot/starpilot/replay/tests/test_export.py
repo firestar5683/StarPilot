@@ -1,5 +1,6 @@
 """Exports keep recorded coverage, remain private, and become ready only after cleanup."""
 from types import SimpleNamespace
+from typing import NoReturn
 import fcntl
 import json
 import os
@@ -95,16 +96,21 @@ def test_partial_video_and_storage_shortage_cannot_be_finalized(tmp_path, packet
   assert not (tmp_path / 'export.mp4').exists()
 
 
+def _reject_engine_resume(_command) -> NoReturn:
+  __tracebackhide__ = True
+  raise pytest.fail.Exception('an ended engine must not resume')
+
+
 def test_export_finishes_at_actual_engine_eof(tmp_path, packet):
   from openpilot.tools.replay.tests.test_machine import BINARY, Machine
   if not BINARY.is_file():
-    pytest.skip('build the replay test binary first')
+    raise pytest.skip.Exception('build the replay test binary first')
   with Machine([(0, [.1, .2, .3], True)]) as engine:
     initial = engine.wait(lambda status: status['state'] == 'paused')
     engine.command_status('pause', 'a4', paused=False)
     ended = engine.wait(lambda status: status['state'] == 'ended')
   assert ended['position'] < ended['end']
-  stopped = SimpleNamespace(command=lambda command: pytest.fail('an ended engine must not resume'))
+  stopped = SimpleNamespace(command=_reject_engine_resume)
   writer = ExportVideo(tmp_path, 32, 18, [(initial['start'], initial['end'])], 1024 ** 2)
   try:
     for position in (.1, .2, .3):
@@ -119,7 +125,7 @@ def test_export_finishes_at_actual_engine_eof(tmp_path, packet):
 
 def test_early_engine_eof_cannot_hide_missing_export_coverage(tmp_path, packet):
   writer = ExportVideo(tmp_path, 32, 18, [(0, 2)], 1024 ** 2)
-  engine = SimpleNamespace(command=lambda command: pytest.fail('an ended engine must not resume'))
+  engine = SimpleNamespace(command=_reject_engine_resume)
   try:
     writer.frame(packet, position=0, keyframe=True)
     with pytest.raises(ValueError, match='end of the selected coverage'):

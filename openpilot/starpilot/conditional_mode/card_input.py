@@ -60,7 +60,7 @@ def conditional_manual_candidate(CS: car.CarState, tracker: ButtonTracker, param
     if not media.valid:
       tracker.observe_media(media)
     elif media.samples:
-      buttons = media_buttons if media_map_captured else read_button_map(params, include_ioniq_media=True)
+      buttons = media_buttons if media_map_captured else read_button_map(params, include_ioniq_media=True, cp=CP)
       if buttons is None:
         tracker.invalidate_media()
         return None
@@ -73,9 +73,9 @@ def conditional_manual_candidate(CS: car.CarState, tracker: ButtonTracker, param
     return None
   if gesture.button in (Button.LKAS, Button.DISTANCE):
     # Read the saved mapping on each physical gesture so live remaps apply without 0x448.
-    buttons = read_button_map(params, include_ioniq_media=ioniq_media)
+    buttons = read_button_map(params, include_ioniq_media=ioniq_media, cp=CP)
   elif buttons is None:
-    buttons = media_buttons if media_map_captured and ioniq_media else read_button_map(params, include_ioniq_media=ioniq_media)
+    buttons = media_buttons if media_map_captured and ioniq_media else read_button_map(params, include_ioniq_media=ioniq_media, cp=CP)
   if buttons is None or not buttons.assigned(gesture):
     return None
   return gesture, drive_id, fingerprint, choice, now_ns
@@ -130,7 +130,7 @@ def conditional_traffic_candidate(CS: car.CarState, tracker: ButtonTracker, para
     if tracker.media_context is not None and tracker.media_context[:2] != (drive_id, fingerprint):
       tracker.invalidate_media()
     return None
-  buttons = media_buttons if media_map_captured else read_button_map(params, include_ioniq_media=not gm_distance)
+  buttons = media_buttons if media_map_captured else read_button_map(params, include_ioniq_media=not gm_distance, cp=CP)
   if buttons is None:
     tracker.invalidate_media()
     return None

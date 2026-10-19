@@ -25,6 +25,7 @@ def test_original_positional_preferences_do_not_enable_door_features():
   )
   assert tuple(getattr(preferences, name) for name in names) == values
   assert not preferences.toyota_lock_doors and not preferences.toyota_unlock_doors
+  assert not preferences.gm_cancel_remap
   assert VehicleStartupPreferences(True, True).turn_assist
 
 

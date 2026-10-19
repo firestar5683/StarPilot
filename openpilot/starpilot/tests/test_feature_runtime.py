@@ -1,15 +1,30 @@
-"""Saved Ioniq runtime startup does not replace live driving authority."""
+"""Saved generic runtime startup does not replace live driving authority."""
 
 from pathlib import Path
 import json
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
 
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.conditional_mode.preferences import SavedPreferences, encode_preferences
 from openpilot.starpilot.feature_runtime import enabled, requested
 from openpilot.starpilot.longitudinal.profile_document import default_personality_profiles, profile_document
 from openpilot.starpilot.speed_limits.vision_gate import diagnostic_choice_enabled
+
+
+def long_cp():
+  from opendbc.car.toyota.interface import CarInterface
+  from opendbc.car.toyota.values import CAR
+  cp = CarInterface.get_non_essential_params(CAR.TOYOTA_RAV4_TSS2)
+  assert cp.openpilotLongitudinalControl and cp.pcmCruise
+  return cp
+
+
+def stock_cp():
+  from opendbc.car.honda.interface import CarInterface
+  from opendbc.car.honda.values import CAR
+  cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC_BOSCH)
+  assert not cp.openpilotLongitudinalControl
+  return cp
 
 
 class Files:
@@ -24,83 +39,79 @@ class Files:
     return b'0' if key == 'CustomPersonalities' else {}
 
 
-def test_readable_absence_starts_factory_cem_only_on_exact_eligible_cp():
+def test_readable_absence_starts_factory_cem_only_on_native_long_cp():
   with TemporaryDirectory() as temporary:
     params = Files(Path(temporary))
-    with patch('openpilot.starpilot.feature_runtime.ioniq6_long_eligible', side_effect=lambda cp: cp == 'tagged'):
-      assert requested(params, 'conditional')
-      assert enabled(params, 'tagged', 'conditional', {})
-      assert not enabled(params, 'other', 'conditional', {})
-      for name in ('curve', 'slc', 'vision', 'profile'):
-        assert not enabled(params, object(), name, {})
-      (params.root / 'SafeMode').write_bytes(b'1')
-      assert not requested(params, 'conditional')
-      (params.root / 'SafeMode').write_bytes(b'0')
-      (params.root / 'ConditionalModeConfig').write_bytes(b'{broken')
-      (params.root / 'CurveSpeedController').write_bytes(b'true')
-      assert not requested(params, 'conditional')
-      assert not requested(params, 'curve')
-      (params.root / 'ConditionalModeConfig').unlink()
-      (params.root / 'ConditionalModeConfig').mkdir()
-      assert not requested(params, 'conditional')  # Read error is never factory absence.
+    assert requested(params, 'conditional')
+    assert enabled(params, long_cp(), 'conditional', {})
+    assert not enabled(params, stock_cp(), 'conditional', {})
+    for name in ('curve', 'slc', 'vision', 'profile'):
+      assert not enabled(params, object(), name, {})
+    (params.root / 'SafeMode').write_bytes(b'1')
+    assert not requested(params, 'conditional')
+    (params.root / 'SafeMode').write_bytes(b'0')
+    (params.root / 'ConditionalModeConfig').write_bytes(b'{broken')
+    (params.root / 'CurveSpeedController').write_bytes(b'true')
+    assert not requested(params, 'conditional')
+    assert not requested(params, 'curve')
+    (params.root / 'ConditionalModeConfig').unlink()
+    (params.root / 'ConditionalModeConfig').mkdir()
+    assert not requested(params, 'conditional')  # Read error is never factory absence.
 
 
-def test_exact_tagged_cp_and_saved_document_start_owner_without_granting_other_cars():
+def test_native_long_cp_and_saved_document_start_owner_without_granting_stock_control():
   with TemporaryDirectory() as temporary:
     params = Files(Path(temporary))
     (params.root / 'ConditionalModeConfig').write_bytes(encode_preferences(SavedPreferences(mode=ModeChoice.STOCK)))
     (params.root / 'CurveSpeedController').write_bytes(b'1')
-    with patch('openpilot.starpilot.feature_runtime.ioniq6_long_eligible', side_effect=lambda cp: cp == 'tagged'):
-      for name in ('conditional', 'curve'):
-        assert enabled(params, 'tagged', name, {})
-        assert not enabled(params, 'stock', name, {})
-      (params.root / 'SafeMode').write_bytes(b'1')
-      assert not enabled(params, 'tagged', 'conditional', {})
+    for name in ('conditional', 'curve'):
+      assert enabled(params, long_cp(), name, {})
+      assert not enabled(params, stock_cp(), name, {})
+    (params.root / 'SafeMode').write_bytes(b'1')
+    assert not enabled(params, long_cp(), 'conditional', {})
 
 
 def test_global_braking_choice_starts_only_qualified_profile_owner_without_custom_master():
   with TemporaryDirectory() as temporary:
     params = Files(Path(temporary))
     source = params.root / 'LongitudinalPersonalityProfiles'
-    with patch('openpilot.starpilot.feature_runtime.ioniq6_long_eligible', side_effect=lambda cp: cp == 'tagged'):
-      assert requested(params, 'profile')
-      assert enabled(params, 'tagged', 'profile', {})
-      assert not enabled(params, 'stock', 'profile', {})
-      for response in ('eco', 'sport'):
-        source.write_text(json.dumps(profile_document(default_personality_profiles(False), enabled=False,
-                                                      global_braking_response=response)))
-        assert requested(params, 'profile')
-        assert enabled(params, 'tagged', 'profile', {})
-        assert not enabled(params, 'stock', 'profile', {})
+    assert requested(params, 'profile')
+    assert enabled(params, long_cp(), 'profile', {})
+    assert not enabled(params, stock_cp(), 'profile', {})
+    for response in ('eco', 'sport'):
       source.write_text(json.dumps(profile_document(default_personality_profiles(False), enabled=False,
-                                                    selected_deceleration_profile='dom_default')))
-      assert not requested(params, 'profile')
-      bad = profile_document(default_personality_profiles(False), enabled=False)
-      bad['globalBrakingResponse'] = 'unsupported'
-      source.write_text(json.dumps(bad))
-      assert not requested(params, 'profile')
-      source.write_text('{invalid')
-      assert not requested(params, 'profile')
-      (params.root / 'SafeMode').write_bytes(b'corrupt')
-      assert not enabled(params, 'tagged', 'conditional', {})
+                                                    global_braking_response=response)))
+      assert requested(params, 'profile')
+      assert enabled(params, long_cp(), 'profile', {})
+      assert not enabled(params, stock_cp(), 'profile', {})
+    source.write_text(json.dumps(profile_document(default_personality_profiles(False), enabled=False,
+                                                  selected_deceleration_profile='dom_default')))
+    assert not requested(params, 'profile')
+    bad = profile_document(default_personality_profiles(False), enabled=False)
+    bad['globalBrakingResponse'] = 'unsupported'
+    source.write_text(json.dumps(bad))
+    assert not requested(params, 'profile')
+    source.write_text('{invalid')
+    assert not requested(params, 'profile')
+    (params.root / 'SafeMode').write_bytes(b'corrupt')
+    assert not enabled(params, long_cp(), 'conditional', {})
 
 
-def test_vision_control_needs_saved_master_and_vision_source_on_exact_long_cp():
+def test_vision_control_needs_saved_master_and_vision_source_on_native_long_cp():
   with TemporaryDirectory() as temporary:
     params = Files(Path(temporary))
     (params.root / 'SpeedLimitController').write_bytes(b'1')
     (params.root / 'SLCPriority1').write_bytes(b'Dashboard')
     (params.root / 'SLCPriority2').write_bytes(b'Vision')
-    with patch('openpilot.starpilot.feature_runtime.ioniq6_long_eligible', side_effect=lambda cp: cp == 'tagged'):
-      from openpilot.starpilot.feature_runtime import vision_control_enabled
-      assert requested(params, 'vision')
-      assert enabled(params, 'tagged', 'vision', {})
-      assert not enabled(params, 'stock', 'vision', {})
-      assert vision_control_enabled(params, 'tagged')
-      assert not vision_control_enabled(params, 'stock')
-      (params.root / 'SpeedLimitController').write_bytes(b'0')
-      assert enabled(params, 'tagged', 'vision', {})  # Default-on display still needs its selected Vision producer.
-      assert not vision_control_enabled(params, 'tagged')
+    from openpilot.starpilot.feature_runtime import vision_control_enabled
+    assert requested(params, 'vision')
+    assert enabled(params, long_cp(), 'vision', {})
+    assert enabled(params, stock_cp(), 'vision', {})  # Stock owner may display selected Vision.
+    assert vision_control_enabled(params, long_cp())
+    assert not vision_control_enabled(params, stock_cp())
+    (params.root / 'SpeedLimitController').write_bytes(b'0')
+    assert enabled(params, long_cp(), 'vision', {})  # Default-on display still needs its selected Vision producer.
+    assert not vision_control_enabled(params, long_cp())
 
 
 def test_explicit_replay_flags_remain_available_for_existing_replay_fixtures():
@@ -113,13 +124,11 @@ def test_explicit_replay_flags_remain_available_for_existing_replay_fixtures():
     assert not enabled(params, None, 'vision', {'SLC_VISION_DEVELOPMENT': '1'})
 
 
-def test_saved_vision_choice_is_offered_only_for_supported_vehicle_or_explicit_replay():
-  with patch('openpilot.starpilot.speed_limits.vision_gate.ioniq6_settings_capable',
-             side_effect=lambda cp: cp == 'reviewed_ioniq'):
-    assert diagnostic_choice_enabled({}, 'reviewed_ioniq')
-    assert not diagnostic_choice_enabled({}, 'stock_or_other')
-    assert not diagnostic_choice_enabled({})
-    assert diagnostic_choice_enabled({'SLC_REPLAY_RUNTIME': '1', 'SLC_VISION_DEVELOPMENT': '1'})
+def test_saved_vision_choice_is_offered_for_native_display_vehicle_or_explicit_replay():
+  assert diagnostic_choice_enabled({}, long_cp())
+  assert diagnostic_choice_enabled({}, stock_cp())  # Source visibility grants no speed authority.
+  assert not diagnostic_choice_enabled({})
+  assert diagnostic_choice_enabled({'SLC_REPLAY_RUNTIME': '1', 'SLC_VISION_DEVELOPMENT': '1'})
 
 
 def test_gm_saved_profiles_require_existing_longitudinal_owner():
@@ -169,13 +178,13 @@ def test_gm_saved_profiles_require_existing_longitudinal_owner():
     assert not enabled(params, ascm_params(CAR.CHEVROLET_VOLT, radar=True), 'profile', {})
 
 
-def test_honda_slc_needs_openpilot_long_with_card_owned_set_speed():
+def test_honda_slc_controls_only_with_openpilot_long():
   from types import SimpleNamespace
-  from openpilot.starpilot.feature_runtime import slc_transport_capable, vision_control_enabled
+  from openpilot.starpilot.feature_runtime import slc_runtime_settings, slc_transport_capable, vision_control_enabled
 
   def honda(**overrides):
-    return SimpleNamespace(**{'brand': 'honda', 'openpilotLongitudinalControl': True, 'pcmCruise': False,
-                              'passive': False, 'dashcamOnly': False, 'notCar': False, **overrides})
+    return SimpleNamespace(**{'brand': 'honda', 'carFingerprint': 'HONDA_CIVIC_2022', 'openpilotLongitudinalControl': True,
+                              'pcmCruise': False, 'passive': False, 'dashcamOnly': False, 'notCar': False, **overrides})
 
   with TemporaryDirectory() as temporary:
     params = Files(Path(temporary))
@@ -184,10 +193,11 @@ def test_honda_slc_needs_openpilot_long_with_card_owned_set_speed():
     (params.root / 'SLCPriority2').write_bytes(b'Map Data')
     assert slc_transport_capable(honda(), {})
     assert enabled(params, honda(), 'slc', {})
-    for name in ('vision', 'curve', 'conditional', 'profile'):
-      assert not enabled(params, honda(), name, {})
+    assert slc_runtime_settings(params, honda(), {}).enabled
+    assert not enabled(params, honda(), 'vision', {})
     assert not vision_control_enabled(params, honda())
-    for blocked in (honda(openpilotLongitudinalControl=False), honda(pcmCruise=True), honda(dashcamOnly=True),
-                    honda(brand='toyota')):
-      assert not slc_transport_capable(blocked, {})
-      assert not enabled(params, blocked, 'slc', {})
+    stock = honda(openpilotLongitudinalControl=False, pcmCruise=True)
+    assert enabled(params, stock, 'slc', {})
+    assert not slc_runtime_settings(params, stock, {}).enabled
+    assert not slc_transport_capable(honda(dashcamOnly=True), {})
+    assert not enabled(params, honda(dashcamOnly=True), 'slc', {})

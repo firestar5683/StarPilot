@@ -247,15 +247,7 @@ createApp({
         <SettingsPage @nested="ensureBackEntry" ref="activeSettings" v-else-if="drivingSettingsPage" :key="drivingSettingsPage" :mode="state.monitorMode" :unauthorized="sessionExpired" :initial-page="drivingSettingsPage" :title="'Driving settings · ' + drivingSettingsPage.replaceAll('_', ' ')" :return-to="returnToDriving" />
         <SettingsPage @nested="ensureBackEntry" ref="activeSettings" v-else-if="route.path === '/settings'" :key="state.searchPage || 'hub'" :mode="state.monitorMode" :unauthorized="sessionExpired"
           :initial-page="state.searchPage || 'hub'" :return-to="state.searchPage ? returnFromSearch : null" />
-        <div v-else-if="route.path === '/tuning'" class="gx-view">
-          <h2>Plots &amp; Analysis</h2>
-          <p class="gx-note">Live control observations and recorded-drive analysis.</p>
-          <div class="gx-grid">
-            <MenuTile icon="bi-graph-up" title="Live plots" description="Compare steering and acceleration targets with measured response" @select="go('/tuning/plots')" />
-            <MenuTile icon="bi-file-earmark-bar-graph" title="Recorded-drive analysis" description="Review lateral tracking from saved drives" @select="go('/tuning/flm')" />
-          </div>
-        </div>
-        <PlotsPage v-else-if="route.path === '/tuning/plots'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
+        <PlotsPage v-else-if="['/tuning', '/tuning/plots'].includes(route.path)" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <FlmPage v-else-if="route.path === '/tuning/flm'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <GxState v-else :title="pageName">This capability is unavailable in this build. No operation was attempted.</GxState>
       </div></Transition></div></main>

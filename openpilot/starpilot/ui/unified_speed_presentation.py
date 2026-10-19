@@ -42,9 +42,16 @@ def positive(value):
   return value is not None and math.isfinite(value) and value > 0
 
 
+def retaining_limit(observation):
+  """A fresh publisher can qualify retained control while its source is unavailable."""
+  return (str(observation.kind) != 'valid' and observation.action_enabled and
+          bool(getattr(observation, 'session_id', None)) and positive(observation.accepted_speed_limit_mps) and
+          positive(getattr(observation, 'effective_cap_mps', None)) and positive(observation.effective_cluster_target_mps))
+
+
 def displayed_limit_mps(observation):
   """A proposal never replaces the accepted sign."""
-  if str(observation.kind) != 'valid':
+  if str(observation.kind) != 'valid' and not retaining_limit(observation):
     return None
   for value in (observation.accepted_speed_limit_mps, observation.speed_limit_mps):
     if positive(value):
@@ -54,7 +61,7 @@ def displayed_limit_mps(observation):
 
 def displayed_adjusted_limit_mps(observation):
   """The informational SLC number, independent of current control authority."""
-  if str(observation.kind) != 'valid':
+  if str(observation.kind) != 'valid' and not retaining_limit(observation):
     return None
   candidates = (getattr(observation, 'accepted_adjusted_limit_mps', None), observation.effective_cluster_target_mps)
   if not positive(observation.accepted_speed_limit_mps) and not positive(observation.pending_speed_limit_mps):
@@ -68,14 +75,15 @@ def resolve_unified_speed(state) -> UnifiedSpeedPresentation:
   def speed(value):
     return str(round(value * factor)) if positive(value) else '–'
   valid = str(obs.kind) == 'valid'
+  retained = retaining_limit(obs)
   pending = valid and positive(obs.pending_speed_limit_mps)
-  accepted = valid and positive(obs.accepted_speed_limit_mps)
+  accepted = (valid or retained) and positive(obs.accepted_speed_limit_mps)
   posted = displayed_limit_mps(obs)
-  source = (obs.accepted_source if accepted else obs.source) if valid else 'none'
+  source = (obs.accepted_source if accepted else obs.source) if valid or retained else 'none'
   if source in ('', 'none'):
     source = 'unknown' if positive(posted) else 'none'
   show_max = state.customization.get('showMaxSpeed', True)
-  has_slc = valid or str(obs.kind) == 'stale'
+  has_slc = valid or retained or str(obs.kind) == 'stale'
   mode = 'split' if show_max and has_slc else 'limit_only' if has_slc else 'max_only' if show_max else 'hidden'
   target = displayed_adjusted_limit_mps(obs)
   offset = None
@@ -85,7 +93,7 @@ def resolve_unified_speed(state) -> UnifiedSpeedPresentation:
       offset = f'{adjustment:+d}'
   active = 'none'
   status = 'Unavailable'
-  if valid:
+  if valid or retained:
     status = 'Override saved' if getattr(obs, 'retained_override', False) else 'Cruise off'
     if getattr(obs, 'status', '') == 'display_hold':
       status = 'Unavailable'
@@ -110,6 +118,8 @@ def resolve_unified_speed(state) -> UnifiedSpeedPresentation:
         else:
           active = 'slc' if target < max_mps else 'max'
       status = {'slc': 'Using speed limit', 'max': 'Using set speed', 'shared': 'Matches set speed'}[active]
+      if retained and active == 'slc':
+        status = 'Using previous limit'
     elif state.cruise_active:
       status = 'Unavailable'
   max_text = str(round(state.cruise_kph * (1 if state.metric else .621371))) if positive(state.cruise_kph) else '–'

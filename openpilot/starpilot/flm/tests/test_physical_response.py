@@ -10,7 +10,7 @@ def rows():
                            1_110_000_000 + (block * 40 + index) * 50_000_000,
                            (-1 if block % 2 else 1) * (.1 + index * .005),
                            2 * (-1 if block % 2 else 1) * (.1 + index * .005) + .01,
-                           'stable_vm_roll_lag', 'left' if block % 2 else 'right', True, False, False)
+                           'stable_vm_roll_lag', 'right' if block % 2 else 'left', True, False, False)
                for block in range(8) for index in range(40))
 
 

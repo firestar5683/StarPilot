@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from typing import TypedDict
 
 from openpilot.common.params import Params
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
@@ -13,6 +14,12 @@ from openpilot.starpilot.galaxy.server import make_server
 from openpilot.starpilot.ui.layout_preview_transport import PreviewService
 from openpilot.starpilot.ui.onroad_customization import PARAM_KEY, default_document
 from openpilot.starpilot.ui.tests.test_layout_preview_transport import png
+
+
+class PreviewPayload(TypedDict):
+  document: dict
+  profile: str
+  scene: str
 
 
 class TestLayoutPreviewHttp(unittest.TestCase):
@@ -34,7 +41,7 @@ class TestLayoutPreviewHttp(unittest.TestCase):
     self.worker = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
     self.worker.start()
     self.addCleanup(self.stop)
-    self.payload = {'document': default_document(), 'profile': 'large', 'scene': 'aol'}
+    self.payload: PreviewPayload = {'document': default_document(), 'profile': 'large', 'scene': 'aol'}
 
   def stop(self):
     self.server.shutdown()

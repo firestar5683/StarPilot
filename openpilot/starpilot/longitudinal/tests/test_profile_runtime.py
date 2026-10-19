@@ -488,19 +488,22 @@ class ProfileRuntimeTests(unittest.TestCase):
                              tuple(message.longitudinalPlan.speeds)))
 
     self.params.put('CarParams', self.cp.to_bytes(), block=True)
-    self.params.put_bool('CustomPersonalities', True, block=True)
     self.params.put('StandardFollow', 2.5, block=True)
     self.params.put('StandardFollowHigh', 2.5, block=True)
     results = []
     for enabled in (False, True):
+      self.params.put_bool('CustomPersonalities', enabled, block=True)
+      # Explicit native response removes the separate default Comfort request;
+      # this comparison isolates the saved following/jerk master switch.
+      self.params.put('LongitudinalPersonalityProfiles', current_profile_document(
+        default_personality_profiles(False), enabled=enabled,
+        selected_deceleration_profile='dom_default'), block=True)
       data, _ = messages(lead=True)
       data['carState'].canValid = True
       data['carControl'].longActive = True
       sm = LoopSM(data)
       publisher = Publisher()
-      environment = {}
-      if enabled:
-        environment['LONG_PLANNER_REPLAY_RUNTIME'] = '1'
+      environment = {}  # Normal admission follows the actual saved request.
       with (mock.patch.object(plannerd, 'Params', return_value=self.params),
             mock.patch.object(plannerd, 'config_realtime_process'),
             mock.patch.object(plannerd, 'LeadApproachPreferences', return_value=None),

@@ -1,6 +1,7 @@
 """SLC native offset actions and both unit paths against real temporary Params."""
 
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace as NS
 from typing import Any, cast
 import tempfile
@@ -144,16 +145,52 @@ class SlcOffsetFeatureTests(unittest.TestCase):
     self.assertEqual(od.decode(self.raw(DOCUMENT_KEY)), adjusted)
     self.assertEqual((self.raw("Offset1"), self.raw("Offset7")), old)
 
-  def test_rounded_range_labels_do_not_rewrite_si_bounds(self):
+  def test_range_labels_follow_saved_si_bounds_without_rewriting_them(self):
     document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (0.0,) * 7)
     self.params.put(DOCUMENT_KEY, od.to_value(document), block=True)
     original = self.raw(DOCUMENT_KEY)
     rows = [self.row(f"Offset{index}").label for index in range(1, 8)]
-    self.assertEqual(rows, [f"{low}–{high} mph offset" for low, high in
-                           ((0, 25), (25, 35), (35, 45), (45, 55), (55, 65), (65, 75), (75, 100))])
+    self.assertEqual(rows, [f"{low}–<{high} mph offset" for low, high in
+                           (("0", "25.05"), ("25.05", "34"), ("34", "43.84"), ("43.84", "53.91"),
+                            ("53.91", "63.98"), ("63.98", "74.04"), ("74.04", "98.87"))])
+    state = self.owner.snapshot("slc", parked=True, system_long=True, lateral_context=True, metric=False)
+    self.assertTrue(any(row.label == "98.87 mph and above" and row.value == "Zero offset" for row in state.rows))
     self.assertEqual(self.raw(DOCUMENT_KEY), original)
     self.assertTrue(self.units.change_units(True, None))
     self.assertEqual(od.decode(self.raw(DOCUMENT_KEY)), document)
+    self.assertEqual(self.row("Offset4").label, "70.56–<86.76 km/h offset")
+
+  def test_editor_rejects_offsets_that_cannot_produce_a_positive_target_in_the_band(self):
+    for metric, offset in ((False, -30), (True, -45)):
+      with self.subTest(metric=metric):
+        self.params.put_bool("IsMetric", metric, block=True)
+        document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (0.0,) * 7)
+        self.params.put(DOCUMENT_KEY, od.to_value(document), block=True)
+        original = self.raw(DOCUMENT_KEY)
+        row = self.row("Offset1")
+        request = row_change(row)
+        assert request is not None
+        self.assertGreater(row.minimum, offset)
+        self.assertFalse(self.owner.apply(replace(request, value=str(offset), direction=0)))
+        self.assertEqual(self.raw(DOCUMENT_KEY), original)
+        # Useful reductions remain supported, including in the first band.
+        self.assertTrue(self.owner.apply(replace(request, value="-1", direction=0)))
+
+  def test_stepper_can_repair_an_unsafe_saved_offset_and_clamps_at_the_band_minimum(self):
+    document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (-30 * od.MPH_TO_MPS, 0, 0, 0, 0, 0, 0))
+    self.params.put(DOCUMENT_KEY, od.to_value(document), block=True)
+    row = self.row('Offset1')
+    request = row_change(row)
+    assert request is not None
+    self.assertTrue(self.owner.apply(request))
+    self.assertEqual(od.decode(self.raw(DOCUMENT_KEY)).offsets_mps[0], row.minimum * od.MPH_TO_MPS)
+    # Unit conversion can leave a fractional value less than one step above the minimum.
+    document = od.OffsetDocument(od.IMPERIAL_BOUNDS, ((row.minimum + .5) * od.MPH_TO_MPS, 0, 0, 0, 0, 0, 0))
+    self.params.put(DOCUMENT_KEY, od.to_value(document), block=True)
+    request = row_change(self.row('Offset1'), -1)
+    assert request is not None
+    self.assertTrue(self.owner.apply(request))
+    self.assertEqual(od.decode(self.raw(DOCUMENT_KEY)).offsets_mps[0], row.minimum * od.MPH_TO_MPS)
 
   def test_onroad_adopted_offsets_edit_without_repair_authority(self):
     self.params.put_bool("IsMetric", False, block=True)

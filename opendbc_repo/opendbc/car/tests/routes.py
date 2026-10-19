@@ -26,6 +26,9 @@ unrecorded_route_gaps = {
   GM.CHEVROLET_MALIBU_HYBRID_CC: "gm/tests/test_ordinary_cc.py",
   TOYOTA.TOYOTA_PRIUS_RETROFIT: "toyota/tests/test_retrofit.py",
   TESLA.TESLA_MODEL_S_HW1: "tesla/tests/test_hw1.py",
+  VOLVO.VOLVO_XC40_RECHARGE: "volvo/tests/test_cma.py",
+  VOLVO.VOLVO_S60_RECHARGE: "volvo/tests/test_cma.py",
+  VOLVO.POLESTAR_2: "volvo/tests/test_cma.py",
 }
 
 # FIXME: add routes for these cars

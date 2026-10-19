@@ -97,15 +97,15 @@ def _qualified(ctx: AuthorityContext, group: str) -> bool:
       from opendbc.car.toyota.interface import toyota_auto_hold_supported
       return toyota_auto_hold_supported(cp)
     if group == "switchback_wheel":
-      from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
-      return bool(ioniq6_media_eligible(cp) and not cp.notCar and not cp.passive and not cp.dashcamOnly)
+      from openpilot.starpilot.feature_capabilities import lateral_supported
+      return lateral_supported(cp)
     if group in ("conditional", "conditional_wheel", "long_output"):
       return bool((cp.openpilotLongitudinalControl or ctx.configuration_longitudinal) and not cp.notCar and not cp.dashcamOnly and not cp.passive)
     if group == "slc":
       return bool((cp.openpilotLongitudinalControl or ctx.configuration_longitudinal) and
                   not cp.notCar and not cp.dashcamOnly and not cp.passive)
     if group == "long":
-      return bool(((cp.openpilotLongitudinalControl and not cp.pcmCruise) or ctx.configuration_longitudinal) and
+      return bool((cp.openpilotLongitudinalControl or ctx.configuration_longitudinal) and
                   not cp.notCar and not cp.dashcamOnly and not cp.passive)
     if group in ("aol", "aol_wheel") and ctx.configuration_vehicle and ctx.parked:
       from openpilot.starpilot.aol.vehicle import configuration_settings_policy

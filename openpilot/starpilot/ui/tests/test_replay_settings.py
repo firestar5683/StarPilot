@@ -12,6 +12,7 @@ import pytest
 
 from openpilot.starpilot.ui.replay_settings import ReplayCompactPage, ReplayController, ReplayPage, duration, route_date
 from openpilot.starpilot.ui.presentation import Profile
+from openpilot.starpilot.ui.feature_settings_state import FEATURE_ROW_HEIGHT, feature_row_top
 
 
 ROUTE = {'routeId': '00000001--0123456789', 'displayName': 'Recorded route', 'segmentCount': 2,
@@ -59,8 +60,11 @@ def test_route_rows_prioritize_dates_preserve_names_and_keep_route_identity(utc,
   assert row.reason == ''
   if profile == Profile.COMPACT:
     assert row.value.count('\n') == 1
-  else:
     assert '2 segments' in row.value
+  else:
+    assert row.segment_count == 2
+    assert row.page == 'detail' and not row.actions
+    assert ROUTE['routeId'] in row.value
   assert page._rows()[0] is row
 
 
@@ -85,11 +89,11 @@ def test_compact_file_date_is_explicit_and_unavailable_reason_is_retained(utc):
   owner.routes = [{**ROUTE, 'displayName': ROUTE['routeId'], 'fileTime': STAMP,
                    'availability': 'unavailable', 'reason': 'No road camera footage'}]
   row = page._rows()[0]
-  assert row.value == '2:05 PM\nFile date'
+  assert row.value == '2:05 PM\nFile date - 2 segments'
   assert row.reason == 'No road camera footage'
   owner.routes = [{**ROUTE, 'displayName': 'School run', 'fileTime': STAMP, 'availability': 'limited'}]
   row = page._rows()[0]
-  assert row.value == 'Oct 14, 2026\n2:05 PM - File date'
+  assert row.value == 'File date: Oct 14, 2026\n2:05 PM - 2 segments'
   assert row.reason == ''
 
 
@@ -389,17 +393,22 @@ def page_for_input():
   return page, controller
 
 
-def test_timeline_commits_only_on_release_and_epoch_change_cancels():
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+def test_timeline_commits_only_on_release_and_epoch_change_cancels(profile):
   page, controller = page_for_input()
-  page._handle_mouse_press(NS(x=100, y=940))
-  page._handle_mouse_event(mouse_event=NS(left_down=True, left_released=False, pos=NS(x=1570, y=940), t=1))
+  page.profile = profile
+  page.set_rect(rl.Rectangle(0, 0, *profile.size))
+  x, top, width, height = page._transport()[0]
+  y, destination = top + height / 2, x + width * .75
+  page._handle_mouse_press(NS(x=x, y=y))
+  page._handle_mouse_event(mouse_event=NS(left_down=True, left_released=False, pos=NS(x=destination, y=y), t=1))
   controller.seek.assert_not_called()
-  page._handle_mouse_release(NS(x=1570, y=940))
+  page._handle_mouse_release(NS(x=destination, y=y))
   controller.seek.assert_called_once_with(90)
   controller.seek.reset_mock()
-  page._handle_mouse_press(NS(x=100, y=940))
+  page._handle_mouse_press(NS(x=x, y=y))
   controller.status['epoch'] = 2
-  page._handle_mouse_release(NS(x=1000, y=940))
+  page._handle_mouse_release(NS(x=destination, y=y))
   controller.seek.assert_not_called()
 
 
@@ -493,6 +502,7 @@ def test_transport_autohides_only_during_playback_and_tap_does_not_activate_hidd
   page.set_rect(rl.Rectangle(0, 0, *profile.size))
   page.fonts.measure.return_value = NS(width=20, height=20)
   page._button = Mock()
+  monkeypatch.setattr(module, 'draw_rounded_fill', Mock())
   owner.available, owner.busy, owner.error = True, False, ''
   owner.frame = NS(session_id='b' * 32, epoch=1, frame_id=1, width=profile.size[0], height=profile.size[1], data=b'pixels')
   owner.status.update(state='playing', paused=False)
@@ -505,8 +515,12 @@ def test_transport_autohides_only_during_playback_and_tap_does_not_activate_hidd
   page.last_touch = 0
   page._render_viewer()
   assert page.controls  # Preparation time does not consume the initial visibility timeout.
-  panel = rl.draw_rectangle.call_args_list[0].args[-1]
-  assert panel.a == 190
+  if profile == Profile.LARGE:
+    assert rl.draw_rectangle.call_args_list[0].args[-1].a == 190
+  else:
+    backings = [call.args[0] for call in module.draw_rounded_fill.call_args_list]
+    assert any((rect.x, rect.y, rect.width, rect.height) == (8, 70, 520, 36) for rect in backings)
+    assert not any(rect.height > 36 for rect in backings)
   now = 14
   page._button.reset_mock()
   page._render_viewer()
@@ -594,6 +608,7 @@ def test_passive_frame_texture_upload_is_cached_and_uses_full_profile(monkeypatc
   page, owner = page_for_input()
   page.profile = profile
   page._button = Mock()
+  monkeypatch.setattr(module, 'draw_rounded_fill', Mock())
   page.fonts.measure.return_value = NS(width=20, height=20)
   owner.available, owner.busy, owner.error = True, False, ''
   owner.frame = NS(session_id='b' * 32, epoch=1, frame_id=1, width=size[0], height=size[1],
@@ -662,35 +677,76 @@ def test_paused_new_epoch_frame_can_be_reread_after_status_catches_up():
     owner.executor.shutdown(wait=True)
 
 
-def test_owned_dynamic_source_warning_is_retained_for_route_details(playback):
-  owner, backend, _, _ = playback
-  warning = 'Stop duration before this seek is unavailable.'
-  backend.status['sourceWarnings'] = [warning]
-  owner.next_status = 0
-  pump(owner, lambda: owner.source_warnings == [warning])
-  assert owner.stop()
-  pump(owner, lambda: owner.status['state'] == 'idle')
-  assert owner.source_warnings == [warning]
-  page = ReplayPage(NS(fonts=Mock(profile=Profile.LARGE), profile=Profile.LARGE), Mock(), owner)
-  page.page = 'detail'
-  assert warning in page._warnings()
-
-
 @pytest.fixture
-def route_detail():
+def route_detail(monkeypatch):
+  monkeypatch.setattr(rl, 'draw_line', Mock())
   page, owner = page_for_input()
   page.page = 'detail'
-  page.fonts.measure.return_value = NS(width=200, height=50)
+  page.fonts.measure.side_effect = lambda text, _role, size: NS(width=len(text) * 8 * size / 18, height=size)
   owner.detail = {**ROUTE, 'segmentCount': 3, 'warnings': [f'Warning {number}' for number in range(32)],
                   'segments': [{'number': number, 'files': {'rlog': number != 3, 'qlog': False, 'fcamera': True, 'qcamera': False}}
                                for number in (0, 2, 3)]}
   owner.selected_route = ROUTE['routeId']
   owner.routes, owner.catalog_loaded = [ROUTE], True
-  owner.source_warnings = ['Warning 0', 'Recorded clock unavailable']
   owner.available, owner.busy, owner.error = True, False, ''
   owner.status['state'] = 'idle'
   owner.start = Mock()
   return page, owner
+
+
+@pytest.mark.parametrize('x', [30, 800, 1900, 2130])
+def test_large_route_row_opens_from_anywhere_and_back_keeps_catalog_page(route_detail, x):
+  page, owner = route_detail
+  page.page, page.scroll = 'routes', 5
+  owner.routes = [{**ROUTE, 'routeId': f'{number:08d}--0123456789', 'startTime': STAMP - number} for number in range(8)]
+  owner.select = Mock(return_value=True)
+  pos = NS(x=x, y=feature_row_top(page._state()) + FEATURE_ROW_HEIGHT / 2)
+  page._handle_mouse_press(pos)
+  page._handle_mouse_release(pos)
+  owner.select.assert_called_once_with(owner.routes[5])
+  assert page.page == 'detail'
+  page._back()
+  assert page.page == 'routes' and page.scroll == 5
+
+
+def test_route_swipe_pages_without_opening_and_cancels_taps_before_page_settles(route_detail):
+  page, owner = route_detail
+  page.page = 'routes'
+  owner.routes = [{**ROUTE, 'routeId': f'{number:08d}--0123456789'} for number in range(8)]
+  owner.select = Mock()
+  page.view._last_state = page._state()
+  y = feature_row_top(page._state()) + FEATURE_ROW_HEIGHT / 2
+  page._handle_mouse_press(NS(x=900, y=y))
+  page._handle_mouse_release(NS(x=650, y=y))
+  assert page.scroll == 5
+  owner.select.assert_not_called()
+  page._handle_mouse_press(NS(x=900, y=y))
+  page._handle_mouse_release(NS(x=900, y=y))
+  owner.select.assert_not_called()
+
+
+def test_large_details_show_route_inventory_without_diagnostic_action(route_detail, monkeypatch):
+  from openpilot.starpilot.ui import replay_settings as module
+  page, _ = route_detail
+  monkeypatch.setattr(module, 'draw_settings_header', Mock())
+  page._button = Mock()
+  page._render_detail()
+  texts = [call.args[0] for call in page.fonts.draw.call_args_list]
+  assert ROUTE['routeId'] in texts
+  assert 'Segments' in texts and '3' in texts and '2 available to play' in texts
+  assert [button[0] for button in page._detail_buttons()] == ['< Back', 'Choose segment', 'Play from beginning']
+
+
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+@pytest.mark.parametrize('busy,available,playable', [(True, True, True), (False, False, True), (False, True, False)])
+def test_detail_playback_actions_disable_together(route_detail, profile, busy, available, playable):
+  page, owner = route_detail
+  page.profile = profile
+  owner.busy, owner.available = busy, available
+  owner.detail['playable'] = playable
+  for _, (x, y, width, height), enabled, _ in page._detail_buttons()[1:]:
+    assert not enabled
+    assert page._target(x + width / 2, y + height / 2) is None
 
 
 @pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
@@ -703,10 +759,10 @@ def test_details_are_fixed_with_pinned_play_and_do_not_paginate(route_detail, mo
   monkeypatch.setattr(module, 'draw_settings_header', Mock())
   page._render_detail()
   buttons = page._button.call_args_list
-  assert len(buttons) == (3 if profile == Profile.LARGE else 4)  # Warnings cannot grow the summary into more pages.
+  assert len(buttons) == (2 if profile == Profile.LARGE else 3)
   label, bounds, enabled = buttons[-1].args
-  assert label == 'Play' and enabled
-  assert bounds == ((72, 916, 2016, 128) if profile == Profile.LARGE else (12, 184, 512, 48))
+  assert label == 'Play from beginning' and enabled
+  assert bounds == ((744, 900, 1344, 144) if profile == Profile.LARGE else (224, 164, 300, 64))
   for _, rect, _, _ in page._detail_buttons():
     x, y, w, h = rect
     assert 0 <= x < x + w <= profile.size[0] and 0 <= y < y + h <= profile.size[1]
@@ -721,21 +777,6 @@ def test_details_are_fixed_with_pinned_play_and_do_not_paginate(route_detail, mo
   page._handle_mouse_press(pos)
   page._handle_mouse_release(pos)
   owner.start.assert_not_called()
-
-
-def test_warning_dialog_keeps_full_list_and_deduplicates_dynamic_notes(route_detail, monkeypatch):
-  from openpilot.starpilot.ui import replay_settings as module
-  page, _ = route_detail
-  dialog = NS(_html_renderer=NS(elements=[]))
-  factory = Mock(return_value=dialog)
-  monkeypatch.setattr('openpilot.system.ui.widgets.confirm_dialog.ConfirmDialog', factory)
-  monkeypatch.setattr(module.gui_app, 'push_widget', Mock())
-  page._show_warnings()
-  text = factory.call_args.args[0]
-  assert text.count('<p>Warning 0</p>') == 1
-  assert '<p>Warning 31</p>' in text and 'Recorded clock unavailable' in text
-  assert factory.call_args.kwargs['rich']
-  module.gui_app.push_widget.assert_called_once_with(dialog)
 
 
 def test_segment_picker_filters_missing_sources_and_starts_exact_selection(route_detail, monkeypatch):
@@ -760,18 +801,122 @@ def test_segment_picker_filters_missing_sources_and_starts_exact_selection(route
   owner.start.assert_not_called()
 
 
-def test_compact_warnings_use_native_description_screen(route_detail, monkeypatch):
+def test_compact_long_message_is_readable_in_full_without_displacing_playback(route_detail, monkeypatch):
+  from openpilot.starpilot.ui import replay_settings as module
+  page, owner = route_detail
+  page.profile = Profile.COMPACT
+  page.set_rect(rl.Rectangle(0, 0, *page.profile.size))
+  owner.error = 'A long service error. ' * 30
+  page._button = Mock()
+  page._render_detail()
+  assert page.detail_message == owner.error
+  status = [call.args for call in page.fonts.draw.call_args_list if call.args[4] in (114, 135)]
+  assert len(status) == 2
+  assert status[1][0].endswith('...')
+  assert page._detail_buttons()[-1][1] == (224, 164, 300, 64)
+  dialog = NS(_scroller=NS(items=['cover', 'message']))
+  factory = Mock(return_value=dialog)
+  monkeypatch.setattr('openpilot.selfdrive.ui.mici.widgets.dialog.SettingDescriptionDialog', factory)
+  monkeypatch.setattr(module.gui_app, 'font', Mock())
+  monkeypatch.setattr(module, 'wrap_text', lambda _font, word, *_: [word])
+  monkeypatch.setattr(module.gui_app, 'push_widget', Mock())
+  pos = NS(x=472, y=134)
+  page._handle_mouse_press(pos)
+  page._handle_mouse_release(pos)
+  factory.assert_called_once_with('replay', owner.error.strip())
+  assert dialog._scroller.items == ['message']
+  module.gui_app.push_widget.assert_called_once_with(dialog)
+  owner.error = 'Short message'
+  page._render_detail()
+  assert page.detail_message == ''
+  assert page._target(pos.x, pos.y) is None
+
+
+def test_compact_full_message_paginates_long_tokens_without_losing_content(route_detail, monkeypatch):
   from openpilot.starpilot.ui import replay_settings as module
   page, _ = route_detail
-  page.profile = Profile.COMPACT
-  factory = Mock()
-  monkeypatch.setattr('openpilot.selfdrive.ui.mici.widgets.dialog.SettingDescriptionDialog', factory)
+  page.profile, page.detail_message = Profile.COMPACT, 'W' * 128
+  font = NS(texture=NS(id=987654321))
+  monkeypatch.setattr(module.gui_app, 'font', lambda *_: font)
+  monkeypatch.setattr(module.gui_app, 'texture', Mock(return_value=NS(width=64, height=64)))
   monkeypatch.setattr(module.gui_app, 'push_widget', Mock())
-  page._show_warnings()
-  title, text = factory.call_args.args
-  assert title == 'warnings'
-  assert text.splitlines() == list(page._warnings())
-  module.gui_app.push_widget.assert_called_once_with(factory.return_value)
+  monkeypatch.setattr(rl, 'measure_text_ex', lambda _font, text, size, _spacing: rl.Vector2(len(text) * size * .9, size))
+  page._show_detail_message()
+  cards = module.gui_app.push_widget.call_args.args[0]._scroller.items
+  assert len(cards) > 1
+  assert ''.join(card.get_value().strip() for card in cards) == page.detail_message
+  for card in cards:
+    assert card._sub_label.get_content_height(card._subtitle_width_hint()) <= card.rect.height - 2 * card.LABEL_VERTICAL_PADDING
+
+
+@pytest.mark.parametrize('message', ['No road camera footage. Choose another route.',
+                                    'MMMM WWWW iiiii\n' * 20, 'W' * 300])
+def test_detail_lines_fit_the_bitmap_font_and_preserve_remaining_content(route_detail, message):
+  page, _ = route_detail
+  page.fonts.measure.side_effect = lambda text, _role, _size: NS(width=sum(14 if char == 'W' else 4 for char in text), height=20)
+  lines, remaining = page._detail_lines(message, 120)
+  assert 1 <= len(lines) <= 2
+  assert all(page.fonts.measure(line, None, 18).width <= 120 for line in lines)
+  assert ''.join(''.join(lines).split()) + ''.join(remaining.split()) == ''.join(message.split())
+
+
+@pytest.mark.parametrize('state,expected', [('partial', '2 of 3 available to play'),
+                                           ('loading', 'Loading route details...'),
+                                           ('unavailable', 'No road camera footage. Choose another route.'),
+                                           ('unavailable-guidance', 'No road camera footage. Choose another route.'),
+                                           ('single', '1 segment')])
+def test_compact_detail_status_and_counts_do_not_need_diagnostics(route_detail, state, expected):
+  page, owner = route_detail
+  page.profile = Profile.COMPACT
+  page._button = Mock()
+  if state == 'loading':
+    owner.busy = True
+    owner.detail['reason'] = 'No road camera footage'
+  elif state.startswith('unavailable'):
+    owner.detail.update(playable=False, reason=expected if state == 'unavailable-guidance' else 'No road camera footage')
+  elif state == 'single':
+    owner.detail.update(segmentCount=1, segments=owner.detail['segments'][:1])
+  page._render_detail()
+  texts = [call.args[0] for call in page.fonts.draw.call_args_list]
+  assert expected in texts
+  assert ROUTE['routeId'] in texts
+  assert [button[0] for button in page._detail_buttons()] == ['< Back', 'Choose segment', 'Play from beginning']
+  assert not any('Warning' in text for text in texts)
+
+
+@pytest.mark.parametrize('profile', [Profile.LARGE, Profile.COMPACT])
+def test_detail_primary_fill_survives_return_from_collapsed_playback(route_detail, monkeypatch, profile):
+  from openpilot.starpilot.ui import replay_settings as module
+  page, _ = route_detail
+  page.profile, page.controls = profile, False
+  fill = Mock()
+  monkeypatch.setattr(module, 'draw_rounded_fill', fill)
+  monkeypatch.setattr(module, 'draw_rounded_stroke', Mock())
+  page._button(*page._detail_buttons()[-1][:3])
+  color = fill.call_args.args[1]
+  expected = rl.color_lerp(module.ACCENT, module.PANEL_BG, .2) if profile == Profile.COMPACT else module.ACCENT
+  assert (color.r, color.g, color.b, color.a) == (expected.r, expected.g, expected.b, expected.a)
+
+
+@pytest.mark.parametrize('page_name', ['detail', 'viewer'])
+@pytest.mark.parametrize('movement,activates', [(6, True), (12, True), (13, False)])
+def test_compact_button_taps_allow_small_drift_but_cancel_drag(route_detail, page_name, movement, activates):
+  page, owner = route_detail
+  page.profile, page.page = Profile.COMPACT, page_name
+  page.set_rect(rl.Rectangle(0, 0, *page.profile.size))
+  bounds = page._detail_buttons()[-1][1] if page_name == 'detail' else page._transport()[1][1][1]
+  x, y, width, height = bounds
+  initial = NS(x=x + width / 2, y=y + height / 2)
+  final = NS(x=initial.x + movement, y=initial.y)
+  page._handle_mouse_press(initial)
+  page._handle_mouse_event(mouse_event=NS(left_down=True, left_released=False, pos=final))
+  page._handle_mouse_release(final)
+  if page_name == 'detail':
+    assert owner.start.call_count == int(activates)
+  else:
+    assert owner.control.call_count == int(activates)
+    if activates:
+      owner.control.assert_called_once_with('pause', paused=True)
 
 
 def test_compact_segment_cards_close_chooser_and_start_exact_segment(route_detail, monkeypatch):
@@ -789,6 +934,7 @@ def test_compact_segment_cards_close_chooser_and_start_exact_segment(route_detai
   monkeypatch.setattr(module.gui_app, 'get_active_widget', lambda: active[0])
   page._choose_segment()
   assert [call.args[0] for call in factory.call_args_list] == ['segment 0', 'segment 2']
+  assert all(call.args[1] == 'date unavailable\nstart here' for call in factory.call_args_list)
   callback = buttons[1].set_click_callback.call_args.args[0]
   callback()
   assert active[0] is page.stack_widget
@@ -853,6 +999,7 @@ def test_loading_is_centered_and_warnings_and_unknown_timing_stay_out_of_viewer(
   page, owner = page_for_input()
   page.profile = profile
   page._button = Mock()
+  monkeypatch.setattr(module, 'draw_rounded_fill', Mock())
   page.fonts.measure.return_value = NS(width=200, height=32)
   owner.available, owner.busy, owner.error, owner.frame = True, False, error, None
   owner.status.update(state=state, end=None, sourceWarnings=['This route has missing segments'])

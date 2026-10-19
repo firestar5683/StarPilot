@@ -2,15 +2,15 @@
 // Known checksum equations adapted from pinned Dom b220a37f4bd119e402225a7aa16a7cd84878d0af
 // opendbc/car/volvo/helpers.py. Unknown receiver checksum domains remain unsupported.
 static uint8_t volvo_cma_parity8(uint8_t x) {
-  x ^= x >> 4U;
-  x ^= x >> 2U;
-  x ^= x >> 1U;
-  return x & 1U;
+  uint8_t folded = x;
+  folded ^= folded >> 4U;
+  folded ^= folded >> 2U;
+  folded ^= folded >> 1U;
+  return folded & 1U;
 }
 
 static uint8_t volvo_cma_crc_lca2_first(uint8_t b0, uint8_t b5) {
   // Retain the pinned encoder's existing special case exactly; no new CRC rule.
-  if ((b0 == 0U) && (b5 == 128U)) { return 0U; }
   static const uint8_t masks[8][2] = {
     {0x08U, 0x83U},
     {0x00U, 0x86U},
@@ -22,8 +22,10 @@ static uint8_t volvo_cma_crc_lca2_first(uint8_t b0, uint8_t b5) {
     {0x00U, 0x89U},
   };
   uint8_t checksum = 0U;
-  for (uint8_t bit = 0U; bit < 8U; bit++) {
-    checksum |= (volvo_cma_parity8(b0 & masks[bit][0]) ^ volvo_cma_parity8(b5 & masks[bit][1])) << bit;
+  if ((b0 != 0U) || (b5 != 128U)) {
+    for (uint8_t bit = 0U; bit < 8U; bit++) {
+      checksum |= (volvo_cma_parity8(b0 & masks[bit][0]) ^ volvo_cma_parity8(b5 & masks[bit][1])) << bit;
+    }
   }
   return checksum;
 }
@@ -94,6 +96,8 @@ static uint32_t volvo_cma_get_checksum(const CANPacket_t *msg) {
     value = (uint32_t)msg->data[0] | ((uint32_t)msg->data[3] << 8U);
   } else if (msg->addr == 0x67U) {
     value = msg->data[2];
+  } else {
+    // Unsupported checksum domains retain the zero result.
   }
   return value;
 }
@@ -108,6 +112,8 @@ static uint32_t volvo_cma_compute_checksum(const CANPacket_t *msg) {
       ((uint32_t)volvo_cma_crc_pscm_second(d[2]) << 8U);
   } else if (msg->addr == 0x67U) {
     value = volvo_cma_crc_lca5(d[0], d[1], d[3], d[4], d[5]);
+  } else {
+    // Unsupported checksum domains retain the zero result.
   }
   return value;
 }

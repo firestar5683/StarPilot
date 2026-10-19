@@ -157,12 +157,24 @@ def civic_engagement_owner(*, enabled=True, lkas_action=AOL_TOGGLE, main_action=
   cp.alternativeExperience = 32
   assert cp.flags == 2060 and cp.safetyConfigs[0].safetyParam == 10
   settings = AolSettings(enabled, 5., lkas_action, main_action, (0, 0, 0), (0, 0, 0))
-  return cp, create_intent(cp, settings)
+  intent = create_intent(cp, settings)
+  intent.observe_full_engagement(state(), enabled=False, active=False, source_ns=1,
+                                  observation_valid=True, now_ns=1, fault_active=False)
+  return cp, intent
+
+
+def update_engagement(intent, cs, *, now_ns, standard_enabled=False, standard_active=False,
+                      fault_active=False, native_rejection_ns=0):
+  intent.update(cs, now_ns=now_ns, standard_enabled=standard_enabled,
+                fault_active=fault_active, native_rejection_ns=native_rejection_ns)
+  intent.observe_full_engagement(cs, enabled=standard_enabled or standard_active, active=standard_active,
+                                source_ns=now_ns, observation_valid=True, now_ns=now_ns,
+                                fault_active=fault_active, native_rejection_ns=native_rejection_ns)
 
 
 @pytest.mark.parametrize("main_action", (0, AOL_TOGGLE))
 @pytest.mark.parametrize("paused,temporary", ((False, False), (True, False), (False, True)))
-def test_active_engagement_arms_without_raw_cruise_and_preserves_output_pauses(main_action, paused, temporary):
+def test_active_engagement_arms_without_raw_cruise_resumes_lateral_and_preserves_long_pause(main_action, paused, temporary):
   from openpilot.starpilot.aol.runtime import decide_axes
 
   _, intent = civic_engagement_owner(main_action=main_action)
@@ -171,14 +183,14 @@ def test_active_engagement_arms_without_raw_cruise_and_preserves_output_pauses(m
   cs.gasPressed = True
   assert not cs.cruiseState.enabled  # Non-PCM host engagement can precede ACC_STATUS.
   intent.pause_lateral = intent.pause_longitudinal = paused
-  intent.update(cs.as_reader(), now_ns=10, fault_active=False, standard_enabled=True)
+  update_engagement(intent, cs.as_reader(), now_ns=10, fault_active=False, standard_enabled=True)
   assert not intent.allowed_latch  # Enabled/preEnabled alone is not the active edge.
-  intent.update(cs.as_reader(), now_ns=20, fault_active=False, standard_enabled=True, standard_active=True)
+  update_engagement(intent, cs.as_reader(), now_ns=20, fault_active=False, standard_enabled=True, standard_active=True)
   assert intent.allowed_latch
-  assert intent.pause_lateral is paused and intent.pause_longitudinal is paused
+  assert not intent.pause_lateral and intent.pause_longitudinal is paused
   cs.gasPressed = False
   cs.brakePressed = True
-  intent.update(cs.as_reader(), now_ns=30, fault_active=False, standard_active=False)
+  update_engagement(intent, cs.as_reader(), now_ns=30, fault_active=False, standard_active=False)
   assert intent.allowed_latch  # Braking drops normal cruise, retaining AOL intent.
   allowed, pause_lat, pause_long = intent.output(cs.as_reader())
   snapshot = SimpleNamespace(allowedLatch=allowed, pauseLateral=pause_lat, pauseLongitudinal=pause_long)
@@ -188,7 +200,7 @@ def test_active_engagement_arms_without_raw_cruise_and_preserves_output_pauses(m
                 car_state=cs.as_reader(), initialized=True, model_ready=True,
                 no_entry=False, immediate_disable=False, dm_lockout=False, pause_brake_mps=5.)
   decision = decide_axes(native=native, **kwargs)
-  assert decision.lateral_active == (not paused and not temporary)
+  assert decision.lateral_active == (not temporary)
   assert not decision.longitudinal_active
   assert not decide_axes(native=None, **kwargs).lateral_active
   cs.vEgo = 4.9
@@ -198,12 +210,12 @@ def test_active_engagement_arms_without_raw_cruise_and_preserves_output_pauses(m
   assert not decide_axes(native=native, **kwargs).lateral_active
 
 
-@pytest.mark.parametrize("blocked", ("disabled", "mapping", "main_off", "can_invalid", "timeout",
+@pytest.mark.parametrize("blocked", ("disabled", "main_off", "can_invalid", "timeout",
                                      "fatal", "permanent", "acc_fault", "native_rejection", "park", "unknown", "reverse", "neutral"))
 def test_blocked_engagement_edge_is_consumed_without_rearm_on_held_active(blocked):
-  _, intent = civic_engagement_owner(enabled=blocked != "disabled", lkas_action=0 if blocked == "mapping" else AOL_TOGGLE)
+  _, intent = civic_engagement_owner(enabled=blocked != "disabled")
   cs = structs.CarState(**state().to_dict())
-  intent.update(cs.as_reader(), now_ns=10, fault_active=False)
+  update_engagement(intent, cs.as_reader(), now_ns=10, fault_active=False)
   if blocked == "main_off":
     cs.cruiseState.available = False
   for case, field in (("can_invalid", "canValid"), ("timeout", "canTimeout"),
@@ -212,14 +224,14 @@ def test_blocked_engagement_edge_is_consumed_without_rearm_on_held_active(blocke
       setattr(cs, field, case != "can_invalid")
   if blocked in ("park", "unknown", "reverse", "neutral"):
     cs.gearShifter = blocked
-  intent.update(cs.as_reader(), now_ns=20, standard_enabled=True, standard_active=True,
+  update_engagement(intent, cs.as_reader(), now_ns=20, standard_enabled=True, standard_active=True,
                 fault_active=blocked == "fatal", native_rejection_ns=20 if blocked == "native_rejection" else 0)
   assert not intent.allowed_latch
   intent.settings = replace(intent.settings, enabled=True, lkas_action=AOL_TOGGLE)
-  intent.update(state(), now_ns=30, standard_enabled=True, standard_active=True, fault_active=False)
+  update_engagement(intent, state(), now_ns=30, standard_enabled=True, standard_active=True, fault_active=False)
   assert not intent.allowed_latch
-  intent.update(state(), now_ns=40, fault_active=False)
-  intent.update(state(), now_ns=50, standard_enabled=True, standard_active=True, fault_active=False)
+  update_engagement(intent, state(), now_ns=40, fault_active=False)
+  update_engagement(intent, state(), now_ns=50, standard_enabled=True, standard_active=True, fault_active=False)
   assert intent.allowed_latch
 
 
@@ -227,42 +239,65 @@ def test_blocked_engagement_edge_is_consumed_without_rearm_on_held_active(blocke
 def test_manual_gesture_takes_priority_over_coincident_active_edge(button):
   _, intent = civic_engagement_owner(main_action=AOL_TOGGLE)
   cs = structs.CarState(**state().to_dict())
-  intent.update(cs.as_reader(), now_ns=10, fault_active=False)
+  update_engagement(intent, cs.as_reader(), now_ns=10, fault_active=False)
   cs.buttonEvents = [structs.CarState.ButtonEvent(type=button, pressed=True)]
-  intent.update(cs.as_reader(), now_ns=20, standard_enabled=True, standard_active=True, fault_active=False)
+  update_engagement(intent, cs.as_reader(), now_ns=20, standard_enabled=True, standard_active=True, fault_active=False)
   assert not intent.allowed_latch
   cs.buttonEvents = [structs.CarState.ButtonEvent(type=button, pressed=False)]
-  intent.update(cs.as_reader(), now_ns=30, standard_enabled=True, standard_active=True, fault_active=False)
+  update_engagement(intent, cs.as_reader(), now_ns=30, standard_enabled=True, standard_active=True, fault_active=False)
   assert not intent.allowed_latch
 
 
 def test_manual_off_and_native_withdrawal_do_not_rearm_while_active_stays_high():
   _, intent = civic_engagement_owner()
-  intent.update(state(), now_ns=10, fault_active=False)
-  intent.update(state(), now_ns=20, standard_enabled=True, standard_active=True, fault_active=False)
+  update_engagement(intent, state(), now_ns=10, fault_active=False)
+  update_engagement(intent, state(), now_ns=20, standard_enabled=True, standard_active=True, fault_active=False)
   assert intent.allowed_latch
-  intent.update(state(True), now_ns=30, standard_enabled=True, standard_active=True, fault_active=False)
+  update_engagement(intent, state(True), now_ns=30, standard_enabled=True, standard_active=True, fault_active=False)
   assert not intent.allowed_latch and intent.pause_lateral
-  intent.update(state(False), now_ns=40, standard_enabled=True, standard_active=True, fault_active=False)
+  update_engagement(intent, state(False), now_ns=40, standard_enabled=True, standard_active=True, fault_active=False)
   assert not intent.allowed_latch and intent.pause_lateral
-  intent.update(state(), now_ns=50, fault_active=False)
-  intent.update(state(), now_ns=60, standard_enabled=True, standard_active=True, fault_active=False)
-  assert intent.allowed_latch and intent.pause_lateral  # A new SET edge keeps deliberate output pause.
-  intent.update(state(), now_ns=70, standard_enabled=True, standard_active=True, native_rejection_ns=70, fault_active=False)
+  update_engagement(intent, state(), now_ns=50, fault_active=False)
+  update_engagement(intent, state(), now_ns=60, standard_enabled=True, standard_active=True, fault_active=False)
+  assert intent.allowed_latch and not intent.pause_lateral  # A new full SET resumes lateral output.
+  update_engagement(intent, state(), now_ns=70, standard_enabled=True, standard_active=True, native_rejection_ns=70, fault_active=False)
   assert not intent.allowed_latch
-  intent.update(state(), now_ns=80, standard_enabled=True, standard_active=True, fault_active=False)
+  update_engagement(intent, state(), now_ns=80, standard_enabled=True, standard_active=True, fault_active=False)
   assert not intent.allowed_latch
 
 
 @pytest.mark.parametrize("gear", ("drive", "sport", "low", "brake"))
 def test_supported_driving_gears_keep_active_engagement_intent(gear):
   _, intent = civic_engagement_owner()
-  intent.update(state(gear=gear), now_ns=10, fault_active=False)
-  intent.update(state(gear=gear), now_ns=20, standard_enabled=True, standard_active=True, fault_active=False)
+  update_engagement(intent, state(gear=gear), now_ns=10, fault_active=False)
+  update_engagement(intent, state(gear=gear), now_ns=20, standard_enabled=True, standard_active=True, fault_active=False)
   assert intent.allowed_latch
 
 
-def test_actual_card_active_observation_requires_fresh_applied_command(monkeypatch):
+@pytest.mark.parametrize("lkas_action", (0, AOL_TOGGLE))
+def test_full_engagement_does_not_require_a_configured_lkas_toggle(lkas_action):
+  _, intent = civic_engagement_owner(lkas_action=lkas_action)
+  update_engagement(intent, state(), now_ns=10, standard_enabled=True, standard_active=False)
+  assert not intent.allowed_latch
+  update_engagement(intent, state(), now_ns=20, standard_enabled=True, standard_active=True)
+  assert intent.allowed_latch
+  update_engagement(intent, state(), now_ns=30, standard_enabled=False, standard_active=False)
+  assert intent.allowed_latch
+
+
+def test_starting_during_active_engagement_requires_a_fresh_disabled_epoch():
+  cp, seeded = civic_engagement_owner()
+  intent = create_intent(cp, seeded.settings)
+  update_engagement(intent, state(), now_ns=10, standard_enabled=True, standard_active=True)
+  update_engagement(intent, state(), now_ns=20, standard_enabled=True, standard_active=True)
+  assert not intent.allowed_latch
+  update_engagement(intent, state(), now_ns=30)
+  update_engagement(intent, state(), now_ns=40, standard_enabled=True, standard_active=True)
+  assert intent.allowed_latch
+
+
+def test_actual_card_active_observation_requires_fresh_selfdrive_state(monkeypatch):
+  from openpilot.cereal import log
   from openpilot.selfdrive.car import card as card_module
   from openpilot.selfdrive.car.card import Car
   from openpilot.starpilot.aol.intent import AolCardIntent
@@ -279,11 +314,13 @@ def test_actual_card_active_observation_requires_fresh_applied_command(monkeypat
   cs = state()
   now = 1_000_000_000
   control = structs.CarControl(enabled=False, latActive=False, longActive=False)
-  samples = Samples(carControl=control.as_reader(), onroadEvents=[])
-  samples.valid = {"carControl": True, "onroadEvents": True}
-  samples.alive = {"carControl": True}
+  engagement = log.SelfdriveState.new_message(enabled=False, active=False)
+  samples = Samples(carControl=control.as_reader(), onroadEvents=[], selfdriveState=engagement.as_reader())
+  samples.valid = {"carControl": True, "onroadEvents": True, "selfdriveState": True}
+  samples.alive = {"carControl": True, "selfdriveState": True}
+  samples.seen = {"selfdriveState": True}
   samples.updated = {"onroadEvents": True}
-  samples.logMonoTime = {"carControl": now, "onroadEvents": now}
+  samples.logMonoTime = {"carControl": now, "onroadEvents": now, "selfdriveState": now}
   host = Car.__new__(Car)
   host.CP, host.aol_card_intent = cp, intent
   host.CI = SimpleNamespace(update=lambda _: cs, CS=SimpleNamespace())
@@ -311,41 +348,45 @@ def test_actual_card_active_observation_requires_fresh_applied_command(monkeypat
                        "fixture-panda", host.slc_producer_session)
   monkeypatch.setattr(card_module, "current_native", lambda *args, **kwargs: native)
   observed = []
-  update = intent.update
+  observe = intent.observe_full_engagement
 
   def at_boundary(state, **kwargs):
     observed.append(kwargs)
-    update(state, **kwargs)
+    observe(state, **kwargs)
     raise BoundaryReached
 
-  monkeypatch.setattr(intent, "update", at_boundary)
+  monkeypatch.setattr(intent, "observe_full_engagement", at_boundary)
 
-  def tick(*, previous=False, enabled=True, lat=False, long=False, valid=True, alive=True, age=0):
+  def tick(*, enabled=True, active=False, valid=True, alive=True, seen=True, age=0, control_active=True):
     nonlocal now
     now += 10_000_000
-    control.enabled, control.latActive, control.longActive = enabled, lat, long
+    previous_enabled = bool(control.enabled)
+    control.enabled, control.latActive, control.longActive = enabled, control_active, False
+    engagement.enabled, engagement.active = enabled, active
     samples["carControl"] = control.as_reader()
-    samples.valid["carControl"], samples.alive["carControl"] = valid, alive
-    samples.logMonoTime.update(carControl=now - age, onroadEvents=now)
-    host.CC_prev = structs.CarControl(enabled=previous).as_reader()
+    samples["selfdriveState"] = engagement.as_reader()
+    samples.valid["selfdriveState"], samples.alive["selfdriveState"] = valid, alive
+    samples.seen["selfdriveState"] = seen
+    samples.logMonoTime.update(carControl=now, onroadEvents=now, selfdriveState=now - age)
+    host.CC_prev = structs.CarControl(enabled=previous_enabled).as_reader()
     with pytest.raises(BoundaryReached):
       host.state_update()
     return observed[-1]
 
-  assert not tick(previous=True)["standard_active"]  # PreEnabled: enabled with neither active axis.
+  assert not tick(enabled=False)["active"]
+  assert not tick()["active"]  # PreEnabled: fresh actuator activity cannot invent ordinary active state.
   assert not intent.allowed_latch
-  for kwargs in ({"previous": False}, {"previous": True, "valid": False},
-                 {"previous": True, "alive": False}, {"previous": True, "age": 200_000_000}):
-    assert not tick(lat=True, **kwargs)["standard_active"]
+  for kwargs in ({"valid": False}, {"alive": False}, {"seen": False}, {"age": 200_000_000}, {"age": -1}):
+    assert not tick(active=True, **kwargs)["observation_valid"]
     assert not intent.allowed_latch
-  assert tick(previous=True, lat=True)["standard_active"]
+  assert tick(active=True)["observation_valid"]
   assert intent.allowed_latch and not cs.cruiseState.enabled
   intent.allowed_latch = False
-  tick(previous=True, lat=True)
-  assert not intent.allowed_latch  # Repeating the same active level is not a new SET.
+  tick(active=True)
+  assert not intent.allowed_latch  # Repeating the same enabled epoch is not a new SET.
   tick(enabled=False)
-  assert tick(previous=True, long=True)["standard_active"]
-  assert intent.allowed_latch  # Actual normal long activity also proves active engagement.
+  assert tick(active=True, control_active=False)["active"]
+  assert intent.allowed_latch  # Actual ordinary state proves engagement independently of actuator samples.
 
   # The actual Card caller consumes the acknowledged native permission. Its
   # immediate rejection boundary remains strict; no host grace is extended.

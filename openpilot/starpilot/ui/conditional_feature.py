@@ -101,7 +101,7 @@ class ConditionalFeature:
     sources = capture_sources(self.owner.params, document, safe)
     enabled = (self.owner.authority("switchback_wheel" if switchback_only else "conditional_wheel") and config_valid and
                safe_readable and safe in (None, b"0", b"1") and sources.readable)
-    ready = runtime_map_ready(sources) and all(display_action(sources.raw(key))[0] != "Unsupported saved action"
+    ready = runtime_map_ready(sources, cp=cp) and all(display_action(sources.raw(key))[0] != "Unsupported saved action"
                                                 for key in keys)
     rows = [] if ready else [FeatureRow("", "Button assignments",
                        "Review saved actions",

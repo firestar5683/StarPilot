@@ -13,7 +13,8 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource, get_T_FOLLOW, get_jerk_factor
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import (LongitudinalMpc, LongitudinalPlanSource, get_T_FOLLOW, get_jerk_factor,
+                                                                                      qualified_model_leads, ModelLeadHistory)
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan, should_stop
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
@@ -93,6 +94,7 @@ class LongitudinalPlanner:
   def __init__(self, CP, init_v=0.0, init_a=0.0, dt=DT_MDL, clock_ns: Callable[[], int] = time.monotonic_ns):
     self.CP = CP
     self.mpc = LongitudinalMpc(dt=dt)
+    self.model_lead_history = ModelLeadHistory()
     self.fcw = False
     self.dt = dt
     self.clock_ns = clock_ns
@@ -136,6 +138,8 @@ class LongitudinalPlanner:
              now_ns: int | None = None, drive_id: int = 0, wheel_coast=None):
     if curve_ceiling is not None and curve_provider is not None:
       raise ValueError('choose explicit Curve ceiling or same-cycle provider')
+    if self.plan_drive_id != drive_id:
+      self.model_lead_history.clear()
     self.plan_drive_id = drive_id
     faster_takeoffs = bool(faster_lead_takeoff)
     sample_now_ns = self.clock_ns() if now_ns is None else now_ns
@@ -249,7 +253,7 @@ class LongitudinalPlanner:
                     follow_seconds=follow if follow is not None else
                     (self.last_profile.follow_seconds if self.last_profile is not None else None),
                     acceleration_max=acceleration_cap,
-                    stop_line_m=self.force_stop_plan.obstacle_m)
+                    stop_line_m=self.force_stop_plan.obstacle_m, modelV2=qualified_model_leads(sm, sample_now_ns, self.model_lead_history))
 
     # MPC has selected the actual follow time for this model cycle. Its solve
     # does not use the Curve cruise cap, so a provider may now evaluate the

@@ -107,7 +107,10 @@ class TestCurveStatus(unittest.TestCase):
       with self.subTest(slc=slc_on, curve=curve_on), tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
         params = Params(directory)
         params.put('CarParams', cp_bytes, block=True)
-        params.put_bool(MASTER_KEY, True, block=True)
+        # Saved requests, not a replay flag set to zero, choose the hosts.
+        params.put_bool(MASTER_KEY, curve_on, block=True)
+        params.put_bool('SpeedLimitController', slc_on, block=True)
+        params.put_bool('ShowSpeedLimits', slc_on, block=True)
         sm = bus(NOW)
         for name in ('deviceState', 'slcDashboardObservation'):
           sm.messages[name] = getattr(messaging.new_message(name), name)
@@ -161,7 +164,7 @@ class TestCurveStatus(unittest.TestCase):
           plannerd.main()
         counts = Counter(name for name, _raw in sent)
         self.assertEqual(counts['longitudinalPlan'], 2)
-        self.assertEqual(counts['slcState'], 2)  # Display-only signs still publish with both controllers off.
+        self.assertEqual(counts['slcState'], 2)  # Shared optional status still publishes with both controllers off.
         self.assertEqual(sum(name == 'slcCruiseEvent' for name, _kw in subscriptions), 1)
         self.assertTrue(all(not kw['conflate'] for _name, kw in subscriptions))
         for name, raw in sent:

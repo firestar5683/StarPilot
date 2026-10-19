@@ -98,7 +98,7 @@ class FeatureSettingsView:
     self._awaiting_render = False
     return rows, pull_x, cover
 
-  def render(self, state: FeatureSettingsState, drag_x: float = 0.0) -> None:
+  def render(self, state: FeatureSettingsState, drag_x: float = 0.0, *, draw_row=None) -> None:
     pressed = self.pressed_action(state)
     left = 520 if state.sidebar_expanded else 20
     row_top = feature_row_top(state)
@@ -151,6 +151,9 @@ class FeatureSettingsView:
           rl.draw_rectangle_rec(body, PANEL_BG)
         for visible, row in enumerate(rows_state.rows[rows_state.scroll:rows_state.scroll + FEATURE_VISIBLE_ROWS]):
           y = row_top + visible * FEATURE_ROW_HEIGHT
+          if draw_row is not None:
+            draw_row(row, y, left, pressed)
+            continue
           value = _boolean_value(row)
           heading = (bool(row.label) and not (row.key or row.page or row.value or row.reason or
                                              row.choices or row.step or row.repair_value or row.actions))

@@ -11,14 +11,14 @@ INVENTORY = (
 )
 
 
-def run_context(identity, alternate, aol):
+def run_context(identity, alternate, aol, *, cancel_assigned=False):
   from opendbc.can import CANPacker
   from opendbc.car import Bus, gen_empty_fingerprint, structs
   from opendbc.car.hyundai.interface import CarInterface
   from opendbc.car.hyundai.tests.test_torque_ev_startup import owner
   from opendbc.car.hyundai.values import DBC
   from opendbc.safety.tests.libsafety import libsafety_py
-  from openpilot.starpilot.aol.intent import AolSettings, AOL_TOGGLE
+  from openpilot.starpilot.aol.intent import AolSettings, AOL_TOGGLE, PAUSE_LATERAL
   from openpilot.starpilot.car.hyundai.aol import create_intent, policy_for
   from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
   from openpilot.selfdrive.car.car_events import CarEvents
@@ -47,7 +47,8 @@ def run_context(identity, alternate, aol):
   assert int(cp.safetyConfigs[0].safetyParam) == ((0x95 if alternate else 0x15) | (0x800 if aol else 0))
   assert emitted and all(address == 0x730 and bus == 1 for address, _, bus in emitted)
   packer = CANPacker(DBC[identity][Bus.pt])
-  intent = create_intent(cp, AolSettings(aol, 0., AOL_TOGGLE, AOL_TOGGLE, (0, 0, 0), (0, 0, 0)))
+  cancel_actions = (PAUSE_LATERAL, 0, 0) if cancel_assigned else (0, 0, 0)
+  intent = create_intent(cp, AolSettings(aol, 0., AOL_TOGGLE, AOL_TOGGLE, (0, 0, 0), cancel_actions))
   safety = libsafety_py.libsafety
   safety.init_tests()
   safety.set_alternative_experience(int(cp.alternativeExperience))
@@ -62,10 +63,11 @@ def run_context(identity, alternate, aol):
   previous_control = structs.CarControl()
   active_long = False
   independent_lateral = False
+  pre_cancel_edge_ns = 0
   try:
     for tick in range(340):
       now = epoch + tick * 10_000_000
-      lda = tick in (40, 41, 150, 151, 300, 301)
+      lda = tick in (40, 41, 150, 151, 300, 301) or (aol and not cancel_assigned and tick in (160, 161))
       set_pressed = tick in (80, 81, 180, 181, 212, 213, 304, 305)
       cancel = tick in (120, 121)
       gas = 200 <= tick < 210
@@ -151,8 +153,24 @@ def run_context(identity, alternate, aol):
         independent_lateral |= bool(cc.latActive and not cc.longActive)
       if 202 <= tick < 210 or 232 <= tick < 240:
         assert not cc.longActive, (tick, 'physical pedal must withdraw LONG')
+      if aol and tick == 118:
+        pre_cancel_edge_ns = intent._last_latch_edge_ns
+        assert cc.latActive and cc.longActive and pre_cancel_edge_ns > 0
       if aol and 124 <= tick < 148:
-        assert not cc.latActive, (tick, 'cancel must revoke lateral')
+        assert not cc.longActive, (tick, 'cancel must revoke longitudinal')
+        if cancel_assigned:
+          assert not cc.latActive, (tick, 'cancel must revoke lateral')
+          assert not intent.allowed_latch and mask == 0
+        else:
+          # Unassigned CANCEL retains only the already claimed lateral token.
+          assert cc.latActive and intent.allowed_latch and mask == 1
+          assert intent._last_latch_edge_ns == pre_cancel_edge_ns, (tick, 'cancel cannot renew intent')
+      if aol and not cancel_assigned and 154 <= tick < 160:
+        assert not cc.latActive and intent.pause_lateral and not intent.allowed_latch
+        assert mask == 0, (tick, 'physical LDA off must withdraw native lateral')
+      if aol and not cancel_assigned and 164 <= tick < 178:
+        assert cc.latActive and not cc.longActive and mask == 1
+        assert intent._last_latch_edge_ns > pre_cancel_edge_ns, (tick, 'fresh LDA must rearm')
     assert active_long, 'No physical SET LONG epoch'
     assert independent_lateral == aol, 'Independent physical LDA epoch mismatch'
 
@@ -190,8 +208,9 @@ class TestPreparedTorqueEvNative(unittest.TestCase):
     for identity in (CAR.HYUNDAI_IONIQ_5, CAR.HYUNDAI_KONA_EV_2ND_GEN):
       for alternate in (False, True):
         for aol in (False, True):
-          with self.subTest(identity=identity, alternate=alternate, aol=aol):
-            run_context(identity, alternate, aol)
+          for cancel_assigned in ((False, True) if aol else (False,)):
+            with self.subTest(identity=identity, alternate=alternate, aol=aol, cancel_assigned=cancel_assigned):
+              run_context(identity, alternate, aol, cancel_assigned=cancel_assigned)
 
   def test_release_raw_long_preserves_stock_neutral_contract(self):
     from opendbc.can import CANPacker

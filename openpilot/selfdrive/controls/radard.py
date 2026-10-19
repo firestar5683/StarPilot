@@ -416,7 +416,7 @@ def main() -> None:
   honda_bosch_a = CP.brand == "honda" and CP.carFingerprint in VERIFIED_BOSCH_A_CARS and not CP.radarUnavailable
   RD = RadarD(CP.radarDelay, adjacent_enabled=adjacent_enabled, radar_available=not CP.radarUnavailable,
               honda_bosch_a_radar=honda_bosch_a, use_voacc=voacc_selected(params, CP))
-  set_core_affinity([4, 5])
+  set_core_affinity([3, 5])
 
   while 1:
     sm.update()

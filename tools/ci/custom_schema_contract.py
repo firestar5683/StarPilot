@@ -51,9 +51,9 @@ def describe(module, roots):
       else:
         record['slot'] = {k: v for k, v in field['slot'].items() if k != 'hadExplicitDefault'}
         descriptor = field['slot']['type']
-        if next(iter(descriptor)) in ('struct', 'list', 'anyPointer'):
+        if next(iter(descriptor)) in ('struct', 'list', 'anyPointer', 'data'):
           # schema.Value stores these defaults as opaque pointers. Preserve the
-          # value itself, including explicit pointer defaults, without expanding
+          # value itself, including explicit Data/pointer defaults, without expanding
           # it through the referenced type's potentially evolving field layout.
           value = schema.fields[field['name']].proto.slot.defaultValue
           record['slot']['defaultValue'] = {'schemaValueHex': value.as_builder().to_bytes().hex()}

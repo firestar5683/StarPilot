@@ -13,6 +13,10 @@ speed; resolution clamps each delta to `max(cluster - raw, 0)`. A nonvalid
 resolution with a context is malformed and triggers the override session-reset
 contract. Only a `VALID` context may enter `overrides.step(domain=...)`.
 
+A finite negative offset that would make the target nonpositive in cluster or
+planner coordinates is ignored for that limit. The unadjusted accepted limit
+continues to supply the ceiling; malformed schedules still fail validation.
+
 Call order is acceptance, domain resolution, override reduction, then
 `to_planner_coordinate(context, contribution_raw_mps, basis)`. The reducer
 compares current selected and retained intent against `accepted raw + offset`

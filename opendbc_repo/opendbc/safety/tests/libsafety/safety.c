@@ -385,7 +385,7 @@ bool safety_test_volvo_cma_poison_workspace(void) {
   if (current_safety_mode != SAFETY_NOOUTPUT) {
     return false;
   }
-  memset(volvo_cma_rx_workspace, 0xA5, sizeof(volvo_cma_rx_workspace));
+  memset(volvo_cma_rx_checks_workspace(), 0xA5, VOLVO_CMA_RX_CHECK_COUNT * sizeof(RxCheck));
   memset(volvo_cma_relay_data, 0xA5, sizeof(volvo_cma_relay_data));
   memset(volvo_cma_relay_ts, 0xA5, sizeof(volvo_cma_relay_ts));
   memset(volvo_cma_relay_valid, 0xA5, sizeof(volvo_cma_relay_valid));

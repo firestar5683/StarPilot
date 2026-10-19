@@ -49,8 +49,9 @@ class TestSavedTorquePage(unittest.TestCase):
     learning = rows['Use StarPilot Auto Learn']
     self.assertTrue(learning['available'])
     self.assertEqual(learning['value'], 'Off')
-    self.assertIn('StarPilot Controller uses its vehicle tune', learning['reason'])
-    self.assertIn('automatic learning is currently unavailable', learning['reason'])
+    self.assertTrue(learning['reason'].startswith(
+      'StarPilot’s FLM tuning will attempt to automatically correct torque profiles as you drive.'))
+    self.assertIn('controller eligibility are initialized when driving processes start', learning['reason'])
     cp = self.context.sample().cp
     assert cp is not None
     self.assertFalse(learning_allowed(self.params, cp))
@@ -61,7 +62,7 @@ class TestSavedTorquePage(unittest.TestCase):
     self.assertTrue(preference.enabled)
     self.assertEqual(preference.source, 'scope')
     self.assertTrue(self.params.get_bool('ForceAutoTuneOff'))
-    self.assertFalse(learning_allowed(self.params, cp), 'Saving On does not admit the selected nonlinear controller')
+    self.assertTrue(learning_allowed(self.params, cp), 'Scoped On allows native refinement with either selected controller')
     page = self.page()
 
     index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Friction')
