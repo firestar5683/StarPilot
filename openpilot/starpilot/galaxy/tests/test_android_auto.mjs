@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { AndroidAutoFeed, AndroidAutoPage, validPairingStatus, validPromptInput, uploadPackage,
+import { AndroidAutoFeed, AndroidAutoPage, validPairingStatus, validPromptInput, uploadPackage, uploadTimeout,
   expiryInfo, packagePreflight, importProblem, installChecks } from "../web/js/android-auto.js"
 
 const setup = { enabled: true, bluetoothEnabled: true, parked: true, installReady: true, serviceReady: true,
@@ -304,6 +304,11 @@ const alreadyAborted = new AbortController(); alreadyAborted.abort()
 const neverSent = new UploadRequest()
 await assert.rejects(uploadPackage('upload', { signal: alreadyAborted.signal }, () => {}, () => neverSent), /canceled/)
 assert.equal(neverSent.sent, null)
+assert.equal(uploadTimeout(5 * 1024 * 1024), 180000, "small packages keep the three-minute floor")
+assert.equal(uploadTimeout(100 * 1024 * 1024), 1600000, "large packages get time for a slow tunnel")
+const slowLink = new UploadRequest()
+uploadPackage('upload', { body: {}, timeout: 1600000 }, () => {}, () => slowLink)
+assert.equal(slowLink.timeout, 1600000)
 assert.doesNotMatch(AndroidAutoPage.template, /v-if="!localAccess"|Open this comma directly/)
 console.log('Remote-capable binary uploader: progress, credentials, failure, timeout and cancellation passed')
 
