@@ -66,6 +66,7 @@ class MainActivity : Activity() {
         super.onCreate(state)
         share = intent.getStringExtra("share")?.take(8192)
         AppUpdates.initialize(this)
+        AppUpdateCompletion.opened(this)
         val cm = Networks.manager(this)
         knownWifi.addAll(cm.allNetworks.filter { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true })
         // Galaxy Wi-Fi may have no internet, so do not require that capability.
@@ -79,6 +80,7 @@ class MainActivity : Activity() {
     private fun idle() = resumed && !isFinishing && web == null && ble == null && discovery == null && lanPicker == null && screen?.busy() == false
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        AppUpdateCompletion.opened(this)
         share = intent.getStringExtra("share")?.take(8192)
         connect(Networks.localOrigin(intent.getStringExtra(AppUpdates.ORIGIN_EXTRA) ?: ""))
     }

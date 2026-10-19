@@ -19,3 +19,10 @@ def test_in_app_updater_has_scoped_install_permission_and_receiver():
   assert "android.permission.REQUEST_INSTALL_PACKAGES" in permissions
   receiver = next(node for node in root.iter("receiver") if node.get(ANDROID + "name") == ".AppInstallReceiver")
   assert receiver.get(ANDROID + "exported") == "false"
+
+
+def test_update_completion_survives_replacement_without_exporting_receiver():
+  root = ET.parse(MANIFEST).getroot()
+  receiver = next(node for node in root.iter("receiver") if node.get(ANDROID + "name") == ".AppUpdateCompletion")
+  assert receiver.get(ANDROID + "exported") == "false"
+  assert {node.get(ANDROID + "name") for node in receiver.iter("action")} == {"android.intent.action.MY_PACKAGE_REPLACED"}

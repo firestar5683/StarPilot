@@ -54,7 +54,32 @@ Refused through the remote tunnel.
 
 Install: join the Galaxy hotspot, open Galaxy → **Galaxy Access & Install** →
 **Android companion**, and install the APK. Later updates install from inside
-the app.
+the app: tap **Update app** while connected over Galaxy Wi-Fi/LAN, allow
+installation from StarPilot if Android asks, and confirm the Android update dialog.
+The APK streams into Android's installer; there is no file to find in Downloads.
+After replacement, an **Update installed → Reopen** notification opens the new app.
+Enable app notifications for this prompt. If notifications are disabled, open
+StarPilot normally; the app confirms the completed update on launch.
+
+### When an APK rebuild is needed
+
+| Change | Rebuild Android APK? |
+| --- | --- |
+| Kotlin/Java code, native bridge, updater, phone GPS, Bluetooth or services | Yes |
+| Android manifest, permissions, resources, icons, Gradle config or dependencies | Yes |
+| Files in `android/app/src/main/assets/`, including `bluetooth-fetch.js` | Yes |
+| Galaxy HTML/CSS/JS used over Bluetooth | Yes: Gradle bundles `galaxy/web` into the APK |
+| Galaxy HTML/CSS/JS used over Wi-Fi/LAN | No for those connections: screens load from comma. Rebuild too if Bluetooth should get the same change |
+| Comma-side Python/services/API changes only | No, unless the phone protocol or bundled UI also needs a change |
+| iOS-only code or documentation | No |
+
+Release checklist: increment both `versionCode` and `versionName`, run relevant
+host/unit tests, then run `build_apk.sh` (release build and lint). Keep the existing
+signing key so Android can update in place and retain pairing/settings. Verify the
+APK's package ID, version and signing certificate; distribute the generated APK
+and matching `.version` together. Test an upgrade on a phone: Update, Android
+confirmation, Reopen, and retained settings. Building does not deploy to comma.
+An old app without the native updater needs one manual APK installation first.
 
 Build (JDK 17+, Android SDK 37):
 

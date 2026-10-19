@@ -28,6 +28,9 @@
         </activity>
         <receiver android:name=".BootReceiver" android:exported="false"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter></receiver>
         <receiver android:name=".AppInstallReceiver" android:exported="false" />
+        <receiver android:name=".AppUpdateCompletion" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+        </receiver>
         <service android:name=".UplinkService" android:exported="false" android:foregroundServiceType="connectedDevice" />
         <service android:name=".PhoneGpsService" android:exported="false" android:foregroundServiceType="location" />
         <service android:name=".AppUpdateJob" android:exported="true" android:permission="android.permission.BIND_JOB_SERVICE" />
