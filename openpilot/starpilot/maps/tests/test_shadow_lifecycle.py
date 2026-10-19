@@ -212,16 +212,19 @@ class TestShadowLifecycle(unittest.TestCase):
     parent_nice = os.nice(0)
     with tempfile.TemporaryDirectory() as directory:
       out = Path(directory) / 'policy'
-      script = f'import os; open({str(out)!r}, "w").write(f"{{os.nice(0)}} {{os.environ.get(\'GOMAXPROCS\')}}")'
+      env = "{os.environ.get('GOMAXPROCS')} {os.environ.get('GOMEMLIMIT')}"
+      script = f'import os; open({str(out)!r}, "w").write(f"{{os.nice(0)}} {env}")'
       child = Process(target=shadow.shadow_launcher, args=([sys.executable, '-c', script], directory, 'mapd_shadow'))
       child.start()
       child.join(10)
       self.assertEqual(child.exitcode, 0)
-      nice, procs = out.read_text().split()
+      nice, procs, limit = out.read_text().split()
     self.assertEqual(int(nice), min(parent_nice + shadow.SHADOW_NICE, 19))
     self.assertEqual(procs, shadow.SHADOW_GOMAXPROCS)
+    self.assertEqual(limit, shadow.SHADOW_GOMEMLIMIT)
     self.assertEqual(os.nice(0), parent_nice)
     self.assertNotEqual(os.environ.get('GOMAXPROCS'), shadow.SHADOW_GOMAXPROCS)
+    self.assertNotEqual(os.environ.get('GOMEMLIMIT'), shadow.SHADOW_GOMEMLIMIT)
 
   def test_exited_child_backoff_and_pending_shutdown(self):
     now = [10.0]

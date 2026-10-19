@@ -244,11 +244,14 @@ def enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
 # processors so the runtime and its GC workers stay off most cores.
 SHADOW_NICE = 10
 SHADOW_GOMAXPROCS = '2'
+# Soft heap cap about 2x the densest tile's live set; Go returns the rest to the OS.
+SHADOW_GOMEMLIMIT = '64MiB'
 
 
 def shadow_launcher(pargs: list[str], cwd: str, name: str) -> None:
   """In the forked child before exec, so every Go thread inherits it and the manager is untouched."""
   os.environ['GOMAXPROCS'] = SHADOW_GOMAXPROCS
+  os.environ['GOMEMLIMIT'] = SHADOW_GOMEMLIMIT
   try:
     os.nice(SHADOW_NICE)
   except OSError:
