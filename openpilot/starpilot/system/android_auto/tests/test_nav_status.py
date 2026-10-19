@@ -14,7 +14,11 @@ class Session:
   def __init__(self, services=(ns.NAVIGATION_SERVICE,), navigation=None):
     self.channels = [{'id': 4, 'services': [3]}, {'id': 12, 'services': list(services), 'navigation': navigation or {}}]
     self.sent = []
+    self.focus_sent = []
   def send(self, channel, kind, body=b'', control=False):
+    if channel == 0:
+      self.focus_sent.append((channel, kind, body))
+      return
     self.sent.append((channel, kind, body))
 
 
@@ -79,8 +83,8 @@ def test_distance_is_rounded_like_the_comma_card(meters, metric, expected):
 
 def test_head_unit_descriptor_is_parsed():
   raw = field(1, 500) + field(2, ns.TYPE_IMAGE) + field(3, field(1, 128) + field(2, 64) + field(3, 16))
-  assert ns.parse_navigation(raw) == {'min_interval_ms': 500, 'type': ns.TYPE_IMAGE, 'image_width': 128,
-                                      'image_height': 64, 'image_depth': 16}
+  assert ns.parse_navigation(raw) == {'min_interval_ms': 500, 'type': ns.TYPE_IMAGE, 'image_width': 64,
+                                      'image_height': 128, 'image_depth': 16}
 
 
 def test_only_head_units_offering_the_service_get_it():
@@ -196,3 +200,73 @@ def test_session_hands_the_nav_channel_to_nav_status():
   session.nav = type('N', (), {'handle': lambda self, c, k, f: got.append((c, k)) or c == 12})()
   session.handle(12, ns.CLUSTER_START, b'')
   assert got == [(12, ns.CLUSTER_START)]
+
+
+def test_focus_is_requested_before_cluster_start_and_released_at_route_end(nav):
+  stream, session, feed, now = nav
+  stream.service()
+  stream.handle(12, ns.MSG_CHANNEL_OPEN_RESPONSE, {1: [0]})
+  feed.value = GUIDING
+  tick(stream, now, 0.25)
+  assert session.focus_sent == [(0, 0x0d, b'\x08\x02')]
+  assert not any(kind == ns.NAV_TURN for _, kind, _ in session.sent)
+  stream.handle(0, 0x0e, {1: [2]})
+  stream.handle(12, ns.CLUSTER_START, {})
+  tick(stream, now)
+  tick(stream, now)
+  assert len(session.focus_sent) == 1
+  feed.value = {'state': 'routing'}
+  tick(stream, now)
+  assert len(session.focus_sent) == 1
+  feed.value = None
+  tick(stream, now)
+  assert session.focus_sent[-1] == (0, 0x0d, b'\x08\x01')
+  feed.value = GUIDING
+  tick(stream, now)
+  assert session.focus_sent[-1] == (0, 0x0d, b'\x08\x02')
+
+
+def test_native_focus_pauses_updates_and_projected_focus_resends(nav):
+  stream, session, feed, now = nav
+  start(stream, session, now)
+  feed.value = GUIDING
+  tick(stream, now)
+  session.sent.clear()
+  assert stream.handle(0, 0x0e, {1: [1]})
+  feed.value = {**GUIDING, 'distance': 100.0}
+  tick(stream, now)
+  assert session.sent == []
+  assert stream.handle(0, 0x0e, {1: [2]})
+  tick(stream, now)
+  assert [kind for _, kind, _ in session.sent] == [ns.NAV_STATUS, ns.NAV_TURN, ns.NAV_DISTANCE]
+
+
+def test_repeated_cluster_start_resends_current_guidance(nav):
+  stream, session, feed, now = nav
+  start(stream, session, now)
+  feed.value = GUIDING
+  tick(stream, now)
+  session.sent.clear()
+  stream.handle(12, ns.CLUSTER_START, {})
+  tick(stream, now)
+  assert [kind for _, kind, _ in session.sent] == [ns.NAV_STATUS, ns.NAV_TURN, ns.NAV_DISTANCE]
+
+
+def test_legacy_distance_matches_captured_phone_packet():
+  assert ns.distance_message(13925, 517, True) == bytes.fromhex('08 e5 6c 10 85 04 18 b0 6d 20 02')
+
+
+def test_non_square_cluster_image_uses_descriptor_width_and_height():
+  import io
+  from PIL import Image
+  options = ns.parse_navigation(bytes.fromhex('08 f4 03 10 01 1a 05 08 40 10 80 01'))
+  with Image.open(io.BytesIO(ns.turn_image('turn', 'left', options['image_width'], options['image_height']))) as icon:
+    assert icon.size == (128, 64)
+
+
+def test_projection_session_dispatches_navigation_focus(nav):
+  stream, _, _, _ = nav
+  session = ProjectionSession.__new__(ProjectionSession)
+  session.audio, session.mode, session.nav = None, None, stream
+  session.handle(0, 0x0e, b'\x08\x02')
+  assert stream.focus == ns.FOCUS_PROJECTED

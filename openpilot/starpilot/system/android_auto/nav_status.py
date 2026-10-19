@@ -16,6 +16,9 @@ from openpilot.starpilot.system.android_auto.wire import field, one, parse_field
 
 MSG_CHANNEL_OPEN_REQUEST = 0x07
 MSG_CHANNEL_OPEN_RESPONSE = 0x08
+NAV_FOCUS_REQUEST = 0x0d
+NAV_FOCUS_NOTIFICATION = 0x0e
+FOCUS_NATIVE, FOCUS_PROJECTED = 1, 2
 CLUSTER_START = 0x8001
 CLUSTER_STOP = 0x8002
 NAV_STATUS = 0x8003
@@ -48,8 +51,8 @@ def parse_navigation(raw: bytes) -> dict:
   """NavigationChannel: minimum interval, whether the car wants an image or an enum, and the image size."""
   fields = parse_fields(raw)
   options = parse_fields(one(fields, 3)) if isinstance(one(fields, 3), bytes) else {}
-  return {'min_interval_ms': int(one(fields, 1, 0) or 0), 'type': one(fields, 2), 'image_width': one(options, 1),
-          'image_height': one(options, 2), 'image_depth': one(options, 3)}
+  return {'min_interval_ms': int(one(fields, 1, 0) or 0), 'type': one(fields, 2), 'image_width': one(options, 2),
+          'image_height': one(options, 1), 'image_depth': one(options, 3)}
 
 
 def _normal(value: str) -> str:
@@ -192,6 +195,8 @@ class NavStatus:
     self.heard = False  # the car has said start or stop at least once
     self.next_check = 0.0
     self.next_distance = 0.0
+    self.focus_requested = False
+    self.focus = None
     self._reset()
 
   def _reset(self) -> None:
@@ -221,11 +226,22 @@ class NavStatus:
       self._set('unavailable')
     elif self.state == 'open' and now >= self.next_check:
       self.next_check = now + CHECK_EVERY
+      snap = self.feed.snapshot()
+      active = snap is not None
+      if active and not self.focus_requested:
+        self.session.send(0, NAV_FOCUS_REQUEST, field(1, FOCUS_PROJECTED))
+        self.focus_requested = True
+        self.focus = None
+        self.log('nav_focus_requested', focus=FOCUS_PROJECTED)
       if not self.started and not self.heard and now >= self.deadline:
         self.started = True
         self.log('nav_status_started', requested=False)
-      if self.started:
-        self._update(self.feed.snapshot(), now)
+      if self.started and self.focus != FOCUS_NATIVE:
+        self._update(snap, now)
+      if not active and self.focus_requested:
+        self.session.send(0, NAV_FOCUS_REQUEST, field(1, FOCUS_NATIVE))
+        self.focus_requested = False
+        self.log('nav_focus_requested', focus=FOCUS_NATIVE)
 
   def _send(self, kind: int, body: bytes) -> None:
     self.session.send(self.channel_id, kind, body)
@@ -258,6 +274,13 @@ class NavStatus:
       self.shown_distance, self.next_distance = shown, now + self.interval
 
   def handle(self, channel: int, kind: int, fields: dict) -> bool:
+    if channel == 0 and kind == NAV_FOCUS_NOTIFICATION:
+      self.focus = one(fields, 1)
+      self.log('nav_focus', focus=self.focus)
+      if self.focus == FOCUS_PROJECTED:
+        self._reset()
+        self.next_check = 0.0
+      return True
     if channel != self.channel_id:
       return False
     if kind == MSG_CHANNEL_OPEN_RESPONSE and self.state == 'opening':
@@ -269,6 +292,8 @@ class NavStatus:
         self.deadline = self.clock() + START_GRACE
     elif kind == CLUSTER_START:
       self.started, self.heard = True, True
+      self._reset()
+      self.next_check = 0.0
       self.log('nav_status_started', requested=True)
     elif kind == CLUSTER_STOP:
       self.started, self.heard = False, True
