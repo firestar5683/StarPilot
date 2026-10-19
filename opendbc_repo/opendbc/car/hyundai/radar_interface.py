@@ -51,6 +51,11 @@ RADAR_TRACK_CONFIGS = {
 
 
 def get_radar_track_config(car_fingerprint, flags: int = 0) -> RadarTrackConfig | None:
+  if (car_fingerprint == CAR.HYUNDAI_PALISADE_2023 and
+      flags & HyundaiFlags.CAN_CANFD_BLENDED and flags & HyundaiFlags.CANFD_LKA_STEERING):
+    return RadarTrackConfig(GV70_RADAR_START_ADDR, GV70_RADAR_MSG_COUNT, "palisade_210", bus=0,
+                            frequency=20, expected_length=32, dbc_name=GV70_RADAR_DBC)
+
   if car_fingerprint == CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN:
     return RadarTrackConfig(GV70_RADAR_START_ADDR, GV70_RADAR_MSG_COUNT, "gv70_210", bus=0,
                             frequency=20, expected_length=32, dbc_name=GV70_RADAR_DBC)
@@ -73,7 +78,7 @@ def radar_tracks_available(radar_config: RadarTrackConfig | None, fingerprint) -
   if radar_config is None:
     return False
 
-  if radar_config.radar_type == "gv70_210":
+  if radar_config.radar_type in ("gv70_210", "palisade_210"):
     return all(fingerprint[radar_config.bus].get(addr) == radar_config.expected_length
                for addr in range(radar_config.start_addr, radar_config.start_addr + radar_config.msg_count))
 
@@ -236,7 +241,7 @@ class RadarInterface(RadarInterfaceBase):
             del self.pts[track_key]
         continue
 
-      if radar_type == "gv70_210":
+      if radar_type in ("gv70_210", "palisade_210"):
         for i in ("1", "2"):
           track_key = addr * 2 + int(i) - 1
           valid = msg[f"{i}_STATE"] in (3, 4)

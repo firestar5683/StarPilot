@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 # PFEIFER - SLC - Modified by FrogAi
-import calendar
-import json
-import requests
-
-from concurrent.futures import ThreadPoolExecutor
-
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET
 
 from cereal import custom
-from openpilot.starpilot.common.starpilot_utilities import calculate_bearing_offset, calculate_distance_to_point, is_url_pingable
+from openpilot.starpilot.controls.lib.mapbox_speed_limit import MapboxSpeedLimit
 
-FREE_MAPBOX_REQUESTS = 100_000
+
+SOURCE_NONE = "None"
+SOURCE_DASHBOARD = "Dashboard"
+SOURCE_MAP = "Map Data"
+SOURCE_VISION = "Vision"
+SOURCE_MAPBOX = "Mapbox"
+SOURCE_PREVIOUS_LIMIT = "Previous Limit"
+REAL_SOURCES = (SOURCE_DASHBOARD, SOURCE_MAP, SOURCE_VISION, SOURCE_MAPBOX)
 
 OFFSET_MAP_IMPERIAL = [
   (0, 11.2, "speed_limit_offset1"),     # 0–24 mph
@@ -36,83 +37,90 @@ OFFSET_MAP_METRIC = [
 ]
 
 SLC_OVERRIDE_DISABLE_CLEAR_TIME = 0.75
-# Minimum set-speed increase (m/s) counted as a deliberate +/- press. Below the smallest
-# real step (1 km/h ≈ 0.28 m/s), above cluster/float jitter.
-SET_SPEED_RAISE_EPS = 0.1
+SET_SPEED_CHANGE_TOLERANCE_METERS_PER_SECOND = 0.1
+SAME_LIMIT_TOLERANCE = 1.0
 VISION_LARGE_REFERENCE_SPEED_DELTA = 30 * CV.MPH_TO_MS
 VISION_LARGE_SET_SPEED_MIN_SUPPORT = 3
 VISION_SUPPORT_SPEED_TOLERANCE = 0.5 * CV.MPH_TO_MS
+
 
 class SpeedLimitController:
   def __init__(self, StarPilotVCruise):
     self.starpilot_planner = StarPilotVCruise.starpilot_planner
     self.starpilot_toggles = None
+    self.mapbox = MapboxSpeedLimit(self.starpilot_planner.params)
 
-    self.calling_mapbox = False
-    self.override_slc = False
-    self.override_disable_timer = 0.0
-    self._prev_v_cruise = None
-    self._persistent_override_speed = 0.0
-    self._set_speed_override_input_consumed = False
+    self.source = SOURCE_NONE
+    self.target = 0.0
+    self.map_speed_limit = 0.0
+    self.next_speed_limit = 0.0
+    self.vision_limit = 0.0
+    self.overridden_speed = 0.0
 
-    self.denied_target = 0
-    self.map_speed_limit = 0
-    self.mapbox_limit = 0
-    self.next_speed_limit = 0
-    self.overridden_speed = 0
-    self.segment_distance = 0
-    self.speed_limit_changed_timer = 0
-    self.target = 0
-    self.unconfirmed_speed_limit = 0
-    self.vision_limit = 0
-
-    self.previous_source = "None"
-    self.source = "None"
+    self.last_valid_limit = max(self.starpilot_planner.params.get_float("PreviousSpeedLimit"), 0.0)
+    self.last_valid_source = SOURCE_NONE  # The persisted number has no known live source.
+    self.pending_limit = 0.0
+    self.pending_source = SOURCE_NONE
+    self.confirmation_time = 0.0
+    self.denied_limit = 0.0
     self.previous_road_name = ""
 
-    self._slc_adopt_counter = 0
-
-    mapbox_requests_raw = self.starpilot_planner.params.get("MapBoxRequests", encoding="utf-8")
-    try:
-      self.mapbox_requests = json.loads(mapbox_requests_raw or "{}")
-    except (TypeError, ValueError):
-      self.mapbox_requests = {}
-    self.mapbox_requests.setdefault("total_requests", 0)
-    self.mapbox_requests.setdefault("max_requests", FREE_MAPBOX_REQUESTS - (28 * 100))
-
-    self.mapbox_host = "https://api.mapbox.com"
-    self.mapbox_token = self.starpilot_planner.params.get("MapboxSecretKey", encoding="utf-8")
-
-    self.previous_target = self.starpilot_planner.params.get_float("PreviousSpeedLimit")
-    self.last_valid_limit = self.previous_target if self.previous_target > 0 else 0
-
-    self.executor = ThreadPoolExecutor(max_workers=1)
-    self.mapbox_future = None
-
-    self.session = requests.Session()
-    self.session.headers.update({"Accept-Language": "en"})
-    self.session.headers.update({"User-Agent": "starpilot-mapbox-speed-limit-retriever/1.0 (https://github.com/FrogAi/StarPilot)"})
+    self.set_speed_override = 0.0
+    self.pedal_override = 0.0
+    self.previous_set_speed = None
+    self.consume_set_speed_change = False
+    self.override_disable_time = 0.0
+    self.limit_change_started = False
+    self.confirmation_button_consumed = False
+    self._active_control = False
+    self._using_experimental_fallback = False
+    self._using_previous_limit_fallback = False
+    self._mode = "off"
 
   def shutdown(self):
-    self.executor.shutdown(wait=False, cancel_futures=True)
-    self.session.close()
+    self.mapbox.shutdown()
+
+  @property
+  def mapbox_limit(self):
+    return self.mapbox.limit
+
+  @property
+  def confirmation_pending(self):
+    return self.pending_limit >= 1
+
+  @property
+  def unconfirmed_speed_limit(self):
+    return self.pending_limit
+
+  @property
+  def presented_source(self):
+    if self.confirmation_pending:
+      return self.pending_source
+    if self.source in REAL_SOURCES:
+      return self.source
+    if self._using_previous_limit_fallback and self.target >= 1:
+      return self.last_valid_source if self.last_valid_source in REAL_SOURCES else SOURCE_PREVIOUS_LIMIT
+    if (self.denied_limit > 0 and self.last_valid_limit > 0 and self.target >= 1 and
+        abs(self.target - self.last_valid_limit) < SAME_LIMIT_TOLERANCE):
+      return self.last_valid_source if self.last_valid_source in REAL_SOURCES else SOURCE_PREVIOUS_LIMIT
+    return SOURCE_NONE
 
   @property
   def experimental_mode(self):
-    return self.target == 0 and bool(getattr(self.starpilot_toggles, "slc_fallback_experimental_mode", False))
+    return self._active_control and self._using_experimental_fallback
 
   @property
   def target_to_use(self):
-    if self.source == "None" and self.target > 0 and self.last_valid_limit > 0:
-      if self.target >= self.last_valid_limit:
-        return self.last_valid_limit
+    # Keep Set Speed fallback from arming an override against a higher fake limit.
+    if self.source == SOURCE_NONE and self.target > 0 and self.last_valid_limit > 0:
+      return min(self.target, self.last_valid_limit)
     return self.target
 
-  def get_offset(self, target_speed):
+  def get_offset(self, limit):
     if self.starpilot_toggles is None:
-      return 0
+      return 0.0
     offset_map = OFFSET_MAP_METRIC if self.starpilot_toggles.is_metric else OFFSET_MAP_IMPERIAL
-    return next((getattr(self.starpilot_toggles, offset) for low, high, offset in offset_map if low <= target_speed < high), 0)
+    return next((getattr(self.starpilot_toggles, name) for low, high, name in offset_map if low <= limit < high), 0.0)
 
   @property
   def offset(self):
@@ -124,458 +132,303 @@ class SpeedLimitController:
       0 < limit <= max(getattr(self.starpilot_toggles, "vision_speed_limit_low_limit_threshold", 0), 0)
     )
 
-  def _confirmation_required(self, desired_source, desired_target):
-    return desired_source != "None" and (
-      (desired_target < self.target and self.starpilot_toggles.speed_limit_confirmation_lower) or
-      (desired_target > self.target and self.starpilot_toggles.speed_limit_confirmation_higher)
-    )
+  def reset_control_state(self):
+    self._clear_pending()
+    self.clear_override()
+    self.previous_set_speed = None
+    self.consume_set_speed_change = False
+    self.override_disable_time = 0.0
+    self.limit_change_started = False
+    self.confirmation_button_consumed = False
+    self._active_control = False
+    self._using_experimental_fallback = False
+    self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
+    self.starpilot_planner.params_memory.remove("SLCAdoptSpeedLimit")
 
-  def clear_override(self):
-    self.override_slc = False
-    self.overridden_speed = 0
-    self._persistent_override_speed = 0.0
+  def _get_vision_limit(self, v_ego, sm, display_only):
+    enabled = getattr(self.starpilot_toggles, "vision_speed_limit_detection", False)
+    self.vision_limit = self.starpilot_planner.params_memory.get_float("VisionSpeedLimit") if enabled else 0.0
+    limit = self.vision_limit
+    if not display_only and self.low_vision_limit_filtered(limit):
+      return 0.0
 
-  def clear_persistent_override(self):
-    self._persistent_override_speed = 0.0
-
-  def clear_persistent_override_for_limit_change(self, previous_limit, new_limit):
-    if self._persistent_override_speed <= 0:
-      return
-    if previous_limit <= 0 or new_limit <= 0 or abs(new_limit - previous_limit) < 0.1:
-      return
-
-    new_target_with_offset = new_limit + self.get_offset(new_limit)
-    if new_limit < previous_limit or self._persistent_override_speed <= new_target_with_offset:
-      self.clear_persistent_override()
-
-  def get_mapbox_speed_limit(self, now, time_validated, v_ego, sm):
-    if not self.starpilot_planner.gps_valid or not self.mapbox_token or abs(sm["carState"].steeringAngleDeg - sm["liveParameters"].angleOffsetDeg) >= 45:
-      self.mapbox_limit = 0
-      self.segment_distance = 0
-      return
-
-    if v_ego < 1:
-      return
-
-    if self.segment_distance > 0:
-      self.segment_distance -= v_ego * DT_MDL
-      return
-
-    if self.calling_mapbox:
-      self.segment_distance = v_ego
-      return
-
-    def make_request():
-      successful = False
-      response_data = None
-      try:
-        if not is_url_pingable(self.mapbox_host):
-          self.segment_distance = 1000
-          successful = True
-          return None
-
-        if time_validated:
-          current_month = now.month
-          if current_month != self.mapbox_requests.get("month"):
-            self.mapbox_requests.update({
-              "month": current_month,
-              "total_requests": 0,
-              "max_requests": FREE_MAPBOX_REQUESTS - calendar.monthrange(now.year, current_month)[1] * 100,
-            })
-
-        self.mapbox_requests["total_requests"] += 1
-        self.starpilot_planner.params.put_nonblocking("MapBoxRequests", json.dumps(self.mapbox_requests))
-
-        current_bearing = self.starpilot_planner.gps_position.get("bearing")
-        current_latitude = self.starpilot_planner.gps_position.get("latitude")
-        current_longitude = self.starpilot_planner.gps_position.get("longitude")
-
-        future_latitude, future_longitude = calculate_bearing_offset(current_latitude, current_longitude, current_bearing, v_ego)
-
-        url = (
-          f"{self.mapbox_host}/matching/v5/mapbox/driving/"
-          f"{current_longitude},{current_latitude};"
-          f"{future_longitude},{future_latitude}.json"
-        )
-
-        mapbox_params = {
-          "access_token": self.mapbox_token,
-          "annotations": "maxspeed,distance",
-          "geometries": "polyline6",
-          "overview": "full",
-          "steps": "false",
-          "radiuses": "10;10",
-          "tidy": "true",
-        }
-
-        response = self.session.get(url, params=mapbox_params, timeout=10)
-        response.raise_for_status()
-
-        successful = True
-        response_data = response.json()
-      except Exception as exception:
-        print(f"Unexpected error in Mapbox request: {exception}")
-      finally:
-        self.calling_mapbox = False
-
-        if not successful:
-          self.mapbox_limit = 0
-          self.segment_distance = v_ego
-      return response_data
-
-    def complete_request(future):
-      try:
-        data = future.result()
-        if data:
-          matchings = data.get("matchings") or []
-          if not matchings:
-            self.mapbox_limit = 0
-            self.segment_distance = v_ego
-            return
-
-          legs = (matchings[0] or {}).get("legs") or []
-          if not legs:
-            self.mapbox_limit = 0
-            self.segment_distance = v_ego
-            return
-
-          annotation = legs[0].get("annotation") or {}
-
-          distances = annotation.get("distance") or [v_ego]
-          segment_distance = distances[0]
-
-          speed_data = annotation.get("maxspeed", [])
-          if speed_data:
-            first_segment_speed = speed_data[0]
-            try:
-              raw_speed = float(first_segment_speed.get("speed") if first_segment_speed.get("speed") != "none" else 0.0)
-            except (ValueError, TypeError):
-              raw_speed = 0.0
-            unit = first_segment_speed.get("unit", "km/h")
-            if raw_speed > 0:
-              if unit == "mph":
-                self.mapbox_limit = raw_speed * CV.MPH_TO_MS
-              else:
-                self.mapbox_limit = raw_speed * CV.KPH_TO_MS
-              self.segment_distance = segment_distance
-              return
-
-        self.mapbox_limit = 0
-        self.segment_distance = v_ego
-
-      except Exception as exception:
-        print(f"Mapbox Callback Error: {exception}")
-        self.mapbox_limit = 0
-        self.segment_distance = v_ego
-      finally:
-        self.mapbox_future = None
-
-    self.calling_mapbox = True
-    try:
-      future = self.executor.submit(make_request)
-    except RuntimeError:
-      self.calling_mapbox = False
-      self.segment_distance = v_ego
-      return
-
-    self.mapbox_future = future
-    future.add_done_callback(complete_request)
-
-  def handle_limit_change(self, desired_source, desired_target, current_road_name, v_ego, sm):
-    self.speed_limit_changed_timer += DT_MDL
-    previous_limit = self.last_valid_limit if self.last_valid_limit > 0 else self.target
-
-    long_active = sm["carControl"].longActive
-    accepted_by_accel_button = sm["starpilotCarState"].accelPressed and long_active
-    confirmation_required = self._confirmation_required(desired_source, desired_target)
-    higher_confirmation = confirmation_required and desired_target > self.target
-    speed_limit_accepted = confirmation_required and accepted_by_accel_button
-    if confirmation_required and not speed_limit_accepted and self._slc_adopt_counter % 4 == 0:
-      speed_limit_accepted = self.starpilot_planner.params_memory.get_bool("SpeedLimitAccepted")
-    if not confirmation_required:
-      self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
-      self.unconfirmed_speed_limit = 0
-    speed_limit_denied = confirmation_required and (
-      sm["starpilotCarState"].decelPressed or (self.speed_limit_changed_timer >= 30 and long_active)
-    )
-
-    if not long_active and not sm["selfdriveState"].enabled:
-      speed_limit_accepted = True
-
-    if speed_limit_accepted:
-      self.source = desired_source
-      self.target = desired_target
-      self.clear_persistent_override_for_limit_change(previous_limit, desired_target)
-      set_speed_kph = float(sm["carState"].vCruise)
-      target_with_offset = self.target + self.offset
-      if (
-        higher_confirmation
-        and long_active
-        and 0 < set_speed_kph < V_CRUISE_UNSET
-        and set_speed_kph * CV.KPH_TO_MS < target_with_offset
-      ):
-        self.starpilot_planner.params_memory.put_float("SLCForceCruiseSpeed", target_with_offset)
-      if accepted_by_accel_button and confirmation_required:
-        self._set_speed_override_input_consumed = True
-
-      self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
-
-    elif speed_limit_denied:
-      self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
-      self.denied_target = desired_target
-
-      self.previous_source = desired_source
-      self.previous_target = desired_target
-      self.previous_road_name = current_road_name
-
-    elif desired_target != self.target and not confirmation_required:
-      self.source = desired_source
-      self.target = desired_target
-      self.clear_persistent_override_for_limit_change(previous_limit, desired_target)
-
-    elif desired_target == self.target:
-      self.source = desired_source
-      self.target = desired_target
-
-    else:
-      self.source = "None"
-      self.unconfirmed_speed_limit = desired_target
-
-    if (self.target != self.previous_target or self.previous_road_name != current_road_name) and self.target > 0 and not speed_limit_denied:
-      self.denied_target = 0
-
-      self.previous_source = self.source
-      self.previous_target = self.target
-      self.previous_road_name = current_road_name
-
-      self.starpilot_planner.params.put_nonblocking("PreviousSpeedLimit", float(self.target))
-
-  def update_limits(self, dashboard_speed_limit, now, time_validated, v_cruise, v_ego, sm, display_only=False):
-    self.update_map_speed_limit(v_ego, sm)
-    vision_enabled = getattr(self.starpilot_toggles, "vision_speed_limit_detection", False)
-    self.vision_limit = self.starpilot_planner.params_memory.get_float("VisionSpeedLimit") if vision_enabled else 0
-    usable_vision_limit = self.vision_limit
-    if not display_only and self.low_vision_limit_filtered(usable_vision_limit):
-      usable_vision_limit = 0
-    # The planner clamps V_CRUISE_UNSET to V_CRUISE_MAX, so plausibility must use the raw selected speed.
     raw_set_speed_kph = float(sm["carState"].vCruise)
-    selected_set_speed = raw_set_speed_kph * CV.KPH_TO_MS if 0 < raw_set_speed_kph < V_CRUISE_UNSET else 0
-    reference_speed = selected_set_speed if selected_set_speed > 0 else max(float(v_ego), 0)
-    # vEgo jitters around zero at standstill; do not let that switch the active source.
-    if (
-      usable_vision_limit > 0 and reference_speed > 0 and not sm["carState"].standstill and
-      abs(usable_vision_limit - reference_speed) >= VISION_LARGE_REFERENCE_SPEED_DELTA
-    ):
-      support_count = self.starpilot_planner.params_memory.get_int("VisionSpeedLimitSupportCount")
-      support_speed = self.starpilot_planner.params_memory.get_float("VisionSpeedLimitSupportSpeed")
-      if support_count < VISION_LARGE_SET_SPEED_MIN_SUPPORT or abs(support_speed - usable_vision_limit) > VISION_SUPPORT_SPEED_TOLERANCE:
-        usable_vision_limit = 0
+    selected_speed = raw_set_speed_kph * CV.KPH_TO_MS if 0 < raw_set_speed_kph < V_CRUISE_UNSET else 0.0
+    reference_speed = selected_speed if selected_speed > 0 else max(float(v_ego), 0.0)
+    if (limit > 0 and reference_speed > 0 and not sm["carState"].standstill and
+        abs(limit - reference_speed) >= VISION_LARGE_REFERENCE_SPEED_DELTA):
+      memory = self.starpilot_planner.params_memory
+      count = memory.get_int("VisionSpeedLimitSupportCount")
+      support_speed = memory.get_float("VisionSpeedLimitSupportSpeed")
+      if count < VISION_LARGE_SET_SPEED_MIN_SUPPORT or abs(support_speed - limit) > VISION_SUPPORT_SPEED_TOLERANCE:
+        return 0.0
+    return limit
 
-    configured_priorities = {
-      self.starpilot_toggles.speed_limit_priority1,
-      self.starpilot_toggles.speed_limit_priority2,
-    }
-    limits = {
-      "Dashboard": dashboard_speed_limit,
-      "Map Data": self.map_speed_limit,
-    }
-    if "Vision" in configured_priorities:
-      limits["Vision"] = usable_vision_limit
-    filtered_limits = {source: limit for source, limit in limits.items() if limit >= 1}
-
-    if self.starpilot_toggles.speed_limit_priority_highest:
-      desired_source = max(filtered_limits, key=filtered_limits.get, default="None")
-      desired_target = filtered_limits.get(desired_source, 0)
-
-    elif self.starpilot_toggles.speed_limit_priority_lowest:
-      desired_source = min(filtered_limits, key=filtered_limits.get, default="None")
-      desired_target = filtered_limits.get(desired_source, 0)
-
-    elif filtered_limits:
-      for priority in [
-        self.starpilot_toggles.speed_limit_priority1,
-        self.starpilot_toggles.speed_limit_priority2
-      ]:
-        if priority in filtered_limits:
-          desired_source = priority
-          desired_target = filtered_limits[desired_source]
-          break
-      else:
-        desired_source = "None"
-        desired_target = 0
-
-    else:
-      desired_source = "None"
-      desired_target = 0
-
-    if desired_target == 0:
-      if self.mapbox_requests["total_requests"] < self.mapbox_requests["max_requests"] and self.starpilot_toggles.slc_mapbox_filler:
-        self.get_mapbox_speed_limit(now, time_validated, v_ego, sm)
-
-        if self.mapbox_limit >= 1:
-          desired_source = "Mapbox"
-          desired_target = self.mapbox_limit
-
-      if not display_only and desired_target == 0:
-        previous_vision_limit_filtered = self.previous_source == "Vision" and self.low_vision_limit_filtered(self.previous_target)
-        if self.previous_target > 0 and self.starpilot_toggles.slc_fallback_previous_speed_limit and not previous_vision_limit_filtered:
-          desired_source = self.previous_source
-          desired_target = self.previous_target
-
-          self.target = desired_target
-
-        elif sm["selfdriveState"].enabled and self.starpilot_toggles.slc_fallback_set_speed:
-          desired_source = "None"
-          desired_target = v_cruise
-    else:
-      self.mapbox_limit = 0
-      self.segment_distance = 0
-
-    if display_only:
-      self.speed_limit_changed_timer = 0
-      self.unconfirmed_speed_limit = 0
-      self.clear_override()
-
-      if desired_target >= 1:
-        self.source = desired_source
-        self.target = desired_target
-      else:
-        self.source = "None"
-        self.target = 0
-
-      return
-
-    current_road_name = sm["mapdOut"].roadName if desired_source == "Map Data" else ""
-    current_speed = self.target if (self.source != "None" and self.target > 0) else self.last_valid_limit
-
-    # Do not trigger alerts when shifting to fallback or when re-obtaining the same speed limit
-    is_fallback = desired_source == "None" or desired_target == 0
-    same_speed = desired_target > 0 and current_speed > 0 and abs(desired_target - current_speed) < 1
-    confirmation_required = self._confirmation_required(desired_source, desired_target)
-    denied_same_limit = (
-      confirmation_required and self.denied_target > 0 and
-      abs(desired_target - self.denied_target) < 1
-    )
-
-    if not denied_same_limit:
-      self.denied_target = 0
-
-    if denied_same_limit:
-      self.speed_limit_changed_timer = 0
-      self.unconfirmed_speed_limit = 0
-    elif not is_fallback and not same_speed and (abs(desired_target - self.previous_target) >= 1 or current_speed == 0):
-      self.handle_limit_change(desired_source, desired_target, current_road_name, v_ego, sm)
-    else:
-      self.speed_limit_changed_timer = 0
-      self.unconfirmed_speed_limit = 0
-      if desired_source != self.source or desired_target != self.target:
-        if not is_fallback:
-          self.clear_persistent_override_for_limit_change(current_speed, desired_target)
-        self.source = desired_source
-        self.target = desired_target
-      if desired_source != "None" and desired_target > 0:
-        self.previous_source = desired_source
-        self.previous_target = desired_target
-      if current_road_name != self.previous_road_name and current_road_name != "":
-        self.previous_road_name = current_road_name
-        self.denied_target = 0
-
-    if self.source != "None" and self.target > 0:
-      self.last_valid_limit = self.target
-
-    self._slc_adopt_counter += 1
-    if self._slc_adopt_counter % 4 == 0 and self.starpilot_planner.params_memory.get_bool("SLCAdoptSpeedLimit"):
-      self.starpilot_planner.params_memory.remove("SLCAdoptSpeedLimit")
-      if desired_target > 0:
-        self.clear_override()
-        self.denied_target = 0
-        self.source = desired_source
-        self.target = desired_target
-        self.previous_source = desired_source
-        self.previous_target = desired_target
-        self.speed_limit_changed_timer = 0
-        self.unconfirmed_speed_limit = 0
-        self.starpilot_planner.params.put_nonblocking("PreviousSpeedLimit", float(self.target))
-        self.starpilot_planner.params_memory.put_float("SLCForceCruiseSpeed", self.target + self.offset)
-
-  def update_map_speed_limit(self, v_ego, sm):
-    next_speed_limit_distance = sm["mapdOut"].nextSpeedLimitDistance
-
-    way_sel = sm["mapdOut"].waySelectionType
-    if way_sel in (custom.WaySelectionType.current,
-                   custom.WaySelectionType.extended):
-      self.map_speed_limit = sm["mapdOut"].speedLimit
-      self.next_speed_limit = sm["mapdOut"].nextSpeedLimit
-    elif way_sel in (custom.WaySelectionType.predicted,
-                     custom.WaySelectionType.possible):
-      speed = sm["mapdOut"].speedLimit
+  def _update_map_speed_limit(self, v_ego, sm):
+    map_data = sm["mapdOut"]
+    way_sel = map_data.waySelectionType
+    if way_sel in (custom.WaySelectionType.current, custom.WaySelectionType.extended):
+      self.map_speed_limit = map_data.speedLimit
+      self.next_speed_limit = map_data.nextSpeedLimit
+    elif way_sel in (custom.WaySelectionType.predicted, custom.WaySelectionType.possible):
+      speed = map_data.speedLimit
       if speed > 0 and (self.map_speed_limit == 0 or speed < self.map_speed_limit):
         self.map_speed_limit = speed
-      self.next_speed_limit = 0
+      self.next_speed_limit = 0.0
     else:
-      self.next_speed_limit = 0
+      # Explicit selection failure means the old current limit is no longer live.
+      self.map_speed_limit = 0.0
+      self.next_speed_limit = 0.0
 
     if self.next_speed_limit > 0:
       if self.map_speed_limit < self.next_speed_limit:
-        max_lookahead = self.starpilot_toggles.map_speed_lookahead_higher * v_ego
+        lookahead = self.starpilot_toggles.map_speed_lookahead_higher * v_ego
       elif self.map_speed_limit > self.next_speed_limit:
-        max_lookahead = self.starpilot_toggles.map_speed_lookahead_lower * v_ego
+        lookahead = self.starpilot_toggles.map_speed_lookahead_lower * v_ego
       else:
-        max_lookahead = 0
-
-      if next_speed_limit_distance < max_lookahead:
+        lookahead = 0.0
+      if map_data.nextSpeedLimitDistance < lookahead:
         self.map_speed_limit = self.next_speed_limit
 
-  def update_override(self, v_cruise, v_cruise_diff, v_ego, v_ego_diff, sm):
-    # Detect +/- changes on the raw set speed (button-driven, no cluster jitter). A fresh edge
-    # keeps a cleared override from re-arming while the selected speed stays high.
-    prev_v_cruise = self._prev_v_cruise
-    self._prev_v_cruise = v_cruise
-    set_speed_changed = prev_v_cruise is not None and abs(v_cruise - prev_v_cruise) > SET_SPEED_RAISE_EPS
-    set_speed_raised = prev_v_cruise is not None and v_cruise > prev_v_cruise + SET_SPEED_RAISE_EPS
-    set_speed_input_consumed = self._set_speed_override_input_consumed
-    # The button and its vCruise update can arrive in adjacent frames. Clear a consumed
-    # confirmation only after this frame has seen the speed change or button release.
-    if set_speed_input_consumed and (set_speed_changed or not sm["starpilotCarState"].accelPressed):
-      self._set_speed_override_input_consumed = False
+  def _select_limit(self, dashboard, map_limit, vision_limit):
+    priorities = (self.starpilot_toggles.speed_limit_priority1, self.starpilot_toggles.speed_limit_priority2)
+    limits = {SOURCE_DASHBOARD: dashboard, SOURCE_MAP: map_limit}
+    if SOURCE_VISION in priorities:
+      limits[SOURCE_VISION] = vision_limit
+    valid = {source: limit for source, limit in limits.items() if limit >= 1}
+    if not valid:
+      return SOURCE_NONE, 0.0
+    if self.starpilot_toggles.speed_limit_priority_highest:
+      source = max(valid, key=valid.get)
+    elif self.starpilot_toggles.speed_limit_priority_lowest:
+      source = min(valid, key=valid.get)
+    else:
+      source = next((name for name in priorities if name in valid), SOURCE_NONE)
+    return source, valid.get(source, 0.0)
 
-    if not sm["selfdriveState"].enabled:
-      self.override_disable_timer += DT_MDL
-      if self.override_disable_timer >= SLC_OVERRIDE_DISABLE_CLEAR_TIME:
-        self.clear_override()
+  def _apply_mapbox_filler(self, source, limit, now, time_validated, v_ego, sm):
+    if source != SOURCE_NONE or not self.starpilot_toggles.slc_mapbox_filler:
+      self.mapbox.reset()
+      return source, limit
+    self.mapbox.update(
+      now, time_validated, v_ego, self.starpilot_planner.gps_valid, self.starpilot_planner.gps_position,
+      sm["carState"].steeringAngleDeg, sm["liveParameters"].angleOffsetDeg,
+    )
+    if self.mapbox.limit >= 1:
+      return SOURCE_MAPBOX, self.mapbox.limit
+    return source, limit
+
+  def _apply_fallback(self, v_cruise, enabled):
+    self._using_experimental_fallback = False
+    self._using_previous_limit_fallback = False
+    previous_vision_filtered = self.last_valid_source == SOURCE_VISION and self.low_vision_limit_filtered(self.last_valid_limit)
+    if self.starpilot_toggles.slc_fallback_previous_speed_limit and self.last_valid_limit > 0 and not previous_vision_filtered:
+      self.source = self.last_valid_source
+      self.target = self.last_valid_limit
+      self._using_previous_limit_fallback = True
+    elif enabled and self.starpilot_toggles.slc_fallback_set_speed:
+      self.source = SOURCE_NONE
+      self.target = v_cruise
+    else:
+      self.source = SOURCE_NONE
+      self.target = 0.0
+      self._using_experimental_fallback = bool(self.starpilot_toggles.slc_fallback_experimental_mode)
+
+  def _confirmation_required(self, limit):
+    current = self.last_valid_limit
+    return ((limit < current and self.starpilot_toggles.speed_limit_confirmation_lower) or
+            (limit > current and self.starpilot_toggles.speed_limit_confirmation_higher))
+
+  def _clear_pending(self):
+    self.pending_limit = 0.0
+    self.pending_source = SOURCE_NONE
+    self.confirmation_time = 0.0
+
+  def _reconcile_set_speed_override(self, old_limit, new_limit):
+    if self.set_speed_override <= 0 or old_limit <= 0 or new_limit <= 0 or abs(new_limit - old_limit) < 0.1:
+      return
+    if (new_limit < old_limit or
+        self.set_speed_override <= new_limit + self.get_offset(new_limit) + SET_SPEED_CHANGE_TOLERANCE_METERS_PER_SECOND):
+      self.set_speed_override = 0.0
+      self.overridden_speed = self.pedal_override
+
+  def _accept_limit(self, source, limit, *, persist=True):
+    assert source in REAL_SOURCES and limit >= 1
+    old_limit = self.last_valid_limit
+    self._reconcile_set_speed_override(old_limit, limit)
+    self.source = source
+    self.target = limit
+    self.last_valid_limit = limit
+    self.last_valid_source = source
+    self.denied_limit = 0.0
+    self._clear_pending()
+    if persist and abs(limit - old_limit) >= 0.1:
+      self.starpilot_planner.params.put_nonblocking("PreviousSpeedLimit", float(limit))
+
+  def _reject_limit(self, limit):
+    self.denied_limit = limit
+    self.source = SOURCE_NONE
+    self._clear_pending()
+    self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
+
+  def _update_limit(self, source, limit, sm):
+    road_name = sm["mapdOut"].roadName if source == SOURCE_MAP else ""
+    if road_name and road_name != self.previous_road_name:
+      self.denied_limit = 0.0
+      self.previous_road_name = road_name
+
+    if source == SOURCE_NONE:
+      self._clear_pending()
+      self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
       return
 
-    self.override_disable_timer = 0.0
+    current = self.last_valid_limit
+    if current > 0 and abs(limit - current) < SAME_LIMIT_TOLERANCE:
+      self._accept_limit(source, limit, persist=False)
+      self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
+      return
 
-    target_to_use = self.target_to_use
-    target_with_offset = target_to_use + self.get_offset(target_to_use)
+    confirmation_required = self._confirmation_required(limit)
+    if self.denied_limit > 0 and abs(limit - self.denied_limit) < SAME_LIMIT_TOLERANCE:
+      if confirmation_required:
+        self._clear_pending()
+        self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
+        self.source = SOURCE_NONE
+        return
+      # Turning confirmation off applies the already-announced candidate.
+      self._accept_limit(source, limit)
+      self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
+      return
+    self.denied_limit = 0.0
 
-    set_speed = v_cruise + v_cruise_diff
-    bidirectional_set_speed = getattr(self.starpilot_toggles, "redneck_cruise", False)
-
-    if self._persistent_override_speed > 0:
-      if bidirectional_set_speed:
-        if set_speed <= 0:
-          self.clear_persistent_override()
-        else:
-          self._persistent_override_speed = set_speed
-      elif set_speed <= 0 or (target_with_offset > 0 and set_speed <= target_with_offset and (self.source != "None" or set_speed_changed)):
-        self.clear_persistent_override()
-      else:
-        self._persistent_override_speed = set_speed
-    elif (
-      target_with_offset > 0
-      and set_speed > 0
-      and not set_speed_input_consumed
-      and ((bidirectional_set_speed and set_speed_changed) or (not bidirectional_set_speed and set_speed_raised and set_speed > target_with_offset))
-    ):
-      self._persistent_override_speed = set_speed
-
-    if sm["carState"].gasPressed and v_ego > target_with_offset > 0:
-      self.override_slc = True
-      self.overridden_speed = v_ego + v_ego_diff
-    elif self._persistent_override_speed > 0:
-      self.override_slc = True
-      self.overridden_speed = self._persistent_override_speed
+    if self.pending_limit == 0 or abs(limit - self.pending_limit) >= SAME_LIMIT_TOLERANCE:
+      self.pending_limit = limit
+      self.pending_source = source
+      self.confirmation_time = 0.0
+      self.limit_change_started = True
+      new_pending = True
     else:
-      self.clear_override()
+      self.pending_source = source
+      new_pending = False
+
+    if not confirmation_required:
+      self._accept_limit(source, limit)
+      self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
+      return
+
+    self.source = SOURCE_NONE
+    self.confirmation_time += DT_MDL
+    long_active = sm["carControl"].longActive
+    accel_accept = bool(sm["starpilotCarState"].accelPressed and long_active)
+    if new_pending and accel_accept:
+      # This press cannot confirm a candidate that was replaced on this frame.
+      self.confirmation_button_consumed = True
+      self.consume_set_speed_change = True
+    memory = self.starpilot_planner.params_memory
+    ui_accept = memory.get_bool("SpeedLimitAccepted")
+    if ui_accept:
+      memory.remove("SpeedLimitAccepted")
+
+    fully_disengaged = not long_active and not sm["selfdriveState"].enabled
+    if ((accel_accept or ui_accept) and not new_pending) or fully_disengaged:
+      pending_limit, pending_source = self.pending_limit, self.pending_source
+      higher = pending_limit > current
+      self._accept_limit(pending_source, pending_limit)
+      if accel_accept:
+        self.consume_set_speed_change = True
+        self.confirmation_button_consumed = True
+      set_speed_kph = float(sm["carState"].vCruise)
+      target_with_offset = self.target + self.offset
+      if (higher and long_active and 0 < set_speed_kph < V_CRUISE_UNSET and
+          set_speed_kph * CV.KPH_TO_MS < target_with_offset):
+        memory.put_float("SLCForceCruiseSpeed", target_with_offset)
+    elif sm["starpilotCarState"].decelPressed or (self.confirmation_time >= 30 and long_active):
+      self._reject_limit(self.pending_limit)
+
+  def _process_adopt_request(self, source, limit):
+    memory = self.starpilot_planner.params_memory
+    if not memory.get_bool("SLCAdoptSpeedLimit"):
+      return
+    memory.remove("SLCAdoptSpeedLimit")
+    if source not in REAL_SOURCES or limit < 1:
+      return
+    self.clear_override()
+    self.consume_set_speed_change = True
+    self._accept_limit(source, limit)
+    memory.put_float("SLCForceCruiseSpeed", self.target + self.offset)
+
+  def clear_override(self):
+    self.set_speed_override = 0.0
+    self.pedal_override = 0.0
+    self.overridden_speed = 0.0
+
+  def _update_override(self, v_cruise, v_cruise_diff, v_ego, v_ego_diff, sm):
+    previous = self.previous_set_speed
+    self.previous_set_speed = v_cruise
+    changed = previous is not None and abs(v_cruise - previous) > SET_SPEED_CHANGE_TOLERANCE_METERS_PER_SECOND
+    raised = previous is not None and v_cruise > previous + SET_SPEED_CHANGE_TOLERANCE_METERS_PER_SECOND
+    consumed = self.consume_set_speed_change
+    if consumed and (changed or not sm["starpilotCarState"].accelPressed):
+      self.consume_set_speed_change = False
+
+    if not sm["selfdriveState"].enabled:
+      self.override_disable_time += DT_MDL
+      if self.override_disable_time >= SLC_OVERRIDE_DISABLE_CLEAR_TIME:
+        self.clear_override()
+      return
+    self.override_disable_time = 0.0
+
+    target = self.target_to_use
+    target_with_offset = target + self.get_offset(target)
+    set_speed = v_cruise + v_cruise_diff
+    bidirectional = getattr(self.starpilot_toggles, "redneck_cruise", False)
+    if self.set_speed_override > 0:
+      if bidirectional:
+        self.set_speed_override = max(set_speed, 0.0)
+      elif set_speed <= 0 or (target_with_offset > 0 and set_speed <= target_with_offset and
+                              (self.source != SOURCE_NONE or changed)):
+        self.set_speed_override = 0.0
+      else:
+        self.set_speed_override = set_speed
+    elif (target_with_offset > 0 and set_speed > 0 and not consumed and
+          ((bidirectional and changed) or (not bidirectional and raised and set_speed > target_with_offset))):
+      self.set_speed_override = set_speed
+
+    self.pedal_override = v_ego + v_ego_diff if sm["carState"].gasPressed and v_ego > target_with_offset > 0 else 0.0
+    self.overridden_speed = self.pedal_override or self.set_speed_override
+
+  def update(self, dashboard_speed_limit, now, time_validated, v_cruise, v_cruise_diff, v_ego, v_ego_diff, sm,
+             *, active=True, display_only=False):
+    self.limit_change_started = False
+    self.confirmation_button_consumed = False
+    self._using_experimental_fallback = False
+    self._using_previous_limit_fallback = False
+    mode = "display" if display_only else "active" if active else "off"
+    if mode != self._mode:
+      self.mapbox.reset()
+      self._mode = mode
+    if not active and not display_only:
+      self.reset_control_state()
+      self.mapbox.reset()
+      self.source, self.target = SOURCE_NONE, 0.0
+      self.map_speed_limit = self.next_speed_limit = self.vision_limit = 0.0
+      return
+
+    self._update_map_speed_limit(v_ego, sm)
+    vision_limit = self._get_vision_limit(v_ego, sm, display_only)
+    source, limit = self._select_limit(dashboard_speed_limit, self.map_speed_limit, vision_limit)
+    source, limit = self._apply_mapbox_filler(source, limit, now, time_validated, v_ego, sm)
+
+    if display_only:
+      self.reset_control_state()
+      self.source, self.target = (source, limit) if limit >= 1 else (SOURCE_NONE, 0.0)
+      return
+
+    self._active_control = True
+    if source == SOURCE_NONE:
+      self._update_limit(source, limit, sm)
+      self._apply_fallback(v_cruise, sm["selfdriveState"].enabled)
+    else:
+      self._update_limit(source, limit, sm)
+    self._process_adopt_request(source, limit)
+    self._update_override(v_cruise, v_cruise_diff, v_ego, v_ego_diff, sm)

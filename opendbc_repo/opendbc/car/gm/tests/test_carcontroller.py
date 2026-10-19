@@ -70,6 +70,7 @@ from opendbc.car.gm.carcontroller import (
   supports_bolt_acc_pedal_friction_experiment,
   supports_volt_auto_hold,
   supports_volt_one_pedal,
+  update_bolt_acc_pedal_stop_hold,
   use_interceptor_sng_launch,
 )
 from opendbc.car.gm.gmcan import get_friction_brake_mode
@@ -312,6 +313,150 @@ def test_fixed_stopping_brake_stays_enabled_for_normal_acc_path():
   assert not should_use_fixed_stopping_brake(CP, False, True, False)
   assert not should_use_fixed_stopping_brake(CP, True, False, False)
   assert not should_use_fixed_stopping_brake(CP, True, True, True)
+
+
+def _bolt_stop_hold_case():
+  CP = SimpleNamespace(
+    carFingerprint=CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL,
+    openpilotLongitudinalControl=True,
+    enableGasInterceptorDEPRECATED=True,
+    flags=GMFlags.PEDAL_LONG.value,
+  )
+  CC = SimpleNamespace(
+    longActive=True,
+    actuators=SimpleNamespace(longControlState=structs.CarControl.Actuators.LongControlState.stopping),
+    cruiseControl=SimpleNamespace(resume=False),
+  )
+  CS = SimpleNamespace(out=SimpleNamespace(standstill=False, gasPressed=False, brakePressed=False))
+  return CP, CC, CS
+
+
+def test_bolt_pedal_stop_hold_preserves_approach_until_standstill():
+  CP, CC, CS = _bolt_stop_hold_case()
+  assert not update_bolt_acc_pedal_stop_hold(CP, CC, CS, False)
+  CS.out.standstill = True
+  assert update_bolt_acc_pedal_stop_hold(CP, CC, CS, False)
+
+
+def test_bolt_pedal_stop_hold_stays_latched_when_grade_creep_clears_standstill():
+  CP, CC, CS = _bolt_stop_hold_case()
+  CS.out.standstill = True
+  holding = update_bolt_acc_pedal_stop_hold(CP, CC, CS, False)
+  CS.out.standstill = False
+  assert update_bolt_acc_pedal_stop_hold(CP, CC, CS, holding)
+
+
+@pytest.mark.parametrize("release", ["long_off", "pid", "starting", "off", "resume", "gas", "brake"])
+def test_bolt_pedal_stop_hold_releases_for_launch_or_driver_takeover(release):
+  CP, CC, CS = _bolt_stop_hold_case()
+  CS.out.standstill = True
+  if release == "long_off":
+    CC.longActive = False
+  elif release in ("pid", "starting", "off"):
+    CC.actuators.longControlState = getattr(structs.CarControl.Actuators.LongControlState, release)
+  elif release == "resume":
+    CC.cruiseControl.resume = True
+  elif release == "gas":
+    CS.out.gasPressed = True
+  else:
+    CS.out.brakePressed = True
+  assert not update_bolt_acc_pedal_stop_hold(CP, CC, CS, True)
+
+
+@pytest.mark.parametrize("platform", [
+  CAR.CHEVROLET_BOLT_ACC_2022_2023,
+  CAR.CHEVROLET_BOLT_CC_2022_2023,
+  CAR.CHEVROLET_BOLT_CC_2018_2021,
+  CAR.CHEVROLET_BOLT_CC_2017,
+  CAR.CHEVROLET_VOLT,
+  CAR.CHEVROLET_MALIBU_HYBRID_CC,
+  CAR.CHEVROLET_SILVERADO,
+])
+def test_bolt_pedal_stop_hold_does_not_change_other_profiles(platform):
+  CP, CC, CS = _bolt_stop_hold_case()
+  CP.carFingerprint = platform
+  CS.out.standstill = True
+  assert not update_bolt_acc_pedal_stop_hold(CP, CC, CS, True)
+
+
+@pytest.mark.parametrize("disabled", ["long", "pedal", "flag"])
+def test_bolt_pedal_stop_hold_requires_active_pedal_long_configuration(disabled):
+  CP, CC, CS = _bolt_stop_hold_case()
+  CS.out.standstill = True
+  if disabled == "long":
+    CP.openpilotLongitudinalControl = False
+  elif disabled == "pedal":
+    CP.enableGasInterceptorDEPRECATED = False
+  else:
+    CP.flags = 0
+  assert not update_bolt_acc_pedal_stop_hold(CP, CC, CS, True)
+
+
+def test_bolt_pedal_sender_zeros_stopped_offset_without_changing_brake_fade(monkeypatch):
+  import opendbc.car.gm.carcontroller as controller_module
+
+  monkeypatch.setattr(controller_module, "Params", lambda: SimpleNamespace(get_bool=lambda _key: False, get=lambda _key: None))
+  CP = structs.CarParams()
+  CP.carFingerprint = CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL
+  CP.openpilotLongitudinalControl = True
+  CP.enableGasInterceptorDEPRECATED = True
+  CP.flags = GMFlags.PEDAL_LONG.value
+  CP.networkLocation = CarParams.NetworkLocation.fwdCamera
+  CP.transmissionType = CarParams.TransmissionType.direct
+  CP.mass = 1669.0
+  CP.wheelbase = 2.63779
+  CP.vEgoStarting = 0.35
+  CP.vEgoStopping = 0.25
+  CP.stopAccel = -0.25
+  CP.radarUnavailable = True
+  CP.longitudinalTuning.kpBP = [0.0]
+  CP.longitudinalTuning.kpV = [0.095]
+  CP.longitudinalTuning.kiBP = [0.0]
+  CP.longitudinalTuning.kiV = [0.07]
+  controller = CarController({}, CP)
+  controller.frame = 0
+
+  state = structs.CarState()
+  state.vEgo = 0.2
+  state.gearShifter = structs.CarState.GearShifter.drive
+  state.cruiseState.available = True
+  CS = SimpleNamespace(
+    out=state.as_reader(), auto_hold_armed=False, auto_hold_engaged=False, auto_hold_drive_time=0.0,
+    one_pedal_drive_time=0.0, regen_release_timer=0.0, loopback_lka_steering_cmd_updated=False,
+    loopback_lka_steering_cmd_ts_nanos=0, cam_lka_steering_cmd_counter=0, pt_lka_steering_cmd_counter=0,
+    pcm_acc_status=AccState.OFF, buttons_counter=0, cruise_buttons=0,
+    pscm_status={key: 0 for key in ("HandsOffSWDetectionMode", "HandsOffSWlDetectionStatus", "LKATorqueDeliveredStatus",
+                                  "LKADriverAppldTrq", "LKATorqueDelivered", "LKATotalTorqueDelivered", "RollingCounter", "PSCMStatusChecksum")},
+  )
+  control = structs.CarControl()
+  control.enabled = True
+  control.longActive = True
+  control.actuators.accel = -0.253
+  control.actuators.longControlState = structs.CarControl.Actuators.LongControlState.stopping
+  toggles = SimpleNamespace(volt_sng=False)
+
+  def send():
+    controller.frame = (controller.frame + 3) // 4 * 4
+    _, frames = controller.update(control.as_reader(), CS, 2_000_000_000 + controller.frame * 10_000_000, toggles)
+    pedal = next(dat for address, dat, _bus in frames if address == 0x200)
+    brake = next(dat for address, dat, _bus in frames if address == 0x315)
+    assert brake[0] & 0xF == 0 and brake[1] == 0
+    return bool(pedal[4] & 0x80)
+
+  assert send()
+  state.vEgo = 0.05
+  state.standstill = True
+  CS.out = state.as_reader()
+  assert not send()
+  assert controller.pedal_steady == 0.0
+  state.vEgo = 0.244
+  state.standstill = False
+  CS.out = state.as_reader()
+  assert not send()
+  control.actuators.longControlState = structs.CarControl.Actuators.LongControlState.starting
+  control.actuators.accel = 0.55
+  assert send()
+  assert not controller.bolt_acc_pedal_stop_hold
 
 
 def test_stock_cancel_is_suppressed_when_acc_is_faulted():

@@ -77,14 +77,15 @@ def _open_picker(menu, rect, slot_index=0):
   assert menu.state == FavoriteRadialMenu.STATE_PICKER
 
 
-def _menu(clock, options=None):
+def _menu(clock, options=None, cache_render_texture=None):
   params = FakeParams()
   memory = FakeParams()
   options = options or [
     {"key": "FeatureToggle", "label": "Feature Toggle", "description": "The primary test setting.", "section": "Testing"},
     {"key": "OtherToggle", "label": "Other Toggle", "description": "Another test setting.", "section": "Testing"},
   ]
-  return FavoriteRadialMenu(params, memory, lambda: options, clock=lambda: clock[0]), params, memory
+  return FavoriteRadialMenu(params, memory, lambda: options, clock=lambda: clock[0],
+                            cache_render_texture=cache_render_texture), params, memory
 
 
 def test_radial_menu_opens_from_corner_tap_and_arranges_three_slots_on_an_arc():
@@ -114,6 +115,50 @@ def test_corner_hint_keeps_visible_ring_near_content_corner():
   assert center.x - ring_radius == rect.x + edge_margin
   assert rect.y + rect.height - center.y - ring_radius == edge_margin
   assert menu._contains(menu._corner_touch_zone_for(rect), center)
+
+
+def test_corner_hint_caches_idle_and_pressed_art(monkeypatch):
+  clock = [0.0]
+  cached = {}
+  requests = []
+  geometry = []
+  draws = []
+  blend_modes = []
+
+  def cache(key, width, height, render):
+    requests.append((key, width, height, render))
+    return cached.get(key)
+
+  menu, _params, _memory = _menu(clock, cache_render_texture=cache)
+  menu._rect = rl.Rectangle(0, 0, 2160, 1080)
+  monkeypatch.setattr(FavoriteRadialMenu, "_draw_corner_hint_geometry",
+                      staticmethod(lambda *args: geometry.append(args)))
+  monkeypatch.setattr(rl, "draw_texture_pro", lambda *args: draws.append(args))
+  monkeypatch.setattr(rl, "begin_blend_mode", blend_modes.append)
+  monkeypatch.setattr(rl, "end_blend_mode", lambda: None)
+
+  menu._draw_corner_hint()
+  idle_key, width, height, render_idle = requests[-1]
+  assert idle_key == "favorite-corner-hint:150:idle"
+  assert (width, height) == (150, 150)
+  assert geometry == [(1.0, False, 0, 1080)]  # Original drawing remains the cache-miss fallback.
+
+  render_idle()
+  assert geometry[-1] == (1.0, False, 0.0, 150.0)  # Cached art is drawn in local texture coordinates.
+
+  texture = object()
+  cached[idle_key] = texture
+  menu._draw_corner_hint()
+  assert len(geometry) == 2
+  assert draws[-1][0] is texture
+  destination = draws[-1][2]
+  assert (destination.x, destination.y, destination.width, destination.height) == (0, 930, 150, 150)
+  assert blend_modes == [rl.BlendMode.BLEND_ALPHA_PREMULTIPLY]
+
+  menu._corner_press = object()
+  menu._draw_corner_hint()
+  assert requests[-1][0] == "favorite-corner-hint:150:pressed"
+  assert geometry[-1] == (1.0, True, 0, 1080)
 
 
 def test_radial_menu_opens_from_diagonal_inward_swipe_and_auto_collapses_after_six_seconds():

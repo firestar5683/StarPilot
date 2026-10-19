@@ -1223,3 +1223,19 @@ msgstr "✓ SUSCRITO"
 #, python-format
 msgid "🔥 Firehose Mode 🔥"
 msgstr "🔥 Modo Firehose 🔥"
+
+#: selfdrive/ui/layouts/settings/starpilot/maps.py
+msgid "Auto: Off"
+msgstr "Auto: No"
+
+#: selfdrive/ui/layouts/settings/starpilot/maps.py
+msgid "Auto: Weekly"
+msgstr "Auto: Semanal"
+
+#: selfdrive/ui/layouts/settings/starpilot/maps.py
+msgid "Auto: Monthly"
+msgstr "Auto: Mensual"
+
+#: selfdrive/ui/onroad/starpilot/navigation_card.py
+msgid "Then"
+msgstr "Luego"

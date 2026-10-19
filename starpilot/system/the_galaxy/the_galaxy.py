@@ -3762,6 +3762,23 @@ def _get_detected_truck_tuning():
     return False
 
 
+def _get_effective_car_make(stored_make):
+  if isinstance(stored_make, bytes):
+    stored_make = stored_make.decode("utf-8", errors="replace")
+  if str(stored_make or "").strip().lower() not in ("", "mock"):
+    return stored_make
+  cp_bytes = _safe_params_get_live_raw("CarParamsPersistent")
+  if cp_bytes:
+    try:
+      with car.CarParams.from_bytes(cp_bytes) as cp:
+        if cp.brand and cp.brand != "mock":
+          make_key = str(cp.carFingerprint).split("_", 1)[0]
+          return next((make for make in FINGERPRINT_MAKE_LABELS if make.lower() == make_key.lower()), cp.brand.title())
+    except Exception:
+      pass
+  return stored_make
+
+
 def _get_effective_legacy_custom_accel_curve(
   ev_tuning: bool, truck_tuning: bool, *, acceleration_profile=None, custom_enabled: bool | None = None,
 ) -> list[float]:
@@ -6724,6 +6741,12 @@ def setup(app):
       if key == "RivianAngleControl":
         response["message"] = "Rivian steering mode updated. The safe channel handoff is in progress."
       updated = {}
+      if key in {
+        "BelowSteerSpeedVolume", "DisengageVolume", "EngageVolume", "PromptVolume",
+        "PromptDistractedVolume", "RefuseVolume", "WarningImmediateVolume", "WarningSoftVolume",
+      }:
+        _, value_types = _get_param_type_info()
+        updated[key] = _get_current_param_value(key, value_types.get(key, int), _get_default_param_values())
       if key in PANDA_FIRMWARE_TOGGLE_KEYS:
         threading.Thread(target=_flash_panda_then_reboot, daemon=True).start()
         response["message"] = f"Parameter '{key}' updated successfully. Panda flashing started; device will reboot when finished."
@@ -6767,6 +6790,8 @@ def setup(app):
     if request_key == "IsRHD" and not params.get_bool("IsRHDOverride"):
       return ("1" if params.get_bool("IsRhdDetected") else "0"), 200
     value = params.get(request_key) or ""
+    if request_key == "CarMake":
+      return _get_effective_car_make(value), 200
     if request_key in ("Model", "DrivingModel"):
       if isinstance(value, bytes):
         value = value.decode("utf-8", errors="replace")
@@ -6807,6 +6832,7 @@ def setup(app):
       except Exception:
         result[key] = None
 
+    result["CarMake"] = _get_effective_car_make(result.get("CarMake"))
     result["TeslaCANWakeAvailable"] = supports_tesla_can_wake(params)
     result["HasRadar"] = _get_has_radar()
     result["VehicleParked"] = _get_vehicle_parked()
@@ -10540,7 +10566,7 @@ def setup(app):
 
     for raw_key in _params_raw.all_keys():
       key = raw_key.decode() if isinstance(raw_key, bytes) else str(raw_key)
-      if key in EXCLUDED_KEYS:
+      if key in EXCLUDED_KEYS or key in ("CarMake", "CarModel", "CarModelName"):
         continue
 
       default_value = _params_raw.get_default_value(raw_key)

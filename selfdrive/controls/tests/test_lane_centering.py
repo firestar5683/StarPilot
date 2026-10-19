@@ -139,18 +139,59 @@ def test_offset_is_reduced_in_narrow_lane():
   assert np.isclose(at_safe_limit, above_safe_limit)
 
 
-def test_confident_e2e_path_can_fully_break_in():
-  model = _model(left=-1.0, right=2.6, model_y=0.0, path_std=0.1)
+@pytest.mark.parametrize("direction", [-1.0, 1.0])
+def test_confident_e2e_path_retains_bounded_lane_correction(direction):
+  model = _model(left=-2.4, right=2.4, model_y=direction * 0.6, path_std=0.1)
   _, lane_authority = _converge(model, authority=0.0)
   _, e2e_authority = _converge(model, authority=1.0)
-  assert lane_authority > 0.0
-  assert abs(e2e_authority) < 1e-9
+  assert lane_authority * direction < 0.0
+  assert e2e_authority == pytest.approx(0.2 * lane_authority)
+
+
+@pytest.mark.parametrize("direction", [-1.0, 1.0])
+def test_e2e_retains_more_lane_correction_near_boundary(direction):
+  model = _model(model_y=direction * 0.8, path_std=0.1)
+  _, lane_authority = _converge(model, authority=0.0)
+  _, e2e_authority = _converge(model, authority=1.0)
+  assert e2e_authority == pytest.approx(0.5 * lane_authority)
+
+
+def test_e2e_boundary_authority_blends_continuously():
+  fractions = []
+  for clearance in np.linspace(1.55, 1.05, 101):
+    model = _model(left=-2.4, right=2.4, model_y=-2.4 + clearance)
+    lane_valid, lane_authority = LaneCenteringController._raw_correction(model, _V_EGO, 0.0, 0.0)
+    e2e_valid, e2e_authority = LaneCenteringController._raw_correction(model, _V_EGO, 0.0, 1.0)
+    assert lane_valid and e2e_valid
+    fractions.append(e2e_authority / lane_authority)
+  assert fractions[0] == pytest.approx(0.2)
+  assert fractions[-1] == pytest.approx(0.5)
+  assert np.all(np.diff(fractions) >= -1e-9)
+  assert np.max(np.diff(fractions)) < 0.004
+
+
+@pytest.mark.parametrize("line", [1, 2])
+def test_e2e_boundary_correction_requires_both_lane_lines(line):
+  model = _model(model_y=-0.8)
+  assert _update(LaneCenteringController(), model) > 0.0
+  model.laneLineProbs[line] = 0.59
+  assert _update(LaneCenteringController(), model) == 0.0
+
+
+@pytest.mark.parametrize("direction", [-1.0, 1.0])
+def test_e2e_boundary_correction_remains_capped_and_yields_to_driver(direction):
+  model = _model(model_y=direction * 2.0)
+  controller, output = _converge(model)
+  assert output * direction < 0.0
+  assert abs(output) <= 0.004 * 0.30
+  assert _update(controller, model, driver_override=True) == 0.0
 
 
 def test_uncertain_e2e_path_does_not_break_in():
   model = _model(left=-1.0, right=2.6, model_y=0.0, path_std=0.6)
+  _, lane_only = _converge(model, authority=0.0)
   _, output = _converge(model, authority=1.0)
-  assert output > 0.0
+  assert output == pytest.approx(lane_only)
 
 
 def test_e2e_authority_blends_lane_correction():

@@ -301,6 +301,18 @@ def create_es_infotainment(packer, frame, es_infotainment_msg, visual_alert, bus
   return packer.make_can_msg("ES_Infotainment", bus, values)
 
 
+def create_ascent_lkas_alert(raw_dat: bytes, lateral_active: bool, visual_alert):
+  address = 0x3C4
+  if len(raw_dat) != 8 or raw_dat[0] != (((address & 0xff) + (address >> 8) + sum(raw_dat[1:])) & 0xff):
+    return None
+
+  dat = bytearray(raw_dat)
+  if lateral_active and visual_alert != VisualAlert.steerRequired and dat[2:] == b"\x00\x01\x04\x00\x00\x00":
+    dat[3:5] = b"\x00\x00"
+    dat[0] = ((address & 0xff) + (address >> 8) + sum(dat[1:])) & 0xff
+  return address, bytes(dat), CanBus.main
+
+
 def create_es_highbeamassist(packer):
   values = {
     "HBA_Available": False,

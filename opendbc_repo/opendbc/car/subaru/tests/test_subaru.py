@@ -682,6 +682,28 @@ def test_ascent_angle_controller_reengages_immediately_after_manual_steering_sto
   assert CS.out.steeringAngleDeg < parser.vl["ES_LKAS_ANGLE"]["LKAS_Output"] < CC.actuators.steeringAngleDeg
 
 
+def test_ascent_reentry_rate_uses_last_transmitted_angle():
+  CP = CarInterface.get_non_essential_params(CAR.SUBARU_ASCENT_2023)
+  controller = CarController({}, CP)
+  controller.angle_handoff_active = True
+  CC = SimpleNamespace(enabled=True, latActive=True, actuators=SimpleNamespace(steeringAngleDeg=-1.45))
+  CS = SimpleNamespace(out=SimpleNamespace(
+    vEgoRaw=30.3, steeringAngleDeg=0.78, steeringRateDeg=-1.5, steeringTorque=56.0,
+    gearShifter=structs.CarState.GearShifter.drive, standstill=False,
+  ))
+  parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("ES_LKAS_ANGLE", 0)], CanBus.main)
+
+  parser.update([(1, [controller.lateral_angle(CC, CS)])])
+  assert parser.vl["ES_LKAS_ANGLE"]["LKAS_Request"] == 0
+  assert parser.vl["ES_LKAS_ANGLE"]["LKAS_Output"] == pytest.approx(0.78)
+
+  CS.out.steeringAngleDeg = 0.74
+  CS.out.steeringRateDeg = -1.99
+  parser.update([(2, [controller.lateral_angle(CC, CS)])])
+  assert parser.vl["ES_LKAS_ANGLE"]["LKAS_Request"] == 1
+  assert parser.vl["ES_LKAS_ANGLE"]["LKAS_Output"] == pytest.approx(0.53, abs=0.01)
+
+
 def test_ascent_angle_controller_waits_for_parking_lot_safety_envelope():
   CP = CarInterface.get_non_essential_params(CAR.SUBARU_ASCENT_2023)
   controller = CarController({}, CP)
@@ -855,6 +877,151 @@ def test_ascent_hud_waits_for_angle_request():
   assert not controller._lkas_status_active(CC)
   controller.angle_lkas_active = True
   assert controller._lkas_status_active(CC)
+
+
+@pytest.mark.parametrize("platform", list(CAR))
+def test_secondary_lkas_alert_is_detected_only_on_ascent(platform):
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[CanBus.camera][0x3C4] = 8
+  CP = CarInterface.get_params(platform, fingerprint, [], False, False, False, None)
+  expected = platform == CAR.SUBARU_ASCENT_2023
+  assert bool(CP.flags & SubaruFlags.ASCENT_LKAS_ALERT) == expected
+  assert bool(CP.safetyConfigs[0].safetyParam & SubaruSafetyFlags.ASCENT_LKAS_ALERT) == expected
+  assert (0x3C4 in CarState.get_can_parsers(CP)[Bus.cam].addresses) == expected
+
+
+@pytest.mark.parametrize("bus,length", [(0, 8), (1, 8), (2, 4), (2, 16)])
+def test_ascent_secondary_alert_requires_native_camera_frame(bus, length):
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[bus][0x3C4] = length
+  CP = CarInterface.get_params(CAR.SUBARU_ASCENT_2023, fingerprint, [], False, False, False, None)
+  assert not CP.flags & SubaruFlags.ASCENT_LKAS_ALERT
+  assert not CP.safetyConfigs[0].safetyParam & SubaruSafetyFlags.ASCENT_LKAS_ALERT
+
+
+@pytest.mark.parametrize("active,visual_alert,masked", [
+  (True, structs.CarControl.HUDControl.VisualAlert.none, True),
+  (False, structs.CarControl.HUDControl.VisualAlert.none, False),
+  (True, structs.CarControl.HUDControl.VisualAlert.steerRequired, False),
+  (True, structs.CarControl.HUDControl.VisualAlert.fcw, True),
+])
+def test_ascent_secondary_hands_on_payload_is_filtered_only_during_active_lateral(active, visual_alert, masked):
+  raw = bytes.fromhex("ce02000104000000")
+  address, dat, bus = subarucan.create_ascent_lkas_alert(raw, active, visual_alert)
+  assert address == 0x3C4
+  assert bus == CanBus.main
+  assert dat[1] == raw[1]
+  assert dat[0] == ((address & 0xff) + (address >> 8) + sum(dat[1:])) & 0xff
+  assert dat[2:] == (bytes(6) if masked else raw[2:])
+
+
+@pytest.mark.parametrize("payload", [
+  "000000000000", "000000110000", "000000100000", "1e0030000000",
+  "000704000000", "000000010000", "1b0002000000", "000002000000",
+  "0e0000000000", "190000100000", "1c0704000000", "190000110000",
+  "190000000000", "190000010000", "010104000000", "000604000000",
+])
+def test_ascent_secondary_alert_preserves_other_alerts_and_opaque_data(payload):
+  raw = bytearray(bytes.fromhex("0000" + payload))
+  raw[0] = (0xc4 + 3 + sum(raw[1:])) & 0xff
+  assert subarucan.create_ascent_lkas_alert(bytes(raw), True, structs.CarControl.HUDControl.VisualAlert.none)[1] == raw
+
+
+@pytest.mark.parametrize("raw", [b"", bytes(7), bytes(9), bytes.fromhex("0002000104000000")])
+def test_ascent_secondary_alert_does_not_transmit_invalid_data(raw):
+  assert subarucan.create_ascent_lkas_alert(raw, True, structs.CarControl.HUDControl.VisualAlert.none) is None
+
+
+def test_ascent_secondary_alert_uses_fresh_camera_counter_and_actual_angle_request():
+  CP = CarInterface.get_non_essential_params(CAR.SUBARU_ASCENT_2023)
+  CP.flags |= SubaruFlags.ASCENT_LKAS_ALERT.value
+  controller = CarController({}, CP)
+  CC = SimpleNamespace(latActive=True, hudControl=SimpleNamespace(visualAlert=structs.CarControl.HUDControl.VisualAlert.none))
+  CS = SimpleNamespace(es_lkas_alert_dat=bytes.fromhex("ce02000104000000"))
+  assert controller._ascent_lkas_alert(CC, CS)[1] == CS.es_lkas_alert_dat
+  assert controller._ascent_lkas_alert(CC, CS) is None
+
+  controller.angle_lkas_active = True
+  for counter in (3, 15, 0):
+    dat = bytearray(CS.es_lkas_alert_dat)
+    dat[1] = counter
+    dat[0] = (0xc4 + 3 + sum(dat[1:])) & 0xff
+    CS.es_lkas_alert_dat = bytes(dat)
+    msg = controller._ascent_lkas_alert(CC, CS)
+    assert msg[1][1] == counter
+    assert msg[1][2:] == bytes(6)
+    assert controller._ascent_lkas_alert(CC, CS) is None
+
+
+@pytest.mark.parametrize("platform", [CAR.SUBARU_ASCENT, CAR.SUBARU_OUTBACK_2023, CAR.SUBARU_LEGACY_2025, CAR.SUBARU_CROSSTREK_2025])
+def test_secondary_alert_controller_does_not_touch_other_subarus(platform):
+  CP = CarInterface.get_non_essential_params(platform)
+  CP.flags |= SubaruFlags.ASCENT_LKAS_ALERT.value
+  controller = CarController({}, CP)
+  assert controller._ascent_lkas_alert(None, None) is None
+
+
+@pytest.mark.parametrize("platform", [CAR.SUBARU_ASCENT_2023, CAR.SUBARU_OUTBACK_2023, CAR.SUBARU_LEGACY_2025,
+                                      CAR.SUBARU_CROSSTREK_2025, CAR.SUBARU_ASCENT])
+def test_stock_cruise_cancel_fresh_frame_gate_is_ascent_angle_only(platform):
+  CP = CarInterface.get_non_essential_params(platform)
+  controller = CarController({}, CP)
+  CC = structs.CarControl()
+  CC.cruiseControl.cancel = True
+  CS = SimpleNamespace(
+    out=structs.CarState(),
+    es_distance_msg=defaultdict(int, COUNTER=11),
+    es_dashstatus_msg=defaultdict(int),
+    es_lkas_state_msg=defaultdict(int),
+    es_infotainment_msg=defaultdict(int),
+  )
+  toggles = SimpleNamespace(subaru_sng=False)
+  cancel_messages = []
+  for frame in range(5):
+    _, sends = controller.update(CC.as_reader(), CS, frame * 10_000_000, toggles)
+    cancel_messages.extend(msg for msg in sends if msg[0] == 0x221)
+
+  assert len(cancel_messages) == (1 if platform == CAR.SUBARU_ASCENT_2023 else 5)
+  assert all(msg[2] == (CanBus.alt if CP.flags & SubaruFlags.GLOBAL_GEN2 else CanBus.main) for msg in cancel_messages)
+  parser = CANParser(DBC[platform][Bus.pt], [("ES_Distance", 0)], cancel_messages[0][2])
+  parser.update([(1, [cancel_messages[0]])])
+  assert parser.vl["ES_Distance"]["COUNTER"] == 12
+  assert parser.vl["ES_Distance"]["Cruise_Cancel"] == 1
+  assert parser.vl["ES_Distance"]["Cruise_Throttle"] == 1818
+
+
+def test_ascent_cancel_uses_fresh_stock_frames_and_handles_counter_rollover():
+  CP = CarInterface.get_non_essential_params(CAR.SUBARU_ASCENT_2023)
+  controller = CarController({}, CP)
+  CC = structs.CarControl()
+  CC.latActive = True
+  CS = SimpleNamespace(
+    out=structs.CarState(vEgoRaw=24.04, steeringAngleDeg=2.93, gearShifter="drive"),
+    es_distance_msg=defaultdict(int, COUNTER=14),
+    es_dashstatus_msg=defaultdict(int),
+    es_lkas_state_msg=defaultdict(int),
+    es_infotainment_msg=defaultdict(int),
+  )
+  CS.out.cruiseState.available = True
+  toggles = SimpleNamespace(subaru_sng=False)
+  parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("ES_Distance", 0)], CanBus.alt)
+  cancel_counters = []
+  for frame, (stock_counter, cancel) in enumerate([
+    (14, False), (14, True), (15, True), (15, True), (0, True), (0, True),
+    (1, False), (1, True), (2, True),
+  ]):
+    CS.es_distance_msg["COUNTER"] = stock_counter
+    CC.cruiseControl.cancel = cancel
+    _, sends = controller.update(CC.as_reader(), CS, frame * 10_000_000, toggles)
+    cancel_messages = [msg for msg in sends if msg[0] == 0x221]
+    assert len(cancel_messages) <= 1
+    if cancel_messages:
+      parser.update([(frame + 1, cancel_messages)])
+      cancel_counters.append(parser.vl["ES_Distance"]["COUNTER"])
+      assert parser.vl["ES_Distance"]["Cruise_Cancel"] == 1
+      assert parser.vl["ES_Distance"]["Cruise_Throttle"] == 1818
+
+  assert cancel_counters == [0, 1, 3]
 
 
 def test_other_angle_cars_keep_lateral_status_behavior():

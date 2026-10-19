@@ -29,6 +29,9 @@ class CarState(CarStateBase):
 
     self.distance_button = 0
     self.lc_button = 0
+    self.cancel_button = False
+    self.cancel_resume_pressed = False
+    self.cancel_resume_is_cancel = False
     self.lkas_available = False
     self.lateral_motion_control = None
     self.lateral_control_status = None
@@ -156,6 +159,14 @@ class CarState(CarStateBase):
     prev_lc_button = self.lc_button
     self.distance_button = cp.vl["Steering_Data_FD1"]["AccButtnGapTogglePress"]
     self.lc_button = bool(cp.vl["Steering_Data_FD1"]["TjaButtnOnOffPress"])
+    prev_cancel_button = self.cancel_button
+    cancel_resume_pressed = bool(cp.vl["Steering_Data_FD1"]["CcAslButtnCnclResPress"])
+    if cancel_resume_pressed and not self.cancel_resume_pressed:
+      self.cancel_resume_is_cancel = ret.cruiseState.available and ret.cruiseState.enabled
+    self.cancel_resume_pressed = cancel_resume_pressed
+    self.cancel_button = bool(cp.vl["Steering_Data_FD1"]["CcAslButtnCnclPress"]) or (
+      cancel_resume_pressed and self.cancel_resume_is_cancel
+    )
 
     # lock info
     ret.doorOpen = any([cp.vl["BodyInfo_3_FD1"]["DrStatDrv_B_Actl"], cp.vl["BodyInfo_3_FD1"]["DrStatPsngr_B_Actl"],
@@ -183,10 +194,13 @@ class CarState(CarStateBase):
       except KeyError:
         self.lateral_motion_control = None
 
-    ret.buttonEvents = [
+    button_events = [
       *create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise}),
       *create_button_events(self.lc_button, prev_lc_button, {1: ButtonType.lkas}),
     ]
+    if self.CP.openpilotLongitudinalControl:
+      button_events += create_button_events(self.cancel_button, prev_cancel_button, {1: ButtonType.cancel})
+    ret.buttonEvents = button_events
 
     fp_ret = custom.StarPilotCarState.new_message()
     fp_ret.brakeLights = ret.brakePressed

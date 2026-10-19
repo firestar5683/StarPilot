@@ -331,6 +331,7 @@ class Device:
     self._screen_timeout = 30
     self._screen_timeout_onroad = 30
     self._standby_mode = False
+    self._keep_screen_on_gpu_loading = False
     self._last_status = ui_state.status
     self._screen_offset = self._screen_offset_onroad = 0
     self._wake_keys = frozenset()
@@ -396,6 +397,7 @@ class Device:
       self._screen_timeout,
       self._screen_timeout_onroad,
       self._standby_mode,
+      self._keep_screen_on_gpu_loading,
       self._screen_offset,
       self._screen_offset_onroad,
       self._wake_keys,
@@ -408,6 +410,7 @@ class Device:
       self._screen_timeout = self._params.get_int("ScreenTimeout", return_default=True)
       self._screen_timeout_onroad = self._params.get_int("ScreenTimeoutOnroad", return_default=True)
       self._standby_mode = self._params.get_bool("StandbyMode")
+      self._keep_screen_on_gpu_loading = self._params.get_bool("KeepScreenOnGpuLoading")
       self._screen_offset = brightness_preferences(self._params, "ScreenBrightness")["offset"]
       self._screen_offset_onroad = brightness_preferences(self._params, "ScreenBrightnessOnroad")["offset"]
       self._wake_keys = frozenset(enabled_wake_keys(self._params))
@@ -417,6 +420,7 @@ class Device:
       self._screen_timeout = 30
       self._screen_timeout_onroad = 30
       self._standby_mode = False
+      self._keep_screen_on_gpu_loading = False
       self._screen_offset = self._screen_offset_onroad = 0
       self._wake_keys = frozenset()
 
@@ -428,6 +432,7 @@ class Device:
       self._screen_timeout,
       self._screen_timeout_onroad,
       self._standby_mode,
+      self._keep_screen_on_gpu_loading,
       self._screen_offset,
       self._screen_offset_onroad,
       self._wake_keys,
@@ -491,6 +496,7 @@ class Device:
                       "StandbyWakeButton" in self._wake_keys and "button" in input_events)
     wake_for_onroad_event = (ui_state.started and self._standby_mode and self._screen_brightness_onroad != 0 and
                              (selected_status_change or self._visible_onroad_alert() or selected_turn_signal))
+    keep_on_for_gpu_loading = self._keep_screen_on_gpu_loading and ui_state.started and ui_state.usbgpu_loading
 
     counter = screen_off_toggle_counter(ui_state.params_memory)
     presses = counter - self._screen_off_counter
@@ -507,7 +513,8 @@ class Device:
     elif touched or wake_for_onroad_event or "StandbyWakeCriticalAlert" in self._active_standby_alerts():
       self._screen_off = False
 
-    if ignition_state_changed or touched or button_pressed or wake_for_onroad_event or presses > 0 or (was_screen_off and not self._screen_off):
+    if (ignition_state_changed or touched or button_pressed or wake_for_onroad_event or keep_on_for_gpu_loading or
+        presses > 0 or (was_screen_off and not self._screen_off)):
       self._reset_interactive_timeout()
 
     interaction_timeout = time.monotonic() > self._interaction_time

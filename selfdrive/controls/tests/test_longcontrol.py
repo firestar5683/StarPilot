@@ -6,6 +6,10 @@ import pytest
 import openpilot.selfdrive.controls.lib.longcontrol as longcontrol
 import openpilot.selfdrive.controls.lib.longcontrol_vehicle_tunes as vehicle_tunes
 from opendbc.car.gm.values import CAR, GMFlags
+from opendbc.car import gen_empty_fingerprint
+from opendbc.car.hyundai.interface import CarInterface as HyundaiCarInterface
+from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
+from opendbc.car.ford.values import CAR as FORD_CAR
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR
 from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN_CAR
@@ -42,6 +46,105 @@ def make_longcontrol_cp(**overrides):
     setattr(CP, key, value)
 
   return CP
+
+
+@pytest.mark.parametrize("speed", [0.0, 5.0, 12.0, 25.0])
+def test_ray_pedal_feedback_corrects_acceleration_error_and_resets_on_disengage(speed):
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0][0x201] = 6
+  fingerprint[0][0x391] = 8
+  fingerprint[2][0x485] = 8
+  CP = HyundaiCarInterface.get_params(HYUNDAI_CAR.KIA_RAY_EV, fingerprint, [], False, False, False, None)
+  controller = LongControl(CP)
+  CS = car.CarState.new_message(vEgo=speed, aEgo=0.2)
+  toggles = make_toggles()
+  first = controller.update(True, CS, 1.0, False, (-3.5, 2.0), toggles)
+  for _ in range(200):
+    output = controller.update(True, CS, 1.0, False, (-3.5, 2.0), toggles)
+  assert output > first > 1.0
+  assert controller.pid.i > 0.0
+  assert output <= 2.0
+
+  assert controller.update(False, CS, 0.0, False, (-3.5, 2.0), toggles) == 0.0
+  assert controller.pid.i == 0.0
+  CS.aEgo = 0.4
+  assert controller.update(True, CS, 0.0, False, (-3.5, 2.0), toggles) < 0.0
+
+
+@pytest.mark.parametrize("speed,target,expected", ((2.4, -1.18, -1.33), (1.6, -1.03, -1.18), (0.7, -0.83, -0.98)))
+def test_mach_e_moving_light_stop_follows_easing_target(speed, target, expected):
+  CP = make_longcontrol_cp(brand="ford", carFingerprint=FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.stopping
+  lc.last_output_accel = -2.0
+  CS = car.CarState.new_message(vEgo=speed, aEgo=target)
+  output = lc.update(True, CS, target, True, (-3.5, 2.0), make_toggles(stopAccel=-2.0))
+  assert lc.long_control_state == LongCtrlState.stopping
+  assert output == pytest.approx(expected)
+  assert output <= target - 0.15
+
+
+@pytest.mark.parametrize("speed,target,has_lead,should_stop", (
+  (0.0, -0.2, False, True),
+  (0.1, -0.2, False, True),
+  (3.0, -0.8, False, True),
+  (1.0, -1.5, False, True),
+  (1.0, -3.5, False, True),
+  (1.0, -0.8, True, True),
+  (1.0, -0.8, False, False),
+  (1.0, 0.2, False, True),
+))
+def test_mach_e_stop_tune_preserves_hold_urgent_and_lead_braking(speed, target, has_lead, should_stop):
+  CP = make_longcontrol_cp(brand="ford", carFingerprint=FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  tune = vehicle_tunes.LongControlVehicleTuning(CP)
+  expected = min(-2.0, target) if should_stop and 0.1 < speed < 3.0 and target <= -1.5 else -2.0
+  assert tune.shape_stopping_accel(-2.0, target, should_stop, speed, has_lead, -2.0) == expected
+
+
+def test_mach_e_stop_tune_does_not_ignore_raw_lead_or_change_other_fords():
+  CP = make_longcontrol_cp(brand="ford", carFingerprint=FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  tune = vehicle_tunes.LongControlVehicleTuning(CP)
+  lead = SimpleNamespace(status=True, dRel=4.0, vLead=0.0)
+  assert tune.shape_stopping_accel(-2.0, -0.8, True, 1.0, False, -2.0, leads=(lead,)) == -2.0
+
+  for fingerprint in FORD_CAR:
+    if fingerprint != FORD_CAR.FORD_MUSTANG_MACH_E_MK1:
+      CP.carFingerprint = fingerprint
+      tune = vehicle_tunes.LongControlVehicleTuning(CP)
+      assert tune.shape_stopping_accel(-2.0, -0.8, True, 1.0, False, -2.0) == -2.0
+
+
+@pytest.mark.parametrize("initial_speed", (0.5, 1.0, 2.4))
+@pytest.mark.parametrize("actuator_lag", (0.15, 0.3))
+def test_mach_e_gentle_light_stop_finishes_and_holds(initial_speed, actuator_lag):
+  CP = make_longcontrol_cp(brand="ford", carFingerprint=FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.stopping
+  lc.last_output_accel = -1.2
+  speed, acceleration, distance = initial_speed, -1.2, 0.0
+  toggles = make_toggles(stopAccel=-2.0)
+  for _ in range(800):
+    target = -min(1.2, max(0.3, 0.8 * speed + 0.15))
+    CS = car.CarState.new_message(vEgo=float(speed), aEgo=float(acceleration))
+    output = lc.update(True, CS, target, True, (-3.5, 2.0), toggles)
+    assert output < 0.0
+    acceleration += DT_CTRL / (actuator_lag + DT_CTRL) * (output - acceleration)
+    distance += speed * DT_CTRL
+    speed = max(0.0, speed + acceleration * DT_CTRL)
+  assert speed == 0.0
+  assert distance < 4.5
+  assert output == pytest.approx(-2.0, abs=0.01)
+
+
+def test_mach_e_soft_stop_immediately_honors_urgent_target():
+  CP = make_longcontrol_cp(brand="ford", carFingerprint=FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.stopping
+  lc.last_output_accel = -2.0
+  CS = car.CarState.new_message(vEgo=1.0, aEgo=-0.8)
+  toggles = make_toggles(stopAccel=-2.0)
+  assert lc.update(True, CS, -0.8, True, (-3.5, 2.0), toggles) == pytest.approx(-0.95)
+  assert lc.update(True, CS, -3.5, True, (-3.5, 2.0), toggles, has_lead=True) == -3.5
 
 
 class TestLongControlStateTransition:
@@ -556,6 +659,66 @@ def test_update_releases_stopping_on_small_sustained_positive_target():
   )
 
   assert lc.long_control_state == LongCtrlState.starting
+
+
+def test_corolla_holds_stop_until_close_lead_moves():
+  CP = make_longcontrol_cp(
+    brand="toyota",
+    carFingerprint=TOYOTA_CAR.TOYOTA_COROLLA_TSS2,
+  )
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.stopping
+  CS = car.CarState.new_message(vEgo=0.0, aEgo=0.0, brakePressed=False)
+  CS.cruiseState.standstill = False
+  lead = SimpleNamespace(status=True, dRel=6.2, yRel=0.0, vLead=0.1)
+
+  for _ in range(40):
+    output_accel = lc.update(
+      active=True,
+      CS=CS,
+      a_target=0.18,
+      should_stop=False,
+      accel_limits=(-3.0, 2.0),
+      starpilot_toggles=make_toggles(),
+      has_lead=True,
+      leads=(lead, None),
+    )
+    assert lc.long_control_state == LongCtrlState.stopping
+    assert output_accel <= 0.0
+
+  lead.vLead = 0.6
+  lc.update(
+    active=True,
+    CS=CS,
+    a_target=0.18,
+    should_stop=False,
+    accel_limits=(-3.0, 2.0),
+    starpilot_toggles=make_toggles(),
+    has_lead=True,
+    leads=(lead, None),
+  )
+  assert lc.long_control_state == LongCtrlState.pid
+
+
+def test_non_corolla_releases_stop_with_stopped_lead_as_before():
+  CP = make_longcontrol_cp(brand="honda")
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.stopping
+  CS = car.CarState.new_message(vEgo=0.0, aEgo=0.0, brakePressed=False)
+  CS.cruiseState.standstill = False
+  lead = SimpleNamespace(status=True, dRel=6.2, yRel=0.0, vLead=0.1)
+
+  lc.update(
+    active=True,
+    CS=CS,
+    a_target=0.18,
+    should_stop=False,
+    accel_limits=(-3.0, 2.0),
+    starpilot_toggles=make_toggles(),
+    has_lead=True,
+    leads=(lead, None),
+  )
+  assert lc.long_control_state == LongCtrlState.pid
 
 
 def test_corolla_tss2_stop_release_ramps_positive_target():

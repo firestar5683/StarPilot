@@ -221,6 +221,14 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
       break;
     // **** 0xdd: get healthpacket and CANPacket versions
     case 0xdd:
+#ifdef STM32H7
+      if (req->param1 == SPI_CAN_REPLAY_CAPABILITY) {
+        if (req->param2 == 1U) spi_can_replay_reset();
+        resp[0] = 1U;
+        resp_len = 1;
+        break;
+      }
+#endif
       resp[0] = HEALTH_PACKET_VERSION;
       resp[1] = CAN_PACKET_VERSION;
       resp[2] = CAN_HEALTH_PACKET_VERSION;

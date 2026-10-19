@@ -1,5 +1,7 @@
 import json
 import sys
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -786,6 +788,38 @@ def test_reset_defaults_requires_confirmed_offroad_without_side_effects(monkeypa
   assert params.writes == []
   assert toggle_updates == []
   assert reboots == []
+
+
+def test_reset_defaults_preserves_detected_vehicle_for_vehicle_settings(monkeypatch):
+  client, params = _client(monkeypatch, {
+    "CarMake": "Ford", "CarModel": "FORD_MUSTANG_MACH_E_MK1", "CarModelName": "Mustang Mach-E",
+    "FordHandsFreeCluster": True,
+  })
+  monkeypatch.setattr(params, "all_keys", lambda: ["CarMake", "CarModel", "CarModelName", "FordHandsFreeCluster"], raising=False)
+  monkeypatch.setattr(params, "get_default_value", lambda key: "mock" if key == "CarMake" else False, raising=False)
+  monkeypatch.setattr(the_galaxy, "_params_raw", params)
+  monkeypatch.setattr(the_galaxy, "update_starpilot_toggles", lambda: None)
+  monkeypatch.setattr(the_galaxy.HARDWARE, "reboot", lambda: None)
+
+  assert client.post("/api/toggles/reset_default").status_code == 200
+  assert params.values["CarMake"] == "Ford"
+  assert params.values["CarModel"] == "FORD_MUSTANG_MACH_E_MK1"
+  assert params.values["CarModelName"] == "Mustang Mach-E"
+  assert params.values["FordHandsFreeCluster"] is False
+
+
+def test_vehicle_make_recovers_from_persistent_car_params_after_reset(monkeypatch):
+  @contextmanager
+  def ford_params(_):
+    yield SimpleNamespace(brand="ford", carFingerprint="FORD_MUSTANG_MACH_E_MK1")
+
+  client, params = _client(monkeypatch, {"CarMake": "mock", "CarParamsPersistent": b"saved-ford-params"})
+  monkeypatch.setattr(the_galaxy, "_safe_params_get_live_raw", lambda key, default=None, block=False: params.values.get(key, default))
+  monkeypatch.setattr(the_galaxy.car.CarParams, "from_bytes", ford_params)
+
+  assert the_galaxy._get_effective_car_make("mock") == "Ford"
+  assert the_galaxy._get_effective_car_make("Toyota") == "Toyota"
+  assert client.get("/api/params/all").get_json()["CarMake"] == "Ford"
 
 
 @pytest.mark.parametrize("device_state", [

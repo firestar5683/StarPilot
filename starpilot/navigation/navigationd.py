@@ -203,7 +203,8 @@ class Navigationd:
       "now": now,
     }
 
-  def _maybe_recompute(self, route: NavigationRoute | None, destination: dict[str, object] | None, progress: RouteProgress | None, route_state: dict[str, object] | None) -> None:
+  def _maybe_recompute(self, route: NavigationRoute | None, destination: dict[str, object] | None,
+                       progress: RouteProgress | None, route_state: dict[str, object] | None) -> None:
     if route is None or destination is None or progress is None or route_state is None:
       return
 
@@ -301,6 +302,7 @@ class Navigationd:
 
     state = {
       "valid": True,
+      "updatedAtMonotonic": monotonic(),
       "maneuverModifier": str(payload.get("maneuverModifier") or ""),
       "maneuverType": str(payload.get("maneuverType") or ""),
       "laneCount": len(lanes),

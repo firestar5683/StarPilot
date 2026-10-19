@@ -76,6 +76,7 @@ class ModelRenderer(Widget):
     self._adjacent_path_vertices = [np.empty((0, 2), dtype=np.float32), np.empty((0, 2), dtype=np.float32)]
     # Outer path polygon for edge rendering
     self._track_edge_vertices = np.empty((0, 2), dtype=np.float32)
+    self._path_edge_width = 0.0
 
     # Initialize ModelPoints objects
     self._path = ModelPoints()
@@ -147,22 +148,25 @@ class ModelRenderer(Widget):
       self._rainbow_path.update(max(sm['carState'].vEgo, 0.0))
     render_lead_indicator = self._should_render_lead_indicator(radar_state)
 
-    # Update model data when needed
+    # Update model and lead data
     model_updated = sm.updated['modelV2']
-    if model_updated or sm.updated['radarState'] or self._transform_dirty:
-      if model_updated:
-        self._update_raw_points(model)
+    transform_dirty = self._transform_dirty
 
-      path_x_array = self._path.raw_points[:, 0]
-      if path_x_array.size == 0:
-        return
+    if model_updated:
+      self._update_raw_points(model)
 
+    path_x_array = self._path.raw_points[:, 0]
+    if path_x_array.size == 0:
+      return
+
+    if model_updated or transform_dirty:
       self._update_model(lead_one, path_x_array)
-      if render_lead_indicator:
-        self._update_leads(radar_state, path_x_array)
-        if sm.valid.get("starpilotRadarState", False):
-          self._update_adjacent_leads(sm["starpilotRadarState"], path_x_array)
       self._transform_dirty = False
+
+    if render_lead_indicator and (sm.updated['radarState'] or model_updated or transform_dirty):
+      self._update_leads(radar_state, path_x_array)
+      if sm.valid.get("starpilotRadarState", False):
+        self._update_adjacent_leads(sm["starpilotRadarState"], path_x_array)
 
     self._lead_text_rects = []
     self._adjacent_lead_text_rects = []
@@ -231,8 +235,12 @@ class ModelRenderer(Widget):
     """Update model visualization data based on model message"""
     model_ui_enabled = self._params.get_bool('ModelUI', default=True)
     custom_path_width, pw = self._param_float_changed('PathWidth', DEFAULT_PATH_WIDTH) if model_ui_enabled else (False, DEFAULT_PATH_WIDTH)
-    custom_lane_line_width, llw = self._param_float_changed('LaneLinesWidth', DEFAULT_LANE_LINES_WIDTH) if model_ui_enabled else (False, DEFAULT_LANE_LINES_WIDTH)
-    custom_road_edge_width, rew = self._param_float_changed('RoadEdgesWidth', DEFAULT_ROAD_EDGES_WIDTH) if model_ui_enabled else (False, DEFAULT_ROAD_EDGES_WIDTH)
+    custom_lane_line_width, llw = (
+      self._param_float_changed('LaneLinesWidth', DEFAULT_LANE_LINES_WIDTH) if model_ui_enabled else (False, DEFAULT_LANE_LINES_WIDTH)
+    )
+    custom_road_edge_width, rew = (
+      self._param_float_changed('RoadEdgesWidth', DEFAULT_ROAD_EDGES_WIDTH) if model_ui_enabled else (False, DEFAULT_ROAD_EDGES_WIDTH)
+    )
     custom_path_edge_width, pew = self._param_float_changed('PathEdgeWidth', DEFAULT_PATH_EDGE_WIDTH) if model_ui_enabled else (False, DEFAULT_PATH_EDGE_WIDTH)
 
     path_width = self._path_width_to_half_m(pw) if custom_path_width else 0.9
@@ -250,18 +258,19 @@ class ModelRenderer(Widget):
       else:
         path_width *= 0.50
 
+    self._path_edge_width = path_width * path_edge_width_pct
+
     unclipped_max_distance = np.clip(path_x_array[-1], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE)
     unclipped_max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], unclipped_max_distance)
 
-    # Update lane lines using raw points
-    for i, lane_line in enumerate(self._lane_lines):
-      lane_line.projected_points = self._map_line_to_polygon(
-        lane_line.raw_points, lane_line_width_m * self._lane_line_probs[i], 0.0, unclipped_max_idx, unclipped_max_distance, clip_by_lead=True
-      )
-
-    # Update road edges using raw points
-    for road_edge in self._road_edges:
-      road_edge.projected_points = self._map_line_to_polygon(road_edge.raw_points, road_edge_width_m, 0.0, unclipped_max_idx, unclipped_max_distance, clip_by_lead=True)
+    # Update lane lines and road edges using batched projection
+    lines = [*self._lane_lines, *self._road_edges]
+    widths = [lane_line_width_m * prob for prob in self._lane_line_probs] + [road_edge_width_m] * len(self._road_edges)
+    polygons = self._map_lines_to_polygons(
+      [line.raw_points for line in lines], widths, 0.0, unclipped_max_idx, unclipped_max_distance, clip_by_lead=True
+    )
+    for line, polygon in zip(lines, polygons, strict=True):
+      line.projected_points = polygon
 
     # Update path using raw points
     max_distance = unclipped_max_distance
@@ -581,7 +590,7 @@ class ModelRenderer(Widget):
         text_lines.append(f"{distance_string} {lead_distance_unit} (Desired: {desired_distance})")
       else:
         text_lines.append(f"{distance_string} {lead_distance_unit}")
-      
+
       text_lines.append(f"{speed_string}{lead_speed_unit}")
 
       v_ego = max(ui_state.sm["carState"].vEgo, 0.0)
@@ -839,15 +848,72 @@ class ModelRenderer(Widget):
 
     return (x, y)
 
-  def _map_line_to_polygon(self, line: np.ndarray, y_off: float, z_off: float, max_idx: int, max_distance: float, allow_invert: bool = True, clip_by_lead: bool = False) -> np.ndarray:
-    """Convert 3D line to 2D polygon for rendering."""
+  def _get_active_leads(self) -> list[tuple[str, object]]:
+    active_leads = []
+    sm = ui_state.sm
+    if sm.valid.get("radarState", False):
+      rs = sm["radarState"]
+      if rs.leadOne and rs.leadOne.status:
+        active_leads.append(("ego", rs.leadOne))
+      if rs.leadTwo and rs.leadTwo.status:
+        active_leads.append(("ego", rs.leadTwo))
+    if sm.valid.get("starpilotRadarState", False):
+      srs = sm["starpilotRadarState"]
+      if srs.leadLeft and srs.leadLeft.status:
+        active_leads.append(("left", srs.leadLeft))
+      if srs.leadRight and srs.leadRight.status:
+        active_leads.append(("right", srs.leadRight))
+    return active_leads
+
+  def _clip_line_by_lead(self, points: np.ndarray, active_leads: list[tuple[str, object]]) -> np.ndarray:
+    if not active_leads or points.shape[0] == 0:
+      return points
+
+    x = points[:, 0]
+    y = points[:, 1]
+    clipped_mask = np.zeros(len(points), dtype=bool)
+
+    for lead_type, lead in active_leads:
+      lead_x = lead.dRel
+      lead_y = -lead.yRel
+      y_limit = 5.0 if lead_type == "ego" else 1.8
+      in_box = (x >= lead_x - 1.5) & (x <= lead_x + 5.0) & (y >= lead_y - y_limit) & (y <= lead_y + y_limit)
+      clipped_mask |= in_box
+
+    indices = np.where(clipped_mask)[0]
+    if indices.size > 0:
+      first_clip_idx = indices[0]
+      if first_clip_idx > 0:
+        p_prev = points[first_clip_idx - 1]
+        p_curr = points[first_clip_idx]
+
+        best_lead_x = None
+        for lead_type, lead in active_leads:
+          lead_x = lead.dRel
+          lead_y = -lead.yRel
+          y_limit = 5.0 if lead_type == "ego" else 1.8
+          if (lead_x - 1.5) <= p_curr[0] <= (lead_x + 5.0) and (lead_y - y_limit) <= p_curr[1] <= (lead_y + y_limit):
+            best_lead_x = lead_x
+            break
+
+        if best_lead_x is not None:
+          x_clip = best_lead_x - 1.5
+          x0, x1 = p_prev[0], p_curr[0]
+          if x1 > x0:
+            t = (x_clip - x0) / (x1 - x0)
+            y_clip = p_prev[1] + t * (p_curr[1] - p_prev[1])
+            z_clip = p_prev[2] + t * (p_curr[2] - p_prev[2])
+            interp_pt = np.array([x_clip, y_clip, z_clip], dtype=points.dtype)
+            return np.concatenate((points[:first_clip_idx], interp_pt[None, :]), axis=0)
+        return points[:first_clip_idx]
+      return np.empty((0, 3), dtype=points.dtype)
+    return points
+
+  def _prepare_line_points(self, line: np.ndarray, max_idx: int, max_distance: float, active_leads: list[tuple[str, object]] | None = None) -> np.ndarray:
     if line.shape[0] == 0:
-      return np.empty((0, 2), dtype=np.float32)
+      return np.empty((0, 3), dtype=np.float32)
 
-    # Slice points and filter non-negative x-coordinates
     points = line[:max_idx + 1]
-
-    # Interpolate around max_idx so path end is smooth (max_distance is always >= p0.x)
     if 0 < max_idx < line.shape[0] - 1:
       p0 = line[max_idx]
       p1 = line[max_idx + 1]
@@ -858,130 +924,99 @@ class ModelRenderer(Widget):
       points = np.concatenate((points, interp_point[None, :]), axis=0)
 
     points = points[points[:, 0] >= 0]
-    if points.shape[0] == 0:
-      return np.empty((0, 2), dtype=np.float32)
+    if active_leads:
+      points = self._clip_line_by_lead(points, active_leads)
+    return points
 
-    # Lead vehicle clipping to prevent drawing through/on top of lead vehicles
-    if clip_by_lead:
-      active_leads = []
-      sm = ui_state.sm
-      if sm.valid.get("radarState", False):
-        rs = sm["radarState"]
-        if rs.leadOne and rs.leadOne.status:
-          active_leads.append(("ego", rs.leadOne))
-        if rs.leadTwo and rs.leadTwo.status:
-          active_leads.append(("ego", rs.leadTwo))
-      if sm.valid.get("starpilotRadarState", False):
-        srs = sm["starpilotRadarState"]
-        if srs.leadLeft and srs.leadLeft.status:
-          active_leads.append(("left", srs.leadLeft))
-        if srs.leadRight and srs.leadRight.status:
-          active_leads.append(("right", srs.leadRight))
+  def _map_lines_to_polygons(
+    self,
+    lines: list[np.ndarray],
+    y_offs: list[float],
+    z_off: float = 0.0,
+    max_idx: int = 100,
+    max_distance: float = MAX_DRAW_DISTANCE,
+    allow_invert: bool = True,
+    clip_by_lead: bool = False,
+  ) -> list[np.ndarray]:
+    if not lines:
+      return []
 
-      if active_leads:
-        x = points[:, 0]
-        y = points[:, 1]
-        clipped_mask = np.zeros(len(points), dtype=bool)
+    active_leads = self._get_active_leads() if clip_by_lead else None
+    prepared_lines = [self._prepare_line_points(line, max_idx, max_distance, active_leads) for line in lines]
+    counts = [len(p) for p in prepared_lines]
+    total = sum(counts)
+    if total == 0:
+      return [np.empty((0, 2), dtype=np.float32) for _ in lines]
 
-        for lead_type, lead in active_leads:
-          lead_x = lead.dRel
-          lead_y = -lead.yRel
-          y_limit = 5.0 if lead_type == "ego" else 1.8
-          # Collision box for lead car: x ∈ [lead_x - 1.5, lead_x + 5.0], y ∈ [lead_y - y_limit, lead_y + y_limit]
-          in_box = (x >= lead_x - 1.5) & (x <= lead_x + 5.0) & (y >= lead_y - y_limit) & (y <= lead_y + y_limit)
-          clipped_mask |= in_box
+    offsets = np.zeros((2, total, 3), dtype=np.float32)
+    offsets[1, :, 1] = np.repeat(y_offs, counts)
+    offsets[0, :, 1] = -offsets[1, :, 1]
+    if z_off != 0.0:
+      offsets[:, :, 2] = z_off
 
-        indices = np.where(clipped_mask)[0]
-        if indices.size > 0:
-          first_clip_idx = indices[0]
-          if first_clip_idx > 0:
-            # Interpolate to the exact entry boundary (lead_x - 1.5)
-            p_prev = points[first_clip_idx - 1]
-            p_curr = points[first_clip_idx]
-            
-            # Find the lead vehicle that triggered the clip
-            best_lead_x = None
-            for lead_type, lead in active_leads:
-              lead_x = lead.dRel
-              lead_y = -lead.yRel
-              y_limit = 5.0 if lead_type == "ego" else 1.8
-              if (lead_x - 1.5) <= p_curr[0] <= (lead_x + 5.0) and (lead_y - y_limit) <= p_curr[1] <= (lead_y + y_limit):
-                best_lead_x = lead_x
-                break
+    concat_pts = np.concatenate(prepared_lines)
+    points_3d = concat_pts[None, :, :] + offsets
+    proj = (self._car_space_transform @ points_3d.reshape(2 * total, 3).T).reshape(3, 2, total)
 
-            if best_lead_x is not None:
-              x_clip = best_lead_x - 1.5
-              x0, x1 = p_prev[0], p_curr[0]
-              if x1 > x0:
-                t = (x_clip - x0) / (x1 - x0)
-                y_clip = p_prev[1] + t * (p_curr[1] - p_prev[1])
-                z_clip = p_prev[2] + t * (p_curr[2] - p_prev[2])
-                interp_pt = np.array([x_clip, y_clip, z_clip], dtype=points.dtype)
-                points = np.concatenate((points[:first_clip_idx], interp_pt[None, :]), axis=0)
-              else:
-                points = points[:first_clip_idx]
-            else:
-              points = points[:first_clip_idx]
-          else:
-            points = np.empty((0, 3), dtype=points.dtype)
+    valid_proj = (np.abs(proj[2, 0]) >= 1e-6) & (np.abs(proj[2, 1]) >= 1e-6)
 
-    if points.shape[0] == 0:
-      return np.empty((0, 2), dtype=np.float32)
+    left_screen = np.zeros((2, total), dtype=np.float32)
+    right_screen = np.zeros((2, total), dtype=np.float32)
+    np.divide(proj[:2, 0], proj[2, 0], out=left_screen, where=valid_proj)
+    np.divide(proj[:2, 1], proj[2, 1], out=right_screen, where=valid_proj)
 
-    N = points.shape[0]
-    # Generate left and right 3D points in one array using broadcasting
-    offsets = np.array([[0, -y_off, z_off], [0, y_off, z_off]], dtype=np.float32)
-    points_3d = points[None, :, :] + offsets[:, None, :]  # Shape: 2xNx3
-    points_3d = points_3d.reshape(2 * N, 3)  # Shape: (2*N)x3
-
-    # Transform all points to projected space in one operation
-    proj = self._car_space_transform @ points_3d.T  # Shape: 3x(2*N)
-    proj = proj.reshape(3, 2, N)
-    left_proj = proj[:, 0, :]
-    right_proj = proj[:, 1, :]
-
-    # Filter points where z is sufficiently large
-    valid_proj = (np.abs(left_proj[2]) >= 1e-6) & (np.abs(right_proj[2]) >= 1e-6)
-    if not np.any(valid_proj):
-      return np.empty((0, 2), dtype=np.float32)
-
-    # Compute screen coordinates
-    left_screen = left_proj[:2, valid_proj] / left_proj[2, valid_proj][None, :]
-    right_screen = right_proj[:2, valid_proj] / right_proj[2, valid_proj][None, :]
-
-    # Define clip region bounds
     clip = self._clip_region
-    x_min, x_max = clip.x, clip.x + clip.width
-    y_min, y_max = clip.y, clip.y + clip.height
+    if clip is not None:
+      x_min, x_max = clip.x, clip.x + clip.width
+      y_min, y_max = clip.y, clip.y + clip.height
+      in_clip = (
+        valid_proj &
+        (left_screen[0] >= x_min) & (left_screen[0] <= x_max) &
+        (left_screen[1] >= y_min) & (left_screen[1] <= y_max) &
+        (right_screen[0] >= x_min) & (right_screen[0] <= x_max) &
+        (right_screen[1] >= y_min) & (right_screen[1] <= y_max)
+      )
+    else:
+      in_clip = valid_proj
 
-    # Filter points within clip region
-    left_in_clip = (
-      (left_screen[0] >= x_min) & (left_screen[0] <= x_max) &
-      (left_screen[1] >= y_min) & (left_screen[1] <= y_max)
-    )
-    right_in_clip = (
-      (right_screen[0] >= x_min) & (right_screen[0] <= x_max) &
-      (right_screen[1] >= y_min) & (right_screen[1] <= y_max)
-    )
-    both_in_clip = left_in_clip & right_in_clip
+    polygons = []
+    start = 0
+    for count in counts:
+      end = start + count
+      if count == 0:
+        polygons.append(np.empty((0, 2), dtype=np.float32))
+        start = end
+        continue
 
-    if not np.any(both_in_clip):
-      return np.empty((0, 2), dtype=np.float32)
+      mask = in_clip[start:end]
+      if not np.any(mask):
+        polygons.append(np.empty((0, 2), dtype=np.float32))
+      else:
+        l_scr = left_screen[:, start:end][:, mask]
+        r_scr = right_screen[:, start:end][:, mask]
+        if not allow_invert and l_scr.shape[1] > 1:
+          y = l_scr[1, :]
+          keep = y == np.minimum.accumulate(y)
+          if not np.any(keep):
+            polygons.append(np.empty((0, 2), dtype=np.float32))
+            start = end
+            continue
+          l_scr = l_scr[:, keep]
+          r_scr = r_scr[:, keep]
+        poly = np.vstack((l_scr.T, r_scr[:, ::-1].T)).astype(np.float32)
+        polygons.append(poly)
+      start = end
 
-    # Select valid and clipped points
-    left_screen = left_screen[:, both_in_clip]
-    right_screen = right_screen[:, both_in_clip]
+    return polygons
 
-    # Handle Y-coordinate inversion on hills
-    if not allow_invert and left_screen.shape[1] > 1:
-      y = left_screen[1, :]  # y-coordinates
-      keep = y == np.minimum.accumulate(y)
-      if not np.any(keep):
-        return np.empty((0, 2), dtype=np.float32)
-      left_screen = left_screen[:, keep]
-      right_screen = right_screen[:, keep]
-
-    return np.vstack((left_screen.T, right_screen[:, ::-1].T)).astype(np.float32)
+  def _map_line_to_polygon(
+    self, line: np.ndarray, y_off: float, z_off: float, max_idx: int, max_distance: float,
+    allow_invert: bool = True, clip_by_lead: bool = False,
+  ) -> np.ndarray:
+    """Convert 3D line to 2D polygon for rendering."""
+    return self._map_lines_to_polygons(
+      [line], [y_off], z_off, max_idx, max_distance, allow_invert=allow_invert, clip_by_lead=clip_by_lead,
+    )[0]
 
   @staticmethod
   def _hsla_to_color(h, s, l, a):

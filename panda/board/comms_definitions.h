@@ -1,3 +1,8 @@
+#pragma once
+
+#define SPI_CAN_WRITE_SEQUENCED_ENDPOINT 0x83U
+#define SPI_CAN_REPLAY_CAPABILITY 0x5351U
+
 typedef struct {
   uint8_t request;
   uint16_t param1;

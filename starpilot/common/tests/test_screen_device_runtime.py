@@ -39,7 +39,8 @@ class Messages(dict):
 
 def make_device(*, device_type="tici", **settings):
   status = Enum('UIStatus', 'DISENGAGED ENGAGED OVERRIDE')
-  state = SimpleNamespace(started=True, ignition=True, status=status.DISENGAGED, light_sensor=-1, started_time=0, started_frame=0, starpilot_toggles={},
+  state = SimpleNamespace(started=True, ignition=True, usbgpu_loading=False, status=status.DISENGAGED,
+                          light_sensor=-1, started_time=0, started_frame=0, starpilot_toggles={},
                           params_memory=Params({}), ui_params=Params({'ScreenManagement': True, 'ScreenBrightness': 101,
                                            'ScreenBrightnessOnroad': 101, 'StandbyMode': True, **settings}), sm=Messages())
   app = SimpleNamespace(target_fps=20, big_ui=lambda: False, mouse_events=[], set_should_render=lambda value: None)
@@ -62,6 +63,58 @@ def test_driving_and_parked_offsets_apply_independently():
   assert device._calculate_brightness() == 75
   state.started = False
   assert device._calculate_brightness() == 52
+
+
+@pytest.mark.parametrize('device_type', ['tici', 'mici'])
+@pytest.mark.parametrize('enabled', [False, True])
+@pytest.mark.parametrize('brightness', [0, 45, 101])
+def test_gpu_loading_screen_option_wakes_and_holds_onroad_screen(device_type, enabled, brightness):
+  device, state, _ = make_device(device_type=device_type, KeepScreenOnGpuLoading=enabled,
+                                ScreenBrightnessOnroad=brightness)
+  device._update_wakefulness()
+  assert not device.awake
+  state.usbgpu_loading = True
+  device._update_wakefulness()
+  assert device.awake is enabled
+  assert (device._calculate_brightness() > 0) is enabled
+  device._interaction_time = 90
+  device._update_wakefulness()
+  assert device.awake is enabled
+
+
+@pytest.mark.parametrize('device_type', ['tici', 'mici'])
+def test_gpu_loading_screen_option_resumes_timeout_after_loading(device_type):
+  device, state, _ = make_device(device_type=device_type, KeepScreenOnGpuLoading=True)
+  state.usbgpu_loading = True
+  original_settings = dict(state.ui_params.values)
+  device._update_wakefulness()
+  state.usbgpu_loading = False
+  device._update_wakefulness()
+  assert device.awake
+  device._interaction_time = 90
+  device._update_wakefulness()
+  assert not device.awake
+  assert state.ui_params.values == original_settings
+
+
+@pytest.mark.parametrize('device_type', ['tici', 'mici'])
+def test_gpu_loading_screen_option_respects_manual_screen_off(device_type):
+  device, state, _ = make_device(device_type=device_type, KeepScreenOnGpuLoading=True)
+  state.usbgpu_loading = True
+  state.params_memory.values[screen.SCREEN_OFF_TOGGLE_PARAM] = 1
+  device._update_wakefulness()
+  device._update_wakefulness()
+  assert not device.awake
+  assert device._calculate_brightness() == 0
+
+
+@pytest.mark.parametrize('management,started', [(False, True), (True, False)])
+def test_gpu_loading_screen_option_only_applies_to_managed_onroad_screen(management, started):
+  device, state, _ = make_device(KeepScreenOnGpuLoading=True, ScreenManagement=management)
+  state.started = started
+  state.usbgpu_loading = True
+  device._update_wakefulness()
+  assert device._interaction_time == 90
 
 
 @pytest.mark.parametrize('wake', ['button', 'touch', 'offroad', 'ignition', 'critical'])

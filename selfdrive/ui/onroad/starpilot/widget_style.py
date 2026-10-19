@@ -15,6 +15,7 @@ CONTROL_SEGMENTS = 10
 CONTROL_BORDER_WIDTH = 6
 CONTROL_BG = rl.Color(0, 0, 0, 166)
 CONTROL_BORDER = rl.Color(196, 205, 208, 180)
+UNIFIED_ACCENT = rl.Color(160, 96, 230, 230)
 # The layout manager has historically anchored the left controls at x + 146.
 # Keep that placement stable while making the width explicit and shared.
 WIDGET_ANCHOR_OFFSET = 146

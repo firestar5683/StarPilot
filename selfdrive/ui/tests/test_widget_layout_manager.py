@@ -63,6 +63,25 @@ class TestWidgetLayoutManager(unittest.TestCase):
     self.assertEqual(w2.rect.x, 88)
     self.assertEqual(w2.rect.y, 294)
 
+  def test_vertical_speed_card_aligns_with_gauge_and_clears_bottom_controls(self):
+    from openpilot.selfdrive.ui.onroad.starpilot.widgets.unified_speed import UNIFIED_WIDTH, UNIFIED_HEIGHT
+
+    speed = DummyLayoutWidget("unified_speed", priority=1, width=UNIFIED_WIDTH, height=UNIFIED_HEIGHT)
+    gauge = DummyLayoutWidget("aethergauge", priority=3, width=176, height=260)
+    personality = DummyLayoutWidget("personality", priority=1, width=192, height=192)
+    self.layout_manager.register_widget("left", speed)
+    self.layout_manager.register_widget("left", gauge)
+    self.layout_manager.register_widget("bottom", personality)
+
+    for content_rect in (self.content_rect, rl.Rectangle(330, 30, 1800, 1020)):
+      for is_rhd in (False, True):
+        self.layout_manager.update_layout(content_rect, is_rhd=is_rhd)
+        speed_center = speed.rect.x + speed.rect.width / 2
+        self.assertEqual(speed_center, gauge.rect.x + gauge.rect.width / 2)
+        self.assertGreaterEqual(speed.rect.x, content_rect.x + 30)
+        self.assertEqual(gauge.rect.y, speed.rect.y + speed.rect.height + self.layout_manager.spacing)
+        self.assertLess(gauge.rect.y + gauge.rect.height, personality.rect.y)
+
   def test_bottom_zone_lhd_stacking(self):
     # Bottom zone: LHD horizontal stacking from left to right starting at x = 146
     # Y center should be content_rect.y + content_rect.height - 146 = 30 + 1020 - 146 = 904
@@ -136,6 +155,19 @@ class TestWidgetLayoutManager(unittest.TestCase):
     # w2: is invisible, should not be set (or rather, is skipped in stacking)
     # w3: should stack directly below w1: y = 75 + 100 + 15 = 190
     self.assertEqual(w3.rect.y, 190)
+
+  def test_wide_unified_card_stays_inside_the_left_edge(self):
+    card = DummyLayoutWidget("unified_speed", priority=1, width=520, height=250)
+    gauge = DummyLayoutWidget("aethergauge", priority=3, width=176, height=260)
+    self.layout_manager.register_widget("left", card)
+    self.layout_manager.register_widget("left", gauge)
+
+    self.layout_manager.update_layout(self.content_rect)
+
+    self.assertEqual(card.rect.x, self.content_rect.x + 30)
+    self.assertEqual(card.rect.y, self.content_rect.y + 45)
+    self.assertEqual(gauge.rect.x + gauge.rect.width / 2, self.content_rect.x + 146)
+    self.assertEqual(gauge.rect.y, card.rect.y + card.rect.height + self.layout_manager.spacing)
 
   def test_dynamic_repositioning_on_rect_change(self):
     # Register a widget

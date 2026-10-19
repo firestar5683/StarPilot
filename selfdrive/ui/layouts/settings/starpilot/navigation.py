@@ -229,7 +229,7 @@ NAV_SUMMARY_HEIGHT = 124.0
 NAV_ACTION_HEIGHT = 78.0
 NAV_SECTION_HEIGHT = 72.0
 NAV_ROW_HEIGHT = 124.0
-NAV_EMPTY_HEIGHT = 132.0
+NAV_EMPTY_HEIGHT = 208.0
 NAV_ACTION_COLUMNS = 3
 NAV_ACTION_GAP = 12.0
 
@@ -633,7 +633,7 @@ class StarPilotNavigationLayout(_SettingsPage):
         fill = with_alpha(AetherListColors.PRIMARY, 54 if enabled and (hovered or pressed) else 24 if enabled else 8)
         border = with_alpha(AetherListColors.PRIMARY, 110 if enabled else 28)
         text_color = AetherListColors.HEADER if enabled else AetherListColors.MUTED
-      draw_action_pill(rect, label, fill, border, text_color, font_size=24)
+      draw_action_pill(rect, label, fill, border, text_color, font_size=26)
     return rows * NAV_ACTION_HEIGHT + max(0, rows - 1) * NAV_ACTION_GAP
 
   def _draw_summary_row(self, rect: rl.Rectangle, manager: NavigationManagerView) -> None:
@@ -666,9 +666,6 @@ class StarPilotNavigationLayout(_SettingsPage):
       action_pill=True,
       action_pill_height=64,
       action_pill_width=220,
-      title_size=34,
-      subtitle_size=24,
-      action_text_size=24,
       action_fill=with_alpha(AetherListColors.DANGER if target_id == "action:cancel" else AetherListColors.SUCCESS, 38 if enabled else 10),
       action_border=with_alpha(AetherListColors.DANGER if target_id == "action:cancel" else AetherListColors.SUCCESS, 85 if enabled else 25),
       action_text_color=AetherListColors.HEADER if enabled else AetherListColors.MUTED,
@@ -696,9 +693,6 @@ class StarPilotNavigationLayout(_SettingsPage):
       action_pill=True,
       action_pill_height=64,
       action_pill_width=180,
-      title_size=32,
-      subtitle_size=22,
-      action_text_size=24,
       row_separator=PANEL_STYLE.divider_color,
     )
     y += NAV_SEARCH_HEIGHT + NAV_GAP
@@ -709,7 +703,6 @@ class StarPilotNavigationLayout(_SettingsPage):
         tr("Searching…"),
         tr("Looking up destinations"),
         title_size=30,
-        body_size=22,
         border=with_alpha(PANEL_STYLE.surface_border, 14),
         style=PANEL_STYLE,
       )
@@ -720,7 +713,6 @@ class StarPilotNavigationLayout(_SettingsPage):
         tr("Search unavailable"),
         self._search_error,
         title_size=30,
-        body_size=22,
         border=with_alpha(AetherListColors.WARNING, 45),
         style=PANEL_STYLE,
       )
@@ -761,9 +753,6 @@ class StarPilotNavigationLayout(_SettingsPage):
           action_pill=True,
           action_pill_height=58,
           action_pill_width=150,
-          title_size=31,
-          subtitle_size=22,
-          action_text_size=23,
           row_separator=PANEL_STYLE.divider_color,
         )
         y += NAV_ROW_HEIGHT
@@ -802,9 +791,6 @@ class StarPilotNavigationLayout(_SettingsPage):
           action_pill=True,
           action_pill_height=58,
           action_pill_width=150,
-          title_size=31,
-          subtitle_size=22,
-          action_text_size=23,
           row_separator=PANEL_STYLE.divider_color,
         )
         y += NAV_ROW_HEIGHT
@@ -837,9 +823,6 @@ class StarPilotNavigationLayout(_SettingsPage):
           action_pill=True,
           action_pill_height=58,
           action_pill_width=150,
-          title_size=31,
-          subtitle_size=22,
-          action_text_size=23,
           row_separator=PANEL_STYLE.divider_color,
         )
         y += NAV_ROW_HEIGHT
@@ -852,7 +835,6 @@ class StarPilotNavigationLayout(_SettingsPage):
         empty_title,
         empty_body,
         title_size=30,
-        body_size=22,
         border=with_alpha(PANEL_STYLE.surface_border, 14),
         style=PANEL_STYLE,
       )

@@ -1,4 +1,5 @@
 import ast
+from collections import deque
 import json
 import math
 import numpy as np
@@ -127,7 +128,8 @@ def is_ioniq_6_2025_model(CP) -> bool:
   try:
     for fw in CP.carFw:
       value = fw.fwVersion
-      versions.append(value.decode("ascii", errors="ignore") if isinstance(value, bytes) else str(value))
+      versions.append(bytes(value).decode("ascii", errors="ignore")
+                      if isinstance(value, (bytes, bytearray, memoryview)) else str(value))
   except (AttributeError, TypeError, ValueError):
     return False
 
@@ -156,6 +158,9 @@ TUCSON_4TH_GEN_CARS = (
 )
 KIA_XCEED_CARS = (
   HYUNDAI_CAR.KIA_XCEED_PHEV,
+)
+KIA_NIRO_EV_CARS = (
+  HYUNDAI_CAR.KIA_NIRO_EV,
 )
 KIA_NIRO_PHEV_2022_CARS = (
   HYUNDAI_CAR.KIA_NIRO_PHEV_2022,
@@ -239,7 +244,9 @@ GENESIS_GV70_UNWIND_FF_JERK = 0.10
 GENESIS_GV70_UNWIND_FF_JERK_WIDTH = 0.10
 GENESIS_GV70_UNWIND_FF_SPEED = 10.0 * CV.MPH_TO_MS
 GENESIS_GV70_UNWIND_FF_SPEED_WIDTH = 4.0 * CV.MPH_TO_MS
-GENESIS_GV70_HIGH_SPEED_ERROR_DAMPING_MAX = 0.18
+GENESIS_GV70_CURVE_DAMPING_LAT_BP = [0.25, 0.55]
+GENESIS_GV70_CURVE_DAMPING_OVERSHOOT_BP = [0.0, 0.20]
+GENESIS_GV70_HIGH_SPEED_ERROR_DAMPING_MAX = 0.20
 GENESIS_GV70_HIGH_SPEED_ERROR_DAMPING_SPEED = 50.0 * CV.MPH_TO_MS
 GENESIS_GV70_HIGH_SPEED_ERROR_DAMPING_SPEED_WIDTH = 8.0 * CV.MPH_TO_MS
 GENESIS_GV70_HIGH_SPEED_ERROR_DAMPING_ERROR = 0.18
@@ -274,8 +281,28 @@ GENESIS_GV70_OUTPUT_SMOOTHING_UNWIND_PHASE = 0.04
 GENESIS_GV70_OUTPUT_SMOOTHING_UNWIND_PHASE_WIDTH = 0.08
 GENESIS_GV70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_LAT = 0.55
 GENESIS_GV70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_RC = 0.065
+GENESIS_GV70_MEASUREMENT_DAMPING_SPEED_BP = [10.0 * CV.MPH_TO_MS, 35.0 * CV.MPH_TO_MS, 60.0 * CV.MPH_TO_MS]
+GENESIS_GV70_MEASUREMENT_DAMPING_V = [0.0, 0.08, 0.12]
+GENESIS_GV70_HIGHWAY_STABILIZER_SPEED_BP = [40.0 * CV.MPH_TO_MS, 50.0 * CV.MPH_TO_MS]
+GENESIS_GV70_HIGHWAY_STABILIZER_CENTER_LAT_BP = [0.75, 1.0]
+GENESIS_GV70_HIGHWAY_STABILIZER_BASELINE_RC = 0.85
+GENESIS_GV70_HIGHWAY_STABILIZER_BLEND_RC = 0.35
+GENESIS_GV70_HIGHWAY_STABILIZER_REVERSAL_LAT = 0.06
+GENESIS_GV70_HIGHWAY_STABILIZER_REVERSAL_WINDOW = 6.0
+GENESIS_GV70_HIGHWAY_STABILIZER_RECOVERY_SECONDS = 4.0
+GENESIS_GV70_HIGHWAY_STABILIZER_DIRECTION_CHANGE_LAT = 0.35
+GENESIS_GV70_HIGHWAY_STABILIZER_REDUCTION = 0.70
+GENESIS_GV70_HIGHWAY_STABILIZER_MAX_DELTA = 0.20
 
 GENESIS_G70_FRICTION_THRESHOLD_GAIN = 0.10
+GENESIS_G70_CURVE_TURN_IN_JERK_REDUCTION = 0.50
+GENESIS_G70_CURVE_TURN_IN_SPEED_BP = [20.0, 25.0]
+GENESIS_G70_CURVE_TURN_IN_LAT_BP = [0.35, 0.70]
+GENESIS_G70_HIGHWAY_TURN_IN_OUTPUT_REDUCTION = 0.12
+GENESIS_G70_HIGHWAY_TURN_IN_SPEED_BP = [26.0, 32.0]
+GENESIS_G70_HIGHWAY_TURN_IN_LAT_BP = [0.70, 1.10]
+GENESIS_G70_HIGHWAY_TURN_IN_JERK_BP = [0.25, 0.60]
+GENESIS_G70_HIGHWAY_TURN_IN_TRACKING_BP = [0.70, 0.90, 1.10]
 GENESIS_G70_FRICTION_THRESHOLD_SPEED_BP = [10.0, 20.0]
 GENESIS_G70_FRICTION_THRESHOLD_SPEED_V = [1.0, 2.0]
 GENESIS_G70_FRICTION_SPEED_ONSET = 10.0
@@ -323,6 +350,11 @@ GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_LAT = 0.14
 GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_LAT_WIDTH = 0.05
 GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_SPEED = 6.0
 GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_SPEED_WIDTH = 1.5
+GENESIS_G70_TRAFFIC_FRICTION_INCREMENT = 0.90
+GENESIS_G70_TRAFFIC_FRICTION_SPEED_BP = [6.0, 8.0]
+GENESIS_G70_TRAFFIC_FRICTION_LAT_BP = [0.12, 0.30]
+GENESIS_G70_TRAFFIC_FRICTION_CURVATURE_BP = [0.0035, 0.0080]
+GENESIS_G70_TRAFFIC_FRICTION_JERK_BP = [0.15, 0.50]
 GENESIS_G70_UNWIND_FF_REDUCTION_MAX = 0.34
 GENESIS_G70_UNWIND_FF_OVERSHOOT = 0.13
 GENESIS_G70_UNWIND_FF_OVERSHOOT_WIDTH = 0.17
@@ -345,6 +377,12 @@ GENESIS_G70_OUTPUT_SMOOTHING_CENTER_RC = 0.18
 GENESIS_G70_OUTPUT_SMOOTHING_CURVE_RC = 0.10
 GENESIS_G70_OUTPUT_SMOOTHING_RELEASE_RC = 0.03
 GENESIS_G70_OUTPUT_SMOOTHING_OVERSHOOT = 0.08
+GENESIS_G70_CENTER_MEASUREMENT_DAMPING_MAX = 0.09
+GENESIS_G70_CENTER_MEASUREMENT_DAMPING_SPEED_BP = [50.0 * CV.MPH_TO_MS, 60.0 * CV.MPH_TO_MS]
+GENESIS_G70_CENTER_MEASUREMENT_DAMPING_LAT_BP = [0.15, 0.35]
+GENESIS_G70_CENTER_MEASUREMENT_DAMPING_JERK_BP = [0.20, 0.50]
+GENESIS_G70_HIGHWAY_STABILIZER_CENTER_LAT_BP = [1.4, 1.8]
+GENESIS_G70_HIGHWAY_STABILIZER_CURVE_EXIT_LAT = 0.15
 GENESIS_G70_ANGLE_OUTPUT_TAPER_MIN = 0.45
 GENESIS_G70_ANGLE_OUTPUT_TAPER_START = 70.0
 GENESIS_G70_ANGLE_OUTPUT_TAPER_WIDTH = 6.0
@@ -580,6 +618,11 @@ KIA_XCEED_CENTER_TAPER_LAT_WIDTH = 0.03
 KIA_XCEED_CENTER_TAPER_SPEED = 17.5
 KIA_XCEED_CENTER_TAPER_SPEED_WIDTH = 2.5
 
+KIA_NIRO_EV_CENTER_FRICTION_SPEED_BP = [60.0 * CV.MPH_TO_MS, 65.0 * CV.MPH_TO_MS]
+KIA_NIRO_EV_CENTER_FRICTION_LAT_BP = [0.15, 0.35]
+KIA_NIRO_EV_CENTER_FRICTION_JERK_BP = [0.20, 0.50]
+KIA_NIRO_EV_CENTER_FRICTION_THRESHOLD_GAIN = 0.35
+
 KIA_NIRO_PHEV_2022_CENTER_TAPER_MAX = 0.06
 KIA_NIRO_PHEV_2022_CENTER_TAPER_LAT = 0.12
 KIA_NIRO_PHEV_2022_CENTER_TAPER_LAT_WIDTH = 0.03
@@ -599,6 +642,10 @@ KIA_STINGER_2022_CENTER_TAPER_LAT_WIDTH = 0.05
 KIA_STINGER_2022_CENTER_TAPER_SPEED = 10.0
 KIA_STINGER_2022_CENTER_TAPER_SPEED_WIDTH = 2.5
 KIA_STINGER_2022_FRICTION_THRESHOLD_GAIN = 0.10
+KIA_STINGER_2022_HIGHWAY_FRICTION_INCREMENT = 0.20
+KIA_STINGER_2022_HIGHWAY_FRICTION_SPEED_BP = [50.0 * CV.MPH_TO_MS, 60.0 * CV.MPH_TO_MS]
+KIA_STINGER_2022_HIGHWAY_FRICTION_LAT_BP = [0.15, 0.40]
+KIA_STINGER_2022_HIGHWAY_FRICTION_JERK_BP = [0.20, 0.75]
 
 KIA_CARNIVAL_CENTER_TAPER_MAX = 0.20
 KIA_CARNIVAL_CENTER_TAPER_LAT = 0.20
@@ -608,6 +655,12 @@ KIA_CARNIVAL_CENTER_TAPER_SPEED_WIDTH = 1.8
 KIA_CARNIVAL_CENTER_TAPER_SPEED_MAX = 14.5
 KIA_CARNIVAL_CENTER_TAPER_SPEED_MAX_WIDTH = 2.0
 KIA_CARNIVAL_FRICTION_THRESHOLD_GAIN = 0.24
+KIA_CARNIVAL_HEV_CENTER_SPEED_BP = [1.0, 4.0, 20.0, 25.0]
+KIA_CARNIVAL_HEV_CENTER_LAT_BP = [0.18, 0.40]
+KIA_CARNIVAL_HEV_CENTER_ERROR_BP = [0.12, 0.30]
+KIA_CARNIVAL_HEV_CENTER_JERK_BP = [0.25, 0.75]
+KIA_CARNIVAL_HEV_CENTER_FRICTION_INCREMENT = 0.20
+KIA_CARNIVAL_HEV_CENTER_ERROR_REDUCTION = 0.25
 KIA_CARNIVAL_FRICTION_CENTER_FADE_MAX = 0.34
 KIA_CARNIVAL_HIGHWAY_CENTER_TAPER_MAX = 0.14
 KIA_CARNIVAL_HIGHWAY_CENTER_TAPER_LAT = 0.24
@@ -783,6 +836,8 @@ IONIQ_5_SUSTAINED_TURN_IN_FF_LAT_END = 3.60
 IONIQ_5_SUSTAINED_TURN_IN_FF_LAT_WIDTH = 0.30
 IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_BASE = 0.05
 IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_TURN_RELIEF = 0.95
+IONIQ_5_LOW_SPEED_TURN_OUTPUT_FLOOR = 0.30
+IONIQ_5_LOW_SPEED_TURN_CURVATURE_BP = [0.005, 0.020]
 IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_SPEED = 8.0
 IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_SPEED_WIDTH = 0.8
 IONIQ_5_LOW_SPEED_CENTER_LAT = 0.40
@@ -955,6 +1010,11 @@ IONIQ_6_2023_UNWIND_FF_SPEED_ONSET = 8.0
 IONIQ_6_2023_UNWIND_FF_SPEED_ONSET_WIDTH = 2.5
 IONIQ_6_2023_UNWIND_FF_SPEED_CUTOFF = 23.5
 IONIQ_6_2023_UNWIND_FF_SPEED_CUTOFF_WIDTH = 2.0
+IONIQ_6_2023_CENTER_FRICTION_INCREMENT = 0.24
+IONIQ_6_2023_CENTER_FRICTION_SPEED_BP = [3.5, 8.0]
+IONIQ_6_2023_CENTER_FRICTION_LAT_BP = [0.12, 0.35]
+IONIQ_6_2023_CENTER_FRICTION_ERROR_BP = [0.08, 0.18]
+IONIQ_6_2023_CENTER_FRICTION_JERK_BP = [0.20, 0.60]
 IONIQ_6_LOW_SPEED_PID_RESET_SPEED = 0.1 * CV.MPH_TO_MS
 # Friction compensation near zero lateral accel amplifies planner jerk noise into a slow
 # (~0.5 Hz) weave on straights: the 0.09/0.39 small-signal slope plus the jerk feed acts as
@@ -1240,10 +1300,17 @@ HONDA_CRV_5G_PID_CENTER_ANGLE = 14.0
 HONDA_CRV_5G_PID_CENTER_ANGLE_WIDTH = 3.0
 HONDA_CRV_5G_PID_OUTPUT_SCALE_MIN = 0.62
 HONDA_CRV_5G_PID_OUTPUT_ALPHA_MIN = 0.28
+HONDA_CRV_5G_PID_CENTER_KP_SCALE_MIN = 0.50
+HONDA_CRV_5G_PID_CENTER_KP_SPEED_BP = [11.0 * CV.MPH_TO_MS, 18.0 * CV.MPH_TO_MS]
+HONDA_CRV_5G_PID_CENTER_KP_ANGLE_BP = [6.0, 18.0]
 
 RAV4_TSS2_CENTER_FRICTION_THRESHOLD_GAIN = 0.14
 RAV4_TSS2_CENTER_FRICTION_LAT = 0.30
 RAV4_TSS2_CENTER_FRICTION_LAT_WIDTH = 0.08
+RAV4_TSS2_CLEANUP_FRICTION_SPEED_BP = [0.0, 2.5, 5.0, 10.0, 15.0, 25.0]
+RAV4_TSS2_CLEANUP_FRICTION_SPEED_V = [0.0, 0.0, 0.04, 0.065, 0.05, 0.025]
+RAV4_TSS2_CLEANUP_FRICTION_LAT_BP = [0.30, 0.85]
+RAV4_TSS2_CLEANUP_FRICTION_JERK_BP = [0.25, 0.75]
 RAV4_TSS2_CENTER_SPEED = 13.0
 RAV4_TSS2_CENTER_SPEED_WIDTH = 3.0
 RAV4_TSS2_CENTER_OUTPUT_TAPER_MAX = 0.12
@@ -1306,6 +1373,11 @@ KONA_EV_2022_CENTER_FRICTION_THRESHOLD_LAT = 0.20
 KONA_EV_2022_CENTER_FRICTION_THRESHOLD_LAT_WIDTH = 0.05
 KONA_EV_2022_CENTER_FRICTION_THRESHOLD_SPEED = 18.0
 KONA_EV_2022_CENTER_FRICTION_THRESHOLD_SPEED_WIDTH = 2.5
+KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_GAIN = 0.30
+KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_SPEED_ONSET = 100.0 / 3.6
+KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_SPEED_FULL = 110.0 / 3.6
+KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_LAT_FADE_START = 1.20
+KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_LAT_FADE_END = 2.00
 KONA_EV_2022_CENTER_OUTPUT_TAPER_MAX = 0.08
 KONA_EV_2022_CENTER_OUTPUT_TAPER_LAT = 0.20
 KONA_EV_2022_CENTER_OUTPUT_TAPER_LAT_WIDTH = 0.05
@@ -1884,6 +1956,12 @@ def get_rav4_tss2_pid_output(output_torque: float, prev_output_torque: float,
   return float(prev_output_torque + output_alpha * (limited_output - prev_output_torque))
 
 
+def get_honda_crv_5g_pid_kp_scale(desired_angle_deg: float, v_ego: float) -> float:
+  speed_weight = np.interp(max(v_ego, 0.0), HONDA_CRV_5G_PID_CENTER_KP_SPEED_BP, [1.0, 0.0])
+  center_weight = np.interp(abs(desired_angle_deg), HONDA_CRV_5G_PID_CENTER_KP_ANGLE_BP, [1.0, 0.0])
+  return float(1.0 - (1.0 - HONDA_CRV_5G_PID_CENTER_KP_SCALE_MIN) * speed_weight * center_weight)
+
+
 def get_honda_crv_5g_pid_output(output_torque: float, prev_output_torque: float,
                                 desired_angle_deg: float, v_ego: float) -> float:
   """Damp low-speed CR-V 5G center reversals without blunting real turns."""
@@ -1909,12 +1987,15 @@ def _rav4_tss2_center_envelope(desired_lateral_accel: float, v_ego: float) -> fl
 
 def get_rav4_tss2_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0,
                                      desired_lateral_jerk: float = 0.0) -> float:
-  del desired_lateral_jerk
   gain = _flm_vehicle_knob("toyota_rav4_tss2.center_friction_threshold_gain",
                            RAV4_TSS2_CENTER_FRICTION_THRESHOLD_GAIN)
-  return get_standard_friction_threshold(v_ego) * (
+  threshold = get_standard_friction_threshold(v_ego) * (
     1.0 + gain * _rav4_tss2_center_envelope(desired_lateral_accel, v_ego)
   )
+  curve_weight = float(np.interp(abs(desired_lateral_accel), RAV4_TSS2_CLEANUP_FRICTION_LAT_BP, [1.0, 0.0]))
+  calm_weight = float(np.interp(abs(desired_lateral_jerk), RAV4_TSS2_CLEANUP_FRICTION_JERK_BP, [1.0, 0.0]))
+  increment = float(np.interp(max(v_ego, 0.0), RAV4_TSS2_CLEANUP_FRICTION_SPEED_BP, RAV4_TSS2_CLEANUP_FRICTION_SPEED_V))
+  return threshold + increment * curve_weight * calm_weight
 
 
 def get_rav4_tss2_center_output_scale(desired_lateral_accel: float, v_ego: float) -> float:
@@ -2025,9 +2106,20 @@ def _kona_ev_2022_center_weights(desired_lateral_accel: float, v_ego: float) -> 
 
 def get_kona_ev_2022_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0) -> float:
   speed_weight, center_weight = _kona_ev_2022_center_weights(desired_lateral_accel, v_ego)
-  return get_standard_friction_threshold(v_ego) * (
+  base_threshold = get_standard_friction_threshold(v_ego) * (
     1.0 + KONA_EV_2022_CENTER_FRICTION_THRESHOLD_GAIN * speed_weight * center_weight
   )
+  high_speed_weight = float(np.interp(
+    v_ego,
+    [KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_SPEED_ONSET, KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_SPEED_FULL],
+    [0.0, 1.0],
+  ))
+  curve_weight = float(np.interp(
+    abs(desired_lateral_accel),
+    [KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_LAT_FADE_START, KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_LAT_FADE_END],
+    [1.0, 0.0],
+  ))
+  return base_threshold + KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_GAIN * high_speed_weight * curve_weight
 
 
 def get_kona_ev_2022_center_output_scale(desired_lateral_accel: float, v_ego: float) -> float:
@@ -2784,6 +2876,17 @@ def get_kia_xceed_center_taper_scale(desired_lateral_accel: float, v_ego: float)
   return 1.0 - reduction
 
 
+def get_kia_niro_ev_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0,
+                                      desired_lateral_jerk: float = 0.0,
+                                      future_lateral_accel: float | None = None) -> float:
+  speed_weight = np.interp(v_ego, KIA_NIRO_EV_CENTER_FRICTION_SPEED_BP, [0.0, 1.0])
+  requested_accel = max(abs(desired_lateral_accel), abs(future_lateral_accel or 0.0))
+  center_weight = np.interp(requested_accel, KIA_NIRO_EV_CENTER_FRICTION_LAT_BP, [1.0, 0.0])
+  calm_weight = np.interp(abs(desired_lateral_jerk), KIA_NIRO_EV_CENTER_FRICTION_JERK_BP, [1.0, 0.0])
+  gain = KIA_NIRO_EV_CENTER_FRICTION_THRESHOLD_GAIN * speed_weight * center_weight * calm_weight
+  return float(get_standard_friction_threshold(v_ego) * (1.0 + gain))
+
+
 def get_kia_niro_phev_2022_center_taper_scale(desired_lateral_accel: float, v_ego: float) -> float:
   speed_weight = _sigmoid((v_ego - KIA_NIRO_PHEV_2022_CENTER_TAPER_SPEED) / KIA_NIRO_PHEV_2022_CENTER_TAPER_SPEED_WIDTH)
   center_weight = _sigmoid((KIA_NIRO_PHEV_2022_CENTER_TAPER_LAT - abs(desired_lateral_accel)) / KIA_NIRO_PHEV_2022_CENTER_TAPER_LAT_WIDTH)
@@ -2813,10 +2916,17 @@ def get_kia_stinger_2022_center_taper_scale(desired_lateral_accel: float, v_ego:
 
 
 def get_kia_stinger_2022_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0,
-                                            desired_lateral_jerk: float = 0.0) -> float:
-  del desired_lateral_jerk
+                                            desired_lateral_jerk: float = 0.0,
+                                            future_lateral_accel: float = 0.0, steering_pressed: bool = False) -> float:
   speed_weight, center_weight = _kia_stinger_2022_center_weights(desired_lateral_accel, v_ego)
-  return get_standard_friction_threshold(v_ego) * (1.0 + KIA_STINGER_2022_FRICTION_THRESHOLD_GAIN * speed_weight * center_weight)
+  threshold = get_standard_friction_threshold(v_ego) * (1.0 + KIA_STINGER_2022_FRICTION_THRESHOLD_GAIN * speed_weight * center_weight)
+  if not steering_pressed:
+    highway_weight = np.interp(v_ego, KIA_STINGER_2022_HIGHWAY_FRICTION_SPEED_BP, [0.0, 1.0])
+    requested_accel = max(abs(desired_lateral_accel), abs(future_lateral_accel))
+    highway_weight *= np.interp(requested_accel, KIA_STINGER_2022_HIGHWAY_FRICTION_LAT_BP, [1.0, 0.0])
+    highway_weight *= np.interp(abs(desired_lateral_jerk), KIA_STINGER_2022_HIGHWAY_FRICTION_JERK_BP, [1.0, 0.0])
+    threshold += KIA_STINGER_2022_HIGHWAY_FRICTION_INCREMENT * highway_weight
+  return float(threshold)
 
 
 def _kia_carnival_center_weights(desired_lateral_accel: float, v_ego: float) -> tuple[float, float]:
@@ -2850,6 +2960,15 @@ def get_kia_carnival_friction_threshold(v_ego: float, desired_lateral_accel: flo
   gain = KIA_CARNIVAL_FRICTION_THRESHOLD_GAIN * speed_weight * center_weight
   gain += KIA_CARNIVAL_HIGHWAY_FRICTION_THRESHOLD_GAIN * highway_speed_weight * highway_center_weight
   return get_hkg_canfd_base_friction_threshold(v_ego) * (1.0 + gain)
+
+
+def get_kia_carnival_hev_center_weight(v_ego: float, setpoint: float, measurement: float, jerk: float,
+                                       future_lateral_accel: float = 0.0) -> float:
+  speed_weight = np.interp(v_ego, KIA_CARNIVAL_HEV_CENTER_SPEED_BP, [0.0, 1.0, 1.0, 0.0])
+  center_weight = np.interp(max(abs(setpoint), abs(measurement), abs(future_lateral_accel)), KIA_CARNIVAL_HEV_CENTER_LAT_BP, [1.0, 0.0])
+  tracking_weight = np.interp(abs(setpoint - measurement), KIA_CARNIVAL_HEV_CENTER_ERROR_BP, [1.0, 0.0])
+  calm_weight = np.interp(abs(jerk), KIA_CARNIVAL_HEV_CENTER_JERK_BP, [1.0, 0.0])
+  return float(speed_weight * center_weight * tracking_weight * calm_weight)
 
 
 def get_kia_carnival_friction_center_fade_scale(desired_lateral_accel: float, v_ego: float) -> float:
@@ -2907,7 +3026,10 @@ def get_kia_carnival_unwind_ff_scale(setpoint: float, measured_lateral_accel: fl
 
 
 def get_kia_carnival_unwind_output_scale(setpoint: float, measured_lateral_accel: float,
-                                         desired_lateral_jerk: float, v_ego: float) -> float:
+                                         desired_lateral_jerk: float, v_ego: float,
+                                         *, output_torque: float | None = None) -> float:
+  if output_torque is not None and output_torque * setpoint <= 0.0:
+    return 1.0
   if (setpoint * desired_lateral_jerk >= 0.0 or
       setpoint * measured_lateral_accel <= 0.0):
     return 1.0
@@ -3192,6 +3314,13 @@ def get_genesis_gv70_center_output_scale(desired_lateral_accel: float, v_ego: fl
   return 1.0 - (GENESIS_GV70_CENTER_OUTPUT_TAPER_MAX * speed_weight * center_weight)
 
 
+def _genesis_gv70_curve_damping_weight(setpoint: float, measured_lateral_accel: float) -> float:
+  curve_weight = float(np.interp(abs(setpoint), GENESIS_GV70_CURVE_DAMPING_LAT_BP, [0.0, 1.0]))
+  overshoot = max(abs(measured_lateral_accel) - abs(setpoint), 0.0) if setpoint * measured_lateral_accel > 0.0 else 0.0
+  overshoot_weight = float(np.interp(overshoot, GENESIS_GV70_CURVE_DAMPING_OVERSHOOT_BP, [0.0, 1.0]))
+  return 1.0 - curve_weight * (1.0 - overshoot_weight)
+
+
 def get_genesis_gv70_unwind_ff_scale(setpoint: float, measured_lateral_accel: float,
                                      desired_lateral_jerk: float, v_ego: float) -> float:
   """Remove old-turn feedforward when the GV70 has already over-rotated."""
@@ -3205,7 +3334,8 @@ def get_genesis_gv70_unwind_ff_scale(setpoint: float, measured_lateral_accel: fl
                          GENESIS_GV70_UNWIND_FF_JERK_WIDTH)
   speed_weight = _sigmoid((v_ego - GENESIS_GV70_UNWIND_FF_SPEED) /
                           GENESIS_GV70_UNWIND_FF_SPEED_WIDTH)
-  return 1.0 - GENESIS_GV70_UNWIND_FF_REDUCTION_MAX * overshoot_weight * jerk_weight * speed_weight
+  tracking_weight = _genesis_gv70_curve_damping_weight(setpoint, measured_lateral_accel)
+  return 1.0 - GENESIS_GV70_UNWIND_FF_REDUCTION_MAX * overshoot_weight * jerk_weight * speed_weight * tracking_weight
 
 
 def get_genesis_gv70_high_speed_error_scale(setpoint: float, measured_lateral_accel: float,
@@ -3222,7 +3352,7 @@ def get_genesis_gv70_high_speed_error_scale(setpoint: float, measured_lateral_ac
   phase_weight = 1.0 if setpoint * desired_lateral_jerk < 0.0 else 0.45
   reduction = (GENESIS_GV70_HIGH_SPEED_ERROR_DAMPING_MAX * speed_weight * error_weight *
                (0.35 + (0.65 * jerk_weight)) * phase_weight)
-  return 1.0 - reduction
+  return 1.0 - reduction * _genesis_gv70_curve_damping_weight(setpoint, measured_lateral_accel)
 
 
 def get_genesis_gv70_reversal_output_scale(setpoint: float, measured_lateral_accel: float,
@@ -3240,7 +3370,7 @@ def get_genesis_gv70_reversal_output_scale(setpoint: float, measured_lateral_acc
   jerk_weight = _sigmoid((abs(desired_lateral_jerk) - GENESIS_GV70_REVERSAL_OUTPUT_DAMPING_JERK) /
                          GENESIS_GV70_REVERSAL_OUTPUT_DAMPING_JERK_WIDTH)
   reduction = (GENESIS_GV70_REVERSAL_OUTPUT_DAMPING_MAX * speed_weight * error_weight * jerk_weight)
-  return 1.0 - reduction
+  return 1.0 - reduction * _genesis_gv70_curve_damping_weight(setpoint, measured_lateral_accel)
 
 
 def get_genesis_gv70_low_speed_center_overshoot_scale(setpoint: float, measured_lateral_accel: float,
@@ -3288,6 +3418,91 @@ def get_genesis_gv70_stabilized_output(output_torque: float, prev_output_torque:
   return float(output_torque + speed_weight * (smoothed_output - output_torque))
 
 
+class GenesisHighwayCommandStabilizer:
+  def __init__(self, center_lat_bp: list[float], curve_exit_lat: float = 0.0) -> None:
+    self.center_lat_bp = tuple(center_lat_bp)
+    self.curve_exit_lat = curve_exit_lat
+    self.reset()
+
+  def reset(self) -> None:
+    self.baseline: float | None = None
+    self.last_sign = 0
+    self.reversals: deque[float] = deque()
+    self.elapsed = 0.0
+    self.blend = 0.0
+    self.active_until = 0.0
+    self.curve_direction = 0
+
+  def update(self, curvature: float, v_ego: float, enabled: bool, dt: float) -> float:
+    if not enabled or v_ego <= GENESIS_GV70_HIGHWAY_STABILIZER_SPEED_BP[0] or not math.isfinite(curvature):
+      self.reset()
+      return curvature
+
+    self.elapsed += dt
+    lateral_accel = curvature * v_ego ** 2
+    if self.baseline is None:
+      self.baseline = lateral_accel
+    if abs(self.baseline) >= GENESIS_GV70_HIGHWAY_STABILIZER_DIRECTION_CHANGE_LAT:
+      self.curve_direction = 1 if self.baseline > 0.0 else -1
+    if self.curve_direction * lateral_accel < 0.0:
+      self.reset()
+      self.baseline = lateral_accel
+      return curvature
+    self.baseline += dt / (GENESIS_GV70_HIGHWAY_STABILIZER_BASELINE_RC + dt) * (lateral_accel - self.baseline)
+    residual = lateral_accel - self.baseline
+
+    if abs(lateral_accel) >= self.center_lat_bp[1]:
+      self.last_sign = 0
+      self.reversals.clear()
+      self.blend = 0.0
+      self.active_until = 0.0
+      return curvature
+
+    sign = 0
+    if residual > GENESIS_GV70_HIGHWAY_STABILIZER_REVERSAL_LAT:
+      sign = 1
+    elif residual < -GENESIS_GV70_HIGHWAY_STABILIZER_REVERSAL_LAT:
+      sign = -1
+    if sign and sign != self.last_sign:
+      if self.last_sign:
+        self.reversals.append(self.elapsed)
+      self.last_sign = sign
+    while self.reversals and self.elapsed - self.reversals[0] > GENESIS_GV70_HIGHWAY_STABILIZER_REVERSAL_WINDOW:
+      self.reversals.popleft()
+
+    speed_weight = float(np.interp(v_ego, GENESIS_GV70_HIGHWAY_STABILIZER_SPEED_BP, [0.0, 1.0]))
+    if len(self.reversals) >= 3:
+      self.active_until = self.elapsed + GENESIS_GV70_HIGHWAY_STABILIZER_RECOVERY_SECONDS
+    target_blend = speed_weight if self.elapsed < self.active_until else 0.0
+    self.blend += dt / (GENESIS_GV70_HIGHWAY_STABILIZER_BLEND_RC + dt) * (target_blend - self.blend)
+    center_weight = float(np.interp(abs(lateral_accel), self.center_lat_bp, [1.0, 0.0]))
+    if self.curve_direction and self.curve_exit_lat > 0.0:
+      center_weight *= float(np.interp(abs(lateral_accel), [0.0, self.curve_exit_lat], [0.0, 1.0]))
+    correction = float(np.clip(GENESIS_GV70_HIGHWAY_STABILIZER_REDUCTION * residual,
+                               -GENESIS_GV70_HIGHWAY_STABILIZER_MAX_DELTA,
+                               GENESIS_GV70_HIGHWAY_STABILIZER_MAX_DELTA))
+    return float((lateral_accel - self.blend * center_weight * correction) / v_ego ** 2)
+
+
+class GenesisGV70HighwayCommandStabilizer(GenesisHighwayCommandStabilizer):
+  def __init__(self) -> None:
+    super().__init__(GENESIS_GV70_HIGHWAY_STABILIZER_CENTER_LAT_BP)
+
+
+class GenesisG70HighwayCommandStabilizer(GenesisHighwayCommandStabilizer):
+  def __init__(self) -> None:
+    super().__init__(GENESIS_G70_HIGHWAY_STABILIZER_CENTER_LAT_BP, GENESIS_G70_HIGHWAY_STABILIZER_CURVE_EXIT_LAT)
+
+
+def get_genesis_highway_command_stabilizer(car_fingerprint: str, torque_control: bool) -> GenesisHighwayCommandStabilizer | None:
+  if torque_control:
+    if car_fingerprint in GENESIS_G70_CARS:
+      return GenesisG70HighwayCommandStabilizer()
+    if car_fingerprint in GENESIS_GV70_CARS:
+      return GenesisGV70HighwayCommandStabilizer()
+  return None
+
+
 def get_genesis_g70_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0,
                                        desired_lateral_jerk: float = 0.0) -> float:
   base_threshold = get_standard_friction_threshold(v_ego)
@@ -3303,6 +3518,19 @@ def get_genesis_g70_friction_threshold(v_ego: float, desired_lateral_accel: floa
   return base_threshold * (1.0 + gain)
 
 
+def get_genesis_g70_traffic_friction_increment(v_ego: float, desired_lateral_accel: float,
+                                              desired_lateral_jerk: float, future_curvature: float,
+                                              measured_curvature: float) -> float:
+  speed = max(v_ego, 0.0)
+  speed_weight = np.interp(speed, GENESIS_G70_TRAFFIC_FRICTION_SPEED_BP, [1.0, 0.0])
+  request_accel = max(abs(desired_lateral_accel), abs(future_curvature) * speed ** 2)
+  accel_weight = np.interp(request_accel, GENESIS_G70_TRAFFIC_FRICTION_LAT_BP, [1.0, 0.0])
+  curvature = max(abs(future_curvature), abs(measured_curvature), abs(desired_lateral_accel) / max(speed ** 2, 1.0))
+  curve_weight = np.interp(curvature, GENESIS_G70_TRAFFIC_FRICTION_CURVATURE_BP, [1.0, 0.0])
+  calm_weight = np.interp(abs(desired_lateral_jerk), GENESIS_G70_TRAFFIC_FRICTION_JERK_BP, [1.0, 0.0])
+  return float(GENESIS_G70_TRAFFIC_FRICTION_INCREMENT * speed_weight * accel_weight * curve_weight * calm_weight)
+
+
 def get_genesis_g70_friction_jerk_deadzone(v_ego: float, desired_lateral_accel: float,
                                            desired_lateral_jerk: float = 0.0,
                                            measured_lateral_accel: float = 0.0) -> float:
@@ -3311,6 +3539,12 @@ def get_genesis_g70_friction_jerk_deadzone(v_ego: float, desired_lateral_accel: 
   center_weight = _sigmoid((GENESIS_G70_FRICTION_JERK_DEADZONE_LAT - abs(desired_lateral_accel)) /
                            GENESIS_G70_FRICTION_JERK_DEADZONE_LAT_WIDTH)
   deadzone = GENESIS_G70_FRICTION_JERK_DEADZONE_MAX * speed_weight * center_weight
+
+  if desired_lateral_accel * desired_lateral_jerk > 0.0:
+    turn_in_weight = (np.interp(v_ego, GENESIS_G70_CURVE_TURN_IN_SPEED_BP, [0.0, 1.0]) *
+                      np.interp(abs(desired_lateral_accel), GENESIS_G70_CURVE_TURN_IN_LAT_BP, [0.0, 1.0]))
+    deadzone += (GENESIS_G70_CURVE_TURN_IN_JERK_REDUCTION * turn_in_weight *
+                 max(abs(desired_lateral_jerk) - deadzone, 0.0))
 
   overshoot = max(abs(measured_lateral_accel) - abs(desired_lateral_accel), 0.0)
   if (desired_lateral_accel * desired_lateral_jerk < 0.0 and
@@ -3332,8 +3566,10 @@ def get_genesis_g70_friction_jerk_deadzone(v_ego: float, desired_lateral_accel: 
       GENESIS_G70_CURVE_UNWIND_FRICTION_JERK_DEADZONE_JERK_WIDTH
     )
     overshoot_weight = _sigmoid((overshoot - 0.08) / 0.10)
+    boundary_weight = get_genesis_g70_overshoot_blend(desired_lateral_accel, measured_lateral_accel)
+    boundary_weight *= min(abs(desired_lateral_jerk) / 0.15, 1.0)
     deadzone += (GENESIS_G70_CURVE_UNWIND_FRICTION_JERK_DEADZONE_MAX * curve_speed_weight *
-                 curve_onset_weight * curve_cutoff_weight * jerk_weight * overshoot_weight)
+                 curve_onset_weight * curve_cutoff_weight * jerk_weight * overshoot_weight * boundary_weight)
   return deadzone
 
 
@@ -3389,6 +3625,13 @@ def get_genesis_g70_angle_output_scale(steering_angle_deg: float, output_torque:
   return 1.0 - ((1.0 - GENESIS_G70_ANGLE_OUTPUT_TAPER_MIN) * angle_weight)
 
 
+def get_genesis_g70_overshoot_blend(setpoint: float, measured_lateral_accel: float) -> float:
+  if setpoint * measured_lateral_accel <= 0.0:
+    return 0.0
+  overshoot = max(abs(measured_lateral_accel) - abs(setpoint), 0.0)
+  return float(np.interp(abs(setpoint), [0.10, 0.35], [0.0, 1.0]) * min(overshoot / 0.15, 1.0))
+
+
 def get_genesis_g70_unwind_ff_scale(setpoint: float, measured_lateral_accel: float,
                                     desired_lateral_jerk: float, v_ego: float) -> float:
   if setpoint * desired_lateral_jerk >= 0.0 or setpoint * measured_lateral_accel <= 0.0:
@@ -3403,7 +3646,9 @@ def get_genesis_g70_unwind_ff_scale(setpoint: float, measured_lateral_accel: flo
                          GENESIS_G70_UNWIND_FF_JERK_WIDTH)
   speed_weight = _sigmoid((v_ego - GENESIS_G70_UNWIND_FF_SPEED) /
                           GENESIS_G70_UNWIND_FF_SPEED_WIDTH)
-  return 1.0 - GENESIS_G70_UNWIND_FF_REDUCTION_MAX * overshoot_weight * jerk_weight * speed_weight
+  boundary_weight = get_genesis_g70_overshoot_blend(setpoint, measured_lateral_accel)
+  boundary_weight *= min(abs(desired_lateral_jerk) / 0.15, 1.0)
+  return 1.0 - GENESIS_G70_UNWIND_FF_REDUCTION_MAX * overshoot_weight * jerk_weight * speed_weight * boundary_weight
 
 
 def get_genesis_g70_high_speed_error_scale(setpoint: float, measured_lateral_accel: float,
@@ -3418,10 +3663,35 @@ def get_genesis_g70_high_speed_error_scale(setpoint: float, measured_lateral_acc
                           GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_ERROR_WIDTH)
   jerk_weight = _sigmoid((abs(desired_lateral_jerk) - GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_JERK) /
                          GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_JERK_WIDTH)
-  phase_weight = 1.0 if setpoint * desired_lateral_jerk < 0.0 else 0.45
+  unwind_jerk = -math.copysign(1.0, setpoint) * desired_lateral_jerk
+  phase_weight = float(np.interp(unwind_jerk, [0.0, 0.15], [0.45, 1.0]))
   reduction = (GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_MAX * speed_weight * error_weight *
-               (0.35 + (0.65 * jerk_weight)) * phase_weight)
+               (0.35 + (0.65 * jerk_weight)) * phase_weight *
+               get_genesis_g70_overshoot_blend(setpoint, measured_lateral_accel))
   return 1.0 - reduction
+
+
+def get_genesis_g70_highway_turn_in_output_scale(output_torque: float, setpoint: float,
+                                                   measured_lateral_accel: float,
+                                                   desired_lateral_jerk: float, v_ego: float) -> float:
+  if (setpoint * desired_lateral_jerk <= 0.0 or setpoint * measured_lateral_accel <= 0.0 or
+      output_torque * setpoint >= 0.0):
+    return 1.0
+  speed_weight = np.interp(v_ego, GENESIS_G70_HIGHWAY_TURN_IN_SPEED_BP, [0.0, 1.0])
+  curve_weight = np.interp(abs(setpoint), GENESIS_G70_HIGHWAY_TURN_IN_LAT_BP, [0.0, 1.0])
+  jerk_weight = np.interp(abs(desired_lateral_jerk), GENESIS_G70_HIGHWAY_TURN_IN_JERK_BP, [0.0, 1.0])
+  tracking_weight = np.interp(abs(measured_lateral_accel / setpoint),
+                              GENESIS_G70_HIGHWAY_TURN_IN_TRACKING_BP, [0.0, 1.0, 0.0])
+  return 1.0 - GENESIS_G70_HIGHWAY_TURN_IN_OUTPUT_REDUCTION * speed_weight * curve_weight * jerk_weight * tracking_weight
+
+
+def get_genesis_g70_center_measurement_damping_gain(v_ego: float, desired_lateral_accel: float,
+                                                   measured_lateral_accel: float, desired_lateral_jerk: float) -> float:
+  speed_weight = np.interp(v_ego, GENESIS_G70_CENTER_MEASUREMENT_DAMPING_SPEED_BP, [0.0, 1.0])
+  center_weight = np.interp(max(abs(desired_lateral_accel), abs(measured_lateral_accel)),
+                            GENESIS_G70_CENTER_MEASUREMENT_DAMPING_LAT_BP, [1.0, 0.0])
+  jerk_weight = np.interp(abs(desired_lateral_jerk), GENESIS_G70_CENTER_MEASUREMENT_DAMPING_JERK_BP, [1.0, 0.0])
+  return float(GENESIS_G70_CENTER_MEASUREMENT_DAMPING_MAX * speed_weight * center_weight * jerk_weight)
 
 
 def get_genesis_g70_stabilized_output(output_torque: float, prev_output_torque: float,
@@ -3539,7 +3809,8 @@ def get_ioniq_5_center_taper_scale(desired_lateral_accel: float, v_ego: float) -
 
 
 def get_ioniq_5_low_speed_output_limit(desired_lateral_accel: float,
-                                       desired_lateral_jerk: float, v_ego: float) -> float:
+                                       desired_lateral_jerk: float, v_ego: float,
+                                       desired_curvature: float = 0.0, output_torque: float = 0.0) -> float:
   """Bound stop-transition center chatter without blunting actual turns."""
   speed_weight = _ioniq_5_sigmoid((IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_SPEED - max(v_ego, 0.0)) /
                                   IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_SPEED_WIDTH)
@@ -3551,6 +3822,9 @@ def get_ioniq_5_low_speed_output_limit(desired_lateral_accel: float,
   center_limit = (IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_BASE +
                   IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_TURN_RELIEF * (1.0 - center_weight))
   limit = 1.0 - speed_weight * (1.0 - center_limit)
+  if desired_curvature * output_torque > 0.0:
+    turn_weight = np.interp(abs(desired_curvature), IONIQ_5_LOW_SPEED_TURN_CURVATURE_BP, [0.0, 1.0])
+    limit += max(IONIQ_5_LOW_SPEED_TURN_OUTPUT_FLOOR - limit, 0.0) * turn_weight
   return float(np.clip(limit, IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_BASE, 1.0))
 
 
@@ -3720,6 +3994,17 @@ def get_ioniq_6_2023_unwind_ff_scale(setpoint: float, measured_lateral_accel: fl
   reduction = (IONIQ_6_2023_UNWIND_FF_REDUCTION_MAX * overshoot_weight * jerk_weight *
                speed_onset * speed_cutoff)
   return 1.0 - reduction
+
+
+def get_ioniq_6_2023_center_friction_increment(v_ego: float, desired_lateral_accel: float, measured_lateral_accel: float,
+                                             desired_lateral_jerk: float, future_lateral_accel: float) -> float:
+  speed_weight = np.interp(v_ego, IONIQ_6_2023_CENTER_FRICTION_SPEED_BP, [0.0, 1.0])
+  center_weight = np.interp(max(abs(desired_lateral_accel), abs(measured_lateral_accel), abs(future_lateral_accel)),
+                            IONIQ_6_2023_CENTER_FRICTION_LAT_BP, [1.0, 0.0])
+  tracking_weight = np.interp(abs(desired_lateral_accel - measured_lateral_accel),
+                              IONIQ_6_2023_CENTER_FRICTION_ERROR_BP, [1.0, 0.0])
+  jerk_weight = np.interp(abs(desired_lateral_jerk), IONIQ_6_2023_CENTER_FRICTION_JERK_BP, [1.0, 0.0])
+  return float(IONIQ_6_2023_CENTER_FRICTION_INCREMENT * speed_weight * center_weight * tracking_weight * jerk_weight)
 
 
 def get_ioniq_6_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0, desired_lateral_jerk: float = 0.0) -> float:
@@ -4554,7 +4839,7 @@ def get_flm_capabilities(car_fingerprint, brand: str = "", hyundai_canfd: bool =
   dedicated_friction = car_fingerprint in (
     set(BOLT_2022_2023_CARS) | set(BOLT_2018_2021_CARS) | set(VOLT_STANDARD_CARS) | set(PALISADE_CARS) |
     set(PRIUS_CARS) | set(RAV4_PRIME_CARS) | set(SIENNA_4TH_GEN_CARS) | set(IONIQ_5_CARS) | set(IONIQ_6_CARS) | set(KIA_EV6_CARS) | set(KIA_FORTE_CARS) |
-    set(KIA_NIRO_PHEV_2022_CARS) | set(KIA_CARNIVAL_CARS) | set(GENESIS_G90_CARS) | set(GENESIS_G70_CARS) | set(CAMRY_CARS)
+    set(KIA_NIRO_EV_CARS) | set(KIA_NIRO_PHEV_2022_CARS) | set(KIA_CARNIVAL_CARS) | set(GENESIS_G90_CARS) | set(GENESIS_G70_CARS) | set(CAMRY_CARS)
   )
   dedicated_center_taper = car_fingerprint in (
     set(PRIUS_CARS) | set(SIENNA_4TH_GEN_CARS) | set(BOLT_CARS) | set(VOLT_STANDARD_CARS) | set(IONIQ_5_CARS) |

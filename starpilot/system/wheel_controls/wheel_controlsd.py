@@ -650,7 +650,7 @@ class WheelControlsDaemon:
           if key not in self.pressed_keys:
             self.pressed_keys.add(key)
             self._publish_button_press(time.monotonic_ns())
-          self._handle_key(source, code)
+            self._handle_key(source, code)
       elif event_type == EV_ABS and ABS_HAT0X <= code <= ABS_HAT3Y:
         previous = self.hat_values.get((fd, code), 0)
         self.hat_values[(fd, code)] = value

@@ -8,18 +8,11 @@
 **StarPilot** is a custom fork of [comma.ai's openpilot](https://comma.ai/openpilot),
 an open source driver assistance system.
 
-
 Openpilot provides
 * Automated Lane Centering
 * Adaptive Cruise Control
 * Lane Change Assist
 * Driver Monitoring *without wheel nags*
-
-StarPilot was formerly a GM targeted fork,
-but [has expanded to offer Quality-Of-Life improvements for all](#features)!
-
-StarPilot is built off of [FrogPilot](https://github.com/FrogAi/FrogPilot)
-and supports the major features FrogPilot offers.
 
 Ford-specific lateral-control and vehicle-support work includes substantial adaptations from
 [BluePilot](https://github.com/BluePilotDev/bluepilot/tree/bp-7.0), principally developed by
@@ -37,6 +30,7 @@ this adaptation. Detailed code lineage is recorded in [CREDITS.md](CREDITS.md#hy
 
 StarPilot has a vibrant, welcoming community [discord](https://firestar.link/discord).
 Stop by to chat or ask questions!
+If your car isn't driving as well as you'd like, [open a ticket so we can help](https://firestar.link/logs)!
 
 ## Documentation
 
@@ -45,27 +39,35 @@ installation guides, and software configuration.
 
 ## Features
 
-* Full support for Comma C3, C3X, and C4
+* **Full support for Comma C3, C3X, and C4**
+* Full support for chestnut/eGPU on C3, C3X, and C4. C3/C3X may require special gps handling.
 * Model switcher with all of comma's tinygrad driving models
-* Special longitudinal planner tuning for VoACC (visual only, radar-less) vehicles
-* Custom-tuned torque controllers for an expanding list of cars.
+* StarPilot custom torque controller
+* StarPilot custom longitudinal planner for both radar and VoACC (visual only, radar-less) vehicles
+* **Custom tuning for an expanding list of vehicles**
+* Firestar Lateral Method -
+Auto tuning system to adapt openpilot to *your* car's unique lateral characteristics.
 * Galaxy: StarPilot's portal to configure your comma device using your phone from anywhere.
-Download models, change settings, update software, visualize live model outputs for tuning.
-* Always On Lateral (full time steering assist)*
-* Speed Limit Controller*
-* Learning Curve Speed Controller*
-* Conditional Experimental Mode (CEM)*
-* Driving Profiles*
-* Custom themes*
-* Alert Volume Controller*
-* Comma Pedal Interceptor support*
-* Toyota SDSU support*
-* ZSS support*
-* High quality dashcam recordings*
-* Enhanced tuning for CEM (dynamic experimental mode switching)
+Download models, change settings, update software, diagnostics, manage dashcam video, and more.
+* Navigation - Display routes and give the driving model hints on taking exits and turns.
+* Always On Lateral (full time steering assist)
+* Lane Centering - Enable to center between detected lane lines,
+with graceful fallback to model E2E lateral outputs and safety breakout
+* Force Stop 2.0 - Better stops at stop signs and traffic lights.
+* Speed Limit Controller - Use dashboard, map data, and/or vision detection for speed limit signs
+* Curve Speed Controller - Learns from how you take curves
+* Conditional Experimental Mode (CEM)
+* Conditional Chill Mode (CCM)
+* Driving Profiles and Traffic Mode
+* Custom themes
+* Alert volume customization
+* Comma Pedal Interceptor support
+* Bluetooth support - Connect keyboards, controllers, steering wheel remotes, and more.
+* Sentry mode - Record when motion is detected while parked.
+* V-ASM - Detect vehicles in the adjacent/blind spots using the driver-facing camera.
+* Additional car support - Toyota SDSU, ZSS, CAN filter; pre-AP tesla; ford; Polestar 2; and more.
 * And more!
 
-\* [Inherited from FrogPilot](https://github.com/FrogAi/FrogPilot#openpilot-vs-frogpilot)
 
 ## GM-only Features
 
@@ -82,6 +84,7 @@ Download models, change settings, update software, visualize live model outputs 
 
 * Native and cross compilation for Windows, Mac, and Ubuntu
 * Custom AGNOS to support C3, C3X, and C4
+* Raylib UI on C3, C3X, and C4
 * To run UI on PC:
   * `./c3` for large UI
   * `./c4` for small UI

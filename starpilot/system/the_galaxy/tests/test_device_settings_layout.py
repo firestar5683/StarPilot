@@ -80,6 +80,25 @@ def test_galaxy_layout_contains_basic_mode_controls():
   assert {"AlphaLongitudinalEnabled", "ForceOffroad", "GalaxyDeveloperMode"} <= sections["Developer"].keys()
 
 
+def test_tesla_aol_brake_disengage_is_tesla_only_and_opt_in():
+  setting = _params_by_section(_layout())["Lateral (Steering)"]["TeslaAOLDisengageOnBrake"]
+
+  assert _declared_default("TeslaAOLDisengageOnBrake") == "0"
+  assert setting["vehicle_makes"] == ["Tesla"]
+  assert setting["parent_key"] == "AlwaysOnLateral"
+  assert setting["ui_type"] == "toggle"
+
+
+def test_tesla_screen_tap_is_optional_parked_only_galaxy_setting():
+  setting = _params_by_section(_layout())["Lateral (Steering)"]["TeslaAOLScreenTap"]
+  assert _declared_default("TeslaAOLScreenTap") == "0"
+  assert setting["vehicle_makes"] == ["Tesla"]
+  assert setting["parent_key"] == "AlwaysOnLateral"
+  assert setting["requires_offroad"] is True
+  assert setting["ui_type"] == "toggle"
+  assert "detected automatically" in setting["description"]
+
+
 def test_galaxy_new_ui_is_the_visible_default_choice():
   galaxy_default = _params_by_section(_layout())["Developer"]["GalaxyMobileDefault"]
 
@@ -408,6 +427,18 @@ def test_toyota_auto_hold_is_galaxy_only():
   assert setting["galaxy_only"] is True
   assert setting["ui_type"] == "toggle"
   assert setting["data_type"] == "bool"
+
+
+def test_rav4_radar_is_galaxy_only_parked_only_and_default_off():
+  setting = _params_by_section(_layout())["Vehicle"]["ToyotaRadarMode"]
+  assert _declared_default("ToyotaRadarMode") == "0"
+  assert setting["vehicle_makes"] == ["Toyota"]
+  assert setting["galaxy_only"] is True
+  assert setting["requires_offroad"] is True
+  assert setting["settings_tier"] == "simple"
+  assert setting["options"] == [
+    {"value": 0, "label": "Off"}, {"value": 1, "label": "ACC Target"}, {"value": 2, "label": "Fused Tracks"},
+  ]
 
 
 def test_cluster_offset_is_in_galaxy_developer_section_only():

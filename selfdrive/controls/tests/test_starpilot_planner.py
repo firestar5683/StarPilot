@@ -6,6 +6,7 @@ import pytest
 
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
+from openpilot.selfdrive.controls.lib.drive_helpers import get_lateral_active
 from openpilot.starpilot.controls.starpilot_planner import StarPilotPlanner, get_force_stop_jerk_scale
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_hyundai_canfd_scc_jerk_limits,
@@ -48,6 +49,7 @@ def test_force_stop_jerk_scale_is_platform_specific():
 
 def test_lead_follow_jerk_scale_is_platform_specific():
   assert get_lead_follow_jerk_scale(SimpleNamespace(brand="hyundai", carFingerprint="HYUNDAI_ELANTRA_2021")) == 1.25
+  assert get_lead_follow_jerk_scale(SimpleNamespace(brand="hyundai", carFingerprint="KIA_NIRO_EV")) == 1.5
   assert get_lead_follow_jerk_scale(SimpleNamespace(brand="hyundai", carFingerprint="GENESIS_GV70_ELECTRIFIED_1ST_GEN")) == 1.75
   assert get_lead_follow_jerk_scale(SimpleNamespace(brand="ford", carFingerprint="FORD_F_150_LIGHTNING_MK1")) == 1.35
   assert get_lead_follow_jerk_scale(SimpleNamespace(brand="honda", carFingerprint="HONDA_CRV_5G")) == 1.35
@@ -157,6 +159,19 @@ def test_standstill_without_turn_signal_keeps_lateral_allowed(monkeypatch):
     planner.update(0.0, False, make_sm(planner, frame=1, v_ego=0.0, left_blinker=False, standstill=True), toggles)
 
     assert planner.lateral_check is True
+  finally:
+    planner.shutdown()
+
+
+@pytest.mark.parametrize("left_blinker", [False, True])
+def test_pause_steering_below_speed_includes_standstill(monkeypatch, left_blinker):
+  planner = make_planner(monkeypatch)
+
+  try:
+    toggles = make_toggles(pause_lateral_below_speed=35.0 * CV.MPH_TO_MS, pause_lateral_below_signal=False)
+    planner.update(0.0, False, make_sm(planner, frame=1, v_ego=0.0, left_blinker=left_blinker, standstill=True), toggles)
+    assert planner.lateral_check is False
+    assert not get_lateral_active(False, False, True, False, False, True, True, planner.lateral_check)
   finally:
     planner.shutdown()
 

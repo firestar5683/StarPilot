@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from openpilot.common.constants import CV
 from openpilot.starpilot.controls.starpilot_planner import StarPilotPlanner
 import openpilot.starpilot.controls.starpilot_planner as starpilot_planner_module
@@ -252,6 +254,76 @@ def test_close_visible_but_untracked_lead_blocks_stop_light():
   run_stop_light_detector(cem, v_ego, steps=30)
 
   assert not cem.stop_light_detected
+
+
+@pytest.mark.parametrize("radar", (False, True))
+def test_braking_model_target_before_lead_is_not_masked(radar):
+  cem = make_cem(model_length=50.3, lead_status=True, lead_d_rel=58.6,
+                 lead_v_lead=9.9, lead_model_prob=0.95, lead_radar=radar)
+  sm = make_sm()
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(desiredAcceleration=-1.28))
+  for _ in range(30):
+    cem.stop_sign_and_light(10.7, sm, model_time=7.7)
+  assert cem.stop_light_model_detected
+  assert cem.stop_light_detected
+
+  toggles = make_update_toggles()
+  assert cem.check_conditions(10.7, sm, toggles)
+  assert cem.status_value == conditional_experimental_mode_module.CEStatus["STOP_LIGHT"]
+
+
+@pytest.mark.parametrize("length,accel,speed", (
+  (50.3, 0.2, 10.7),
+  (50.3, -0.49, 10.7),
+  (56.0, -1.28, 10.7),
+  (10.0, -1.28, 4.0),
+))
+def test_model_lead_exemption_requires_distinct_braking_target(length, accel, speed):
+  cem = make_cem(model_length=length, lead_status=True, lead_d_rel=min(58.6, speed * 7.7 + 10.0), lead_v_lead=9.9)
+  sm = make_sm()
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(desiredAcceleration=accel))
+  for _ in range(30):
+    cem.stop_sign_and_light(speed, sm, model_time=7.7)
+  assert not cem.stop_light_detected
+
+
+def test_model_lead_exemption_releases_when_model_wants_to_go(monkeypatch):
+  now = [10.0]
+  monkeypatch.setattr(conditional_experimental_mode_module.time, "monotonic", lambda: now[0])
+  cem = make_cem(model_length=50.3, lead_status=True, lead_d_rel=58.6, lead_v_lead=9.9)
+  sm = make_sm()
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(desiredAcceleration=-1.28))
+  for _ in range(30):
+    cem.stop_sign_and_light(10.7, sm, model_time=7.7)
+    now[0] += 0.05
+  assert cem.stop_light_detected
+  assert cem.stop_light_detected_hold_until > now[0]
+
+  sm["modelV2"].action.desiredAcceleration = 0.5
+  cem.starpilot_planner.model_length = 120.0
+  cem.stop_sign_and_light(10.7, sm, model_time=7.7)
+  assert not cem.stop_light_detected
+
+
+def test_braking_model_approach_does_not_exit_during_short_lead_range_overlap(monkeypatch):
+  now = [10.0]
+  monkeypatch.setattr(conditional_experimental_mode_module.time, "monotonic", lambda: now[0])
+  cem = make_cem(model_length=50.3, lead_status=True, lead_d_rel=58.6, lead_v_lead=9.9)
+  sm = make_update_sm(standstill=False)
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(desiredAcceleration=-1.28))
+  toggles = make_update_toggles()
+  for _ in range(30):
+    cem.update(10.7, sm, toggles)
+    now[0] += 0.05
+  assert cem.experimental_mode
+
+  for length, distance, accel in [(51.7, 54.0, -1.57)] * 6 + [(51.2, 58.0, -2.04)] * 10:
+    cem.starpilot_planner.model_length = length
+    cem.starpilot_planner.lead_one.dRel = distance
+    sm["modelV2"].action.desiredAcceleration = accel
+    cem.update(10.0, sm, toggles)
+    assert cem.experimental_mode
+    now[0] += 0.05
 
 
 def test_far_visible_lead_does_not_block_stop_light():

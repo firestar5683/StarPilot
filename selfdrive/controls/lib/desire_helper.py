@@ -1,4 +1,5 @@
 import json
+from time import monotonic
 
 import numpy as np
 
@@ -12,8 +13,11 @@ LaneChangeDirection = log.LaneChangeDirection
 
 LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
-NAV_TURN_DISTANCE_SPEED_BREAKPOINTS = [0.0, 5.0, 10.0]
-NAV_TURN_DISTANCE_BREAKPOINTS = [20.0, 35.0, 55.0]
+NAV_TURN_MAX_SPEED = 14.0
+NAV_TURN_PREVIEW_SECONDS = 6.0
+NAV_TURN_MIN_DISTANCE = 35.0
+NAV_TURN_MAX_DISTANCE = 90.0
+NAV_INSTRUCTION_MAX_AGE = 2.5
 # A driver normally signals an intersection before slowing below the lane-change
 # speed threshold. Use the route to classify that early signal so it does not
 # start a lane change while approaching the matching turn.
@@ -122,7 +126,20 @@ class DesireHelper:
     except (TypeError, ValueError):
       return False
 
-    return 0.0 <= distance <= float(np.interp(carstate.vEgo, NAV_TURN_DISTANCE_SPEED_BREAKPOINTS, NAV_TURN_DISTANCE_BREAKPOINTS))
+    preview_distance = float(np.clip(
+      max(float(carstate.vEgo), 0.0) * NAV_TURN_PREVIEW_SECONDS,
+      NAV_TURN_MIN_DISTANCE,
+      NAV_TURN_MAX_DISTANCE,
+    ))
+    return 0.0 <= distance <= preview_distance
+
+  def _nav_instruction_is_fresh(self):
+    try:
+      updated_at = float(self._nav_instruction_state["updatedAtMonotonic"])
+    except (KeyError, TypeError, ValueError):
+      return False
+    age = monotonic() - updated_at
+    return 0.0 <= age <= NAV_INSTRUCTION_MAX_AGE
 
   @staticmethod
   def _nav_turn_signal_matches(carstate, nav_instruction_state):
@@ -234,7 +251,7 @@ class DesireHelper:
     self.nav_lane_positioning_allowed = bool(
       getattr(starpilot_toggles, "nav_lane_positioning_allowed", self.nav_lane_positioning_allowed)
     )
-    if not self.nav_desires_allowed or not lateral_active or not bool(self._nav_instruction_state.get("valid", False)):
+    if not self.nav_desires_allowed or not lateral_active or not bool(self._nav_instruction_state.get("valid", False)) or not self._nav_instruction_is_fresh():
       return log.Desire.none
 
     maneuver_distance = self._nav_instruction_state.get("maneuverDistance", 0.0)
@@ -265,14 +282,14 @@ class DesireHelper:
       if self.turn_stop_hold:
         return log.Desire.none
       turn_allowed = carstate.leftBlinker and not carstate.rightBlinker and not carstate.leftBlindspot
-      turn_allowed &= carstate.vEgo < starpilot_toggles.minimum_lane_change_speed and not carstate.standstill
+      turn_allowed &= 0.0 <= carstate.vEgo < NAV_TURN_MAX_SPEED and not carstate.standstill
       if turn_allowed and self._nav_turn_is_imminent(carstate, maneuver_distance):
         return log.Desire.turnLeft
     elif modifier in ("right", "sharpRight"):
       if self.turn_stop_hold:
         return log.Desire.none
       turn_allowed = carstate.rightBlinker and not carstate.leftBlinker and not carstate.rightBlindspot
-      turn_allowed &= carstate.vEgo < starpilot_toggles.minimum_lane_change_speed and not carstate.standstill
+      turn_allowed &= 0.0 <= carstate.vEgo < NAV_TURN_MAX_SPEED and not carstate.standstill
       if turn_allowed and self._nav_turn_is_imminent(carstate, maneuver_distance):
         return log.Desire.turnRight
 
@@ -289,7 +306,7 @@ class DesireHelper:
 
     self._update_nav_params()
     self.nav_desires_allowed = bool(getattr(starpilot_toggles, "nav_desires_allowed", self.nav_desires_allowed))
-    nav_turn_signal = self.nav_desires_allowed and self._nav_turn_signal_matches(carstate, self._nav_instruction_state)
+    nav_turn_signal = self.nav_desires_allowed and self._nav_instruction_is_fresh() and self._nav_turn_signal_matches(carstate, self._nav_instruction_state)
 
     stop_imminent = (bool(getattr(starpilotPlan, "redLight", False))
                      or bool(getattr(starpilotPlan, "forcingStop", False))
@@ -409,3 +426,5 @@ class DesireHelper:
     nav_desire = self._navigation_desire(carstate, lateral_active, starpilotPlan, starpilot_toggles)
     if nav_desire != log.Desire.none and self.lane_change_state == LaneChangeState.off:
       self.desire = nav_desire
+      if nav_desire in (log.Desire.turnLeft, log.Desire.turnRight):
+        self.turn_direction = nav_desire

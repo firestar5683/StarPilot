@@ -2,6 +2,7 @@
 
 #include "board/drivers/spi_declarations.h"
 #include "board/crc.h"
+#include "board/drivers/spi_can_replay.h"
 
 uint8_t spi_buf_rx[SPI_BUF_SIZE];
 uint8_t spi_buf_tx[SPI_BUF_SIZE];
@@ -130,6 +131,9 @@ void spi_rx_done(void) {
       } else if (spi_endpoint == 2U) {
         comms_endpoint2_write(&spi_buf_rx[SPI_HEADER_SIZE], spi_data_len_mosi);
         response_ack = true;
+      } else if (spi_endpoint == SPI_CAN_WRITE_SEQUENCED_ENDPOINT) {
+        response_ack = spi_can_write_sequenced(spi_data_len_miso, &spi_buf_rx[SPI_HEADER_SIZE], spi_data_len_mosi,
+                                               &spi_can_tx_ready);
       } else if (spi_endpoint == 3U) {
         if (spi_data_len_mosi > 0U) {
           if (spi_can_tx_ready) {

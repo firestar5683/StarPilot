@@ -4,7 +4,7 @@ from opendbc.can import CANPacker
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, structs
 from opendbc.car.lateral import ISO_LATERAL_ACCEL, apply_std_steer_angle_limits
 from opendbc.car.ford import fordcan
-from opendbc.car.ford.values import CarControllerParams, FordFlags
+from opendbc.car.ford.values import CAR, CarControllerParams, FordFlags
 from opendbc.car.interfaces import CarControllerBase, V_CRUISE_MAX
 # This Ford extension boundary substantially adapts BluePilot bp-7.0 work. See the root CREDITS.md
 # (including Alan Polk's d0aac605f and db2bdff05) and THIRD_PARTY_NOTICES.md.
@@ -64,11 +64,27 @@ def apply_ford_curvature_limits(apply_curvature, apply_curvature_last, current_c
   return apply_curvature
 
 
-def apply_creep_compensation(accel: float, v_ego: float) -> float:
+def apply_creep_compensation(accel: float, v_ego: float, car_fingerprint: str, *, standstill: bool, stopping: bool) -> float:
+  if car_fingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and not (standstill and stopping):
+    return accel
   creep_accel = np.interp(v_ego, [1., 3.], [0.6, 0.])
   creep_accel = np.interp(accel, [0., 0.2], [creep_accel, 0.])
   accel -= creep_accel
   return float(accel)
+
+
+def apply_brake_rate_limit(accel: float, gas: float, accel_last: float, v_ego: float, car_fingerprint: str,
+                          *, stopping: bool, standstill: bool, fcw: bool) -> tuple[float, float]:
+  mild_mach_e_braking = (
+    car_fingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and
+    -1.0 < gas < 0.0 and v_ego >= 5.0 and not (stopping or standstill or fcw)
+  )
+  if mild_mach_e_braking:
+    accel = max(accel, min(accel_last, 0.0) - 2.0 * CarControllerParams.ACC_CONTROL_STEP * DT_CTRL)
+    gas = accel
+  else:
+    accel = max(accel, accel_last - 3.5 * CarControllerParams.ACC_CONTROL_STEP * DT_CTRL)
+  return float(accel), float(gas)
 
 
 class CarController(CarControllerBase):
@@ -165,7 +181,7 @@ class CarController(CarControllerBase):
           can_sends.append(starpilot_fordcan.create_lat_ctl2_msg(
             self.packer, self.CAN, 1 if lateral.active else 0,
             lateral.ramp_type, lateral.precision_type,
-            -lateral.curvature, -lateral.curvature_rate, counter))
+            -lateral.curvature, -lateral.curvature_rate, counter, -lateral.path_angle))
         else:
           can_sends.append(starpilot_fordcan.create_lat_ctl_msg(
             self.packer, self.CAN, lateral.active,
@@ -181,16 +197,17 @@ class CarController(CarControllerBase):
     if self.CP.openpilotLongitudinalControl and (self.frame % CarControllerParams.ACC_CONTROL_STEP) == 0:
       accel = actuators.accel
       gas = accel
+      stopping = actuators.longControlState == LongCtrlState.stopping
 
       if CC.longActive:
-        # Compensate for engine creep at low speed.
-        # Either the ABS does not account for engine creep, or the correction is very slow
-        # TODO: verify this applies to EV/hybrid
-        accel = apply_creep_compensation(accel, CS.out.vEgo)
+        accel = apply_creep_compensation(accel, CS.out.vEgo, self.CP.carFingerprint,
+                                         standstill=CS.out.standstill, stopping=stopping)
 
-        # The stock system has been seen rate limiting the brake accel to 5 m/s^3,
-        # however even 3.5 m/s^3 causes some overshoot with a step response.
-        accel = max(accel, self.accel - (3.5 * CarControllerParams.ACC_CONTROL_STEP * DT_CTRL))
+        accel, gas = apply_brake_rate_limit(
+          accel, gas, self.accel, CS.out.vEgo, self.CP.carFingerprint,
+          stopping=stopping, standstill=CS.out.standstill,
+          fcw=fcw_alert or CS.out.stockFcw or CS.out.stockAeb,
+        )
 
       accel = float(np.clip(accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
       gas = float(np.clip(gas, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
@@ -210,7 +227,6 @@ class CarController(CarControllerBase):
       elif accel_pitch_compensated < 0.0:
         self.brake_request = True
 
-      stopping = CC.actuators.longControlState == LongCtrlState.stopping
       # TODO: look into using the actuators packet to send the desired speed
       can_sends.append(fordcan.create_acc_msg(self.packer, self.CAN, CC.longActive, gas, accel, stopping, self.brake_request, v_ego_kph=V_CRUISE_MAX))
 

@@ -849,12 +849,17 @@ class AugmentedRoadView(CameraView):
     rl.draw_rectangle_rounded_lines_ex(border_rect, 0.12, 16, border_size, border_color)
 
     if (colors := get_traffic_border_colors()) is not None:
+      content_x = int(round(self._content_rect.x))
+      content_y = int(round(self._content_rect.y))
+      content_width = int(round(self._content_rect.width))
+      content_height = int(round(self._content_rect.height))
+      split_x = content_x + content_width // 2
       for x, w, color in (
-        (border_rect.x, border_rect.width / 2, colors[0]),
-        (border_rect.x + border_rect.width / 2, border_rect.width - border_rect.width / 2, colors[1]),
+        (content_x, split_x - content_x, colors[0]),
+        (split_x, content_x + content_width - split_x, colors[1]),
       ):
         if color.a > 0:
-          rl.begin_scissor_mode(int(x), int(border_rect.y), int(w), int(border_rect.height))
+          rl.begin_scissor_mode(x, content_y, w, content_height)
           rl.draw_rectangle_rounded_lines_ex(border_rect, 0.12, 16, border_size, color)
           rl.end_scissor_mode()
 

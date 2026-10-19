@@ -5,6 +5,7 @@ from cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.lib.lead_behavior import should_disable_far_lead_throttle
+from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import get_far_lead_coast_headway_floor
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import COMFORT_BRAKE, LEAD_DANGER_FACTOR, desired_follow_distance, get_jerk_factor, get_T_FOLLOW
 
 from openpilot.starpilot.common.longitudinal_personality_profiles import active_personality_id, interpolate_category_curve, resolve_personality_category
@@ -136,7 +137,14 @@ class StarPilotFollowing:
       v_lead = self.starpilot_planner.lead_one.vLead
       closing_speed = max(0.0, v_ego - v_lead)
       desired_gap = float(desired_follow_distance(v_ego, v_lead, self.t_follow))
-      self.disable_throttle = should_disable_far_lead_throttle(v_ego, lead_distance, desired_gap, closing_speed, self.following_lead)
+      try:
+        car_params = sm["carParams"]
+      except KeyError:
+        car_params = None
+      self.disable_throttle = should_disable_far_lead_throttle(
+        v_ego, lead_distance, desired_gap, closing_speed, self.following_lead,
+        get_far_lead_coast_headway_floor(car_params),
+      )
 
     if long_control_active and self.starpilot_planner.tracking_lead:
       self.update_follow_values(self.starpilot_planner.lead_one.dRel, v_ego, self.starpilot_planner.lead_one.vLead, starpilot_toggles)

@@ -50,6 +50,7 @@ class FordSafetyFlags(IntFlag):
   LONG_CONTROL = 1
   CANFD = 2
   LKA_STEERING = 4
+  MACH_E_CURVATURE = 8
 
 
 class FordFlags(IntFlag):

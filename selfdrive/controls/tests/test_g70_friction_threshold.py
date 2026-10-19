@@ -40,3 +40,29 @@ def test_symmetric_and_continuous():
   for speed in (10, 20):
     assert abs(tunes.get_genesis_g70_friction_threshold(speed + 1e-6) -
                tunes.get_genesis_g70_friction_threshold(speed - 1e-6)) < 1e-6
+
+
+@pytest.mark.parametrize('speed,accel,jerk,actual', [
+  (30, 0.2, 0.8, 0.1), (30, 0.35, 0.8, 0.3), (20, 1.0, 0.8, 0.8),
+  (10, 1.0, 0.8, 0.8), (30, 1.0, -0.8, 1.2), (30, 1.0, 0.0, 1.2),
+])
+def test_turn_in_preserves_center_low_speed_and_unwind(monkeypatch, speed, accel, jerk, actual):
+  revised = tunes.get_genesis_g70_friction_jerk_deadzone(speed, accel, jerk, actual)
+  monkeypatch.setattr(tunes, 'GENESIS_G70_CURVE_TURN_IN_JERK_REDUCTION', 0.0)
+  assert revised == tunes.get_genesis_g70_friction_jerk_deadzone(speed, accel, jerk, actual)
+
+
+@pytest.mark.parametrize('direction', [-1, 1])
+@pytest.mark.parametrize('jerk', [0.1, 0.5, 1.0])
+def test_curve_turn_in_halves_remaining_jerk(monkeypatch, direction, jerk):
+  revised = tunes.get_genesis_g70_friction_jerk_deadzone(30, direction, direction * jerk, direction * 0.8)
+  monkeypatch.setattr(tunes, 'GENESIS_G70_CURVE_TURN_IN_JERK_REDUCTION', 0.0)
+  original = tunes.get_genesis_g70_friction_jerk_deadzone(30, direction, direction * jerk, direction * 0.8)
+  assert max(jerk - revised, 0) == pytest.approx(0.5 * max(jerk - original, 0))
+
+
+@pytest.mark.parametrize('speed,accel', [(20, 0.8), (25, 0.8), (30, 0.35), (30, 0.7)])
+def test_curve_turn_in_blend_continuity(speed, accel):
+  low = tunes.get_genesis_g70_friction_jerk_deadzone(speed - 1e-6, accel - 1e-6, 0.8)
+  high = tunes.get_genesis_g70_friction_jerk_deadzone(speed + 1e-6, accel + 1e-6, 0.8)
+  assert abs(high - low) < 1e-5

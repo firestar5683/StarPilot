@@ -54,6 +54,7 @@ def download_file(cancel_param, destination, download_param, params_memory, prog
                 params_memory.put(progress_param, "Verifying authenticity...")
 
         temp_file_path.replace(destination)
+        return destination
 
       except InterruptedError:
         temp_file_path.unlink(missing_ok=True)

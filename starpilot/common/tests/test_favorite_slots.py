@@ -2,6 +2,7 @@ import json
 from typing import cast
 
 from openpilot.common.params import ParamKeyType, Params
+from openpilot.starpilot.common.controller_actions import CONTROLLER_ACTION_TOGGLE_AOL
 from openpilot.starpilot.common.favorite_slots import (
   FAVORITE_ACTION_ACCEL_COUNTER,
   FAVORITE_ACTION_DECEL_COUNTER,
@@ -37,6 +38,7 @@ class FakeParams:
       FAVORITE_SLOTS_PARAM: ParamKeyType.JSON,
       PERSONALITY_PROFILES_PARAM: ParamKeyType.JSON,
       "AlphaLongitudinalEnabled": ParamKeyType.BOOL,
+      "AlwaysOnLateral": ParamKeyType.BOOL,
       "ForceOffroad": ParamKeyType.BOOL,
       "RedneckCruise": ParamKeyType.BOOL,
       "NotBool": ParamKeyType.INT,
@@ -109,6 +111,26 @@ def test_galaxy_only_ford_controls_are_not_available_to_device_favorites():
   options = build_favorite_slot_options(lambda _key: True, alpha_longitudinal_available=True)
 
   assert ford_keys.isdisjoint({option["key"] for option in options})
+
+
+def test_aol_master_favorite_is_preserved_alongside_transient_toggle_action():
+  options = build_favorite_slot_options(lambda _key: True, alpha_longitudinal_available=True)
+  option_keys = {option["key"] for option in options}
+
+  assert "AlwaysOnLateral" in option_keys
+  assert CONTROLLER_ACTION_TOGGLE_AOL in option_keys
+
+  params = FakeParams()
+  memory = FakeParams()
+  params.put_bool("AlwaysOnLateral", True)
+  params.put(FAVORITE_SLOTS_PARAM, [
+    {"enabled": True, "show_onroad": True, "key": "AlwaysOnLateral", "label": "Always On Lateral"},
+  ])
+
+  slots = load_favorite_slots(params, eligible_keys={"AlwaysOnLateral"})
+  assert slots[0]["key"] == "AlwaysOnLateral"
+  assert execute_favorite_key("AlwaysOnLateral", params, memory, eligible_keys={"AlwaysOnLateral"}) is True
+  assert params.get_bool("AlwaysOnLateral") is False
 
 
 def test_parked_only_personality_keys_are_never_exposed_or_mutated_as_favorites():

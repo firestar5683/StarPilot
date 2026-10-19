@@ -25,6 +25,9 @@ class CarInterface(CarInterfaceBase):
     if not (ret.flags & SubaruFlags.PREGLOBAL) and 0x323 in fingerprint[2]:
       ret.flags |= SubaruFlags.SEND_INFOTAINMENT.value
 
+    if candidate == CAR.SUBARU_ASCENT_2023 and fingerprint[CanBus.camera].get(0x3C4) == 8:
+      ret.flags |= SubaruFlags.ASCENT_LKAS_ALERT.value
+
     if ret.flags & SubaruFlags.PREGLOBAL:
       ret.enableBsm = 0x25c in fingerprint[0]
       ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.subaruPreglobal)]
@@ -40,6 +43,8 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam |= SubaruSafetyFlags.D_PLATFORM.value
       if ret.flags & SubaruFlags.D_PLATFORM_CAMERA:
         ret.safetyConfigs[0].safetyParam |= SubaruSafetyFlags.D_PLATFORM_CAMERA.value
+      if ret.flags & SubaruFlags.ASCENT_LKAS_ALERT:
+        ret.safetyConfigs[0].safetyParam |= SubaruSafetyFlags.ASCENT_LKAS_ALERT.value
       if candidate in SUBARU_STOP_START_CARS:
         ret.safetyConfigs[0].safetyParam |= SubaruSafetyFlags.STOP_START_BUTTON.value
       if candidate == CAR.SUBARU_LEGACY_2025:

@@ -29,6 +29,7 @@ class CarState(CarStateBase):
     self.stop_start_state = 0
     self.avh_frames = {}
     self.cruise_buttons_msg = {}
+    self.es_lkas_alert_dat = b""
     self.cruise_buttons = {button: 0 for button in SUBARU_CRUISE_BUTTONS}
 
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
@@ -166,6 +167,8 @@ class CarState(CarStateBase):
       self.es_distance_msg = copy.copy(cp_es_distance.vl["ES_Distance"])
 
     self.es_dashstatus_msg = copy.copy(cp_cam.vl["ES_DashStatus"])
+    if self.CP.flags & SubaruFlags.ASCENT_LKAS_ALERT:
+      self.es_lkas_alert_dat = cp_cam.vl_raw[0x3C4]
     if self.CP.flags & SubaruFlags.SEND_INFOTAINMENT:
       self.es_infotainment_msg = copy.copy(cp_cam.vl["ES_Infotainment"])
 
@@ -183,9 +186,10 @@ class CarState(CarStateBase):
   @staticmethod
   def get_can_parsers(CP):
     avh_messages = [(a, 0) for a in (0x6BB, 0x32B, 0x40, 0x48)] if CP.carFingerprint == CAR.SUBARU_LEGACY_2025 else []
+    camera_messages = [(0x3C4, 0)] if CP.flags & SubaruFlags.ASCENT_LKAS_ALERT else []
     parsers = {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.main_for_cp(CP)),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.camera),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], camera_messages, CanBus.camera),
       Bus.alt: CANParser(DBC[CP.carFingerprint][Bus.pt], avh_messages, CanBus.alt_for_cp(CP))
     }
     if CP.flags & SubaruFlags.D_PLATFORM:

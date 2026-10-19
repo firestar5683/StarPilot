@@ -79,7 +79,7 @@ def test_traffic_border_blinker_alone_flickers_amber(monkeypatch):
   assert _rgba(right) == TRANSPARENT
 
 
-def test_traffic_border_blinker_with_blindspot_flickers_red_and_amber(monkeypatch):
+def test_traffic_border_blindspot_stays_red_over_blinker(monkeypatch):
   _setup(monkeypatch, car_state=_car_state(left_blinker=True, left_blindspot=True), time=0.1)
 
   left, _ = starpilot_border.get_traffic_border_colors()
@@ -87,7 +87,7 @@ def test_traffic_border_blinker_with_blindspot_flickers_red_and_amber(monkeypatc
 
   _setup(monkeypatch, car_state=_car_state(left_blinker=True, left_blindspot=True), time=0.3)
   left, _ = starpilot_border.get_traffic_border_colors()
-  assert _rgba(left) == _rgba(CEM_OVERRIDE_COLOR)
+  assert _rgba(left) == _rgba(TRAFFIC_COLOR)
 
 
 def test_traffic_border_v_asm_blindspot_is_red(monkeypatch):
@@ -98,7 +98,7 @@ def test_traffic_border_v_asm_blindspot_is_red(monkeypatch):
   assert _rgba(right) == TRANSPARENT
 
 
-def test_c4_draw_border_paints_traffic_color_on_active_half(monkeypatch):
+def test_c4_draw_border_paints_full_width_traffic_color_on_active_half(monkeypatch):
   import pyray as rl
   from openpilot.selfdrive.ui.mici.onroad import augmented_road_view as mici_view
 
@@ -121,10 +121,12 @@ def test_c4_draw_border_paints_traffic_color_on_active_half(monkeypatch):
   assert len(lines) == 2
   assert _rgba(lines[0][1][4]) == _rgba(base_color)
   assert _rgba(lines[1][1][4]) == _rgba(TRAFFIC_COLOR)
+  assert lines[0][1][0] == lines[1][1][0]
+  assert lines[0][1][3] == lines[1][1][3]
 
   scissor = [c for c in calls if c[0] == "begin_scissor"]
   assert scissor[0][1] == (10, 20, 200, 100)
-  assert scissor[1][1] == (14, 24, 96, 92)
+  assert scissor[1][1] == (10, 20, 100, 100)
 
 
 def test_c4_draw_border_skips_traffic_colors_when_inactive(monkeypatch):

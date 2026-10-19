@@ -21,7 +21,7 @@ from opendbc.car.hyundai.carcontroller import CarController, CANCEL_BUTTON_DELAY
                                              preserve_stock_canfd_lfa_status, \
                                              preserve_stock_canfd_lkas_status, \
                                              suppress_redundant_gv70_brake_cancel
-from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state, \
+from opendbc.car.hyundai.carstate import CarState, Ev6AolArmingState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state, \
                                              get_canfd_cruise_available
 from opendbc.car.hyundai.interface import CarInterface, KIA_EV9_ACCEL_MAX, get_communication_control_request
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
@@ -130,6 +130,73 @@ def get_test_toggles() -> SimpleNamespace:
 
 
 class TestHyundaiFingerprint:
+  @pytest.mark.parametrize("candidate, alpha_long, needs_arming", (
+    (CAR.KIA_EV6, True, True), (CAR.KIA_EV6, False, False),
+    (CAR.KIA_EV6_2025, True, False), (CAR.KIA_EV9, True, False),
+    (CAR.HYUNDAI_IONIQ_5, True, False), (CAR.HYUNDAI_IONIQ_6, True, False),
+  ))
+  def test_ev6_aol_arming_is_vehicle_specific(self, candidate, alpha_long, needs_arming):
+    toggles = get_test_toggles()
+    CP = CarInterface.get_params(candidate, gen_empty_fingerprint(), [], alpha_long, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(candidate, gen_empty_fingerprint(), [], CP, toggles)
+    CS = CarState(CP, FPCP)
+    assert (CS.ev6_aol_arming is not None) == needs_arming
+    assert not CS.ev6_aol_authorized
+
+  @pytest.mark.parametrize("alt_buttons", (False, True))
+  @pytest.mark.parametrize("lkas_on_engage", (False, True))
+  def test_ev6_aol_uses_all_physical_button_samples(self, alt_buttons, lkas_on_engage):
+    toggles = get_test_toggles()
+    toggles.always_on_lateral_lkas = lkas_on_engage
+    fingerprint = gen_empty_fingerprint()
+    if not alt_buttons:
+      fingerprint[0][0x1CF] = 8
+    CP = CarInterface.get_params(CAR.KIA_EV6, fingerprint, [], True, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_EV6, fingerprint, [], CP, toggles)
+    CS = CarState(CP, FPCP)
+    parsers = CS.get_can_parsers(CP)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    buttons_msg = CS.cruise_btns_msg_canfd
+    frame = 0
+
+    def update(samples, acc_available=True):
+      nonlocal frame
+      frame += 1
+      msgs = [packer.make_can_msg(buttons_msg, CanBus(CP).ECAN, {
+        "ADAPTIVE_CRUISE_MAIN_BTN": main, "LDA_BTN": lkas, "CRUISE_BUTTONS": cruise,
+      }) for main, lkas, cruise in samples]
+      msgs.append(packer.make_can_msg("TCS", CanBus(CP).ECAN, {"ACCEnable": 0 if acc_available else 1}))
+      parsers[Bus.pt].update([(frame * 10_000_000, msgs)])
+      CS.update(parsers, toggles)
+      return CS.ev6_aol_authorized
+
+    assert not update([(0, 0, Buttons.NONE)])
+    assert update([(0, 1, Buttons.NONE), (0, 0, Buttons.NONE)])
+    assert update([])
+    assert not update([(0, 1, Buttons.NONE), (0, 0, Buttons.NONE)])
+    assert update([(1, 0, Buttons.NONE), (1, 0, Buttons.NONE)])
+    assert update([(0, 0, Buttons.NONE)])
+    assert not update([(1, 0, Buttons.NONE), (0, 0, Buttons.NONE)])
+    assert update([(1, 0, Buttons.NONE), (0, 0, Buttons.NONE)])
+    assert not update([], acc_available=False)
+    assert not update([])
+    assert not update([(0, 0, Buttons.SET_DECEL)])
+    assert update([(0, 0, Buttons.NONE)]) == lkas_on_engage
+    assert update([]) == lkas_on_engage
+
+  @pytest.mark.parametrize("button", (Buttons.SET_DECEL, Buttons.RES_ACCEL))
+  @pytest.mark.parametrize("lkas_on_engage", (False, True))
+  def test_ev6_aol_engagement_latch_matches_safety_flag(self, button, lkas_on_engage):
+    state = Ev6AolArmingState(lkas_on_engage)
+    state.update(False, False, button)
+    assert not state.authorized
+    state.update(False, False, Buttons.NONE)
+    assert state.authorized == lkas_on_engage
+    state.update(False, False, Buttons.CANCEL)
+    assert state.authorized == lkas_on_engage
+    state.update(False, True, Buttons.NONE)
+    assert state.authorized != lkas_on_engage
+
   def test_egmp_communication_control_paths(self):
     stock_request = bytes([0x28, 0x83, 0x01])
     radar_keepalive_request = bytes([0x28, 0x01, 0x01])
@@ -552,6 +619,13 @@ class TestHyundaiFingerprint:
     CP = CarInterface.get_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], False, False, False, None)
     assert CP.flags & HyundaiFlags.SEND_LFA
 
+  @pytest.mark.parametrize("candidate", list(CAR))
+  def test_no_stock_lka_safety_flag_is_sportage_only(self, candidate):
+    CP = CarInterface.get_params(candidate, gen_empty_fingerprint(), [], False, False, False, None)
+    if CP.flags & HyundaiFlags.CANFD:
+      assert bool(CP.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.CANFD_NO_STOCK_LKA) == \
+        (candidate == CAR.KIA_SPORTAGE_HEV_2026)
+
   def test_smart_mdps_allows_low_speed_steering(self):
     candidate = CAR.HYUNDAI_IONIQ_EV_LTD
 
@@ -685,6 +759,107 @@ class TestHyundaiFingerprint:
     assert DBC[palisade_2023.carFingerprint][Bus.pt] == "hyundai_palisade_2023_generated"
     assert palisade_2023.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CAN_CANFD_BLENDED
     assert palisade_2023.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CANCEL_BTN_ENABLE
+
+  @pytest.mark.parametrize("alpha_long", [False, True])
+  def test_palisade_hda2_front_radar_is_available_with_complete_native_bank(self, alpha_long):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x50] = 16
+    car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
+    no_radar = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, car_fw, alpha_long, False, False, None)
+    assert no_radar.radarUnavailable
+    config = get_radar_track_config(no_radar.carFingerprint, no_radar.flags)
+    assert config.radar_type == "palisade_210"
+    assert config.start_addr == 0x210
+    assert config.msg_count == 16
+    assert config.expected_length == 32
+    assert config.frequency == 20
+    assert config.bus == CanBus(no_radar).ACAN == 0
+    for addr in range(0x210, 0x220):
+      fingerprint[0][addr] = 32
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, car_fw, alpha_long, False, False, None)
+    assert not CP.radarUnavailable
+    assert CP.openpilotLongitudinalControl == no_radar.openpilotLongitudinalControl
+    assert CP.flags == no_radar.flags
+    assert CP.safetyConfigs[-1].safetyParam == no_radar.safetyConfigs[-1].safetyParam
+    assert DBC[CP.carFingerprint][Bus.pt] == "hyundai_palisade_2023_generated"
+
+  @pytest.mark.parametrize("missing", [0x210, 0x218, 0x21f])
+  def test_palisade_hda2_incomplete_radar_bank_stays_unavailable(self, missing):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x50] = 16
+    for addr in range(0x210, 0x220):
+      if addr != missing:
+        fingerprint[0][addr] = 32
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, [], False, False, False, None)
+    assert CP.radarUnavailable
+
+  @pytest.mark.parametrize("bus,length", [(0, 8), (0, 24), (1, 32), (2, 32), (128, 32), (130, 32)])
+  def test_palisade_hda2_wrong_radar_layout_or_forwarded_copy_stays_unavailable(self, bus, length):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x50] = 16
+    if bus < len(fingerprint):
+      for addr in range(0x210, 0x220):
+        fingerprint[bus][addr] = length
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, [], False, False, False, None)
+    assert CP.radarUnavailable
+
+  def test_palisade_front_radar_configuration_does_not_enable_non_hda2(self):
+    fingerprint = gen_empty_fingerprint()
+    for addr in range(0x210, 0x220):
+      fingerprint[0][addr] = 32
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, [], False, False, False, None)
+    assert not CP.flags & HyundaiFlags.CANFD_LKA_STEERING
+    assert get_radar_track_config(CP.carFingerprint, CP.flags) is None
+    assert CP.radarUnavailable
+    old_palisade = get_radar_track_config(CAR.HYUNDAI_PALISADE)
+    assert old_palisade.radar_type == "mando"
+    assert old_palisade.bus == 1
+
+  @pytest.mark.parametrize("data_hex,expected", [
+    ("0da6690a412630ff79e0fcba3f05c0f90000000b2420410671b101d3bf0080fc",
+     [(6.05, -2.5, -0.7, -1.25, 0.05), (18.45, 1.35, -0.45, -0.7, 0.0)]),
+    ("2cd9d10a381b30fe7c830195be00c0000000000a237830fa95c003f83e0f00fb",
+     [(44.6, 1.2, -3.63, 0.15, 0.0), (7.45, 3.0, -2.64, -1.0, 0.15)]),
+  ])
+  def test_palisade_front_radar_decoder_matches_detailed_reference_frame(self, data_hex, expected):
+    CP = CarParams(carFingerprint=CAR.HYUNDAI_PALISADE_2023,
+                   flags=int(HyundaiFlags.CAN_CANFD_BLENDED | HyundaiFlags.CANFD_LKA_STEERING), radarUnavailable=False)
+    radar = RadarInterface(CP)
+    data = bytes.fromhex(data_hex)
+    radar.rcp.update([(1, [(0x210, data, 0)])])
+    points = radar._update({0x210}).points
+    assert len(points) == 2
+    for point, values in zip(points, expected, strict=True):
+      assert point.measured
+      assert (point.dRel, point.yRel, point.vRel, point.aRel, point.yvRel) == pytest.approx(values)
+
+  def test_palisade_front_radar_emits_32_tracks_without_duplicate_camera_bus_copy(self):
+    CP = CarParams(carFingerprint=CAR.HYUNDAI_PALISADE_2023,
+                   flags=int(HyundaiFlags.CAN_CANFD_BLENDED | HyundaiFlags.CANFD_LKA_STEERING), radarUnavailable=False)
+    radar = RadarInterface(CP)
+    packer = CANPacker(radar.radar_config.dbc_name)
+    messages = []
+    for addr in range(0x210, 0x220):
+      msg = packer.make_can_msg(f"RADAR_TRACK_{addr:x}", 0, {
+        "1_STATE": 3, "1_LONG_DIST": 25.0, "1_LAT_DIST": 0.5, "1_REL_SPEED": -2.0,
+        "2_STATE": 4, "2_LONG_DIST": 35.0, "2_LAT_DIST": -1.0, "2_REL_SPEED": -3.0,
+      })
+      data = bytearray(msg[1])
+      checksum = hkg_can_fd_checksum(addr, None, data)
+      data[0] = checksum & 0xff
+      data[1] = checksum >> 8
+      messages.append((addr, bytes(data), 0))
+    copies = [(addr, data, 2) for addr, data, _ in messages]
+    assert radar.update([(1, copies)]) is None
+    result = radar.update([(2, messages + copies)])
+    assert result is not None
+    assert len(result.points) == 32
+    assert not result.errors.canError
+    assert len({point.trackId for point in result.points}) == 32
+    for addr, _ in radar.track_addrs:
+      radar.rcp.vl[addr]["1_STATE"] = 0
+      radar.rcp.vl[addr]["2_STATE"] = 0
+    assert not radar._update(set()).points
 
   def test_palisade_telluride_hda2_uses_mixed_can_layout(self):
     fingerprint = gen_empty_fingerprint()
@@ -1079,6 +1254,31 @@ class TestHyundaiFingerprint:
 
     assert not (FPCP.flags & HyundaiStarPilotFlags.HAS_LKAS12)
 
+  @pytest.mark.parametrize("length, expected", ((6, True), (8, False)))
+  def test_stinger_only_replaces_six_byte_lkas12(self, length, expected):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x53E] = length
+    CP = CarInterface.get_params(CAR.KIA_STINGER_2022, fingerprint, [], True, False, False, None)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_STINGER_2022, fingerprint, [], CP, get_test_toggles())
+
+    assert bool(FPCP.flags & HyundaiStarPilotFlags.HAS_LKAS12) is expected
+
+  @pytest.mark.parametrize("alpha_long, main_aol, expected", (
+    (True, True, True), (True, False, True), (False, True, False),
+  ))
+  def test_stinger_aol_latches_lkas_after_long_engagement(self, alpha_long, main_aol, expected):
+    toggles = get_test_toggles()
+    toggles.always_on_lateral_main = main_aol
+    fingerprint = gen_empty_fingerprint()
+    CP = CarInterface.get_params(CAR.KIA_STINGER_2022, fingerprint, [], alpha_long, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_STINGER_2022, fingerprint, [], CP, toggles)
+
+    assert bool(FPCP.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE) is expected
+
+    sonata_cp = CarInterface.get_params(CAR.HYUNDAI_SONATA, fingerprint, [], alpha_long, False, False, toggles)
+    sonata_fpcp = CarInterface.get_starpilot_params(CAR.HYUNDAI_SONATA, fingerprint, [], sonata_cp, toggles)
+    assert not (sonata_fpcp.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE)
+
   def test_ray_ev_does_not_treat_eight_byte_485_as_lfa(self):
     fingerprint = gen_empty_fingerprint()
     fingerprint[2][0x485] = 8
@@ -1283,6 +1483,103 @@ class TestHyundaiFingerprint:
     canfd_alt_buttons_fpcp = CarInterface.get_starpilot_params(CAR.KIA_EV6, gen_empty_fingerprint(), [], canfd_alt_buttons_cp, toggles)
     assert canfd_alt_buttons_cp.flags & HyundaiFlags.CANFD_ALT_BUTTONS
     assert not canfd_alt_buttons_fpcp.redneckCruiseAvailable
+
+  def test_sportage_hev_hda2_redneck_uses_stock_scc(self, monkeypatch):
+    class FakeParams:
+      def __init__(self, *args, **kwargs):
+        pass
+
+      @staticmethod
+      def get_bool(key):
+        return key == "RedneckCruise"
+
+    monkeypatch.setattr("opendbc.car.interfaces.Params", FakeParams)
+    toggles = get_test_toggles()
+    fingerprint = gen_empty_fingerprint()
+    can_bus = CanBus(None, fingerprint, True)
+    fingerprint[can_bus.CAM][0x110] = 32
+    fingerprint[can_bus.ECAN][0x1CF] = 8
+
+    CP = CarInterface.get_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], False, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], CP, toggles)
+
+    assert CP.flags & HyundaiFlags.CANFD_LKA_STEERING
+    assert FPCP.redneckCruiseAvailable
+    assert not FPCP.pcmCruiseSpeed
+    assert CP.pcmCruise
+    assert not CP.openpilotLongitudinalControl
+    assert not CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG
+    controller = CarInterface(CP, FPCP).CC
+    assert not controller.long_active_ecu
+
+    controller.frame = 30
+    CS = SimpleNamespace(redneck_send_button=1, buttons_counter=5)
+    msgs = controller._create_canfd_redneck_button_messages(CS)
+    assert len(msgs) == 20
+    assert all(msg[0] == 0x1CF and msg[2] == can_bus.ECAN for msg in msgs)
+    assert all(msg[1][2] & 0x7 == Buttons.RES_ACCEL for msg in msgs)
+
+    controller.frame = 60
+    CS.redneck_send_button = 2
+    msgs = controller._create_canfd_redneck_button_messages(CS)
+    assert len(msgs) == 20
+    assert all(msg[1][2] & 0x7 == Buttons.SET_DECEL for msg in msgs)
+
+    monkeypatch.setattr(FakeParams, "get_bool", staticmethod(lambda key: False))
+    CP = CarInterface.get_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], False, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], CP, toggles)
+    assert FPCP.redneckCruiseAvailable
+    assert FPCP.pcmCruiseSpeed
+    assert CP.pcmCruise
+    assert not CP.openpilotLongitudinalControl
+
+  def test_sportage_redneck_rejects_unverified_button_layouts(self, monkeypatch):
+    class FakeParams:
+      def __init__(self, *args, **kwargs):
+        pass
+
+      @staticmethod
+      def get_bool(key):
+        return key == "RedneckCruise"
+
+    monkeypatch.setattr("opendbc.car.interfaces.Params", FakeParams)
+    toggles = get_test_toggles()
+    for button_address, button_bus, button_length, lka_steering in (
+      (0x1AA, 1, 16, True),
+      (0x1CF, 0, 8, True),
+      (0x1CF, 0, 8, False),
+      (0x1CF, 1, 16, True),
+    ):
+      fingerprint = gen_empty_fingerprint()
+      can_bus = CanBus(None, fingerprint, lka_steering)
+      if lka_steering:
+        fingerprint[can_bus.CAM][0x110] = 32
+      fingerprint[button_bus][button_address] = button_length
+
+      CP = CarInterface.get_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], False, False, False, toggles)
+      FPCP = CarInterface.get_starpilot_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], CP, toggles)
+      assert not FPCP.redneckCruiseAvailable
+      assert FPCP.pcmCruiseSpeed
+      assert CP.pcmCruise
+      assert not CP.openpilotLongitudinalControl
+
+    fingerprint = gen_empty_fingerprint()
+    can_bus = CanBus(None, fingerprint, True)
+    fingerprint[can_bus.CAM][0x110] = 32
+    fingerprint[can_bus.ECAN][0x1CF] = 8
+    fingerprint[can_bus.ECAN][0x1AA] = 16
+    CP = CarInterface.get_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], False, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], CP, toggles)
+    assert not FPCP.redneckCruiseAvailable
+
+    fingerprint = gen_empty_fingerprint()
+    can_bus = CanBus(None, fingerprint, True)
+    fingerprint[can_bus.CAM][0x110] = 32
+    fingerprint[can_bus.ECAN][0x1CF] = 8
+    CP = CarInterface.get_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], False, False, False, toggles)
+    CP.openpilotLongitudinalControl = True
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_SPORTAGE_HEV_2026, fingerprint, [], CP, toggles)
+    assert not FPCP.redneckCruiseAvailable
 
   def test_hyundai_non_scc_without_redneck_keeps_stock_longitudinal_mode(self, monkeypatch):
     class FakeParams:
@@ -1623,8 +1920,8 @@ class TestHyundaiFingerprint:
     CP = CarInterface.get_params(CAR.HYUNDAI_ELANTRA_2021, gen_empty_fingerprint(), [], True, False, False, toggles)
 
     assert CP.longitudinalActuatorDelay == pytest.approx(0.22)
-    assert CP.stopAccel == pytest.approx(-0.85)
-    assert CP.stoppingDecelRate == pytest.approx(0.35)
+    assert CP.stopAccel == pytest.approx(-1.1)
+    assert CP.stoppingDecelRate == pytest.approx(0.55)
 
   def test_elantra_hev_2024_longitudinal_delay_matches_observed_response(self):
     toggles = get_test_toggles()
@@ -1666,6 +1963,55 @@ class TestHyundaiFingerprint:
     exact, matches = match_fw_to_car(car_fw, "", allow_exact=True, allow_fuzzy=False, log=False)
     assert exact
     assert matches == {candidate}
+
+  @pytest.mark.parametrize("alpha_long", (False, True))
+  @pytest.mark.parametrize("alt_buttons", (False, True))
+  @pytest.mark.parametrize("signal, value, button_type", (
+    ("LDA_BTN", 1, ButtonType.lkas),
+    ("ADAPTIVE_CRUISE_MAIN_BTN", 1, ButtonType.mainCruise),
+    ("CRUISE_BUTTONS", Buttons.RES_ACCEL, ButtonType.accelCruise),
+    ("CRUISE_BUTTONS", Buttons.SET_DECEL, ButtonType.decelCruise),
+    ("CRUISE_BUTTONS", Buttons.CANCEL, ButtonType.cancel),
+  ))
+  def test_k4_2025_2026_physical_button_events(self, alpha_long, alt_buttons, signal, value, button_type):
+    toggles = get_test_toggles()
+    fingerprint = gen_empty_fingerprint()
+    if not alt_buttons:
+      fingerprint[0][0x1CF] = 8
+    CP = CarInterface.get_params(CAR.KIA_K4_2025, fingerprint, [], alpha_long, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_K4_2025, fingerprint, [], CP, toggles)
+    car_state = CarState(CP, FPCP)
+    parsers = car_state.get_can_parsers(CP)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+
+    def update(button_value, frame):
+      msg = packer.make_can_msg(car_state.cruise_btns_msg_canfd, CanBus(CP).ECAN, {signal: button_value})
+      parsers[Bus.pt].update([(frame * 10_000_000, [msg])])
+      return car_state.update(parsers, toggles)[0].buttonEvents
+
+    assert not update(0, 1)
+    pressed = update(value, 2)
+    assert [(event.type, event.pressed) for event in pressed] == [(button_type, True)]
+    released = update(0, 3)
+    assert [(event.type, event.pressed) for event in released] == [(button_type, False)]
+
+  @pytest.mark.parametrize("camera_fw", [
+    b'\xf1\x00CL4 MFC  AT CAN LHD 1.00 1.02 99210-GG000 240708',
+    b'\xf1\x00CL4 MFC  AT USA LHD 1.00 1.02 99210-GG000 240708',
+    b'\xf1\x00CL4 MFC  AT USA LHD 1.00 1.04 99210-GG100 251205',
+  ])
+  @pytest.mark.parametrize("radar_fw", [
+    b'\xf1\x00CL4_ RDR -----      1.00 1.01 99110-GG000         ',
+    b'\xf1\x00CL4_ RDR -----      1.00 1.01 99110-GG100         ',
+  ])
+  def test_k4_2025_2026_fw_exact_matches(self, camera_fw, radar_fw):
+    car_fw = [
+      CarParams.CarFw(ecu=Ecu.fwdCamera, fwVersion=camera_fw, address=0x7c4, brand="hyundai"),
+      CarParams.CarFw(ecu=Ecu.fwdRadar, fwVersion=radar_fw, address=0x7d0, brand="hyundai"),
+    ]
+    exact, matches = match_fw_to_car(car_fw, "", allow_exact=True, allow_fuzzy=False, log=False)
+    assert exact
+    assert matches == {CAR.KIA_K4_2025}
 
   def test_staria_2023_australian_route_fw_exact_matches(self):
     route_fw = {

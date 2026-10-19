@@ -46,7 +46,10 @@ class CarController(CarControllerBase):
     self.angle_override_confirm_frames = 0
     self.angle_lkas_active = False
     self.angle_handoff_active = False
+    self.ascent_angle_initialized = False
     self.ascent_aol_arm_frames = 0
+    self.ascent_es_distance_counter_last = None
+    self.ascent_lkas_alert_counter_last = None
 
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
@@ -204,6 +207,10 @@ class CarController(CarControllerBase):
       return subarucan.create_steering_control_angle(self.packer, apply_steer, lkas_active, self.angle_bus)
 
     if self.CP.carFingerprint in (CAR.SUBARU_ASCENT_2023, CAR.SUBARU_OUTBACK_2023):
+      if self.CP.carFingerprint == CAR.SUBARU_ASCENT_2023 and not self.ascent_angle_initialized:
+        self.apply_steer_last = CS.out.steeringAngleDeg
+        self.ascent_angle_initialized = True
+
       mads_only = CC.latActive and not CC.enabled
       mads_only_ok = CS.out.vEgoRaw > _ANGLE_MADS_MIN_SPEED and \
         abs(CS.out.steeringAngleDeg) < _ANGLE_MADS_MAX_STEER_ANGLE
@@ -223,7 +230,7 @@ class CarController(CarControllerBase):
         manual_handoff = self._angle_manual_handoff(CS, lkas_available)
       lkas_active = lkas_available and not manual_handoff
 
-      if lkas_active and not self.angle_lkas_active:
+      if lkas_active and not self.angle_lkas_active and self.CP.carFingerprint != CAR.SUBARU_ASCENT_2023:
         self.apply_steer_last = CS.out.steeringAngleDeg
 
       apply_steer = apply_std_steer_angle_limits(
@@ -295,6 +302,16 @@ class CarController(CarControllerBase):
       return self.angle_lkas_active
     return CC.latActive
 
+  def _ascent_lkas_alert(self, CC, CS):
+    if self.CP.carFingerprint != CAR.SUBARU_ASCENT_2023 or not self.CP.flags & SubaruFlags.ASCENT_LKAS_ALERT:
+      return None
+    dat = getattr(CS, "es_lkas_alert_dat", b"")
+    msg = subarucan.create_ascent_lkas_alert(dat, self._lkas_status_active(CC), CC.hudControl.visualAlert)
+    if msg is None or (dat[1] & 0xf) == self.ascent_lkas_alert_counter_last:
+      return None
+    self.ascent_lkas_alert_counter_last = dat[1] & 0xf
+    return msg
+
   def update(self, CC, CS, now_nanos, starpilot_toggles):
     actuators = CC.actuators
     hud_control = CC.hudControl
@@ -346,6 +363,10 @@ class CarController(CarControllerBase):
       cruise_brake = CarControllerParams.BRAKE_MIN
 
     # *** alerts and pcm cancel ***
+    lkas_alert_msg = self._ascent_lkas_alert(CC, CS)
+    if lkas_alert_msg is not None:
+      can_sends.append(lkas_alert_msg)
+
     if self.CP.flags & SubaruFlags.PREGLOBAL:
       if self.frame % 5 == 0:
         # 1 = main, 2 = set shallow, 3 = set deep, 4 = resume shallow, 5 = resume deep
@@ -406,7 +427,12 @@ class CarController(CarControllerBase):
           can_sends.append(subarucan.create_es_distance(self.packer, self.frame // 5, CS.es_distance_msg, 0, pcm_cancel_cmd,
                                                         self.CP.openpilotLongitudinalControl, cruise_brake > 0, cruise_throttle))
       else:
-        if pcm_cancel_cmd:
+        cancel_frame_ready = True
+        if self.CP.carFingerprint == CAR.SUBARU_ASCENT_2023:
+          stock_counter = CS.es_distance_msg["COUNTER"]
+          cancel_frame_ready = stock_counter != self.ascent_es_distance_counter_last
+          self.ascent_es_distance_counter_last = stock_counter
+        if pcm_cancel_cmd and cancel_frame_ready:
           if not (self.CP.flags & SubaruFlags.HYBRID):
             bus = CanBus.alt_for_cp(self.CP) if self.CP.flags & SubaruFlags.GLOBAL_GEN2 else self.main_bus
             can_sends.append(subarucan.create_es_distance(self.packer, CS.es_distance_msg["COUNTER"] + 1, CS.es_distance_msg, bus, pcm_cancel_cmd))

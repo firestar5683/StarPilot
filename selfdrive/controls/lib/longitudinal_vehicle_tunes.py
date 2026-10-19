@@ -23,6 +23,9 @@ HONDA_ACCORD_LOW_SPEED_STOP_MAX_LEAD_SPEED = 1.0
 HONDA_ACCORD_STANDSTILL_GUARD_MAX_EGO_SPEED = 0.25
 HYUNDAI_ELANTRA_LEAD_FOLLOW_JERK_SCALE = 1.25
 GENESIS_GV70_ELECTRIFIED_LEAD_FOLLOW_JERK_SCALE = 1.75
+KIA_NIRO_EV_LEAD_FOLLOW_JERK_SCALE = 1.5
+KIA_NIRO_EV_FAR_FOLLOW_BRAKE_SLEW_RATE = 2.0
+KIA_NIRO_EV_FAR_FOLLOW_RELEASE_SLEW_RATE = 1.25
 GENESIS_GV70_ELECTRIFIED_SCC_JERK_UPPER = 1.5
 GENESIS_GV70_ELECTRIFIED_SCC_JERK_LOWER = 2.0
 GENESIS_GV70_ELECTRIFIED_SCC_URGENT_JERK_LOWER = 5.0
@@ -36,6 +39,7 @@ GM_SILVERADO_EARLY_FOLLOW_MIN_MODEL_PROB = 0.85
 GM_SILVERADO_EARLY_FOLLOW_MAX_LATERAL_OFFSET = 1.2
 DEFAULT_FOLLOW_PREBRAKE_MIN_HEADWAY = 1.25
 GM_SILVERADO_FOLLOW_PREBRAKE_MIN_HEADWAY = 1.25
+GM_SILVERADO_FAR_LEAD_COAST_HEADWAY_FLOOR = 1.25
 FORD_LIGHTNING_FOLLOW_PREBRAKE_MIN_HEADWAY = 0.75
 FORD_LIGHTNING_TRACKED_LEAD_CATCHUP_MIN_HEADWAY_MARGIN = 0.10
 FORD_LIGHTNING_TRACKED_LEAD_CATCHUP_FULL_HEADWAY_MARGIN = 0.25
@@ -56,6 +60,7 @@ FORD_LIGHTNING_FAR_FOLLOW_RELEASE_SLEW_RATE = 1.75
 FORD_LIGHTNING_STANDSTILL_GUARD_DISTANCE_MARGIN = 5.0
 FORD_LIGHTNING_STANDSTILL_GUARD_MAX_LEAD_SPEED = 0.60
 FORD_LIGHTNING_GAP_SETTLE_MAX_EXTRA_GAP = 3.0
+FORD_MACH_E_GAP_SETTLE_MAX_EXTRA_GAP = 2.5
 TOYOTA_SIENNA_POST_DEPARTURE_RESTOP_MAX_EGO_SPEED = 2.0
 TOYOTA_SIENNA_POST_DEPARTURE_RESTOP_MAX_LEAD_SPEED = 0.45
 TOYOTA_SIENNA_POST_DEPARTURE_RESTOP_MAX_LEAD_DELTA = 0.35
@@ -64,6 +69,7 @@ TOYOTA_SIENNA_POST_DEPARTURE_RESTOP_MIN_MODEL_PROB = 0.95
 TOYOTA_SIENNA_POST_DEPARTURE_RESTOP_MAX_LATERAL_OFFSET = 1.75
 TOYOTA_SIENNA_POST_DEPARTURE_RESTOP_MIN_BRAKE = 0.18
 TOYOTA_SIENNA_POST_DEPARTURE_RESTOP_MAX_BRAKE = 0.32
+TOYOTA_COROLLA_BRAKING_LEAD_MAX_DECEL = 1.5
 TOYOTA_RAV4_TSS2_EARLY_LEAD_MIN_EGO_SPEED = 12.0
 TOYOTA_RAV4_TSS2_EARLY_LEAD_MIN_MODEL_PROB = 0.85
 TOYOTA_RAV4_TSS2_EARLY_LEAD_MAX_LATERAL_OFFSET = 1.2
@@ -100,6 +106,13 @@ HONDA_CRV_5G_STOPPED_LEAD_MIN_CLOSING_SPEED = 0.15
 HONDA_CRV_5G_STOPPED_LEAD_MAX_DISTANCE = 80.0
 HONDA_CRV_5G_STOPPED_LEAD_RAMP_DISTANCE = 10.0
 HONDA_CRV_5G_STOPPED_LEAD_MAX_LATERAL_OFFSET = 1.75
+KIA_EV9_STOPPED_LEAD_OBSTACLE_BIAS_M = 1.5
+KIA_EV9_STOPPED_LEAD_MAX_EGO_SPEED = 4.5
+KIA_EV9_STOPPED_LEAD_MAX_SPEED = 0.5
+KIA_EV9_STOPPED_LEAD_MIN_CLOSING_SPEED = 0.15
+KIA_EV9_STOPPED_LEAD_MAX_DISTANCE = 30.0
+KIA_EV9_STOPPED_LEAD_RAMP_DISTANCE = 8.0
+KIA_EV9_STOPPED_LEAD_MAX_LATERAL_OFFSET = 1.75
 HONDA_CRV_5G_LOW_SPEED_STOP_MAX_EGO_SPEED = 4.5
 HONDA_CRV_5G_LOW_SPEED_STOP_MAX_LEAD_SPEED = 0.5
 HONDA_CRV_5G_LOW_SPEED_STOP_MIN_MODEL_PROB = 0.99
@@ -127,7 +140,28 @@ TOYOTA_CAMRY_TSS2_FORCE_STOP_DISTANCE_BIAS_M = 6.0
 DEFAULT_FORCE_STOP_HANDOFF_M = 6.0
 HYUNDAI_SANTA_FE_2022_FORCE_STOP_REANCHOR_SPEED_TOLERANCE = 0.25
 HYUNDAI_SANTA_FE_2022_FORCE_STOP_LOW_SPEED_HOLD = 2.5
+FORD_MACH_E_FORCE_STOP_LOW_SPEED_HOLD = 1.0
 KIA_CARNIVAL_2025_STOP_SIGN_LOW_SPEED_HOLD = 0.75
+
+
+def get_planner_v_ego(CP, car_state):
+  v_ego = max(car_state.vEgo, car_state.vEgoCluster)
+
+  if (getattr(CP, "carFingerprint", None) == "KIA_RAY_EV" and
+      getattr(CP, "enableGasInterceptorDEPRECATED", False)):
+    return float(car_state.vEgo)
+
+  is_gm = getattr(CP, "carName", "") == "gm" or getattr(CP, "brand", "") == "gm"
+  if is_gm and getattr(CP, "enableGasInterceptorDEPRECATED", False):
+    try:
+      from opendbc.car.gm.values import GMFlags
+      is_gm_pedal_long = bool(CP.flags & GMFlags.PEDAL_LONG.value)
+      if is_gm_pedal_long:
+        return float(car_state.vEgo)
+    except Exception:
+      pass
+
+  return float(v_ego)
 
 
 def get_toyota_prius_stopped_lead_obstacle_bias(CP, lead, v_ego):
@@ -157,6 +191,59 @@ def get_toyota_prius_stopped_lead_obstacle_bias(CP, lead, v_ego):
   )
   bias = TOYOTA_PRIUS_STOPPED_LEAD_OBSTACLE_BIAS_M * strength
   return float(min(bias, max(distance - 0.5, 0.0)))
+
+
+def use_stopped_lead_position(CP):
+  return (
+    getattr(CP, "brand", "") == "toyota" and
+    str(getattr(CP, "carFingerprint", "")) == "TOYOTA_COROLLA_TSS2"
+  )
+
+
+def use_model_lead_filter_sync(CP):
+  return (
+    getattr(CP, "brand", "") == "toyota" and
+    str(getattr(CP, "carFingerprint", "")) == "TOYOTA_COROLLA_TSS2"
+  )
+
+
+def is_toyota_corolla_early_radar_follow_lead(CP, lead, v_ego):
+  if (
+    getattr(CP, "brand", "") != "toyota" or
+    str(getattr(CP, "carFingerprint", "")) != "TOYOTA_COROLLA_TSS2" or
+    lead is None or not bool(getattr(lead, "status", False)) or
+    not bool(getattr(lead, "radar", False)) or
+    float(getattr(lead, "modelProb", 0.0)) < 0.5 or float(v_ego) < 15.0
+  ):
+    return False
+
+  closing_speed = float(v_ego) - max(float(lead.vLead), 0.0)
+  return closing_speed >= 7.0 and 30.0 <= float(lead.dRel) <= min(120.0, 4.0 * float(v_ego))
+
+
+def get_toyota_corolla_braking_lead_cap(CP, lead, v_ego, desired_gap, accel_min):
+  if (
+    getattr(CP, "brand", "") != "toyota" or
+    str(getattr(CP, "carFingerprint", "")) != "TOYOTA_COROLLA_TSS2" or
+    lead is None or not bool(getattr(lead, "status", False)) or
+    not bool(getattr(lead, "radar", False)) or
+    float(v_ego) < 10.0 or
+    float(getattr(lead, "vLead", 0.0)) < 2.0 or
+    abs(float(getattr(lead, "yRel", 0.0))) > 1.2
+  ):
+    return None
+
+  lead_brake = max(0.0, -float(getattr(lead, "aLeadK", 0.0)))
+  distance = float(getattr(lead, "dRel", float("inf")))
+  if (
+    lead_brake < 0.6 or
+    float(v_ego) - float(lead.vLead) < 0.75 or
+    distance <= 0.0 or distance > min(60.0, 3.0 * float(v_ego)) or
+    distance > float(desired_gap) + 6.0
+  ):
+    return None
+
+  return max(float(accel_min), -min(TOYOTA_COROLLA_BRAKING_LEAD_MAX_DECEL, 0.65 * lead_brake))
 
 
 def is_honda_crv_5g(CP):
@@ -240,6 +327,45 @@ def get_honda_crv_5g_stopped_lead_obstacle_bias(CP, lead, v_ego):
   return float(min(bias, max(distance - 0.5, 0.0)))
 
 
+def get_kia_ev9_stopped_lead_obstacle_bias(CP, lead, v_ego):
+  if (
+    getattr(CP, "brand", "") != "hyundai" or
+    str(getattr(CP, "carFingerprint", "")) != "KIA_EV9" or
+    lead is None or not bool(getattr(lead, "status", False)) or
+    float(v_ego) <= 0.0 or float(v_ego) > KIA_EV9_STOPPED_LEAD_MAX_EGO_SPEED or
+    float(getattr(lead, "vLead", 0.0)) > KIA_EV9_STOPPED_LEAD_MAX_SPEED or
+    abs(float(getattr(lead, "yRel", 0.0))) > KIA_EV9_STOPPED_LEAD_MAX_LATERAL_OFFSET
+  ):
+    return 0.0
+
+  distance = float(getattr(lead, "dRel", float("inf")))
+  closing_speed = float(v_ego) - float(getattr(lead, "vLead", 0.0))
+  if (
+    distance <= 0.0 or distance > KIA_EV9_STOPPED_LEAD_MAX_DISTANCE or
+    closing_speed < KIA_EV9_STOPPED_LEAD_MIN_CLOSING_SPEED
+  ):
+    return 0.0
+
+  strength = np.clip(
+    (KIA_EV9_STOPPED_LEAD_MAX_DISTANCE - distance) /
+    (KIA_EV9_STOPPED_LEAD_MAX_DISTANCE - KIA_EV9_STOPPED_LEAD_RAMP_DISTANCE),
+    0.0, 1.0,
+  )
+  bias = KIA_EV9_STOPPED_LEAD_OBSTACLE_BIAS_M * strength
+  return float(min(bias, max(distance - 0.5, 0.0)))
+
+
+def get_stopped_lead_obstacle_bias(CP, lead, v_ego, mode):
+  """Dispatch vehicle-specific stopped-lead spacing tweaks for the active mode."""
+  mode_bias = 0.0
+  if mode == "acc":
+    mode_bias = max(
+      get_toyota_prius_stopped_lead_obstacle_bias(CP, lead, v_ego),
+      get_honda_crv_5g_stopped_lead_obstacle_bias(CP, lead, v_ego),
+    )
+  return max(mode_bias, get_kia_ev9_stopped_lead_obstacle_bias(CP, lead, v_ego))
+
+
 def get_honda_crv_5g_low_speed_stopped_lead_cap(CP, lead, v_ego, accel_min):
   """Bleed a CR-V crawl into the normal standstill gap without a hard jab."""
   if (
@@ -282,6 +408,8 @@ def get_standstill_gap_settle_max_extra_gap(CP):
     return HONDA_CRV_5G_GAP_SETTLE_MAX_EXTRA_GAP
   if is_ford_f150_lightning(CP):
     return FORD_LIGHTNING_GAP_SETTLE_MAX_EXTRA_GAP
+  if getattr(CP, "brand", "") == "ford" and str(getattr(CP, "carFingerprint", "")) == "FORD_MUSTANG_MACH_E_MK1":
+    return FORD_MACH_E_GAP_SETTLE_MAX_EXTRA_GAP
   return 1.5
 
 
@@ -481,7 +609,46 @@ def allow_radar_standstill_gap_settle(CP):
   )
 
 
+def is_kia_niro_ev_follow_lead(CP, lead, v_ego, model_position=None):
+  if (
+    getattr(CP, "brand", "") != "hyundai" or str(getattr(CP, "carFingerprint", "")) != "KIA_NIRO_EV" or
+    lead is None or not bool(getattr(lead, "status", False)) or bool(getattr(lead, "radar", False)) or
+    not float(getattr(lead, "modelProb", 0.0)) >= 0.95 or float(v_ego) < 5.0
+  ):
+    return False
+
+  distance = float(lead.dRel)
+  lateral_offset = float(getattr(lead, "yRel", 0.0))
+  if abs(lateral_offset) <= 1.5 and 10.0 <= distance <= max(40.0, 2.5 * float(v_ego)):
+    return True
+  if not (
+    model_position is not None and
+    10.0 <= distance <= max(40.0, 3.5 * float(v_ego)) and
+    float(v_ego) - float(getattr(lead, "vLead", v_ego)) >= 0.75 and
+    float(getattr(lead, "aLeadK", 0.0)) <= -0.15
+  ):
+    return False
+
+  path_x = np.asarray(getattr(model_position, "x", ()), dtype=float)
+  path_y = np.asarray(getattr(model_position, "y", ()), dtype=float)
+  if (len(path_x) < 2 or len(path_x) != len(path_y) or distance > path_x[-1] or
+      not np.all(np.isfinite(path_x)) or not np.all(np.isfinite(path_y)) or not np.all(np.diff(path_x) > 0.0)):
+    return False
+  return abs(lateral_offset + float(np.interp(distance, path_x, path_y))) <= 1.5
+
+
+def get_far_follow_output_slew_min_speed(CP, default_min_speed):
+  if getattr(CP, "brand", "") == "hyundai" and str(getattr(CP, "carFingerprint", "")) == "KIA_NIRO_EV":
+    return 5.0
+  return default_min_speed
+
+
 def get_far_follow_output_slew_rates(CP):
+  if getattr(CP, "brand", "") == "hyundai" and str(getattr(CP, "carFingerprint", "")) == "KIA_NIRO_EV":
+    return (
+      KIA_NIRO_EV_FAR_FOLLOW_BRAKE_SLEW_RATE,
+      KIA_NIRO_EV_FAR_FOLLOW_RELEASE_SLEW_RATE,
+    )
   if CP.brand == "honda" and str(CP.carFingerprint) == "HONDA_ACCORD":
     return (
       HONDA_ACCORD_FAR_FOLLOW_BRAKE_SLEW_RATE,
@@ -517,9 +684,11 @@ def get_untracked_slow_lead_decel_scale(CP):
 
 
 def get_lead_follow_jerk_scale(CP):
-  """Spread the lead-source transition for cars with a sharp vision-lead handoff."""
+  """Apply vehicle-specific acceleration smoothing while following a lead."""
   if getattr(CP, "brand", "") == "hyundai" and str(getattr(CP, "carFingerprint", "")) == "HYUNDAI_ELANTRA_2021":
     return HYUNDAI_ELANTRA_LEAD_FOLLOW_JERK_SCALE
+  if getattr(CP, "brand", "") == "hyundai" and str(getattr(CP, "carFingerprint", "")) == "KIA_NIRO_EV":
+    return KIA_NIRO_EV_LEAD_FOLLOW_JERK_SCALE
   if (
     getattr(CP, "brand", "") == "hyundai" and
     str(getattr(CP, "carFingerprint", "")) == "GENESIS_GV70_ELECTRIFIED_1ST_GEN"
@@ -635,6 +804,16 @@ def get_follow_prebrake_min_headway(CP, t_follow):
   return max(float(t_follow), DEFAULT_FOLLOW_PREBRAKE_MIN_HEADWAY)
 
 
+def get_far_lead_coast_headway_floor(CP):
+  if (
+    getattr(CP, "brand", "") == "gm" and
+    str(getattr(CP, "carFingerprint", "")) in ("CHEVROLET_SILVERADO", "CHEVROLET_SILVERADO_CC") and
+    not bool(getattr(CP, "enableGasInterceptorDEPRECATED", False))
+  ):
+    return GM_SILVERADO_FAR_LEAD_COAST_HEADWAY_FLOOR
+  return 1.75
+
+
 def get_toyota_sienna_post_departure_restop_cap(CP, lead, v_ego, accel_min,
                                                 stop_distance, now_t, departure_latch_until):
   """Re-arm a stop if a Sienna's lead twitches forward and stops again."""
@@ -696,9 +875,11 @@ def get_force_stop_reanchor_speed_tolerance(car_params):
 
 
 def get_force_stop_low_speed_hold(car_params):
-  """Keep a committed Santa Fe stop from releasing while it is still rolling."""
-  if str(getattr(car_params, "carFingerprint", car_params)) == "HYUNDAI_SANTA_FE_2022":
+  fingerprint = str(getattr(car_params, "carFingerprint", car_params))
+  if fingerprint == "HYUNDAI_SANTA_FE_2022":
     return HYUNDAI_SANTA_FE_2022_FORCE_STOP_LOW_SPEED_HOLD
+  if fingerprint == "FORD_MUSTANG_MACH_E_MK1":
+    return FORD_MACH_E_FORCE_STOP_LOW_SPEED_HOLD
   return None
 
 

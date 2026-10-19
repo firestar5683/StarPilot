@@ -14,6 +14,8 @@ Galaxy shows a mode selector and the slider for that mode. Standby uses the norm
 
 Both timeout readouts use seconds, with a 5–60 second range and 5 second steps. The parked timeout controls normal offroad sleep. The onroad timeout and wake choices are visible when Standby is enabled; the onroad timeout also remains the internal temporary-visibility duration for manual 0%.
 
+**Keep Screen On While eGPU Loads** is an optional setting under Screen Settings, off by default. On comma 3/3X and comma 4 it keeps the driving screen visible while the eGPU model is loading, including when Standby or manual 0% brightness would otherwise blank it. After loading finishes, the normal inactivity timeout resumes. Explicit Screen Off actions still take precedence; parked screen sleep is unchanged.
+
 Touch and ignition changes always wake Standby, as in Dom. The **Bluetooth or steering wheel button** toggle enables waking from recognised Bluetooth/USB/controller and steering-wheel button presses, including buttons without an assigned action. This toggle defaults to off. There are no touch or ignition wake toggles and no additional controller actions to configure.
 
 | Wake choice | Default | Trigger |

@@ -9,7 +9,8 @@ import pyray as rl
 
 from openpilot.common.params import UnknownKeyName
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.system.ui.lib.application import FontWeight, gui_app
+from openpilot.system.ui.lib.application import FONT_SCALE, FontWeight, gui_app
+from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
 
@@ -341,17 +342,20 @@ class NavigationCardRenderer(Widget):
     title_lines, title_font_size = self._fit_title(self._primary_text, text_area_width, preferred_font_size, minimum_font_size)
 
     secondary_font_size = 26
-    text_block_h = len(title_lines) * title_font_size
+    title_line_height = title_font_size * FONT_SCALE
+    secondary_height = secondary_font_size * FONT_SCALE
+    title_lines = title_lines[:2]
+    text_block_h = len(title_lines) * title_line_height
     if self._secondary_text:
-      text_block_h += 8 + secondary_font_size
+      text_block_h += 8 + secondary_height
     text_block_y = container_y + (card_height - text_block_h) // 2
 
-    for index, line in enumerate(title_lines[:2]):
-      rl.draw_text_ex(self._font_bold, line, rl.Vector2(text_x, text_block_y + index * title_font_size), title_font_size, 0, rl.WHITE)
+    for index, line in enumerate(title_lines):
+      rl.draw_text_ex(self._font_bold, line, rl.Vector2(text_x, text_block_y + index * title_line_height), title_font_size, 0, rl.WHITE)
 
     if self._secondary_text:
       secondary_text = self._truncate_text(self._secondary_text, text_area_width, secondary_font_size)
-      secondary_y = text_block_y + len(title_lines) * title_font_size + 8
+      secondary_y = text_block_y + len(title_lines) * title_line_height + 8
       rl.draw_text_ex(
         self._font_medium,
         secondary_text,
@@ -373,7 +377,7 @@ class NavigationCardRenderer(Widget):
     )
 
     then_x = divider_x + 15
-    then_label = "Then"
+    then_label = tr("Then")
     then_font_size = 36
     then_size = measure_text_cached(self._font_medium, then_label, then_font_size)
     then_label_x = then_x + (then_section_width - 23 - then_size.x) / 2

@@ -5,6 +5,7 @@ from collections.abc import Callable
 from openpilot.selfdrive.ui.layouts.settings.developer import DeveloperLayout
 from openpilot.selfdrive.ui.layouts.settings.device import DeviceLayout
 from openpilot.selfdrive.ui.layouts.settings.starpilot.main_panel import StarPilotLayout
+from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import draw_text_fit_common
 from openpilot.selfdrive.ui.layouts.settings.software import SoftwareLayout
 from openpilot.selfdrive.ui.layouts.settings.toggles import TogglesLayout
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
@@ -24,6 +25,7 @@ CLOSE_BTN_SIZE = 200
 CLOSE_ICON_SIZE = 70
 NAV_BTN_HEIGHT = 110
 PANEL_MARGIN = 10
+COLLAPSED_TAB_WIDTH = 64
 
 # Colors
 SIDEBAR_COLOR = rl.BLACK
@@ -126,7 +128,7 @@ class SettingsLayout(Widget):
 
     original_events = list(gui_app.mouse_events)
     if not self._sidebar_expanded:
-      tab_zone = rl.Rectangle(rect.x, rect.y + 581 - 70, 40, 140)
+      tab_zone = rl.Rectangle(rect.x, rect.y + 581 - 70, COLLAPSED_TAB_WIDTH, 140)
       gui_app.mouse_events[:] = [e for e in original_events if not rl.check_collision_point_rec(e.pos, tab_zone)]
 
     self._draw_current_panel(panel_rect)
@@ -161,13 +163,14 @@ class SettingsLayout(Widget):
     # Unified Protruding Edge Tab (Expand/Collapse toggle)
     tab_cy = int(rect.y + 581)
     tab_h = 140
-    tab_w = 70
-    tab_x = rect.x - 30  # Leaves exactly 40px protruding onto the screen
+    visible_w = 40 if self._sidebar_expanded else COLLAPSED_TAB_WIDTH
+    tab_w = visible_w + 30
+    tab_x = rect.x - 30
     tab_y = tab_cy - (tab_h / 2)
     tab_rect = rl.Rectangle(tab_x, tab_y, tab_w, tab_h)
 
     # Hit zone is the visible portion on screen
-    self._collapse_btn_rect = rl.Rectangle(rect.x, tab_y, 40, tab_h)
+    self._collapse_btn_rect = rl.Rectangle(rect.x, tab_y, visible_w, tab_h)
 
     # Interaction state
     is_pressed = False
@@ -192,7 +195,7 @@ class SettingsLayout(Widget):
     rl.draw_rectangle_rounded_lines_ex(tab_rect, 0.5, 30, 2.0, tab_border)
 
     # Chevron properly centered on the *visible* portion of the tab
-    chevron_x = rect.x + 20
+    chevron_x = rect.x + visible_w / 2
     self._draw_chevron(chevron_x, tab_cy, not self._sidebar_expanded, rl.Color(255, 255, 255, 255), size=24, bloom=True)
 
     if self._sidebar_expanded:
@@ -234,8 +237,8 @@ class SettingsLayout(Widget):
         # Draw button text (right-aligned)
         panel_name = tr(panel_info.name)
         text_size = measure_text_cached(self._font_medium, panel_name, 65)
-        text_pos = rl.Vector2(button_rect.x + button_rect.width - text_size.x, button_rect.y + (button_rect.height - text_size.y) / 2)
-        rl.draw_text_ex(self._font_medium, panel_name, rl.Vector2(round(text_pos.x), round(text_pos.y)), 65, 0, text_color)
+        text_pos = rl.Vector2(button_rect.x, button_rect.y + (button_rect.height - text_size.y) / 2)
+        draw_text_fit_common(self._font_medium, panel_name, text_pos, button_rect.width, 65, align_right=True, color=text_color)
 
         # Store button rect for click detection
         panel_info.button_rect = button_rect
@@ -253,7 +256,7 @@ class SettingsLayout(Widget):
     if not self._sidebar_expanded:
       # Only record swipe/tap start when touch is within the 10px left margin OR directly on the protruding tab
       gesture_zone = rl.Rectangle(self._rect.x, self._rect.y, 10, self._rect.height)
-      tab_zone = rl.Rectangle(self._rect.x, self._rect.y + 581 - 70, 40, 140)
+      tab_zone = rl.Rectangle(self._rect.x, self._rect.y + 581 - 70, COLLAPSED_TAB_WIDTH, 140)
       if rl.check_collision_point_rec(mouse_pos, gesture_zone) or rl.check_collision_point_rec(mouse_pos, tab_zone):
         self._swipe_start = mouse_pos
       else:

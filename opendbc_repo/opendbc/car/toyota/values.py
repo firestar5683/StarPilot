@@ -67,6 +67,8 @@ class ToyotaFlags(IntFlag):
   DISABLE_RADAR = 4
   # The DSU's ACC messages are rerouted through the camera bus by an adapter.
   DSU_BYPASS = 8192
+  ARS510_RADAR = 16384
+  ARS510_FUSED = 32768
 
   # Static flags
   TSS2 = 8
@@ -619,6 +621,7 @@ UNSUPPORTED_DSU_CAR = CAR.with_flags(ToyotaFlags.UNSUPPORTED_DSU)
 
 # these cars have a radar which sends ACC messages instead of the camera
 RADAR_ACC_CAR = CAR.with_flags(ToyotaFlags.RADAR_ACC)
+ARS510_RADAR_CAR = {CAR.TOYOTA_RAV4_TSS2_2022, CAR.TOYOTA_RAV4_TSS2_2023}
 
 ANGLE_CONTROL_CAR = CAR.with_flags(ToyotaFlags.ANGLE_CONTROL)
 
@@ -628,6 +631,16 @@ TOYOTA_AUTO_HOLD_CARS = (TSS2_CAR - RADAR_ACC_CAR - SECOC_CAR) | {
   CAR.TOYOTA_RAV4,
   CAR.TOYOTA_RAV4H,
 }
+
+# The Camry uses the legacy camera AEB replacement for Auto Hold. The
+# 2019-2021 RAV4 uses it only with the detected hybrid powertrain.
+TOYOTA_AUTO_HOLD_AEB_CARS = {CAR.TOYOTA_CAMRY_TSS2}
+
+
+def uses_toyota_auto_hold_aeb(CP: CarParams) -> bool:
+  return (CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS or
+          (CP.carFingerprint == CAR.TOYOTA_RAV4_TSS2 and bool(CP.flags & ToyotaFlags.HYBRID.value)))
+
 
 # no resume button press required
 NO_STOP_TIMER_CAR = CAR.with_flags(ToyotaFlags.NO_STOP_TIMER)

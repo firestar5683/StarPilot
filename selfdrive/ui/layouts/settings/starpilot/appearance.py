@@ -1,6 +1,8 @@
 from __future__ import annotations
 import re
+import threading
 
+from openpilot.common.params import Params
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import DialogResult
@@ -18,7 +20,8 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import (
     CardHubManagerView,
 )
 from openpilot.selfdrive.ui.layouts.settings.starpilot.simple_download_manager import SimpleDownloadManager
-from openpilot.starpilot.common.starpilot_variables import THEME_SAVE_PATH
+from openpilot.starpilot.assets.theme_manager import ThemeManager
+from openpilot.starpilot.common.starpilot_variables import THEME_SAVE_PATH, get_starpilot_toggles
 
 PANEL_STYLE = DEFAULT_PANEL_STYLE
 
@@ -130,6 +133,7 @@ class AppearanceManagerView(CardHubManagerView):
 class StarPilotAppearanceLayout(_SettingsPage):
     def __init__(self):
         super().__init__()
+        self._theme_refresh_thread = None
         self._build_view()
 
     def _make_parent(self, key: str, label: str, subtitle: str = "") -> ParentToggle:
@@ -747,10 +751,15 @@ class StarPilotAppearanceLayout(_SettingsPage):
     # ── Boot logo manager ──
 
     def _show_boot_logo_manager(self):
+        if self._theme_refresh_thread is None or not self._theme_refresh_thread.is_alive():
+            self._theme_refresh_thread = threading.Thread(
+                target=lambda: ThemeManager(Params(), self._params_memory).update_themes(get_starpilot_toggles(), update_assets=False), daemon=True,
+            )
+            self._theme_refresh_thread.start()
         def on_close(res, val):
             pass
 
-        gui_app.push_widget(SimpleDownloadManager(
+        manager = SimpleDownloadManager(
             title=tr("Boot Logo"),
             asset_type="boot logo",
             directory=THEME_SAVE_PATH / "bootlogos",
@@ -760,4 +769,6 @@ class StarPilotAppearanceLayout(_SettingsPage):
             params=self._params,
             params_memory=self._params_memory,
             on_close=on_close,
-        ))
+        )
+        manager.refresh_thread = self._theme_refresh_thread
+        gui_app.push_widget(manager)

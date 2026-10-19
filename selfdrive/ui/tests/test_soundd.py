@@ -7,6 +7,7 @@ from openpilot.selfdrive.ui.soundd import (
   Soundd,
   check_selfdrive_timeout_alert,
   is_turn_steering_limit_alert,
+  read_volume_settings,
   should_mute_turn_steering_limit_alert,
   starpilot_alert_key,
 )
@@ -20,6 +21,39 @@ StarPilotAudibleAlert = custom.StarPilotCarControl.HUDControl.AudibleAlert
 
 
 class TestSoundd:
+  def test_volume_settings_are_read_as_percentages(self):
+    class FakeParams:
+      values = {
+        "AlertVolumeControl": True,
+        "BelowSteerSpeedVolume": 0,
+        "PromptVolume": 20,
+        "WarningSoftVolume": 25,
+        "WarningImmediateVolume": 101,
+      }
+
+      def get_bool(self, key):
+        return self.values.get(key, False)
+
+      def get_int(self, key, return_default=False, default=101):
+        return self.values.get(key, default)
+
+    params = FakeParams()
+    settings = read_volume_settings(params)
+    assert settings["alert_volume_controller"] is True
+    assert settings["BelowSteerSpeedVolume"] == 0
+    assert settings["PromptVolume"] == 20
+    assert settings["WarningImmediateVolume"] == 101
+
+    soundd = Soundd.__new__(Soundd)
+    soundd.volume_params = params
+    soundd.volume_settings = settings
+    soundd.last_volume_settings_refresh = 0.0
+    soundd.update_volume_map()
+
+    params.values["PromptVolume"] = 35
+    assert soundd.refresh_volume_settings(now=1.0)
+    assert soundd.volume_map[AudibleAlert.promptRepeat] == 0.35
+
   def test_does_not_consume_car_state_reader(self):
     assert "carState" not in SOUNDD_SERVICES
     assert "starpilotSelfdriveState" in SOUNDD_SERVICES

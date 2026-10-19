@@ -31,6 +31,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle
 from openpilot.selfdrive.controls.lib.steering_saturation import is_angle_steering_limited
 from openpilot.selfdrive.controls.lib.latcontrol_curvature import LatControlCurvature
+from openpilot.selfdrive.controls.lib.latcontrol_vehicle_tunes import get_genesis_highway_command_stabilizer
 from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   BOLT_2018_2021_STEER_RATIO_TEST_SCALE,
   LatControlTorque,
@@ -426,6 +427,8 @@ class Controls:
       self.LaC = LatControlPID(self.CP, self.CI, DT_CTRL)
     elif self.CP.lateralTuning.which() == 'torque':
       self.LaC = LatControlTorque(self.CP, self.CI, DT_CTRL)
+    self.genesis_highway_stabilizer = get_genesis_highway_command_stabilizer(
+      self.CP.carFingerprint, self.CP.lateralTuning.which() == 'torque')
 
     self.sm = self.sm.extend(['liveDelay', 'starpilotCarState', 'starpilotPlan'])
 
@@ -746,6 +749,15 @@ class Controls:
       self.starpilot_toggles.lane_centering_pause_on_signal,
       bool(CS.leftBlinker or CS.rightBlinker),
       bool(CS.steeringPressed))
+
+    if self.genesis_highway_stabilizer is not None:
+      stabilize_genesis = (CC.latActive and isinstance(self.LaC, LatControlTorque) and
+                           not CS.steeringPressed and not CS.leftBlinker and not CS.rightBlinker and
+                           not self.starpilot_toggles.lane_centering and
+                           model_v2.meta.laneChangeState == LaneChangeState.off and
+                           self.sm.all_checks(['modelV2']))
+      new_desired_curvature = self.genesis_highway_stabilizer.update(
+        new_desired_curvature, CS.vEgo, stabilize_genesis, DT_CTRL)
 
     jerk_factor = 1.0
     if self.starpilot_toggles.lane_change_pace < 10:

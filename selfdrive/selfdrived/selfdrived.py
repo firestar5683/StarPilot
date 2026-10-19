@@ -664,7 +664,8 @@ class SelfdriveD:
     if self.big_model_active and big_failed:
       self.events.add(EventName.bigModelFailed)
 
-    not_running = {p.name for p in self.sm['managerState'].processes if not p.running and p.shouldBeRunning}
+    not_running = {p.name for p in self.sm['managerState'].processes
+                   if not p.running and p.shouldBeRunning and p.name != 'stinger_object_shadow'}
     if self.sm.recv_frame['managerState'] and len(not_running):
       if not_running != self.not_running_prev:
         cloudlog.event("process_not_running", not_running=not_running, error=True)

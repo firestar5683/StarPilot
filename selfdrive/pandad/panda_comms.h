@@ -80,10 +80,15 @@ private:
   uint8_t tx_buf[SPI_BUF_SIZE];
   uint8_t rx_buf[SPI_BUF_SIZE];
   inline static std::recursive_mutex hw_lock;
+  std::mutex can_write_lock;
+  bool sequenced_can_writes = false;
+  bool can_write_session_started = false;
+  uint16_t can_write_sequence = 0;
 
   int wait_for_ack(uint8_t ack, uint8_t tx, unsigned int timeout, unsigned int length);
   int bulk_transfer(uint8_t endpoint, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t rx_len, unsigned int timeout);
-  int spi_transfer(uint8_t endpoint, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t max_rx_len, unsigned int timeout);
+  int spi_transfer(uint8_t endpoint, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t max_rx_len, unsigned int timeout,
+                   uint16_t sequence = 0);
   int spi_transfer_retry(uint8_t endpoint, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t max_rx_len, unsigned int timeout);
   int lltransfer(spi_ioc_transfer &t);
 

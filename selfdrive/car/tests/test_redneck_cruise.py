@@ -26,13 +26,13 @@ ButtonType = car.CarState.ButtonEvent.Type
 
 class TestRedneckCruise(unittest.TestCase):
   def setUp(self):
-    self.CP = SimpleNamespace()
+    self.CP = SimpleNamespace(pcmCruise=False, openpilotLongitudinalControl=False)
     self.FPCP = SimpleNamespace(pcmCruiseSpeed=False, redneckCruiseAvailable=True)
     self.redneck = RedneckCruise(self.CP, self.FPCP)
 
-  def _new_state(self, speed_cluster_mph=20.0, button_events=None):
+  def _new_state(self, speed_cluster_mph=20.0, button_events=None, cruise_enabled=True):
     return SimpleNamespace(
-      cruiseState=SimpleNamespace(speedCluster=speed_cluster_mph * CV.MPH_TO_MS),
+      cruiseState=SimpleNamespace(speedCluster=speed_cluster_mph * CV.MPH_TO_MS, enabled=cruise_enabled),
       buttonEvents=button_events or [],
     )
 
@@ -142,6 +142,21 @@ class TestRedneckCruise(unittest.TestCase):
       with self.subTest(**kwargs):
         send_button, _ = self._run_until_active(target_mph=25.0, speed_cluster_mph=20.0, **kwargs)
         self.assertEqual(SEND_BUTTON_NONE, send_button)
+
+  def test_stock_scc_only_sends_buttons_while_engaged(self):
+    self.CP.pcmCruise = True
+    frames = int(INCREASE_INACTIVE_TIMER / DT_CTRL) + 4
+    for _ in range(frames):
+      send_button, _ = self.redneck.run(self._new_state(cruise_enabled=False), self._new_control(),
+                                        25.0 * CV.MPH_TO_MS, is_metric=False)
+      self.assertEqual(SEND_BUTTON_NONE, send_button)
+
+    send_button, _ = self._run_until_active(target_mph=25.0)
+    self.assertEqual(SEND_BUTTON_INCREASE, send_button)
+
+    send_button, _ = self.redneck.run(self._new_state(cruise_enabled=False), self._new_control(),
+                                      25.0 * CV.MPH_TO_MS, is_metric=False)
+    self.assertEqual(SEND_BUTTON_NONE, send_button)
 
   def test_resets_when_pcm_cruise_speed_is_enabled(self):
     self.FPCP.pcmCruiseSpeed = True

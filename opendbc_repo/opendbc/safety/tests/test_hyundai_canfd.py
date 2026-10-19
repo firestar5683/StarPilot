@@ -959,5 +959,85 @@ class TestHyundaiCanfdLKASteeringAolLkasOnEngageEV(HyundaiAolLkasOnEngageStockBa
     self.safety.init_tests()
 
 
+class TestSportageNoStockLka(unittest.TestCase):
+  TX_MSGS = None  # Supplemental transition tests, not a separate safety mode.
+  PARAM = (HyundaiSafetyFlags.CANFD_LKA_STEERING | HyundaiSafetyFlags.CANFD_LKA_STEERING_ALT |
+           HyundaiSafetyFlags.CANFD_ANGLE_STEERING | HyundaiSafetyFlags.HYBRID_GAS)
+
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.packer = CANPackerSafety("hyundai_canfd_generated")
+    self._init(True)
+
+  def _init(self, suppress):
+    param = self.PARAM | (HyundaiStarPilotSafetyFlags.CANFD_NO_STOCK_LKA if suppress else 0)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, param)
+    self.safety.init_tests()
+    self.safety.set_alternative_experience(ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL)
+
+  def _speed(self, speed):
+    for _ in range(common.MAX_SAMPLE_VALS):
+      self.safety.safety_rx_hook(self.packer.make_can_msg_safety(
+        "WHEEL_SPEEDS", 1, {f"WHL_Spd{pos}Val": speed for pos in ("FL", "FR", "RL", "RR")}))
+
+  def _toggle(self):
+    for pressed in (1, 0):
+      self.safety.safety_rx_hook(self.packer.make_can_msg_safety("CRUISE_BUTTONS", 1, {"LDA_BTN": pressed}))
+
+  def _steer(self, active, gain=None):
+    return self.packer.make_can_msg_safety("LKAS_ALT", 0, {
+      "LKAS_ANGLE_ACTIVE": 2 if active else 1,
+      "ADAS_StrAnglReqVal": 0,
+      "ADAS_ACIAnglTqRedcGainVal": (0.4 if active else 0.0) if gain is None else gain,
+      "Damping_Gain": 100,
+    })
+
+  def test_stock_scc_buttons_require_engagement(self):
+    resume = self.packer.make_can_msg_safety("CRUISE_BUTTONS", 1, {"CRUISE_BUTTONS": Buttons.RESUME})
+    set_button = self.packer.make_can_msg_safety("CRUISE_BUTTONS", 1, {"CRUISE_BUTTONS": Buttons.SET})
+    self.assertFalse(self.safety.safety_tx_hook(resume))
+    self.assertFalse(self.safety.safety_tx_hook(set_button))
+
+    self.safety.safety_rx_hook(set_button)
+    self.safety.safety_rx_hook(self.packer.make_can_msg_safety("SCC_CONTROL", 1, {"ACCMode": 1}))
+    self.assertTrue(self.safety.get_controls_allowed())
+    self.assertTrue(self.safety.safety_tx_hook(resume))
+    self.assertTrue(self.safety.safety_tx_hook(set_button))
+
+    self.safety.safety_rx_hook(self.packer.make_can_msg_safety("SCC_CONTROL", 1, {"ACCMode": 0}))
+    self.assertFalse(self.safety.safety_tx_hook(resume))
+    self.assertFalse(self.safety.safety_tx_hook(set_button))
+
+  def test_aol_toggle_keeps_stock_blocked_and_inactive_status_allowed(self):
+    self._speed(30)
+    for expected_aol in (False, True, False, True, False):
+      if expected_aol != self.safety.get_aol_allowed():
+        self._toggle()
+      self.assertEqual(expected_aol, self.safety.get_aol_allowed())
+      for addr in (0x110, 0x362):
+        self.assertEqual(-1, self.safety.safety_fwd_hook(2, addr))
+      self.assertTrue(self.safety.safety_tx_hook(self._steer(False)))
+      self.assertTrue(self.safety.safety_tx_hook(common.make_msg(0, 0x362, 32)))
+      self.assertEqual(expected_aol, self.safety.safety_tx_hook(self._steer(True)))
+      self.assertFalse(self.safety.safety_tx_hook(self._steer(False, gain=0.4)))
+
+  def test_standstill_does_not_allow_active_steering(self):
+    self._speed(0)
+    self._toggle()
+    self.assertTrue(self.safety.get_aol_allowed())
+    self.assertFalse(self.safety.safety_tx_hook(self._steer(True)))
+    self.assertTrue(self.safety.safety_tx_hook(self._steer(False)))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, 0x110))
+
+  def test_unflagged_handoff_and_reinitialization_unchanged(self):
+    self._init(False)
+    self._speed(30)
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x110))
+    self.assertFalse(self.safety.safety_tx_hook(self._steer(False)))
+    self._toggle()
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, 0x110))
+    self.assertTrue(self.safety.safety_tx_hook(self._steer(True)))
+
+
 if __name__ == "__main__":
   unittest.main()

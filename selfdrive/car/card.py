@@ -370,7 +370,10 @@ class Car:
         self.CP, self.CI.CS, self.sm['pandaStates'], self.sm.all_checks(['pandaStates']),
       )
       self.CI.CS.preap_lateral_authorized = preap_authorized
-    FPCS = self.starpilot_card.update(CS, FPCS, self.sm, self.starpilot_toggles, preap_authorized=preap_authorized)
+    FPCS = self.starpilot_card.update(
+      CS, FPCS, self.sm, self.starpilot_toggles, preap_authorized=preap_authorized,
+      ev6_aol_authorized=getattr(self.CI.CS, 'ev6_aol_authorized', False),
+    )
     return CS, RD, FPCS
 
   def state_publish(self, CS: car.CarState, RD: structs.RadarDataT | None, FPCS: custom.StarPilotCarState):

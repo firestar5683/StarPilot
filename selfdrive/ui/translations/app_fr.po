@@ -1228,3 +1228,19 @@ msgstr "✓ ABONNÉ"
 #, python-format
 msgid "🔥 Firehose Mode 🔥"
 msgstr "🔥 Mode Firehose 🔥"
+
+#: selfdrive/ui/layouts/settings/starpilot/maps.py
+msgid "Auto: Off"
+msgstr "Auto : non"
+
+#: selfdrive/ui/layouts/settings/starpilot/maps.py
+msgid "Auto: Weekly"
+msgstr "Auto : hebdo"
+
+#: selfdrive/ui/layouts/settings/starpilot/maps.py
+msgid "Auto: Monthly"
+msgstr "Auto : mensuel"
+
+#: selfdrive/ui/onroad/starpilot/navigation_card.py
+msgid "Then"
+msgstr "Puis"

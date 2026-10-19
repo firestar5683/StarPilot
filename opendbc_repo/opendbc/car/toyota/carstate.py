@@ -9,6 +9,7 @@ from opendbc.car.interfaces import CarStateBase
 from opendbc.car.toyota.values import ToyotaFlags, ToyotaStarPilotFlags, CAR, DBC, STEER_THRESHOLD, NO_STOP_TIMER_CAR, \
                                                   TSS2_CAR, RADAR_ACC_CAR, EPS_SCALE, UNSUPPORTED_DSU_CAR, \
                                                   SECOC_CAR, LEGACY_PRIUS_CAR
+from opendbc.safety import ALTERNATIVE_EXPERIENCE
 
 ButtonType = structs.CarState.ButtonEvent.Type
 SteerControlType = structs.CarParams.SteerControlType
@@ -90,6 +91,11 @@ class CarState(CarStateBase):
     self.has_can_filter = self.FPCP.flags & ToyotaStarPilotFlags.RADAR_CAN_FILTER.value
     self.has_SDSU = self.FPCP.flags & ToyotaStarPilotFlags.SMART_DSU.value
     self.has_ZSS = self.FPCP.flags & ToyotaStarPilotFlags.ZSS.value
+    self.auto_brake_hold = bool(
+      self.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value and
+      getattr(self.CP, "alternativeExperience", 0) & ALTERNATIVE_EXPERIENCE.ALLOW_AEB
+    )
+    self.pre_collision_2 = {}
 
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -225,6 +231,9 @@ class CarState(CarStateBase):
     if self.CP.carFingerprint != CAR.TOYOTA_PRIUS_V:
       self.lkas_hud = copy.copy(cp_cam.vl["LKAS_HUD"])
 
+    if self.auto_brake_hold:
+      self.pre_collision_2 = copy.copy(cp_cam.vl["PRE_COLLISION_2"])
+
     if self.CP.carFingerprint not in UNSUPPORTED_DSU_CAR:
       self.pcm_follow_distance = cp.vl["PCM_CRUISE_2"]["PCM_FOLLOW_DISTANCE"]
 
@@ -308,6 +317,10 @@ class CarState(CarStateBase):
 
     if CP.carFingerprint in DISTANCE_BUTTON_CAR:
       pt_messages.append(("PCM_CRUISE_4", 1))
+
+    if (CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value and
+        getattr(CP, "alternativeExperience", 0) & ALTERNATIVE_EXPERIENCE.ALLOW_AEB):
+      cam_messages.append(("PRE_COLLISION_2", 50))
 
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),

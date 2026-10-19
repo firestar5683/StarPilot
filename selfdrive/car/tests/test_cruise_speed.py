@@ -118,14 +118,17 @@ class TestVCruiseHelper:
         )
         assert pressed == (self.v_cruise_helper.v_cruise_kph == self.v_cruise_helper.v_cruise_kph_last)
 
-  def test_accel_stops_at_slc_target_before_crossing_it(self):
+  @pytest.mark.parametrize(
+    ("starting_kph", "waypoint_kph", "expected_speeds"),
+    [(30, 33, (33, 35, 40)), (65, 68, (68, 70, 75))],
+  )
+  def test_accel_stops_at_slc_target_before_crossing_it(self, starting_kph, waypoint_kph, expected_speeds):
     self.starpilot_toggles.cruise_increase = 5
-    self.v_cruise_helper.v_cruise_kph = 30
-    self.v_cruise_helper.v_cruise_cluster_kph = 30
-    slc_target_with_offset = 33 * CV.KPH_TO_MS
+    self.v_cruise_helper.v_cruise_kph = starting_kph
+    self.v_cruise_helper.v_cruise_cluster_kph = starting_kph
+    slc_target_with_offset = waypoint_kph * CV.KPH_TO_MS
 
-    # A 30 km/h limit with a +3 km/h SLC offset should be an intermediate stop.
-    for expected_kph in (33, 35, 40):
+    for expected_kph in expected_speeds:
       for pressed in (True, False):
         CS = car.CarState(cruiseState={"available": True})
         CS.buttonEvents = [ButtonEvent(type=ButtonType.accelCruise, pressed=pressed)]

@@ -2,7 +2,9 @@
 from opendbc.can import CANParser
 from opendbc.car import Bus
 from opendbc.car.structs import RadarData
-from opendbc.car.toyota.values import CAR, DBC, TSS2_CAR
+from opendbc.car.toyota.values import ARS510_RADAR_CAR, CAR, DBC, TSS2_CAR, ToyotaFlags
+from opendbc.car.toyota.ars510_acc_target import RadarInterface as Ars510AccRadarInterface
+from opendbc.car.toyota.ars510_radar import RadarInterface as Ars510FusedRadarInterface
 from opendbc.car.interfaces import RadarInterfaceBase
 
 RADAR_ACC_TSSP_CAR = {CAR.TOYOTA_CAMRY}
@@ -39,6 +41,12 @@ class RadarInterface(RadarInterfaceBase):
     super().__init__(CP)
     self.track_id = 0
     self.radar_acc_tssp = CP.carFingerprint in RADAR_ACC_TSSP_CAR
+    self.ars510 = None
+    if CP.carFingerprint in ARS510_RADAR_CAR and CP.flags & ToyotaFlags.ARS510_RADAR and not CP.radarUnavailable:
+      parser = Ars510FusedRadarInterface if CP.flags & ToyotaFlags.ARS510_FUSED else Ars510AccRadarInterface
+      self.ars510 = parser(CP)
+      self.rcp = self.pt_cp = None
+      return
 
     if self.radar_acc_tssp:
       self.RADAR_MSGS = TSSP_CLUSTER_MSGS
@@ -60,6 +68,8 @@ class RadarInterface(RadarInterfaceBase):
     self.updated_messages = set()
 
   def update(self, can_strings):
+    if self.ars510 is not None:
+      return self.ars510.update(can_strings)
     if self.rcp is None:
       return super().update(None)
 

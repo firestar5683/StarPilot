@@ -2,6 +2,7 @@ import datetime
 
 import pytest
 
+from cereal import custom
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.common.starpilot_variables import PLANNER_TIME
@@ -36,15 +37,26 @@ class FakeParams:
   def get_float(self, *args, **kwargs):
     return 0.0
 
+  def get_bool(self, key):
+    return bool(self.values.get(key, False))
+
+  def remove(self, key):
+    self.values.pop(key, None)
+
   def put_nonblocking(self, key, value):
     self.values[key] = value
     self.writes.append((key, value))
+
+  def put_float(self, key, value):
+    self.values[key] = value
 
 
 def make_vcruise(*, red_light=False, raw_model_stopped=False, forcing_stop=False, nav_state=None, road_curvature=0.0):
   planner = SimpleNamespace(
     params=FakeParams(),
     params_memory=FakeParams({"NavInstructionState": nav_state or {}}),
+    gps_position={},
+    gps_valid=False,
     lead_one=SimpleNamespace(status=False, dRel=float("inf"), vLead=0.0),
     starpilot_cem=SimpleNamespace(stop_light_detected=red_light),
     starpilot_following=SimpleNamespace(following_lead=False),
@@ -77,9 +89,14 @@ def make_sm(*, standstill=True, min_steer_speed=0.0, car_fingerprint=""):
       leftBlinker=False,
       rightBlinker=False,
       steeringAngleDeg=0.0,
+      vCruise=72.0,
     ),
+    "liveParameters": SimpleNamespace(angleOffsetDeg=0.0),
+    "mapdOut": SimpleNamespace(nextSpeedLimitDistance=0.0, nextSpeedLimit=0.0, speedLimit=0.0,
+                                waySelectionType=custom.WaySelectionType.fail, roadName=""),
+    "selfdriveState": SimpleNamespace(enabled=True),
     "carParams": SimpleNamespace(minSteerSpeed=min_steer_speed, carFingerprint=car_fingerprint),
-    "starpilotCarState": SimpleNamespace(accelPressed=False, dashboardStopSign=0, dashboardSpeedLimit=0),
+    "starpilotCarState": SimpleNamespace(accelPressed=False, decelPressed=False, dashboardStopSign=0, dashboardSpeedLimit=0),
     "onroadEvents": [],
   }
 
@@ -105,6 +122,27 @@ def make_toggles():
     nav_longitudinal_allowed=False,
     speed_limit_controller=False,
     show_speed_limits=False,
+    is_metric=False,
+    map_speed_lookahead_higher=0.0,
+    map_speed_lookahead_lower=0.0,
+    slc_fallback_previous_speed_limit=False,
+    slc_fallback_set_speed=False,
+    slc_fallback_experimental_mode=False,
+    slc_mapbox_filler=False,
+    speed_limit_confirmation_higher=False,
+    speed_limit_confirmation_lower=False,
+    speed_limit_priority1="Dashboard",
+    speed_limit_priority2="Map Data",
+    speed_limit_priority_highest=False,
+    speed_limit_priority_lowest=False,
+    vision_speed_limit_detection=False,
+    speed_limit_offset1=0.0,
+    speed_limit_offset2=0.0,
+    speed_limit_offset3=0.0,
+    speed_limit_offset4=0.0,
+    speed_limit_offset5=0.0,
+    speed_limit_offset6=0.0,
+    speed_limit_offset7=0.0,
     force_stop_distance_offset=0,
   )
 
@@ -112,7 +150,6 @@ def make_toggles():
 def test_active_slc_control_target_does_not_require_set_speed_limit():
   target = get_active_slc_control_target(
     speed_limit_controller=True,
-    set_speed_limit=False,
     slc_target=45.0 * CV.MPH_TO_MS,
     slc_offset=3.0 * CV.MPH_TO_MS,
     overridden_speed=0.0,
@@ -145,8 +182,7 @@ def test_active_slc_target_constrains_vcruise_below_csc_minimum(slc_target_mph, 
 
   vcruise.slc.target = slc_target_mph * CV.MPH_TO_MS
   vcruise.slc.source = "Dashboard"
-  vcruise.slc.update_limits = lambda *_args, **_kwargs: None
-  vcruise.slc.update_override = lambda *_args, **_kwargs: None
+  vcruise.slc.update = lambda *_args, **_kwargs: None
 
   result = update_vcruise(
     vcruise,
@@ -158,6 +194,7 @@ def test_active_slc_target_constrains_vcruise_below_csc_minimum(slc_target_mph, 
   )
 
   assert result == pytest.approx(expected_v_cruise_mph * CV.MPH_TO_MS)
+  assert vcruise.slc_is_limiting_max_set == (expected_v_cruise_mph < 35.0)
 
 
 def test_elantra_gets_lead_veto_margin_before_force_stop():
@@ -417,6 +454,8 @@ def test_csc_res_press_defers_to_slc_confirmation():
   sm = make_sm(standstill=False)
   toggles = make_toggles()
   toggles.curve_speed_controller = True
+  toggles.speed_limit_controller = True
+  toggles.speed_limit_confirmation_higher = True
 
   def set_curve_target(_v_ego, _v_cruise):
     vcruise.csc.target = 14.0
@@ -426,10 +465,12 @@ def test_csc_res_press_defers_to_slc_confirmation():
   assert vcruise.csc_controlling_speed
 
 
-  vcruise.slc.speed_limit_changed_timer = 1.0
-  vcruise.slc.unconfirmed_speed_limit = 25.0
+  # The candidate and accel press arrive together. SLC consumes the press in
+  # this frame, even though accepting immediately clears the pending state.
+  sm["starpilotCarState"].dashboardSpeedLimit = 45.0 * CV.MPH_TO_MS
   sm["starpilotCarState"].accelPressed = True
   update_vcruise(vcruise, sm, toggles, now=80.05, v_ego=20.0)
+  assert vcruise.slc.confirmation_button_consumed
   assert not vcruise.csc_override
 
   sm["starpilotCarState"].accelPressed = False
@@ -622,7 +663,6 @@ def test_curve_speed_controller_hysteresis_keeps_glow_off_for_marginal_targets()
 def test_active_slc_control_target_applies_offset_and_cluster_diff():
   target = get_active_slc_control_target(
     speed_limit_controller=True,
-    set_speed_limit=True,
     slc_target=45.0 * CV.MPH_TO_MS,
     slc_offset=3.0 * CV.MPH_TO_MS,
     overridden_speed=0.0,
@@ -635,7 +675,6 @@ def test_active_slc_control_target_applies_offset_and_cluster_diff():
 def test_active_slc_control_target_allows_lower_redneck_override():
   target = get_active_slc_control_target(
     speed_limit_controller=True,
-    set_speed_limit=False,
     slc_target=65.0 * CV.MPH_TO_MS,
     slc_offset=0.0,
     overridden_speed=35.0 * CV.MPH_TO_MS,
@@ -855,6 +894,65 @@ def test_santa_fe_force_stop_holds_through_low_speed_detector_dropout():
 
   assert vcruise.forcing_stop
   assert result == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("fingerprint", ("FORD_MUSTANG_MACH_E_MK1", "FORD_F_150_LIGHTNING_MK1", "OTHER_CAR"))
+def test_mach_e_force_stop_completion_is_vehicle_scoped(fingerprint):
+  planner, vcruise = make_vcruise(red_light=True, forcing_stop=True)
+  planner.model_length = 60.0
+  vcruise.force_stop_entry_speed = 12.0
+  vcruise.tracked_model_length = 4.6
+  vcruise.force_stop_distance_cap = 4.6
+  sm = make_sm(standstill=False, car_fingerprint=fingerprint)
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(shouldStop=False))
+  toggles = make_toggles()
+
+  update_vcruise(vcruise, sm, toggles, now=0.0, v_ego=0.7)
+  planner.starpilot_cem.stop_light_detected = False
+  update_vcruise(vcruise, sm, toggles, now=0.25, v_ego=0.7)
+  result = update_vcruise(vcruise, sm, toggles, now=0.8, v_ego=0.7)
+
+  if fingerprint == "FORD_MUSTANG_MACH_E_MK1":
+    assert get_force_stop_low_speed_hold(sm["carParams"]) == pytest.approx(1.0)
+    assert vcruise.forcing_stop
+    assert result == pytest.approx(0.0)
+    assert vcruise.tracked_model_length <= 4.6
+  else:
+    assert get_force_stop_low_speed_hold(sm["carParams"]) is None
+    assert not vcruise.forcing_stop
+    assert result == pytest.approx(20.0)
+
+
+def test_mach_e_force_stop_still_releases_green_above_final_handoff():
+  planner, vcruise = make_vcruise(red_light=True, forcing_stop=True)
+  vcruise.force_stop_entry_speed = 12.0
+  sm = make_sm(standstill=False, car_fingerprint="FORD_MUSTANG_MACH_E_MK1")
+  toggles = make_toggles()
+
+  update_vcruise(vcruise, sm, toggles, now=0.0, v_ego=3.0)
+  planner.starpilot_cem.stop_light_detected = False
+  update_vcruise(vcruise, sm, toggles, now=0.25, v_ego=3.0)
+  result = update_vcruise(vcruise, sm, toggles, now=0.8, v_ego=3.0)
+
+  assert not vcruise.forcing_stop
+  assert result == pytest.approx(20.0)
+
+
+@pytest.mark.parametrize("override", ("gas", "standstill"))
+def test_mach_e_force_stop_completion_does_not_block_departure(override):
+  planner, vcruise = make_vcruise(red_light=True, forcing_stop=True)
+  vcruise.force_stop_entry_speed = 12.0
+  sm = make_sm(standstill=False, car_fingerprint="FORD_MUSTANG_MACH_E_MK1")
+  toggles = make_toggles()
+
+  update_vcruise(vcruise, sm, toggles, now=0.0, v_ego=0.7)
+  planner.starpilot_cem.stop_light_detected = False
+  sm["carState"].gasPressed = override == "gas"
+  sm["carState"].standstill = override == "standstill"
+  result = update_vcruise(vcruise, sm, toggles, now=0.8, v_ego=0.0 if override == "standstill" else 0.7)
+
+  assert not vcruise.forcing_stop
+  assert result == pytest.approx(20.0)
 
 
 def test_force_stop_does_not_reanchor_inside_reanchor_floor():

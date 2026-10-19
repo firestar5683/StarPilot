@@ -71,6 +71,7 @@ def _install_aethergrid_stubs():
   app_mod.MousePos = type("MousePos", (), {})
   app_mod.MouseEvent = type("MouseEvent", (), {})
   app_mod.FONT_SCALE = 1.0
+  app_mod.font_fallback = lambda font: font
   app_mod.gui_app = types.SimpleNamespace(
     width=1920,
     height=1080,
@@ -218,6 +219,65 @@ class RenderSpy:
 
   def set_parent_rect(self, rect):
     self.parent_rect = rect
+
+
+@pytest.mark.parametrize("height, body_size, body_height", [(208, 26, None), (208, 24, None), (400, 26, 80), (128, 26, None)])
+@pytest.mark.parametrize("body", ["A long explanation " * 30, "unbroken" * 50, "First line\nSecond line\nThird line"])
+def test_empty_state_body_wraps_within_card(height, body_size, body_height, body):
+  mod = _import_aethergrid()
+  wrapper = importlib.import_module("openpilot.system.ui.lib.wrap_text")
+  mod.FONT_SCALE = 1.242
+  font = types.SimpleNamespace(texture=types.SimpleNamespace(id=1))
+  mod.gui_app.font = lambda *_: font
+  labels = []
+
+  def measure(_font, text, size, spacing=0):
+    return types.SimpleNamespace(x=len(text) * size * mod.FONT_SCALE / 2, y=size * mod.FONT_SCALE)
+
+  with patch.object(mod, "measure_text_cached", measure), patch.object(wrapper, "measure_text_cached", measure), \
+       patch.object(mod, "gui_label", lambda rect, text, *a, **kw: labels.append((rect, text))):
+    mod.draw_empty_state_card(mod.rl.Rectangle(0, 0, 500, height), "Title", body,
+                              title_size=30, body_size=body_size, body_height=body_height)
+
+  body_labels = labels[1:]
+  assert body_labels
+  for rect, text in body_labels:
+    assert rect.y >= labels[0][0].y + labels[0][0].height
+    assert rect.y + rect.height <= height
+    assert measure(font, text, body_size).x <= rect.width
+  if body.startswith(("A long", "unbroken")):
+    assert body_labels[-1][1].endswith("...")
+
+
+@pytest.mark.parametrize("action_text", ["DELETE", "DOWNLOAD", "Current", "Reset", "Set Key"])
+def test_auto_action_pill_keeps_readable_text_inside_action_rail(action_text):
+  mod = _import_aethergrid()
+  mod.FONT_SCALE = 1.242
+  draws = []
+
+  def measure(_font, text, size, spacing=0):
+    return types.SimpleNamespace(x=len(text) * size * mod.FONT_SCALE * 0.65, y=size * mod.FONT_SCALE)
+
+  with patch.object(mod, "measure_text_cached", measure), \
+       patch.object(mod.rl, "draw_text_ex", lambda font, text, pos, size, spacing, color: draws.append((text, pos, size))):
+    pill = mod.draw_selection_list_row(mod.rl.Rectangle(0, 0, 1500, 128), title="Asset", action_text=action_text,
+                                      action_pill=True, action_text_size=26)
+
+  text, pos, size = next(draw for draw in draws if draw[0] == action_text)
+  assert size == 26
+  assert pill.x >= 1500 - mod.AETHER_LIST_METRICS.action_width
+  assert pill.x + pill.width <= 1500
+  assert pos.x >= pill.x + 11
+  assert pos.x + measure(None, text, size).x <= pill.x + pill.width - 11
+
+
+def test_action_pill_preserves_explicit_width_and_rail_limit():
+  mod = _import_aethergrid()
+  row = mod.rl.Rectangle(0, 0, 1500, 128)
+  for requested_width in (120, 1000):
+    pill = mod.draw_selection_list_row(row, title="Asset", action_text="Download", action_pill=True,
+                                      action_pill_width=requested_width)
+    assert pill.width == min(requested_width, mod.AETHER_LIST_METRICS.action_width - 28)
 
 
 class TestAethergridContracts(unittest.TestCase):

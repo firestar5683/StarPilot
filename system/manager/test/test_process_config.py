@@ -4,6 +4,8 @@ import pytest
 
 from cereal import car
 from opendbc.car.ford.values import CAR as FORD_CAR
+from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN_CAR
+from openpilot.common.gps import get_gps_location_service
 import openpilot.system.manager.process_config as process_config
 from openpilot.system.manager.process_config import (
   allow_uploads,
@@ -101,6 +103,24 @@ def test_wheel_controls_process_is_mapping_gated(enabled):
   assert wheel_controls_enabled(False, params, car.CarParams.new_message(), SimpleNamespace()) is enabled
 
 
+@pytest.mark.parametrize("started,platform,enabled,disable_logging,no_logging,not_car,expected", [
+  (True, "KIA_STINGER_2022", True, False, False, False, True),
+  (False, "KIA_STINGER_2022", True, False, False, False, False),
+  (True, "KIA_STINGER_2022", False, False, False, False, False),
+  (True, "KIA_STINGER_2022", True, True, False, False, False),
+  (True, "KIA_STINGER_2022", True, False, True, False, False),
+  (True, "KIA_STINGER_2022", True, False, False, True, False),
+  (True, "KIA_STINGER", True, False, False, False, False),
+  (True, "HYUNDAI_IONIQ_6", True, False, False, False, False),
+  (True, "KIA_EV6", True, False, False, False, False),
+])
+def test_stinger_logging_remains_opt_in_and_exact_platform_only(started, platform, enabled, disable_logging, no_logging, not_car, expected):
+  values = {"StingerObjectShadow": enabled, "DisableLogging": disable_logging}
+  params = SimpleNamespace(get_bool=lambda key: values.get(key, False))
+  cp = SimpleNamespace(carFingerprint=platform, notCar=not_car)
+  assert process_config.run_stinger_object_shadow(started, params, cp, SimpleNamespace(no_logging=no_logging)) is expected
+
+
 class CameraParams:
   def __init__(self, capture: bool):
     self.capture = capture
@@ -174,3 +194,15 @@ def test_ublox_has_single_external_gps_publisher(monkeypatch, car_gps, expected)
 
   assert ublox(True, params, car.CarParams.new_message(), SimpleNamespace()) is expected
   assert params.get_bool("CarGpsAvailable") is car_gps
+
+
+def test_taos_uses_the_car_gps_service(monkeypatch):
+  monkeypatch.setattr("openpilot.system.manager.process_config.ublox_available", lambda: True)
+  CP = car.CarParams.new_message()
+  CP.brand = "volkswagen"
+  CP.carFingerprint = VOLKSWAGEN_CAR.VOLKSWAGEN_TAOS_MK1
+  params = GpsParams(CP)
+
+  assert not ublox(True, params, CP, SimpleNamespace())
+  assert params.get_bool("CarGpsAvailable")
+  assert get_gps_location_service(params) == "gpsLocationExternal"

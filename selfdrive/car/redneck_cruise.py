@@ -197,7 +197,9 @@ class RedneckCruise:
   def _update_readiness(self, CS: car.CarState, CC: car.CarControl) -> None:
     update_manual_button_timers(CS, self.cruise_button_timers)
     button_pressed = any(0 < timer <= int(MANUAL_BUTTON_INACTIVE_TIMER / DT_CTRL) for timer in self.cruise_button_timers.values())
-    self.is_ready = CC.enabled and not CC.cruiseControl.override and not CC.cruiseControl.cancel and not CC.cruiseControl.resume and not button_pressed
+    stock_cruise_ready = (not self.CP.pcmCruise or self.CP.openpilotLongitudinalControl or CS.cruiseState.enabled)
+    self.is_ready = (CC.enabled and stock_cruise_ready and not CC.cruiseControl.override and
+                     not CC.cruiseControl.cancel and not CC.cruiseControl.resume and not button_pressed)
 
   def _desired_state(self) -> str:
     if self.v_target > self.v_cruise_cluster:

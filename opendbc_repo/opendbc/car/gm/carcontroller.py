@@ -415,6 +415,18 @@ def supports_bolt_acc_pedal_friction_experiment(CP) -> bool:
   )
 
 
+def update_bolt_acc_pedal_stop_hold(CP, CC, CS, holding: bool) -> bool:
+  return (
+    supports_bolt_acc_pedal_friction_experiment(CP) and
+    CC.longActive and
+    CC.actuators.longControlState == LongCtrlState.stopping and
+    not CC.cruiseControl.resume and
+    not CS.out.gasPressed and
+    not CS.out.brakePressed and
+    (holding or CS.out.standstill)
+  )
+
+
 def get_bolt_acc_pedal_friction_brake(apply_brake, full_brake_accel, v_ego, params) -> int:
   if apply_brake <= 0:
     return 0
@@ -583,6 +595,7 @@ class CarController(CarControllerBase):
       self.gm_auto_hold_enabled = False
     self.bolt_acc_pedal_friction_release_frames = 0
     self.bolt_acc_pedal_friction_low_speed_active = False
+    self.bolt_acc_pedal_stop_hold = False
     self.truck_friction_brake_active = False
     self.truck_follow_accel = 0.0
 
@@ -772,6 +785,7 @@ class CarController(CarControllerBase):
     actuators = CC.actuators
     self.aego = CS.out.aEgo
     accel = actuators.accel
+    self.bolt_acc_pedal_stop_hold = update_bolt_acc_pedal_stop_hold(self.CP, CC, CS, self.bolt_acc_pedal_stop_hold)
     press_regen_paddle = False
     auto_hold_enabled = supports_volt_auto_hold(self.CP, self.gm_auto_hold_enabled)
     volt_one_pedal_supported = supports_volt_one_pedal(
@@ -1177,6 +1191,9 @@ class CarController(CarControllerBase):
               else:
                 can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (CS.buttons_counter + 1) % 4, CruiseButtons.DECEL_SET))
         if self.CP.enableGasInterceptorDEPRECATED:
+          if self.bolt_acc_pedal_stop_hold:
+            interceptor_gas_cmd = 0.0
+            self.pedal_steady = 0.0
           can_sends.append(create_gas_interceptor_command(self.packer_pt, interceptor_gas_cmd, idx))
         if bolt_acc_pedal_friction_experiment:
           friction_brake_bus = get_friction_brake_bus(self.CP)

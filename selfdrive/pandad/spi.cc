@@ -101,6 +101,10 @@ PandaSpiHandle::PandaSpiHandle(std::string serial) : PandaCommsHandle(serial) {
       throw std::runtime_error("Error connecting to panda: failed to get serial");
     }
 
+    uint8_t capabilities[3] = {0};
+    ret = control_read(0xdd, SPI_CAN_REPLAY_CAPABILITY, 0, capabilities, sizeof(capabilities), 100);
+    sequenced_can_writes = (ret == 1) && (capabilities[0] == 1);
+
     if (!serial.empty() && (serial != hw_serial)) {
       throw std::runtime_error("Error connecting to panda: serial mismatch");
     }
@@ -154,6 +158,19 @@ int PandaSpiHandle::bulk_read(unsigned char endpoint, unsigned char* data, int l
 }
 
 int PandaSpiHandle::bulk_transfer(uint8_t endpoint, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t rx_len, unsigned int timeout) {
+  std::unique_lock<std::mutex> write_lock(can_write_lock, std::defer_lock);
+  if (sequenced_can_writes && (endpoint == 3) && (tx_data != NULL)) {
+    write_lock.lock();
+    if (!can_write_session_started) {
+      uint8_t capabilities[3] = {0};
+      int ret = control_read(0xdd, SPI_CAN_REPLAY_CAPABILITY, 1, capabilities, sizeof(capabilities), 100);
+      if (ret != 1 || capabilities[0] != 1) {
+        comms_healthy = false;
+        return -1;
+      }
+      can_write_session_started = true;
+    }
+  }
   const int xfer_size = SPI_BUF_SIZE - 0x40;
 
   int ret = 0;
@@ -210,6 +227,11 @@ bool check_checksum(uint8_t *data, int data_len) {
 
 
 int PandaSpiHandle::spi_transfer_retry(uint8_t endpoint, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t max_rx_len, unsigned int timeout) {
+  uint16_t sequence = 0;
+  if (sequenced_can_writes && (endpoint == 3) && (tx_len > 0)) {
+    if (++can_write_sequence == 0) ++can_write_sequence;
+    sequence = can_write_sequence;
+  }
   int ret;
   int nack_count = 0;
   int timeout_count = 0;
@@ -217,7 +239,7 @@ int PandaSpiHandle::spi_transfer_retry(uint8_t endpoint, uint8_t *tx_data, uint1
   double start_time = millis_since_boot();
 
   do {
-    ret = spi_transfer(endpoint, tx_data, tx_len, rx_data, max_rx_len, timeout);
+    ret = spi_transfer(endpoint, tx_data, tx_len, rx_data, max_rx_len, timeout, sequence);
 
     if (ret < 0) {
       timed_out = (timeout != 0) && (timeout_count > 5);
@@ -317,7 +339,8 @@ int PandaSpiHandle::lltransfer(spi_ioc_transfer &t) {
   return ret;
 }
 
-int PandaSpiHandle::spi_transfer(uint8_t endpoint, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t max_rx_len, unsigned int timeout) {
+int PandaSpiHandle::spi_transfer(uint8_t endpoint, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t max_rx_len, unsigned int timeout,
+                                uint16_t sequence) {
   int ret;
   uint16_t rx_data_len;
   LockEx lock(spi_fd, hw_lock);
@@ -331,9 +354,9 @@ int PandaSpiHandle::spi_transfer(uint8_t endpoint, uint8_t *tx_data, uint16_t tx
   xfer_count++;
   header = {
     .sync = SPI_SYNC,
-    .endpoint = endpoint,
+    .endpoint = static_cast<uint8_t>(sequence != 0 ? SPI_CAN_WRITE_SEQUENCED_ENDPOINT : endpoint),
     .tx_len = tx_len,
-    .max_rx_len = max_rx_len
+    .max_rx_len = sequence != 0 ? sequence : max_rx_len
   };
 
   spi_ioc_transfer transfer = {
@@ -377,9 +400,9 @@ int PandaSpiHandle::spi_transfer(uint8_t endpoint, uint8_t *tx_data, uint16_t tx
   }
 
   // Read data
-  rx_data_len = *(uint16_t *)(rx_buf+1);
-  if (rx_data_len >= SPI_BUF_SIZE) {
-    SPILOG(LOGE, "SPI: RX data len larger than buf size %d", rx_data_len);
+  rx_data_len = static_cast<uint16_t>(rx_buf[1]) | (static_cast<uint16_t>(rx_buf[2]) << 8);
+  if (rx_data_len >= SPI_BUF_SIZE || rx_data_len > max_rx_len) {
+    SPILOG(LOGE, "SPI: RX data len larger than requested buffer %d", rx_data_len);
     goto fail;
   }
 

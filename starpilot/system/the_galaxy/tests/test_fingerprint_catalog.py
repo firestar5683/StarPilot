@@ -39,6 +39,28 @@ def test_galaxy_does_not_assign_a_regional_label_to_ambiguous_ev6_fingerprint():
   assert catalog["model_to_label"]["KIA_EV6"] is None
 
 
+def test_galaxy_lists_2026_k4_under_existing_non_hda2_platform():
+  kia_models = the_galaxy._extract_fingerprint_models_for_make("kia")
+  assert {"value": "KIA_K4_2025", "label": "Kia K4 (without HDA II) 2025"} in kia_models
+  assert {"value": "KIA_K4_2025", "label": "Kia K4 (without HDA II) 2026"} in kia_models
+  assert {"value": "KIA_K4_2025", "label": "Kia K4 (with HDA II) 2025"} in kia_models
+  assert {"value": "KIA_K4_2025", "label": "Kia K4 (with HDA II) 2025-26"} not in kia_models
+
+
+def test_manual_2026_k4_selection_keeps_the_shared_platform(monkeypatch):
+  client, params = _params_client(monkeypatch, {}, "pc")
+  monkeypatch.setattr(api_server, "_get_param_type_info", lambda: ({"CarModel"}, {"CarModel": str}))
+  monkeypatch.setattr(api_server, "update_starpilot_toggles", lambda: None)
+
+  label = "Kia K4 (without HDA II) 2026"
+  options = client.get("/api/fingerprints/models?make=Kia").get_json()
+  assert {"value": "KIA_K4_2025", "label": label} in options
+  response = client.put("/api/params", json={"key": "CarModel", "value": "KIA_K4_2025", "label": label})
+  assert response.status_code == 200
+  assert params.values["CarModel"] == "KIA_K4_2025"
+  assert params.values["CarModelName"] == label
+
+
 def test_manual_fingerprint_api_keeps_the_saved_value_and_label_consistent(monkeypatch):
   client, params = _params_client(monkeypatch, {}, "pc")
   monkeypatch.setattr(api_server, "_get_param_type_info", lambda: ({"CarModel"}, {"CarModel": str}))

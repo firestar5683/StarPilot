@@ -177,6 +177,68 @@ class TestVolvoSafetyBase(common.CarSafetyTest):
     self.assertTrue(self._tx(self._angle_cmd_msg(10)))
     self.assertFalse(self._tx(self._angle_cmd_msg(20)))
 
+  STOCK_LCA5 = bytes.fromhex("88c04cef1190ba00")
+
+  def _stock_lca5(self, data=None, bus=VOLVO_PARTY_BUS):
+    return libsafety_py.make_CANPacket(VOLVO_LCA_5, bus, self.STOCK_LCA5 if data is None else data)
+
+  def test_inactive_lca5_stock_relay_requires_unchanged_received_frame(self):
+    self._reset_angle_measurement(10)
+    self.safety.set_timer(100000)
+    self.assertFalse(self._tx(self._stock_lca5()))
+    self._rx(self._stock_lca5(bus=VOLVO_MAIN_BUS))
+    self.assertTrue(self._tx(self._stock_lca5()))
+    self.assertEqual(self.safety.get_desired_angle_last(), round(10 / 0.05596))
+
+    for byte in range(8):
+      altered = bytearray(self.STOCK_LCA5)
+      altered[byte] ^= 1
+      self.assertFalse(self._tx(self._stock_lca5(bytes(altered))), f"altered {byte=}")
+    self.assertFalse(self._tx(self._stock_lca5(bus=VOLVO_MAIN_BUS)))
+    self.assertFalse(self._tx(self._stock_lca5(bus=VOLVO_PT_BUS)))
+
+  def test_inactive_lca5_stock_relay_wrong_rx_bus_and_length(self):
+    self._rx(self._stock_lca5(bus=VOLVO_PT_BUS))
+    self._rx(self._stock_lca5(self.STOCK_LCA5[:7], bus=VOLVO_MAIN_BUS))
+    self.assertFalse(self._tx(self._stock_lca5()))
+
+  def test_inactive_lca5_stock_relay_expires_across_timer_wrap(self):
+    start = 0xFFFF0000
+    self.safety.set_timer(start)
+    self._rx(self._stock_lca5(bus=VOLVO_MAIN_BUS))
+    self.safety.set_timer((start + 100000) & 0xFFFFFFFF)
+    self.assertTrue(self._tx(self._stock_lca5()))
+    self.safety.set_timer((start + 100001) & 0xFFFFFFFF)
+    self.assertFalse(self._tx(self._stock_lca5()))
+
+  def test_inactive_lca5_stock_relay_history_is_bounded(self):
+    frames = []
+    for i in range(5):
+      data = bytearray(self.STOCK_LCA5)
+      data[3] = (data[3] + i) & 0xFF
+      frames.append(bytes(data))
+      self.safety.set_timer(i * 20000)
+      self._rx(self._stock_lca5(frames[-1], bus=VOLVO_MAIN_BUS))
+    self.assertFalse(self._tx(self._stock_lca5(frames[0])))
+    for data in frames[1:]:
+      self.assertTrue(self._tx(self._stock_lca5(data)))
+
+  def test_inactive_lca5_stock_relay_cleared_on_safety_init(self):
+    self._rx(self._stock_lca5(bus=VOLVO_MAIN_BUS))
+    self.assertTrue(self._tx(self._stock_lca5()))
+    self.safety.set_safety_hooks(SAFETY_VOLVO, self.SAFETY_PARAM)
+    self.assertFalse(self._tx(self._stock_lca5()))
+
+  def test_stock_lca5_placeholder_does_not_bypass_active_angle_limits(self):
+    self._reset_angle_measurement(10)
+    self._reset_speed_measurement(50)
+    self._rx(self._stock_lca5(bus=VOLVO_MAIN_BUS))
+    self.assertTrue(self._tx(self._stock_lca5()))
+    self.safety.set_controls_allowed(True)
+    self.assertFalse(self._tx(self._stock_lca5()))
+    self.assertTrue(self._tx(self._angle_cmd_msg(10.4)))
+    self.assertFalse(self._tx(self._angle_cmd_msg(11)))
+
   def test_angle_tx_rate_matches_controller_cadence(self):
     """LCA_5 is 50 Hz, so each frame may contain two 100 Hz controller steps."""
     self._reset_speed_measurement(50)

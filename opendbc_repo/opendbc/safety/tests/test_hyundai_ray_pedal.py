@@ -21,8 +21,10 @@ def test_ray_pedal_tx_isolation_and_limits(param):
 
   has_ray_signature = param in (0x9405, 0x9C05)
   assert tx(0) is has_ray_signature
-  assert tx(0.35) is has_ray_signature
-  assert not tx(0.36)  # above the Ray-only initial command cap
+  assert tx(0.55) is has_ray_signature
+  assert tx(0.65) is has_ray_signature
+  assert tx(0.70) is has_ray_signature
+  assert not tx(0.71)
   assert not tx(1.0)
 
   if has_ray_signature:
@@ -48,6 +50,24 @@ def test_ray_pedal_rx_crc_is_checked_only_for_ray_signature():
   bad_crc = bytearray(dat)
   bad_crc[-1] ^= 1
   assert not safety.safety_rx_hook(libsafety_py.make_CANPacket(0x201, 0, bytes(bad_crc)))
+
+
+@pytest.mark.parametrize(("track1", "track2", "allowed"), [
+  (530, 1035, True), (531, 1035, False), (530, 1036, False),
+  (263, 497, False), (264, 496, False), (530, 980, False),
+])
+def test_ray_tuned_command_validates_each_track(track1, track2, allowed):
+  safety = libsafety_py.libsafety
+  safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0x9405)
+  safety.init_tests()
+  safety.set_controls_allowed(True)
+  packer = CANPacker("hyundai_kia_ray_pedal")
+  addr, dat, bus = packer.make_can_msg("GAS_COMMAND", 0, {
+    "GAS_COMMAND": (track1 - 264) * 0.672,
+    "GAS_COMMAND2": (track2 - 497) * 0.332,
+    "ENABLE": 1, "COUNTER_PEDAL": 1,
+  })
+  assert safety.safety_tx_hook(libsafety_py.make_CANPacket(addr, bus, dat)) is allowed
 
 
 def test_ray_native_commanded_gas_does_not_cancel_driver_override_safety():
