@@ -111,7 +111,7 @@ def test_nothing_is_sent_until_the_car_asks_or_the_grace_passes(nav):
   tick(stream, now, 0.5)
   assert session.sent == []
   tick(stream, now, ns.START_GRACE)
-  assert [kind for _, kind, _ in session.sent] == [ns.NAV_STATUS, ns.NAV_TURN, ns.NAV_DISTANCE]
+  assert [kind for _, kind, _ in session.sent] == [ns.NAV_STATUS, ns.NAV_TURN, ns.NAV_NOTIFICATION, ns.NAV_DISTANCE, ns.NAV_CURRENT_POSITION]
 
 
 def test_a_car_that_stopped_the_cluster_is_not_fed_again(nav):
@@ -123,7 +123,7 @@ def test_a_car_that_stopped_the_cluster_is_not_fed_again(nav):
   assert session.sent == []
   stream.handle(12, ns.CLUSTER_START, {})
   tick(stream, now)
-  assert [kind for _, kind, _ in session.sent] == [ns.NAV_STATUS, ns.NAV_TURN, ns.NAV_DISTANCE]
+  assert [kind for _, kind, _ in session.sent] == [ns.NAV_STATUS, ns.NAV_TURN, ns.NAV_NOTIFICATION, ns.NAV_DISTANCE, ns.NAV_CURRENT_POSITION]
 
 
 def test_route_guidance_then_updates_then_end(nav):
@@ -134,10 +134,10 @@ def test_route_guidance_then_updates_then_end(nav):
   session.sent.clear()
   feed.value = GUIDING
   tick(stream, now)
-  status, turn, distance = session.sent
+  status, turn, notification, distance, position = session.sent
   assert (status[1], parse_fields(status[2])) == (ns.NAV_STATUS, {1: [ns.STATUS_ACTIVE]})
   assert turn[1] == ns.NAV_TURN
-  assert parse_fields(turn[2]) == {1: [b'Main Street'], 2: [ns.SIDE_LEFT], 3: [ns.EVENT_TURN]}
+  assert parse_fields(turn[2]) == {1: [b'Main Street'], 2: [7], 3: [ns.SIDE_LEFT]}
   assert distance[1] == ns.NAV_DISTANCE
   assert parse_fields(distance[2]) == {1: [400], 2: [40], 3: [200], 4: [ns.UNIT_MILES_P1]}
   session.sent.clear()
@@ -145,11 +145,11 @@ def test_route_guidance_then_updates_then_end(nav):
   assert session.sent == []  # nothing changed
   feed.value = {**GUIDING, 'distance': 300.0}
   tick(stream, now)
-  assert [kind for _, kind, _ in session.sent] == [ns.NAV_DISTANCE]
+  assert [kind for _, kind, _ in session.sent] == [ns.NAV_DISTANCE, ns.NAV_CURRENT_POSITION]
   session.sent.clear()
   feed.value = {**GUIDING, 'distance': 20.0, 'road': 'Elm Street', 'type': 'arrive', 'modifier': 'right'}
   tick(stream, now)
-  assert [kind for _, kind, _ in session.sent] == [ns.NAV_TURN, ns.NAV_DISTANCE]
+  assert [kind for _, kind, _ in session.sent] == [ns.NAV_TURN, ns.NAV_NOTIFICATION, ns.NAV_DISTANCE, ns.NAV_CURRENT_POSITION]
   session.sent.clear()
   feed.value = {'state': 'routing'}
   tick(stream, now)
@@ -172,7 +172,7 @@ def test_distance_updates_respect_the_cars_minimum_interval():
   tick(stream, now, 1.0)
   assert session.sent == []
   tick(stream, now, 5.0)
-  assert [kind for _, kind, _ in session.sent] == [ns.NAV_DISTANCE]
+  assert [kind for _, kind, _ in session.sent] == [ns.NAV_DISTANCE, ns.NAV_CURRENT_POSITION]
 
 
 def test_image_head_units_get_the_turn_arrow_at_their_size():
@@ -238,7 +238,7 @@ def test_native_focus_pauses_updates_and_projected_focus_resends(nav):
   assert session.sent == []
   assert stream.handle(0, 0x0e, {1: [2]})
   tick(stream, now)
-  assert [kind for _, kind, _ in session.sent] == [ns.NAV_STATUS, ns.NAV_TURN, ns.NAV_DISTANCE]
+  assert [kind for _, kind, _ in session.sent] == [ns.NAV_STATUS, ns.NAV_TURN, ns.NAV_NOTIFICATION, ns.NAV_DISTANCE, ns.NAV_CURRENT_POSITION]
 
 
 def test_repeated_cluster_start_resends_current_guidance(nav):
@@ -249,7 +249,7 @@ def test_repeated_cluster_start_resends_current_guidance(nav):
   session.sent.clear()
   stream.handle(12, ns.CLUSTER_START, {})
   tick(stream, now)
-  assert [kind for _, kind, _ in session.sent] == [ns.NAV_STATUS, ns.NAV_TURN, ns.NAV_DISTANCE]
+  assert [kind for _, kind, _ in session.sent] == [ns.NAV_STATUS, ns.NAV_TURN, ns.NAV_NOTIFICATION, ns.NAV_DISTANCE, ns.NAV_CURRENT_POSITION]
 
 
 def test_legacy_distance_matches_captured_phone_packet():
@@ -259,7 +259,7 @@ def test_legacy_distance_matches_captured_phone_packet():
 def test_non_square_cluster_image_uses_descriptor_width_and_height():
   import io
   from PIL import Image
-  options = ns.parse_navigation(bytes.fromhex('08 f4 03 10 01 1a 05 08 40 10 80 01'))
+  options = ns.parse_navigation(bytes.fromhex('08 f4 03 10 02 1a 05 08 40 10 80 01'))
   with Image.open(io.BytesIO(ns.turn_image('turn', 'left', options['image_width'], options['image_height']))) as icon:
     assert icon.size == (128, 64)
 
@@ -270,3 +270,46 @@ def test_projection_session_dispatches_navigation_focus(nav):
   session.audio, session.mode, session.nav = None, None, stream
   session.handle(0, 0x0e, b'\x08\x02')
   assert stream.focus == ns.FOCUS_PROJECTED
+
+
+@pytest.mark.parametrize('kind,modifier,wire_value', [
+  ('turn', 'left', 7), ('turn', 'right', 8), ('turn', 'slightRight', 6),
+  ('turn', 'sharpLeft', 9), ('arrive', 'right', 42), ('arrive', '', 39),
+  ('merge', '', 29), ('fork', 'left', 25), ('continue', 'straight', 36),
+  ('on ramp', 'slight right', 14), ('off ramp', 'left', 23),
+  ('roundabout', 'right', 0), ('turn', 'uturn', 0),
+])
+def test_modern_maneuver_wire_values(kind, modifier, wire_value):
+  assert ns.modern_maneuver(kind, modifier) == wire_value
+
+
+def test_navigation_wire_schema_golden_bytes():
+  # Independent literals from the proto field numbers: left turn = Maneuver.TYPE_TURN_NORMAL_LEFT (7).
+  assert ns.turn_message('Main', 7, 1) == bytes.fromhex('0a044d61696e10071801')
+  assert ns.notification_message('Main', 7) == bytes.fromhex('0a0c0a02080712060a044d61696e')
+  assert ns.current_position_message(400, 40, False) == bytes.fromhex('0a0e0a0a0890031203302e3218051028')
+  # Zero-distance display is valid; it must not disappear at the actual turn.
+  assert ns.current_position_message(0, 0, False) == bytes.fromhex('0a0b0a07080012013018061000')
+
+
+def test_rerouting_resends_unchanged_instruction(nav):
+  stream, session, feed, now = nav
+  start(stream, session, now)
+  feed.value = GUIDING
+  tick(stream, now)
+  feed.value = {'state': 'routing'}
+  tick(stream, now)
+  session.sent.clear()
+  feed.value = GUIDING
+  tick(stream, now)
+  assert [kind for _, kind, _ in session.sent] == [0x8003, 0x8004, 0x8006, 0x8005, 0x8007]
+
+
+def test_honda_descriptor_uses_next_turn_image_without_dimensions():
+  # Honda T20 discovery from session 000066: channel 9, interval 1000, type 2.
+  options = ns.parse_navigation(bytes.fromhex('08e8071002'))
+  assert options['type'] == ns.TYPE_IMAGE
+  assert ns.TYPE_ENUM == 1
+  session = Session(navigation=options)
+  stream = ns.NavStatus.create(session, lambda *a, **k: None, feed=Feed())
+  assert stream.image_size is None  # no invented size; semantic guidance is still sent
