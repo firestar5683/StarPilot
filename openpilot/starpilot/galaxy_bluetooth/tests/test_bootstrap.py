@@ -62,6 +62,25 @@ class BootstrapTest(unittest.TestCase):
       self.worker.step()
     self.assertEqual([call for call in self.calls if 'restart' in call], [['sudo', '-n', 'systemctl', 'restart', UNIT]])
 
+  def test_open_pairing_during_startup_does_not_restart(self):
+    from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup
+    self.worker.registered = True
+    self.worker.discovery_registered = True
+    self.worker.next_attempt = float('inf')
+    retry_setup(self.data, restart=False)
+    with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=True):
+      self.worker.step()
+    self.assertTrue(any('start' in call and UNIT in call for call in self.calls))
+    self.assertFalse(any('restart' in call or 'link' in call for call in self.calls))
+
+  def test_wake_preserves_explicit_retry(self):
+    from openpilot.starpilot.galaxy_bluetooth.bootstrap import retry_setup
+    retry_setup(self.data)
+    retry_setup(self.data, restart=False)
+    with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=True):
+      self.worker.step()
+    self.assertEqual(len([call for call in self.calls if 'restart' in call]), 1)
+
   def test_power_off_never_starts_bluetooth_or_bridge(self):
     self.installed()
     with patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=False):
