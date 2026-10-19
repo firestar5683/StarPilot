@@ -80,6 +80,19 @@ def test_other_brands_keep_existing_all_fault_veto():
   assert blocking_fault_list([log.PandaState.FaultType.interruptRateCan1], cp)
 
 
+@pytest.mark.parametrize('fault, blocks', [('interruptRateCan2', False), ('interruptRateUsb', False),
+                                          ('relayMalfunction', True), ('registerDivergent', True),
+                                          ('heartbeatLoopWatchdog', True)])
+def test_honda_latched_interrupt_rate_faults_do_not_block(fault, blocks):
+  from openpilot.starpilot.aol.panda_faults import blocking_fault_mask, blocking_fault_list
+  from openpilot.cereal import log
+  cp = SimpleNamespace(brand='honda')
+  value = log.PandaState.FaultType.schema.enumerants[fault]
+  assert blocking_fault_mask(1 << value, cp) == blocks
+  assert blocking_fault_list([value], cp) == blocks
+  assert blocking_fault_list([log.PandaState.FaultType.interruptRateCan2, value], cp) == blocks
+
+
 @pytest.mark.parametrize('word', (0x1405, 0x5007, 0x5407, 0x5087, 0xD107, 0xE500, 0x205, 0x4007, 0x20))
 def test_other_volt_configs_do_not_borrow_stock_register_policy(word):
   from openpilot.starpilot.aol.panda_faults import blocking_fault_mask

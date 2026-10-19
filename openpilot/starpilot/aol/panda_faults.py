@@ -1,13 +1,19 @@
-"""Compatibility policy for two recorded GM configurations; native authority stays separate.
+"""Compatibility policy for Honda and two recorded GM configurations; native authority stays separate.
 
 Register divergence remains a protected-register diagnostic, not a benign-fault
 claim. Raw fault reports are retained. Every unlisted configuration/bit blocks.
 """
 from openpilot.cereal import log
 
+_FAULT_BITS = log.PandaState.FaultType.schema.enumerants
+# Honda Bosch camera CAN latches interrupt-rate faults every drive; they report bus load, not safety.
+_HONDA_INTERRUPT_RATE_MASK = sum(1 << value for name, value in _FAULT_BITS.items() if name.startswith('interruptRate'))
+
 
 def _diagnostic_mask(cp):
   try:
+    if cp.brand == 'honda':
+      return _HONDA_INTERRUPT_RATE_MASK
     from opendbc.car.gm.aol import qualified_gm
     from opendbc.car.gm.values import CAR, is_volt_sdgm_profile, is_bolt_present_no_acc_pedal_profile
     if cp.brand != 'gm' or not qualified_gm(cp) or int(cp.alternativeExperience) != 32 or len(cp.safetyConfigs) != 1:
@@ -35,9 +41,6 @@ def blocking_fault_mask(mask, cp):
 def blocking_fault_list(faults, cp):
   try:
     allowed = _diagnostic_mask(cp)
-    named = ((log.PandaState.FaultType.interruptRateCan1, 1 << 2),
-             (log.PandaState.FaultType.interruptRateCan2, 1 << 3),
-             (log.PandaState.FaultType.registerDivergent, 1 << 18))
-    return any(not any(fault == name and allowed & bit for name, bit in named) for fault in faults)
+    return any(not any(fault == value and allowed & (1 << value) for value in _FAULT_BITS.values()) for fault in faults)
   except (TypeError, ValueError, OverflowError):
     return True
