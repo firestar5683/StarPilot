@@ -1,4 +1,4 @@
-"""Android Auto drive, failure and pairing reports for Bugsink, built from session logs without a network."""
+"""Android Auto drive and pairing reports for Bugsink, built from session logs without a network."""
 
 import json
 import os
@@ -63,8 +63,13 @@ def test_session_record_reports_stages_resolution_and_fps(tmp_path):
 def test_drive_event_groups_sessions_by_head_unit_and_weights_fps(tmp_path):
   sessions = [br.session_record(write_session(tmp_path, 1, STREAMED)), br.session_record(write_session(tmp_path, 2, FAILED))]
   event = br.drive_event(sessions)
-  assert event["fingerprint"] == ["android-auto-drive", "wireless", "Alpine HU-1"]
-  assert event["level"] == "warning" and event["tags"]["aa.outcome"] == "failed"
+  assert event["fingerprint"] == ["android-auto-drive", "wireless", "Alpine HU-1", "failures"]
+  assert event["message"].startswith("Android Auto failures: Alpine HU-1 (wireless)")
+  crumbs = event["breadcrumbs"]["values"]
+  assert [crumb["level"] for crumb in crumbs] == ["info", "error"]
+  assert crumbs[1]["message"] == "Attempt 1: wifi_join_failed at joining_wifi: TimeoutError" and crumbs[1]["category"] == "session 2"
+  assert crumbs[1]["timestamp"] == "2026-10-16T12:00:30+00:00"
+  assert event["level"] == "error" and event["tags"]["aa.outcome"] == "failed"
   assert event["tags"]["aa.resolution"] == "1280x720" and event["tags"]["aa.fps"] == "25.0"
   drive = event["contexts"]["android_auto_drive"]
   assert drive["sessions"] == 2 and drive["failures"] == 1 and drive["fps_avg"] == 25.0 and drive["resolutions"] == ["1280x720"]
@@ -72,18 +77,18 @@ def test_drive_event_groups_sessions_by_head_unit_and_weights_fps(tmp_path):
   assert "Danny's Civic" not in json.dumps(event)
 
 
-def test_failure_event_hides_names_and_addresses(tmp_path):
-  session = br.session_record(write_session(tmp_path, 1, FAILED))
-  event = br.failure_event(session)
-  assert event["message"].splitlines()[0] == "Android Auto wifi_join_failed at joining_wifi: TimeoutError"
-  assert event["fingerprint"] == ["android-auto-failure", "wifi_join_failed", "joining_wifi", "TimeoutError"]
+def test_failures_are_part_of_the_drive_report_and_hide_names(tmp_path):
+  event = br.drive_event([br.session_record(write_session(tmp_path, 1, FAILED))])
+  assert event["fingerprint"] == ["android-auto-drive", "wireless", "unknown head unit", "failures"]
+  assert "1. wifi_join_failed at joining_wifi: TimeoutError (session 1)" in event["message"]
+  assert event["tags"]["aa.cause"] == "wifi_join_failed" and event["tags"]["aa.failures"] == "1"
   text = json.dumps(event)
   for secret in ("AA:BB:CC:DD:EE:FF", "192.168.1.4", "Honda HFL"):
     assert secret not in text
-  assert "Stages: connecting_bluetooth > joining_wifi" in event["contexts"]["android_auto_compat_report"]["text"]
+  assert "Stages: connecting_bluetooth > joining_wifi" in event["contexts"]["android_auto_failure_1"]["compat_report"]
 
 
-def test_send_reports_once_and_rate_limits_failures(tmp_path):
+def test_send_reports_once_as_one_event_per_batch(tmp_path):
   logs, state = tmp_path / "logs", tmp_path / "state.json"
   write_session(logs, 1, STREAMED)
   for number in range(2, 4):
@@ -95,15 +100,28 @@ def test_send_reports_once_and_rate_limits_failures(tmp_path):
     return True
 
   queued = br.send_reports(capture, lambda: flushes.append(1), state_path=state, log_dir=logs, pairing_path=tmp_path / "p.jsonl")
-  assert queued == 2 and len(flushes) == 1  # one drive report, and one failure report for two failures of the same kind
-  assert [event["tags"]["aa.report"] for event in captured] == ["drive", "failure"]
+  assert queued == 1 and len(flushes) == 1
+  assert [event["tags"]["aa.report"] for event in captured] == ["drive"]
+  assert captured[0]["tags"]["aa.failures"] == "1"  # two failures of the same kind are detailed once
   assert json.loads(state.read_text())["last_seq"] == 3
 
   assert br.send_reports(capture, state_path=state, log_dir=logs, pairing_path=tmp_path / "p.jsonl") == 0
-  write_session(logs, 4, FAILED)
-  captured.clear()
-  br.send_reports(capture, state_path=state, log_dir=logs, pairing_path=tmp_path / "p.jsonl")
-  assert [event["tags"]["aa.report"] for event in captured] == ["drive"]  # the same failure was reported today already
+
+
+def test_dropped_stream_breadcrumb_says_it_streamed_first(tmp_path):
+  session = br.session_record(write_session(tmp_path, 1, STREAMED + [
+    (2, 0, "attempt_failed", {"stage": "streaming", "kind": "EOFError", "error": "peer closed"}),
+  ]))
+  crumb = br.drive_event([session])["breadcrumbs"]["values"][0]
+  assert crumb["level"] == "error"
+  assert crumb["message"] == "Attempt 1: streamed 108.0s, then projection_interrupted at streaming: EOFError"
+
+
+def test_clean_drives_keep_their_own_issue(tmp_path):
+  event = br.drive_event([br.session_record(write_session(tmp_path, 1, STREAMED))])
+  assert event["fingerprint"] == ["android-auto-drive", "wireless", "Alpine HU-1"]
+  assert event["message"].startswith("Android Auto sessions: Alpine HU-1 (wireless)")
+  assert [crumb["level"] for crumb in event["breadcrumbs"]["values"]] == ["info"]
 
 
 def test_unaccepted_reports_are_retried(tmp_path):
@@ -157,10 +175,9 @@ def test_recovered_attempts_still_report_the_original_failure(tmp_path):
   events = []
   br.send_reports(lambda **e: events.append(e) or True, state_path=tmp_path / "state.json", log_dir=path.parent,
                   pairing_path=tmp_path / "pairing.jsonl")
-  failure = events[-1]
-  assert failure["tags"]["aa.report"] == "failure"
-  assert failure["contexts"]["android_auto_diagnosis"]["recovered"] is True
-  assert failure["contexts"]["android_auto_diagnosis"]["confidence"] == "suspected"
+  assert len(events) == 1
+  diagnosis = events[0]["contexts"]["android_auto_failure_1"]["diagnosis"]
+  assert diagnosis["recovered"] is True and diagnosis["confidence"] == "suspected"
 
 
 def test_shutdown_does_not_turn_later_retries_into_stream_drops(tmp_path):
@@ -188,19 +205,6 @@ def test_clock_correction_uses_monotonic_order_and_durations(tmp_path):
   assert session["timing_source"] == "monotonic"
 
 
-def test_failed_failure_upload_does_not_advance_session_cursor(tmp_path):
-  logs, state = tmp_path / "logs", tmp_path / "state.json"
-  write_session(logs, 1, FAILED)
-  br.send_reports(lambda **e: e["tags"]["aa.report"] == "drive", state_path=state, log_dir=logs,
-                  pairing_path=tmp_path / "pairing.jsonl")
-  assert json.loads(state.read_text())["last_seq"] == 0
-  captured = []
-  br.send_reports(lambda **e: captured.append(e) or True, state_path=state, log_dir=logs,
-                  pairing_path=tmp_path / "pairing.jsonl")
-  assert captured[-1]["tags"]["aa.report"] == "failure"
-  assert json.loads(state.read_text())["last_seq"] == 1
-
-
 def test_distinct_failures_within_one_session_are_actionable(tmp_path):
   path = write_session(tmp_path / "logs", 1, FAILED + [
     (1, 0, "stage", {"state": "authenticating"}),
@@ -209,7 +213,9 @@ def test_distinct_failures_within_one_session_are_actionable(tmp_path):
   events = []
   br.send_reports(lambda **e: events.append(e) or True, state_path=tmp_path / "state.json", log_dir=path.parent,
                   pairing_path=tmp_path / "pairing.jsonl")
-  assert {e["tags"].get("aa.cause") for e in events[1:]} == {"wifi_join_failed", "authentication_incomplete"}
+  assert len(events) == 1
+  causes = {context["diagnosis"]["category"] for key, context in events[0]["contexts"].items() if key.startswith("android_auto_failure_")}
+  assert causes == {"wifi_join_failed", "authentication_incomplete"}
 
 
 def test_nested_pairing_and_failure_fields_are_scrubbed(tmp_path):
@@ -218,7 +224,7 @@ def test_nested_pairing_and_failure_fields_are_scrubbed(tmp_path):
   path = write_session(tmp_path, 1, FAILED + [(0, 31, "attempt_failed", {
     "stage": "joining_wifi", "kind": "OSError", "error": "Honda HFL password=secret",
   })])
-  event = br.failure_event(br.session_record(path))
+  event = br.drive_event([br.session_record(path)])
   assert "Honda HFL" not in json.dumps(event) and "secret" not in json.dumps(event)
 
 
@@ -237,13 +243,13 @@ def test_companion_tablet_modes_keep_their_transport(tmp_path):
     events = [(0, 0, "session_start", {"receiver": transport})] + FAILED[1:]
     session = br.session_record(write_session(tmp_path, index, events))
     assert session["transport"] == transport
-    assert br.failure_event(session)["tags"]["aa.transport"] == transport
+    assert br.drive_event([session])["tags"]["aa.transport"] == transport
 
 
 def test_readable_summary_uses_session_commit_and_wired_connection(tmp_path):
   events = [(0, 0, "session_start", {"receiver": "usb", "software": {"commit": "abc123-session", "branch": "session-branch"}})] + FAILED[1:]
   session = br.session_record(write_session(tmp_path, 1, events))
-  event = br.failure_event(session)
+  event = br.drive_event([session])
   assert "Connection: Wired USB" in event["message"]
   assert "Session commit: abc123-session" in event["message"]
   assert "Branch: session-branch" in event["message"]
@@ -252,7 +258,7 @@ def test_readable_summary_uses_session_commit_and_wired_connection(tmp_path):
 
 
 def test_legacy_summary_does_not_guess_commit(tmp_path):
-  event = br.failure_event(br.session_record(write_session(tmp_path, 1, FAILED)))
+  event = br.drive_event([br.session_record(write_session(tmp_path, 1, FAILED))])
   assert "Connection: Wireless" in event["message"]
   assert "Session commit: unknown" in event["message"]
   assert event["tags"]["commit"] == "unknown"

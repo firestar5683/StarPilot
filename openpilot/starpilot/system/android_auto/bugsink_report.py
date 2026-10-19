@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from openpilot.starpilot.system.android_auto import identity as identity_store
@@ -23,8 +23,8 @@ PAIRING_MAX_BYTES = 64 << 10
 INTERVAL_S = 60.0
 LOG_SETTLE_S = 120         # a log written this recently may still be a live session, unless it already ended
 MAX_SESSIONS = 20          # per drive report; the rest go in the next one
-MAX_FAILURE_REPORTS = 5    # per day
-FAILURE_WINDOW_S = 24 * 3600
+MAX_FAILURES = 5           # distinct failures detailed per drive report
+MAX_BREADCRUMBS = 100
 FINISHED_EVENT = '"event": "session_stop"'
 OUTCOME_RANK = ("streamed", "recovered", "stopped", "dropped", "failed")
 
@@ -208,48 +208,114 @@ def _public(session: dict) -> dict:
   return sanitize(result, session.get("_names", ()))
 
 
-def drive_event(sessions: list[dict]) -> dict:
-  summary = drive_summary(sessions)
-  head_unit = next((s["head_unit"] for s in reversed(sessions) if s["head_unit"]), {})
-  video = next((s["video"] for s in reversed(sessions) if s["video"].get("resolution")), {})
-  label = _head_unit_label(head_unit)
-  return {
-    "message": f"Android Auto sessions: {label} ({summary['transport'] or 'unknown'})\n\n" + batch_summary(sessions, summary),
-    "level": "info" if summary["outcome"] in ("streamed", "recovered") else "warning",
-    "fingerprint": ["android-auto-drive", summary["transport"] or "unknown", label],
-    "tags": {**software_tags(sessions), "aa.report": "drive", "aa.outcome": summary["outcome"], "aa.transport": summary["transport"] or "unknown",
-             "aa.head_unit": label, "aa.car": _car_label(head_unit), "aa.resolution": video.get("resolution", "none"),
-             "aa.encoder": video.get("encoder", "unknown"),
-             "aa.fps": str(summary["fps_avg"]) if summary["fps_avg"] is not None else "none"},
-    "contexts": {"android_auto_drive": summary, "android_auto_head_unit": head_unit,
-                 **{f"android_auto_session_{index + 1}": _public(session) for index, session in enumerate(sessions)}},
-  }
-
-
 def failure_signature(session: dict) -> str:
   return f"{diagnosis(session)['category']}:{session['failed_stage'] or 'start'}:{session['error_kind'] or 'none'}"
 
 
-def failure_event(session: dict) -> dict:
+def failure_records(sessions):
+  for session in reversed(sessions):
+    for attempt in reversed(session["attempts"]):
+      if attempt["after_car_shutdown"] or not (attempt.get("error") or attempt.get("error_kind")):
+        continue
+      yield {**session, "failed_stage": attempt.get("failed_stage", ""), "error_kind": attempt.get("error_kind", ""),
+             "error": attempt.get("error", ""), "failed_attempt": attempt["attempt"]}
+
+
+def drive_failures(sessions: list[dict]) -> list[dict]:
+  """Distinct failures across the batch, newest first."""
+  seen, failures = set(), []
+  for failure in failure_records(sessions):
+    signature = failure_signature(failure)
+    if signature not in seen:
+      seen.add(signature)
+      failures.append(failure)
+  return failures[:MAX_FAILURES]
+
+
+def failure_detail(session: dict) -> dict:
   from openpilot.starpilot.system.android_auto import compat_report
   stage = session["failed_stage"] or session["furthest_stage"] or "start"
   kind = session["error_kind"] or "no error"
+  assessment = diagnosis(session)
+  names = session.get("_names", ())
   report = dict(session["_report"])
   report["car"] = {key: value for key, value in report["car"].items() if key not in ("bluetooth_name", "display_name")}
   report["errors"] = [{**error, "error": scrub(error.get("error", ""))} for error in report["errors"]]
   report["ended"] = [scrub(reason) for reason in report["ended"]]
   report["tls"] = {key: value for key, value in report["tls"].items() if key != "head_unit"}
   return {
-    "message": f"Android Auto {diagnosis(session)['category']} at {stage}: {kind}\n\n" +
-               sanitize(session_summary(session, diagnosis(session)), session.get("_names", ())),
-    "level": "error" if session["outcome"] == "failed" else "warning",
-    "fingerprint": ["android-auto-failure", diagnosis(session)["category"], stage, kind],
-    "tags": {**software_tags([session]), "aa.report": "failure", "aa.outcome": session["outcome"],
-             "aa.cause": diagnosis(session)["category"], "aa.stage": stage, "aa.error_kind": kind,
-             "aa.transport": session["transport"] or "unknown", "aa.head_unit": _head_unit_label(session["head_unit"]),
-             "aa.car": _car_label(session["head_unit"])},
-    "contexts": {"android_auto_diagnosis": sanitize(diagnosis(session), session.get("_names", ())), "android_auto_session": _public(session),
-                 "android_auto_compat_report": {"text": sanitize(compat_report.render_text(report), session.get("_names", ()))}},
+    "title": f"{assessment['category']} at {stage}: {kind}",
+    "session": session["seq"],
+    "attempt": session.get("failed_attempt"),
+    "cause": assessment["category"], "stage": stage, "error_kind": kind,
+    "summary": sanitize(session_summary(session, assessment), names),
+    "diagnosis": sanitize(assessment, names),
+    "compat_report": sanitize(compat_report.render_text(report), names),
+  }
+
+
+def _attempt_time(session: dict, at_s) -> str | None:
+  try:
+    return (datetime.fromisoformat(session["started"]) + timedelta(seconds=at_s or 0)).isoformat()
+  except (TypeError, ValueError):
+    return None
+
+
+def attempt_breadcrumbs(sessions: list[dict]) -> list[dict]:
+  """Every attempt in the batch, oldest first; failures are errors so they stand out in the timeline."""
+  crumbs = []
+  for session in sessions:
+    for attempt in session["attempts"]:
+      failed = bool(attempt.get("error") or attempt.get("error_kind"))
+      if failed:
+        failure = {**session, "failed_stage": attempt.get("failed_stage", ""), "error_kind": attempt.get("error_kind", "")}
+        message = f"{diagnosis(failure)['category']} at {attempt.get('failed_stage') or 'start'}: {attempt.get('error_kind') or 'no error'}"
+        if attempt["video_acknowledged"]:
+          message = (f"streamed {attempt['streamed_s']}s, then " if attempt["streamed_s"] is not None else "streamed, then ") + message
+      elif attempt["video_acknowledged"]:
+        message = f"streamed {attempt['streamed_s']}s" if attempt["streamed_s"] is not None else "streamed"
+      else:
+        message = f"stopped at {attempt['stages'][-1]['stage'] if attempt['stages'] else 'start'}"
+      if attempt["after_car_shutdown"]:
+        message += " (after car shutdown)"
+      level = "info" if not failed else "debug" if attempt["after_car_shutdown"] else "error"
+      crumb = {"category": f"session {session['seq']}", "message": f"Attempt {attempt['attempt']}: {message}", "level": level,
+               "data": {key: attempt[key] for key in ("error", "failed_at_s") if attempt.get(key)}}
+      if (timestamp := _attempt_time(session, attempt.get("failed_at_s") if failed else attempt.get("at_s"))) is not None:
+        crumb["timestamp"] = timestamp
+      crumbs.append(sanitize(crumb, session.get("_names", ())))
+  return crumbs[-MAX_BREADCRUMBS:]
+
+
+def drive_event(sessions: list[dict]) -> dict:
+  """One report per batch: totals, every session, and each distinct failure, grouped by head unit."""
+  summary = drive_summary(sessions)
+  head_unit = next((s["head_unit"] for s in reversed(sessions) if s["head_unit"]), {})
+  video = next((s["video"] for s in reversed(sessions) if s["video"].get("resolution")), {})
+  label = _head_unit_label(head_unit)
+  failures = [failure_detail(failure) for failure in drive_failures(sessions)]
+  heading = "failures" if failures else "sessions"
+  message = f"Android Auto {heading}: {label} ({summary['transport'] or 'unknown'})\n\n" + batch_summary(sessions, summary)
+  if failures:
+    message += "\n\nFailures:\n" + "\n".join(f"  {index}. {failure['title']} (session {failure['session']})"
+                                               for index, failure in enumerate(failures, 1))
+    message += "".join(f"\n\n--- {index}. {failure['title']} ---\n{failure['summary']}" for index, failure in enumerate(failures, 1))
+  latest = failures[0] if failures else {}
+  return {
+    "message": message,
+    "level": {"streamed": "info", "recovered": "info", "failed": "error"}.get(summary["outcome"], "warning"),
+    "fingerprint": ["android-auto-drive", summary["transport"] or "unknown", label] + (["failures"] if failures else []),
+    "tags": {**software_tags(sessions), "aa.report": "drive", "aa.outcome": summary["outcome"], "aa.transport": summary["transport"] or "unknown",
+             "aa.head_unit": label, "aa.car": _car_label(head_unit), "aa.resolution": video.get("resolution", "none"),
+             "aa.encoder": video.get("encoder", "unknown"),
+             "aa.fps": str(summary["fps_avg"]) if summary["fps_avg"] is not None else "none",
+             "aa.failures": str(len(failures)),
+             **({"aa.cause": latest["cause"], "aa.stage": latest["stage"], "aa.error_kind": latest["error_kind"]} if latest else {})},
+    "breadcrumbs": {"values": attempt_breadcrumbs(sessions)},
+    "contexts": {"android_auto_drive": summary, "android_auto_head_unit": head_unit,
+                 **{f"android_auto_session_{index + 1}": _public(session) for index, session in enumerate(sessions)},
+                 **{f"android_auto_failure_{index + 1}": {key: value for key, value in failure.items() if key != "summary"}
+                    for index, failure in enumerate(failures)}},
   }
 
 
@@ -338,15 +404,6 @@ def _write_atomic(path: Path, text: str) -> None:
       temporary_path.unlink(missing_ok=True)
 
 
-def failure_records(sessions):
-  for session in reversed(sessions):
-    for attempt in reversed(session["attempts"]):
-      if attempt["after_car_shutdown"] or not (attempt.get("error") or attempt.get("error_kind")):
-        continue
-      yield {**session, "failed_stage": attempt.get("failed_stage", ""), "error_kind": attempt.get("error_kind", ""),
-             "error": attempt.get("error", ""), "failed_attempt": attempt["attempt"]}
-
-
 def send_reports(capture: Callable[..., bool], flush: Callable[[], None] = lambda: None, *, state_path: Path = STATE_PATH,
                  log_dir: Path | None = None, pairing_path: Path = PAIRING_PATH, now: float | None = None) -> int:
   """Send what is new since the last call; returns how many reports were queued.
@@ -354,9 +411,6 @@ def send_reports(capture: Callable[..., bool], flush: Callable[[], None] = lambd
   Capture must return True only after the server accepts the event."""
   now = datetime.now(UTC).timestamp() if now is None else now
   state = _load_state(state_path)
-  sent_failures = {key: float(at) for key, at in (state.get("failures") or {}).items()
-                   if isinstance(at, (int, float)) and 0 <= now - at < FAILURE_WINDOW_S}
-  uploads = [float(at) for at in state.get("failure_uploads") or [] if isinstance(at, (int, float)) and 0 <= now - at < FAILURE_WINDOW_S]
   last_seq, pairing_seq = int(state.get("last_seq", 0)), int(state.get("pairing_seq", 0))
   queued = 0
 
@@ -367,26 +421,11 @@ def send_reports(capture: Callable[..., bool], flush: Callable[[], None] = lambd
 
   sessions = new_sessions(log_dir or identity_store.LOG_DIR, last_seq, now)
   if sessions and capture(**drive_event(sessions)):
-    queued += 1
-    accepted = True
-    for session in failure_records(sessions):
-      signature = failure_signature(session)
-      if not session["failures"] or signature in sent_failures or len(uploads) >= MAX_FAILURE_REPORTS:
-        continue
-      if capture(**failure_event(session)):
-        sent_failures[signature] = now
-        uploads.append(now)
-        queued += 1
-      else:
-        accepted = False
-        break
-    if accepted:
-      last_seq = sessions[-1]["seq"]
+    last_seq, queued = sessions[-1]["seq"], queued + 1
 
   if queued:
     flush()
-    _write_atomic(state_path, json.dumps({"last_seq": last_seq, "pairing_seq": pairing_seq,
-                                          "failures": sent_failures, "failure_uploads": uploads}))
+    _write_atomic(state_path, json.dumps({"last_seq": last_seq, "pairing_seq": pairing_seq}))
   return queued
 
 
