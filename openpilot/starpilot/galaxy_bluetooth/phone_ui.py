@@ -273,25 +273,6 @@ def open_pairing(allowed):
   gui_app.push_widget(PairPhone(allowed))
 
 
-def compact_phone_cards(allowed):
-  from openpilot.selfdrive.ui.mici.widgets.button import BigButton
-  from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog
-  from openpilot.system.ui.lib.application import gui_app
-
-  pair = BigButton('pair phone', 'app and music')
-  pair.set_enabled(lambda: permitted(allowed))
-  pair.set_click_callback(lambda: open_pairing(allowed))
-  cards = [pair]
-  if app_only_count():
-    forget = BigButton('forget app-only phones', f'{app_only_count()} saved')
-    forget.set_enabled(lambda: permitted(allowed))
-    forget.set_click_callback(lambda: gui_app.push_widget(BigConfirmationDialog(
-      'forget app-only phones?', gui_app.texture('icons_mici/settings/bluetooth.png', 64, 64),
-      lambda: forget_app_only(allowed), red=True)))
-    cards.append(forget)
-  return cards
-
-
 def large_phone_rows(allowed):
   from openpilot.system.ui.lib.application import gui_app
   from openpilot.system.ui.widgets import DialogResult

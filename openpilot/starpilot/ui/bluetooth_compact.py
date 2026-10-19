@@ -38,6 +38,9 @@ class BluetoothCompact(NavScroller):
     self.next_refresh = 0.0
     self.pair_dialog = None
     self.pair_dialog_id: str | None = None
+    self.pairing_page: NavScroller | None = None
+    self.app_only_phones: list = []
+    self.app_only_stamp: object = ()
     self.icon = gui_app.texture("icons_mici/settings/bluetooth.png", 64, 64)
     self._rebuild()
 
@@ -167,7 +170,8 @@ class BluetoothCompact(NavScroller):
     prompt = ((self.status or {}).get("pairing") or {}).get("prompt")
     if getattr(self, "pair_dialog", None) is not None and (prompt is None or prompt.get("id") != self.pair_dialog_id):
       if gui_app.get_active_widget() is self.pair_dialog:
-        gui_app.pop_widgets_to(self)
+        page = self.pairing_page
+        gui_app.pop_widgets_to(page if page is not None and gui_app.widget_in_stack(page) else self)
       self.pair_dialog = None
       self.pair_dialog_id = None
 
@@ -250,19 +254,30 @@ class BluetoothCompact(NavScroller):
           button.set_click_callback(lambda addr=device["address"]: self._open_device(addr))
           button.set_enabled(self._ready)
           cards.append(button)
-        from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import app_only, describe
-        try:
-          phones = app_only()
-        except (OSError, ValueError):
-          phones = []
+        from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import describe
+        phones = self._app_only()
         for phone in phones:
           cards.append(GreyBigButton(describe(phone), "StarPilot app paired · music not linked"))
         if not devices and not phones:
           cards.append(GreyBigButton("saved devices", "no saved pairings"))
-    if getattr(self, "pairing_page", None) is not None:
+    if self.pairing_page is not None and gui_app.widget_in_stack(self.pairing_page):
       self._rebuild_pairing()
     self._scroller.items.clear()
     self._scroller.add_widgets(cards)
+
+  def _app_only(self) -> list:
+    from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import DEFAULT_KEY_PATH, app_only
+    try:
+      stamp = DEFAULT_KEY_PATH.stat().st_mtime_ns
+    except OSError:
+      stamp = None
+    if stamp != self.app_only_stamp:
+      self.app_only_stamp = stamp
+      try:
+        self.app_only_phones = app_only()
+      except (OSError, ValueError):
+        self.app_only_phones = []
+    return self.app_only_phones
 
   def _open_pairing(self):
     self.pairing_page = NavScroller()
@@ -270,7 +285,6 @@ class BluetoothCompact(NavScroller):
     gui_app.push_widget(self.pairing_page)
 
   def _rebuild_pairing(self):
-    from openpilot.starpilot.galaxy_bluetooth.phone_ui import app_only_count
     pair = BigButton("pair phone", "StarPilot app + Bluetooth music")
     pair.set_enabled(lambda: self.phone_pairing_allowed() and bool(self.status and self.status.get("powered")))
     from openpilot.starpilot.galaxy_bluetooth.phone_ui import open_pairing
@@ -288,7 +302,7 @@ class BluetoothCompact(NavScroller):
         button.set_click_callback(lambda addr=device["address"]: self._open_device(addr))
         button.set_enabled(self._ready)
         cards.append(button)
-    if app_only_count():
+    if self._app_only():
       cleanup = BigButton("remove app-only pairings", "phones paired for StarPilot without music")
       cleanup.set_enabled(lambda: self.phone_pairing_allowed())
       cleanup.set_click_callback(lambda: gui_app.push_widget(BigConfirmationDialog(
