@@ -14,7 +14,7 @@ from openpilot.system.ui.widgets.scroller import NavScroller
 
 
 def device_label(device: dict) -> str:
-  name = "".join(char for char in str(device.get("name") or "") if char.isprintable()).strip()
+  name = "".join(char for char in str(device.get("name") or "") if char.isprintable()).replace("·", "-").strip()
   return (name or str(device.get("address") or "device"))[:80]
 
 
@@ -121,12 +121,27 @@ class BluetoothCompact(NavScroller):
     if operation in ("pair", "pairing_response", "cancel_pair"):
       self.pending = self.executor.submit(self.owner.request, operation, address=address, session=session,
                                           prompt_id=prompt_id, accepted=accepted, value=value)
+    elif operation in ("connect", "disconnect", "forget"):
+      self.pending = self.executor.submit(self._device_request, operation, address)
     else:
       self.pending = self.executor.submit(self.owner.request, operation, address=address, enabled=enabled)
     self.operation = operation
     self.pending_session = getattr(self, "session", None)
     self.return_to_root = return_to_root
     self._rebuild()
+
+  def _device_request(self, operation: str, address: str) -> dict:
+    try:
+      return self.owner.request(operation, address=address)
+    except BluetoothRejected as error:
+      if error.code != "busy":
+        raise
+    # Android Auto holds the adapter in its own process; Galaxy hands the change to it.
+    from openpilot.starpilot.galaxy_bluetooth.phone_ui import ACTION, galaxy_call
+    status, result = galaxy_call()("POST", ACTION, {"operation": operation, "address": address})
+    if status != 200 or not isinstance(result.get("devices"), list):
+      raise BluetoothRejected("Android Auto could not complete the Bluetooth change")
+    return result
 
   def _tick(self):
     if self.pending is not None and self.pending.done():
@@ -249,7 +264,7 @@ class BluetoothCompact(NavScroller):
         devices = [device for device in status.get("devices", ()) if device.get("paired") or device.get("connected")]
         cards.append(GreyBigButton("your devices", "Bluetooth connections"))
         for device in devices:
-          value = "Bluetooth connected" if device.get("connected") else "Bluetooth paired · disconnected"
+          value = "connected" if device.get("connected") else "disconnected"
           button = BigButton(device_label(device), value, scroll=True)
           button.set_click_callback(lambda addr=device["address"]: self._open_device(addr))
           button.set_enabled(self._ready)
@@ -257,7 +272,7 @@ class BluetoothCompact(NavScroller):
         from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import describe
         phones = self._app_only()
         for phone in phones:
-          cards.append(GreyBigButton(describe(phone), "StarPilot app paired · music not linked"))
+          cards.append(GreyBigButton(describe(phone).replace("·", "-"), "app only, music not linked"))
         if not devices and not phones:
           cards.append(GreyBigButton("saved devices", "no saved pairings"))
     if self.pairing_page is not None and gui_app.widget_in_stack(self.pairing_page):

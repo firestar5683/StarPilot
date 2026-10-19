@@ -23,6 +23,19 @@ class TestBluetoothCompact(unittest.TestCase):
       page._open_device("AA:BB:CC:DD:EE:FF")
     request.assert_called_once_with("pair", address="AA:BB:CC:DD:EE:FF")
 
+  def test_forget_falls_back_to_galaxy_when_android_auto_holds_the_adapter(self):
+    from openpilot.starpilot.bluetooth.owner import BluetoothRejected
+    page = BluetoothCompact.__new__(BluetoothCompact)
+    page.owner = NS(request=Mock(side_effect=BluetoothRejected("busy elsewhere", code="busy")))
+    call = Mock(return_value=(200, {"devices": []}))
+    with patch("openpilot.starpilot.galaxy_bluetooth.phone_ui.galaxy_call", return_value=call):
+      self.assertEqual(page._device_request("forget", "AA:BB:CC:DD:EE:FF"), {"devices": []})
+    call.assert_called_once_with("POST", "/api/bluetooth/action", {"operation": "forget", "address": "AA:BB:CC:DD:EE:FF"})
+    page.owner.request.side_effect = BluetoothRejected("changed")
+    with patch("openpilot.starpilot.galaxy_bluetooth.phone_ui.galaxy_call") as galaxy, self.assertRaises(BluetoothRejected):
+      page._device_request("forget", "AA:BB:CC:DD:EE:FF")
+    galaxy.assert_not_called()
+
   def pair_page(self, kind="confirmation", value="123456"):
     class Button:
       def __init__(self, label, subtitle="", *args, **kwargs):
