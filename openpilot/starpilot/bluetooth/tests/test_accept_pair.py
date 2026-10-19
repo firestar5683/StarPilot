@@ -75,34 +75,20 @@ class WindowHarness:
 
 
 class AcceptPairWindowTest(unittest.TestCase):
-  def answer_when_prompted(self, harness, accepted=True):
-    def worker():
-      for _ in range(400):
-        prompt = harness.session.prompt
-        if prompt is not None:
-          harness.session.respond(harness.session.identity, prompt['id'], accepted, '')
-          return
-        time.sleep(0.01)
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    return thread
-
   def test_first_phone_claims_window_and_visibility_returns_to_prior_values(self):
     harness = WindowHarness(self, pairable=True, discoverable=False)
     harness.agent(SPEAKER)
     harness.agent(PHONE)
-    answerer = self.answer_when_prompted(harness)
 
     def finish_bond():
       for _ in range(400):
-        if harness.session.path == PHONE and harness.session.prompt is None and harness.responses:
+        if harness.session.path == PHONE and len(harness.responses) == 2:
           time.sleep(0.05)
           harness.objects[PHONE]['org.bluez.Device1'].update(Paired=True, UUIDs=[A2DP_SOURCE])
           return
         time.sleep(0.01)
     threading.Thread(target=finish_bond, daemon=True).start()
     self.assertTrue(harness.run())
-    answerer.join(2)
     self.assertEqual(harness.session.address, '11:22:33:44:55:66')
     self.assertIn(A2DP_SOURCE, harness.session.uuids)
     self.assertEqual(harness.visibility, [(True, True), (True, False)])
@@ -111,7 +97,8 @@ class AcceptPairWindowTest(unittest.TestCase):
     self.assertEqual(harness.calls.count('RequestDefaultAgent'), 1)
     self.assertEqual(harness.calls[-1], 'UnregisterAgent')
     self.assertIn('Set', harness.calls)
-    self.assertEqual(harness.responses[0].header.message_type, MessageType.error)
+    self.assertEqual([item.header.message_type for item in harness.responses], [MessageType.error, MessageType.method_return],
+                     'the speaker is refused and the phone is confirmed without waiting')
     self.assertEqual(harness.classes, [(4, 5), (0, 0)], 'shown as a speaker, then the original class returns')
 
   def test_devices_that_are_not_phones_cannot_claim_the_window(self):
@@ -129,11 +116,9 @@ class AcceptPairWindowTest(unittest.TestCase):
     harness.objects[other] = {'org.bluez.Device1': device('66:55:44:33:22:11', 0x5a020c)}
     harness.agent(PHONE)
     harness.agent(other)
-    self.answer_when_prompted(harness, accepted=False)
     self.assertFalse(harness.run())
     self.assertEqual(harness.session.path, PHONE)
-    self.assertEqual(len(harness.responses), 2)
-    self.assertTrue(all(item.header.message_type == MessageType.error for item in harness.responses))
+    self.assertEqual([item.header.message_type for item in harness.responses], [MessageType.method_return, MessageType.error])
 
   def test_unpark_closes_the_window_and_restores_visibility(self):
     harness = WindowHarness(self, discoverable=True)
@@ -162,6 +147,7 @@ class AcceptPairWindowTest(unittest.TestCase):
 class FakeWindowBlueZ:
   instances = []
   adapter = ('/org/bluez/hci0', {}, SENDER)
+  bonded = threading.Event()
 
   def __init__(self):
     self.visibility = []
@@ -178,8 +164,10 @@ class FakeWindowBlueZ:
     session.claim(PHONE, '11:22:33:44:55:66', 'Pixel')
     session.uuids = (A2DP_SOURCE,)
     accepted, _ = session.ask('confirmation', PHONE, '123456')
+    while accepted and session.state == 'pairing' and not type(self).bonded.wait(0.02):
+      pass
     restored()
-    return accepted
+    return accepted and type(self).bonded.is_set()
 
   def snapshot(self):
     return {'adapter': True, 'powered': True, 'discovering': False, 'devices': []}
@@ -210,19 +198,20 @@ class AcceptPairOwnerTest(unittest.TestCase):
     (root / 'bluetooth-radio').write_bytes(b'helper')
     FakeWindowBlueZ.instances = []
     FakeWindowBlueZ.adapter = ('/org/bluez/hci0', {}, SENDER)
+    FakeWindowBlueZ.bonded = threading.Event()
     self.paired = []
     self.owner = BluetoothOwner(lambda: True, bluez_factory=FakeWindowBlueZ, radio_helper=root / 'bluetooth-radio',
                                 systemctl=lambda command, **_kwargs: type('Result', (), {'stdout': 'active\n'})(),
                                 radio_preference=RadioPreference(root / 'BluetoothEnabled'),
                                 admission_lock=root / 'owner.lock', on_paired=lambda *args: self.paired.append(args))
 
-  def wait_for_prompt(self):
+  def wait_for_claim(self):
     for _ in range(300):
       prompt = self.owner.snapshot(session=self.identity)['pairing']
       if prompt and prompt['prompt']:
         return prompt
       time.sleep(0.01)
-    self.fail('pairing prompt never appeared')
+    self.fail('phone never claimed the window')
 
   def test_window_requires_a_session_and_no_address(self):
     with self.assertRaises(ValueError):
@@ -233,14 +222,15 @@ class AcceptPairOwnerTest(unittest.TestCase):
   def test_open_window_blocks_other_pairing_and_reports_the_claimed_phone(self):
     started = self.owner.request('accept_pair', session=self.identity)
     self.assertTrue(started['pairing']['incoming'])
-    prompt = self.wait_for_prompt()
+    prompt = self.wait_for_claim()
     self.assertEqual(prompt['address'], '11:22:33:44:55:66')
     self.assertEqual(prompt['name'], 'Pixel')
+    self.assertTrue(prompt['prompt']['displayOnly'], 'the code is shown, not waited on')
     for operation in ('scan', 'accept_pair'):
       with self.assertRaises(BluetoothRejected) as raised:
         self.owner.request(operation, session=self.identity)
       self.assertEqual(raised.exception.code, 'busy')
-    self.owner.request('pairing_response', session=self.identity, prompt_id=prompt['prompt']['id'], accepted=True)
+    FakeWindowBlueZ.bonded.set()
     self.assertTrue(self.owner.pairing.done.wait(2))
     self.assertEqual(self.paired, [('11:22:33:44:55:66', 'Pixel', (A2DP_SOURCE,))])
     self.assertEqual(self.owner.snapshot(session=self.identity)['pairing']['state'], 'paired')
@@ -259,7 +249,7 @@ class AcceptPairOwnerTest(unittest.TestCase):
   def test_unclaimed_window_gives_way_to_forget_and_pair(self):
     for operation in ('forget', 'connect', 'disconnect', 'scan'):
       self.request_when_free('accept_pair', session=self.identity)
-      self.wait_for_prompt()
+      self.wait_for_claim()
       window = self.owner.pairing
       window.path = ''
       address = None if operation == 'scan' else '11:22:33:44:55:66'
@@ -270,7 +260,7 @@ class AcceptPairOwnerTest(unittest.TestCase):
 
   def test_declined_or_canceled_window_does_not_report_a_phone(self):
     self.owner.request('accept_pair', session=self.identity)
-    self.wait_for_prompt()
+    self.wait_for_claim()
     self.owner.request('cancel_pair', session=self.identity)
     self.assertTrue(self.owner.pairing.done.wait(2))
     self.assertEqual(self.paired, [])
@@ -279,7 +269,7 @@ class AcceptPairOwnerTest(unittest.TestCase):
     journal = self.owner.window_journal_path
     journal.write_text(json.dumps({'path': '/org/bluez/hci0', 'sender': SENDER, 'pairable': True, 'discoverable': False}))
     self.owner.request('accept_pair', session=self.identity)
-    self.wait_for_prompt()
+    self.wait_for_claim()
     self.assertEqual(FakeWindowBlueZ.instances[0].visibility, [('/org/bluez/hci0', True, False)])
     self.assertTrue(isinstance(self.owner.pairing, OpenPairingSession))
     self.owner.request('cancel_pair', session=self.identity)
@@ -290,7 +280,7 @@ class AcceptPairOwnerTest(unittest.TestCase):
     journal = self.owner.window_journal_path
     journal.write_text(json.dumps({'path': '/org/bluez/hci0', 'sender': ':1.99', 'pairable': True, 'discoverable': True}))
     self.owner.request('accept_pair', session=self.identity)
-    self.wait_for_prompt()
+    self.wait_for_claim()
     self.assertEqual(FakeWindowBlueZ.instances[0].visibility, [])
     self.owner.request('cancel_pair', session=self.identity)
     self.assertTrue(self.owner.pairing.done.wait(2))

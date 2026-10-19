@@ -115,6 +115,8 @@ class Supervisor:
     self.launched: tuple | None = None
     self.release_target: str | None = None
     self.lock = threading.Lock()
+    # Separate so child output never waits on a tick that is waiting for that child.
+    self.log_lock = threading.Lock()
     self.log: collections.deque[str] = collections.deque(maxlen=LOG_LINES)
     self.state, self.message = 'starting', ''
     self.fast_failures, self.retry_at, self.started_at = 0, 0.0, 0.0
@@ -141,8 +143,10 @@ class Supervisor:
                'playing' if player['status'] == 'playing' and player['active'] else 'ready')
     now_playing = (now_playing_module.from_phone(self.phone_track) if self.phone_prefs is not None and self.player is not None
                    else now_playing_module.from_spotify(player))
+    with self.log_lock:
+      log = list(self.log)[-20:]
     return {'state': state, 'message': self.message, 'daysLeft': self.days_left, 'player': player,
-            'nowPlaying': now_playing, 'log': list(self.log)[-20:]}
+            'nowPlaying': now_playing, 'log': log}
 
   def publish(self) -> None:
     try:
@@ -160,7 +164,7 @@ class Supervisor:
       line = re.sub(r'\x1b\[[0-9;]*m', '', line)
       if self.secret:
         line = line.replace(self.secret, '[api key]')
-      with self.lock:
+      with self.log_lock:
         self.log.append(f'{label}: {line[:300]}')
       match = EXPIRES_IN.search(line)
       if match:

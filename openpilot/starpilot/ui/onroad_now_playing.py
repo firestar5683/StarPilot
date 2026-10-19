@@ -25,7 +25,7 @@ def _play_pause(center: rl.Vector2, playing: bool) -> None:
 
 
 class NowPlayingWidget:
-  def __init__(self, fonts, clock=time.time):
+  def __init__(self, fonts, clock=time.time):  # noqa: TID251 epoch-ms track anchors
     self.fonts = fonts
     self.clock = clock
     self.track = None

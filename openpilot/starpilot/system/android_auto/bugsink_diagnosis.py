@@ -130,7 +130,7 @@ def diagnosis(session):
   elif stage == "streaming":
     category, confidence = "projection_interrupted", "observed"
     explanation = "Projection was interrupted. EOF or a timeout alone cannot distinguish a car shutdown from link loss."
-    actions = ["Compare video acknowledgements, Wi-Fi signal, stalls, encoder recoveries and head-unit shutdown events.",
+    actions = ["Compare video acknowledgments, Wi-Fi signal, stalls, encoder recoveries and head-unit shutdown events.",
                "Retry while parked and verify sustained acknowledged frames, not just a streaming status."]
   return {"category": category, "confidence": confidence, "summary": explanation,
           "evidence": session.get("error", ""), "recovered": session.get("outcome") == "recovered",

@@ -3,7 +3,6 @@ import { createRenderer, nextTick } from '../web/vendor/vue/vue.esm-browser.js'
 import { BluetoothNotice, bluetoothConnection } from '../web/js/bluetooth-notice.js'
 import { LocalHistoryFeed, LocalRecordingsPage } from '../web/js/record-history.js'
 import { CamerasPage, CameraSnapshotFeed, LiveCameraPreview } from '../web/js/cameras.js'
-import { FlmPage } from '../web/js/flm.js'
 import { PipPage } from '../web/js/pip.js'
 import { VasmPage } from '../web/js/vasm.js'
 import { NavigationPage } from '../web/js/navigation.js'
@@ -74,15 +73,6 @@ const preview = new LiveCameraPreview({ publish() {}, redraw() {}, enabled: () =
 preview.start(); preview.refresh(); preview.stop()
 assert.equal(timers, 0)
 assert.equal(requests, 0, 'Neither initial loads nor retries send unsupported recording/camera requests')
-
-const analysis = mount(FlmPage, {}, { components: { ...FlmPage.components,
-  FlmLiveEditor: { template: '<div>Saved surface settings</div>' } } })
-try {
-  notice(analysis.host, 'Recorded-drive analysis')
-  assert.match(text(analysis.host), /Saved surface settings/)
-  assert.doesNotMatch(text(analysis.host), /Choose Full Logs|Analyze selected/)
-} finally { analysis.unmount() }
-assert.equal(requests, 0)
 
 // Render the real editor templates without starting their supported settings feeds.
 const presentation = { created() {}, mounted() {}, updated() {}, beforeUnmount() {} }

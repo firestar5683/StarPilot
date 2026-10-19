@@ -783,7 +783,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(404, {'error': 'Galaxy is not paired'})
           return
         from openpilot.common.qrcode import _Qr, _capacity
-        raw = ("http://172.31.254.1:8082/app.apk" if path == '/api/companion/qr.svg' or record is None else pairing.url(record['slug'])).encode()
+        from openpilot.starpilot.galaxy.hotspot import ADDRESS
+        raw = (f"http://{ADDRESS}:8082/app.apk" if path == '/api/companion/qr.svg' else pairing.url(record['slug'])).encode()
         version = next(version for version in range(1, 21)
                        if 4 + 8 + len(raw) * 8 <= _capacity(version) * 8)
         matrix = _Qr(version, raw).modules
@@ -1545,7 +1546,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(404, {'error': 'Not found'})
         return
       if path not in ('/api/companion/uplink', '/api/companion/settings', '/api/companion/location',
-                      '/api/connect/provider', '/api/developer/intense-logging', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
+                      '/api/connect/provider', '/api/developer/intense-logging', '/api/auth/login', '/api/auth/logout',
+                      '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
                       '/api/replay/start', '/api/replay/control', '/api/replay/stop',
@@ -1566,7 +1568,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/toyota-tools/action', '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
         return
-      if (path.startswith(('/api/companion/', '/api/replay/', '/api/recordings/', '/api/connect/', '/api/developer/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/bluetooth/',
+      if (path.startswith(('/api/companion/', '/api/replay/', '/api/recordings/', '/api/connect/', '/api/developer/', '/api/cameras/', '/api/settings/',
+                           '/api/maps/', '/api/bluetooth/',
                            '/api/android-auto/', '/api/spotify/', '/api/controllers/', '/api/vehicle-selection/', '/api/toyota-tools/',
                            '/api/models/', '/api/ui/', '/api/favorites/', '/api/sounds/', '/api/software/',
                            '/api/drives/', '/api/navigation/', '/api/drive-state/', '/api/sentry/', '/api/crash-reports/')) and
@@ -2257,7 +2260,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(403, {'error': 'Park before changing automatic connection'})
             return
           command, arguments = 'set_auto_connect', {'enabled': payload['enabled']}
-        elif action == 'connection' and set(payload) == {'action', 'connection'} and payload['connection'] in ('wireless', 'wired', 'headunitpad', 'openheadunit'):
+        elif (action == 'connection' and set(payload) == {'action', 'connection'} and
+              payload['connection'] in ('wireless', 'wired', 'headunitpad', 'openheadunit')):
           if not configuration_allowed():
             self.json(403, {'error': 'Park before changing the connection type'})
             return

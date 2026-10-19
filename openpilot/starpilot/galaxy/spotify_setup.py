@@ -101,6 +101,7 @@ class SpotifySetup:
       'preferences': prefs.public(), 'devices': devices, 'service': self._service(),
       'import': self.job.status(), 'maxUploadBytes': package.MAX_UPLOAD_BYTES, 'archiveName': package.ARCHIVE_NAME,
       'cacheChoices': list(preferences.CACHE_CHOICES), 'links': LINKS,
+      'clock': int(time.time() * 1000),  # noqa: TID251 lets the browser rebase epoch-ms play positions
     }
 
   def enable(self, session: tuple, value: bool) -> dict:

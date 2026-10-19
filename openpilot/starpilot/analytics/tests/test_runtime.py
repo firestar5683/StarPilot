@@ -113,10 +113,22 @@ def test_startup_onroad_never_contacts_transport():
 
 def test_host_optional_hook_does_not_construct_network_worker():
   from unittest.mock import patch
-  from openpilot.starpilot.analytics.runtime import start_optional_worker
+  from openpilot.starpilot.analytics.runtime import build_worker
   with patch('openpilot.common.hardware.COMMA_HARDWARE', False), patch('openpilot.starpilot.analytics.runtime.AnalyticsWorker') as factory:
-    assert start_optional_worker() is None
+    assert build_worker() is None
     factory.assert_not_called()
+
+
+def test_process_saves_counters_when_stopped():
+  from unittest.mock import patch
+  from openpilot.starpilot.analytics import runtime
+  obj, values, _source, _clock, client = worker()
+  values.pop('UsageStatsState', None)
+  obj.stop_event.set()
+  with patch.object(runtime, 'build_worker', return_value=obj), patch('signal.signal'):
+    runtime.main()
+  assert 'UsageStatsState' in values
+  client.close.assert_called()
 
 
 def test_malformed_saved_state_has_finite_sanitized_counters():

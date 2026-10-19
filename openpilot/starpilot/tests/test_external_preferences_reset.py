@@ -32,7 +32,9 @@ selected.extend(node for node in owner_ast.body if isinstance(node, ast.Assign)
 owner_class = next(node for node in owner_ast.body if isinstance(node, ast.ClassDef) and node.name == 'NavigationOwner')
 selected.append(next(node for node in owner_class.body if isinstance(node, ast.FunctionDef) and node.name == 'read'))
 namespace: dict = {'json': json, 'math': math, 'hashlib': hashlib, 'os': os, 'copy': copy, 'MAX_DOCUMENT': 256 * 1024,
-                   'MAX_FAVORITES': 100, 'MAX_RECENTS': 10, 'FAVORITE_LABELS': ('home', 'work')}
+                   'MAX_FAVORITES': 100, 'MAX_RECENTS': 10, 'FAVORITE_LABELS': ('home', 'work'),
+                   'GPS_MODES': next(ast.literal_eval(node.value) for node in ast.parse((ROOT / 'gps' / 'source.py').read_text()).body
+                                     if isinstance(node, ast.Assign) and any(getattr(t, 'id', '') == 'GPS_MODES' for t in node.targets))}
 exec(compile(ast.Module(body=selected, type_ignores=[]), str(ROOT / 'navigation' / 'owner.py'), 'exec'), namespace)
 NavigationOwner = type('NavigationOwner', (), {'read': namespace['read']})
 with patch.dict(sys.modules, {'openpilot.starpilot.state_migration': migration}):

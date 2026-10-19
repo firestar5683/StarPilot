@@ -46,10 +46,10 @@ export const LocalRecordingsPage = {
   mounted() {
     this.visibility = () => {
       if (document.hidden) { this.feed.stop(); this.exports.close() }
-      else if (this.mode === "local") { this.feed.start(); this.exports.open() }
+      else if (this.mode === "local") { this.feed.start(); this.openExports() }
     }
     document.addEventListener("visibilitychange", this.visibility)
-    if (this.mode === "local" && !document.hidden) { this.feed.start(); this.exports.open() }
+    if (this.mode === "local" && !document.hidden) { this.feed.start(); this.openExports() }
   },
   beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.feed.stop(); this.exports.close() },
   watch: {
@@ -62,6 +62,7 @@ export const LocalRecordingsPage = {
     mode(value) { if (value !== "local") { this.feed.stop(); this.exports.close() } },
   },
   methods: {
+    openExports() { if (bluetoothConnection()) this.exports.close(); else this.exports.open() },
     hasVideo, replayableSegment, formatDuration,
     openRoute(route, view = "footage") {
       this.entryMode = view

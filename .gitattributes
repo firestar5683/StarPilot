@@ -15,6 +15,7 @@ openpilot/starpilot/galaxy/web/vendor/vue/vue.esm-browser.js -text
 openpilot/starpilot/companion/ios/GalaxyBluetooth/Resources/Web/vendor/vue/vue.esm-browser.js -text
 *.apk -text
 openpilot/starpilot/galaxy/bin/hev-socks5-tunnel_linux_arm64 -text
+openpilot/starpilot/soloist/pulseaudio/bin/pulseaudio -text
 
 openpilot/selfdrive/car/tests/test_models_segs.txt -text
 openpilot/common/hardware/comma/updater -text

@@ -34,7 +34,7 @@ def _read(path):
 def arm(adapter_address, adapter_name, path=None, seconds=WINDOW_SECONDS, now=None):
   """Open the window. Replaces any earlier one."""
   path = Path(CLAIM_PATH if path is None else path)
-  value = {"deadline": (time.time() if now is None else now) + seconds, "adapterAddress": str(adapter_address)[:17],
+  value = {"deadline": (time.monotonic() if now is None else now) + seconds, "adapterAddress": str(adapter_address)[:17],
            "adapterName": str(adapter_name)[:80], "used": False, "claimed": ""}
   fd, tmp = tempfile.mkstemp(prefix=".claim-", dir=path.parent)
   try:
@@ -66,14 +66,14 @@ def window(path=CLAIM_PATH, now=None):
   if not isinstance(value, dict) or value.get("used") is not False:
     return None
   deadline = value.get("deadline")
-  if type(deadline) not in (int, float) or (time.time() if now is None else now) >= deadline:
+  if type(deadline) not in (int, float) or (time.monotonic() if now is None else now) >= deadline:
     return None
   return value
 
 
 def view(path=CLAIM_PATH, now=None):
   """What Galaxy shows: seconds left in the window, the phone that claimed the app key, and whether music paired."""
-  now = time.time() if now is None else now
+  now = time.monotonic() if now is None else now
   try:
     value = _read(path)
   except (OSError, ValueError):
@@ -148,7 +148,7 @@ def note_paired(address, path=None, now=None):
 
   def change(value):
     deadline = value.get("deadline")
-    if type(deadline) not in (int, float) or (time.time() if now is None else now) >= deadline + GRACE_SECONDS:
+    if type(deadline) not in (int, float) or (time.monotonic() if now is None else now) >= deadline + GRACE_SECONDS:
       return None
     value["pairedAddress"] = str(address)[:17].upper()
     return True

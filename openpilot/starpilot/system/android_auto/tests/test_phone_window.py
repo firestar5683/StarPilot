@@ -1,5 +1,6 @@
 """A phone pairing window opened inside Android Auto's projection lease."""
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -23,6 +24,7 @@ class PhoneWindowTest(unittest.TestCase):
     (root / 'bluetooth-radio').write_bytes(b'helper')
     FakeWindowBlueZ.instances = []
     FakeWindowBlueZ.adapter = ('/org/bluez/hci0', {}, SENDER)
+    FakeWindowBlueZ.bonded = threading.Event()
     self.state = {'parked': True, 'valid': True}
     self.owner = SharedBluetoothOwner(lambda: self.state['parked'], session_valid=lambda s: s == SESSION and self.state['valid'],
                                       bluez_factory=FakeWindowBlueZ, lock_path=root / 'owner.lock', radio_helper=root / 'bluetooth-radio',
@@ -34,21 +36,21 @@ class PhoneWindowTest(unittest.TestCase):
                                  process_lock=Mock(), receiver=CAR)
     self.owner.phone_lease = self.lease
 
-  def prompt(self):
+  def claimed(self):
     for _ in range(300):
       result = self.owner.phone_window('status', SESSION)
       if result and result['pairing'] and result['pairing']['prompt']:
         return result['pairing']
       time.sleep(0.01)
-    self.fail('pairing prompt never appeared')
+    self.fail('phone never claimed the window')
 
   def test_window_pairs_a_phone_without_touching_the_lease_or_its_journal(self):
     started = self.owner.phone_window('accept_pair', SESSION)
     self.assertTrue(started['pairing']['incoming'])
-    prompt = self.prompt()
+    prompt = self.claimed()
     self.assertEqual(prompt['address'], '11:22:33:44:55:66')
-    result = self.owner.phone_window('pairing_response', SESSION, prompt_id=prompt['prompt']['id'], accepted=True)
-    self.assertIsNotNone(result)
+    self.assertTrue(prompt['prompt']['displayOnly'], 'the code is shown, not waited on')
+    FakeWindowBlueZ.bonded.set()
     self.assertTrue(self.owner.pairing.done.wait(2))
     final = self.owner.phone_window('status', SESSION)
     self.assertEqual(final['pairing']['state'], 'paired')
@@ -80,7 +82,7 @@ class PhoneWindowTest(unittest.TestCase):
 
   def test_other_sessions_cannot_answer_or_read_the_window(self):
     self.owner.phone_window('accept_pair', SESSION)
-    prompt = self.prompt()
+    prompt = self.claimed()
     other = ('galaxy', 'source-b')
     self.owner.session_valid = lambda s: s in (SESSION, other)
     self.assertIsNone(self.owner.phone_window('status', other))
@@ -91,7 +93,7 @@ class PhoneWindowTest(unittest.TestCase):
 
   def test_ending_projection_closes_the_window_before_the_lease_restores_visibility(self):
     self.owner.phone_window('accept_pair', SESSION)
-    self.prompt()
+    self.claimed()
     window = self.owner.pairing
     self.assertIsInstance(window, OpenPairingSession)
     self.owner.release_phone_role(self.lease)

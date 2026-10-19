@@ -99,11 +99,19 @@ export function serviceLabel(setup) {
   return service.message && !["ready", "playing", "waiting"].includes(service.state) ? service.message : STATE_TEXT[service.state] || "Starting…"
 }
 
-// Where the track is now, from Soloist's anchor and the elapsed wall-clock time since it.
+// Where the track is now, from Soloist's anchor and the browser time elapsed since it.
 export function positionNow(position, durationMs, now = Date.now()) {
   if (!position) return 0
   const value = position.ms + Math.max(0, now - position.at) * position.speed
   return Math.max(0, Math.min(durationMs ?? value, value))
+}
+
+// Moves the play anchor onto the browser's clock, since the comma's and the browser's can differ.
+export function onBrowserClock(setup, now = Date.now()) {
+  const position = setup?.service?.player?.position
+  if (!position || !Number.isFinite(setup.clock)) return setup
+  const player = { ...setup.service.player, position: { ...position, at: position.at + now - setup.clock } }
+  return { ...setup, service: { ...setup.service, player } }
 }
 
 export function formatTime(ms) {
@@ -170,7 +178,7 @@ export class SpotifyFeed {
   async refresh() {
     if (!this.active) return
     const setup = await this.request("./api/spotify/setup")
-    if (setup && validSetup(setup)) { this.setup = setup; if (!this.busy) this.error = "" }
+    if (setup && validSetup(setup)) { this.setup = onBrowserClock(setup); if (!this.busy) this.error = "" }
     else if (setup) this.error = "Spotify setup response changed"
     this.emit()
     this.schedule()
@@ -183,7 +191,7 @@ export class SpotifyFeed {
     this.emit()
     const result = await this.request(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, timeout)
     this.busy = false
-    if (result && validSetup(result)) this.setup = result
+    if (result && validSetup(result)) this.setup = onBrowserClock(result)
     this.emit()
     if (result) this.refresh()
     return result
@@ -215,7 +223,7 @@ export class SpotifyFeed {
     }, 180000, transport)
     this.busy = false
     this.uploadProgress = null
-    if (result && validSetup(result)) this.setup = result
+    if (result && validSetup(result)) this.setup = onBrowserClock(result)
     this.emit()
     this.schedule()
     return result !== null
@@ -227,7 +235,7 @@ export class SpotifyFeed {
     this.emit()
     const result = await this.request("./api/spotify", { method: "DELETE" }, 30000)
     this.busy = false
-    if (result && validSetup(result)) this.setup = result
+    if (result && validSetup(result)) this.setup = onBrowserClock(result)
     this.emit()
     return result !== null
   }
@@ -243,10 +251,10 @@ export const SpotifyPage = {
     keyValue: "", keyEditing: false, nameValue: "", volumeDraft: null,
   }),
   mounted() {
-    this.feed = new SpotifyFeed({ publish: (value) => Object.assign(this, value), unauthorized: this.unauthorized })
+    this.feed = new SpotifyFeed({ publish: (value) => Object.assign(this, value, { now: Date.now() }), unauthorized: this.unauthorized })
     this.visibility = () => { if (document.hidden) this.feed.stop(); else this.feed.start() }
     document.addEventListener("visibilitychange", this.visibility)
-    this.clock = setInterval(() => { this.now = Date.now() }, 1000)
+    this.clock = setInterval(() => { if (this.playing) this.now = Date.now() }, 1000)
     if (!document.hidden) this.feed.start()
   },
   beforeUnmount() {
@@ -440,13 +448,13 @@ export const SpotifyPage = {
       <section v-if="setup && setupDone && !phoneSource" class="gx-card gx-aa-step gx-aa-home gx-spotify-now" aria-labelledby="gx-spotify-now-title">
         <div class="gx-spotify-now__main">
           <div class="gx-spotify-now__text">
-            <h3 id="gx-spotify-now-title">{{ track?.title || setup.preferences.deviceName }}</h3>
-            <p v-if="track">{{ track.artists }}<template v-if="track.album"> · {{ track.album }}</template></p>
-            <p role="status" class="gx-note">{{ statusText }}<template v-if="setup.enabled"> · {{ outputName }}</template></p>
+            <h3 id="gx-spotify-now-title" class="gx-truncate">{{ track?.title || setup.preferences.deviceName }}</h3>
+            <p v-if="track" class="gx-truncate">{{ track.artists }}<template v-if="track.album"> · {{ track.album }}</template></p>
+            <p role="status" class="gx-note gx-truncate">{{ statusText }}<template v-if="setup.enabled"> · {{ outputName }}</template></p>
           </div>
         </div>
         <div v-if="track && track.durationMs" class="gx-spotify-now__progress">
-          <input type="range" min="0" :max="track.durationMs" step="1000" :value="elapsed" :disabled="!can.has('seek')" aria-label="Position"
+          <input type="range" class="gx-slider" min="0" :max="track.durationMs" step="1000" :value="elapsed" :disabled="!can.has('seek')" aria-label="Position"
             @change="control('seek', { positionMs: Math.round(Number($event.target.value)) })" />
           <small class="gx-note">{{ formatTime(elapsed) }} / {{ formatTime(track.durationMs) }}</small>
         </div>
@@ -456,7 +464,7 @@ export const SpotifyPage = {
             <i :class="playing ? 'bi bi-pause-fill' : 'bi bi-play-fill'" aria-hidden="true"></i></button>
           <button type="button" class="gx-icon-btn" aria-label="Next" :disabled="!can.has('skip_next')" @click="control('next')"><i class="bi bi-skip-end-fill"></i></button>
           <label v-if="player.volume !== null" class="gx-spotify-now__volume"><i class="bi bi-volume-up" aria-hidden="true"></i>
-            <input type="range" min="0" max="100" step="1" :value="volumeDraft ?? player.volume" aria-label="Volume"
+            <input type="range" class="gx-slider" min="0" max="100" step="1" :value="volumeDraft ?? player.volume" aria-label="Volume"
               @input="volumeDraft = Number($event.target.value)" @change="commitVolume" /></label>
         </div>
         <button v-if="setup.enabled && player?.loggedIn && !player.active" type="button" class="gx-btn gx-btn--tonal" @click="control('activate')">

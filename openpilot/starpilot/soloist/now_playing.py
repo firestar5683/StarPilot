@@ -44,7 +44,8 @@ def from_phone(props: dict | None, now_ms: int | None = None) -> dict | None:
   position = _whole(props.get('Position'))
   anchor = None
   if position is not None:
-    anchor = {'ms': position, 'at': int(time.time() * 1000) if now_ms is None else now_ms,
+    # Anchors are epoch ms, like the ones Spotify sends.
+    anchor = {'ms': position, 'at': int(time.time() * 1000) if now_ms is None else now_ms,  # noqa: TID251
               'speed': 1.0 if status == 'playing' else 0.0}
   duration = _whole(track.get('Duration'))
   return snapshot('phone', status or '', track.get('Title'), track.get('Artist'), track.get('Album'),
@@ -55,7 +56,7 @@ def elapsed_ms(now_playing: dict, now_ms: float | None = None) -> int:
   position, duration = now_playing.get('position'), now_playing.get('durationMs')
   if not isinstance(position, dict):
     return 0
-  now_ms = time.time() * 1000 if now_ms is None else now_ms
+  now_ms = time.time() * 1000 if now_ms is None else now_ms  # noqa: TID251 epoch-ms anchors
   value = position['ms'] + max(0.0, now_ms - position['at']) * position['speed']
   return int(max(0, min(duration if duration else value, value)))
 
@@ -63,7 +64,7 @@ def elapsed_ms(now_playing: dict, now_ms: float | None = None) -> int:
 def read(path: Path, now: float | None = None) -> dict | None:
   """The supervisor's published snapshot; None when missing, malformed or the supervisor stopped updating."""
   try:
-    if (time.time() if now is None else now) - path.stat().st_mtime > STALE_SECONDS:
+    if (time.time() if now is None else now) - path.stat().st_mtime > STALE_SECONDS:  # noqa: TID251 compared with mtime
       return None
     found = json.loads(path.read_text()).get('nowPlaying')
   except (OSError, ValueError, AttributeError):

@@ -1,6 +1,7 @@
 """Optional parked reporting; failures never participate in driving process health."""
 from datetime import datetime, UTC
 import math
+import signal
 import threading
 import time
 import re
@@ -260,20 +261,15 @@ def build_worker():
                                    'metrics': {'commit': metadata.openpilot.git_commit}})
 
 
-def start_optional_worker():
-  worker = build_worker()
-  return worker.start() if worker is not None else None
-
-
 def main():
   # Own process so the manager's heap stays small when it forks the onroad daemons.
   worker = build_worker()
   if worker is None:
     return
-  try:
-    worker.run()
-  except KeyboardInterrupt:
-    worker.client.close()
+  for sig in (signal.SIGINT, signal.SIGTERM):
+    signal.signal(sig, lambda *_: worker.stop_event.set())
+  worker.run()
+  worker.persist()
 
 
 if __name__ == "__main__":

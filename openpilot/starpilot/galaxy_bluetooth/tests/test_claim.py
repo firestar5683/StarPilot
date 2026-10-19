@@ -67,7 +67,7 @@ class ClaimWindowTests(unittest.TestCase):
 
   def test_app_and_music_in_one_window_link_once_in_either_order(self):
     for first in ("app", "music"):
-      claim.arm("AA:BB:CC:DD:EE:FF", "comma", self.path, now=time.time())
+      claim.arm("AA:BB:CC:DD:EE:FF", "comma", self.path, now=time.monotonic())
       steps = {"app": lambda: claim.finish("Pixel 8", "0a1b2c3d", self.path),
                "music": lambda: claim.note_paired("11:22:33:44:55:66", self.path)}
       steps[first]()
@@ -85,7 +85,7 @@ class ClaimWindowTests(unittest.TestCase):
     self.assertEqual(claim.view(self.path, now=1000), {"open": False, "left": 0, "claimed": "", "paired": False})
     claim.arm("AA:BB:CC:DD:EE:FF", "comma", self.path, seconds=120, now=1000)
     self.assertEqual(claim.view(self.path, now=1000.5), {"open": True, "left": 120, "claimed": "", "paired": False})
-    start = time.time()
+    start = time.monotonic()
     claim.arm("AA:BB:CC:DD:EE:FF", "comma", self.path, seconds=120, now=start)
     claim.finish("Pixel 8", "0a1b2c3d", self.path)
     claim.note_paired("11:22:33:44:55:66", self.path, now=start + 10)
@@ -183,7 +183,7 @@ class ClaimGatewayTests(unittest.IsolatedAsyncioTestCase):
     self.assertTrue(state.response)
 
   async def test_expired_window_and_bad_points_are_refused(self):
-    claim.arm("AA:BB:CC:DD:EE:FF", "comma", self.claim, seconds=60, now=time.time() - 61)
+    claim.arm("AA:BB:CC:DD:EE:FF", "comma", self.claim, seconds=60, now=time.monotonic() - 61)
     with self.assertRaises(DBusError):
       self.gateway.session(self.options, fresh=True)
     claim.arm("AA:BB:CC:DD:EE:FF", "comma", self.claim)
@@ -199,7 +199,8 @@ class ClaimGatewayTests(unittest.IsolatedAsyncioTestCase):
 
   def test_derive_matches_rfc5869(self):
     a, b = ECC.generate(curve="P-256"), ECC.generate(curve="P-256")
-    pub = lambda k: b"\x04" + int(k.pointQ.x).to_bytes(32, "big") + int(k.pointQ.y).to_bytes(32, "big")
+    def pub(k):
+      return b"\x04" + int(k.pointQ.x).to_bytes(32, "big") + int(k.pointQ.y).to_bytes(32, "big")
     salt = bytes(range(16))
     self.assertEqual(claim.derive(int(a.d), pub(b), salt), claim.derive(int(b.d), pub(a), salt))
     secret = int((b.pointQ * int(a.d)).x).to_bytes(32, "big")

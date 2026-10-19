@@ -29,7 +29,8 @@ from openpilot.starpilot.system.android_auto.supervisor import Supervisor
 
 PAIRING_COMMANDS = {"prepare_pairing", "pairing_status", "pairing_response", "cancel_pairing", "pair_device"}
 AUTHENTICATED_COMMANDS = {"start", "set_auto_connect", "select_receiver", "set_view", "set_connection",
-                          "prepare_pairing", "pairing_status", "pairing_response", "cancel_pairing", "pair_device", "devices", "bluetooth_action", "phone_window"}
+                          "prepare_pairing", "pairing_status", "pairing_response", "cancel_pairing", "pair_device", "devices", "bluetooth_action",
+                          "phone_window"}
 
 
 def _offroad() -> bool:

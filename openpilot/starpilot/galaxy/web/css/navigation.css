@@ -123,14 +123,14 @@
 .gx-navigation__token-link { display: inline-block; margin-bottom: var(--sp-4); }
 
 /* Keep the navigation action aligned with the settings controls below. */
-.gx-navigation__enable {display:flex;align-items:flex-start;gap:24px;padding-inline:calc(var(--sp-5, 20px) + var(--sp-4))}
-.gx-navigation__enable>div {flex:1;min-width:0}
-.gx-navigation__enable h3, .gx-navigation__section > h3:first-child {margin-top:0}
-.gx-navigation__enable p {margin-bottom:0}
-.gx-navigation__enable>.gx-btn {flex:0 0 auto}
-.gx-navigation__gps {scroll-margin-top:100px}
-.gx-navigation__gps li {margin-block:8px;line-height:1.5}
-.gx-navigation__gps summary {cursor:pointer;min-height:44px;display:list-item;align-content:center}
-@media (max-width:600px) {
-  .gx-navigation__enable {flex-direction:column;gap:12px;padding-inline:var(--sp-5, 20px)}
+.gx-navigation__enable { display: flex; align-items: flex-start; gap: var(--sp-5); padding-inline: calc(var(--sp-5) + var(--sp-4)); }
+.gx-navigation__enable > div { flex: 1; min-width: 0; }
+.gx-navigation__enable h3, .gx-navigation__section > h3:first-child { margin-top: 0; }
+.gx-navigation__enable p { margin-bottom: 0; }
+.gx-navigation__enable > .gx-btn { flex: 0 0 auto; }
+.gx-navigation__gps { scroll-margin-top: 100px; }
+.gx-navigation__gps li { margin-block: var(--sp-2); line-height: 1.5; }
+.gx-navigation__gps summary { cursor: pointer; min-height: 44px; display: list-item; align-content: center; }
+@media (max-width: 600px) {
+  .gx-navigation__enable { flex-direction: column; gap: var(--sp-3); padding-inline: var(--sp-5); }
 }

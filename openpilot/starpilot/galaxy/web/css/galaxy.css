@@ -51,6 +51,7 @@
   --on-error: #ffffff;
   --warning: #ffb865;
   --success: #4de8e8;
+  --bluetooth: #60a5fa;
 
   --background: #070712;
   --surface: rgba(18, 15, 32, 0.65);
@@ -122,6 +123,7 @@
   --on-error: #ffffff;
   --warning: #c9821f;
   --success: #0c9b9b;
+  --bluetooth: #2563eb;
 
   --background: #f2f4fc;
   --surface: rgba(255, 255, 255, 0.85);
@@ -957,7 +959,7 @@ button.gx-crash-row:hover { background: var(--glass-bg-hover); transform: transl
 .gx-alert--warn { --notice-accent: var(--warning); }
 .gx-alert--danger { --notice-accent: var(--error); }
 .gx-alert--success { --notice-accent: var(--success); }
-.gx-alert--bluetooth { --notice-accent: #3b82f6; }
+.gx-alert--bluetooth { --notice-accent: var(--bluetooth); }
 .gx-alert__icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; font-size: 1.25rem; line-height: 1; color: var(--notice-accent); }
 .gx-alert__body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .gx-alert__body > strong { display: block; font-weight: var(--fw-bold); margin-bottom: var(--sp-1); }
@@ -1166,7 +1168,7 @@ button.gx-chip:hover {
 @media (max-width: 600px) { .gx-home__hero { align-items: flex-start; flex-direction: column; } .gx-home__four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .gx-driving { width: 100%; margin: 0 auto; min-width: 0; }
 .gx-driving__intro { padding: var(--panel-padding); }
-.gx-driving__intro h2, .gx-driving__intro > h3 { margin: 0 0 var(--sp-2); }
+.gx-driving__intro h2 { margin: 0 0 var(--sp-2); }
 .gx-driving__intro p:last-child { margin-bottom: 0; color: var(--text-muted); }
 .gx-driving__actions { margin-block: var(--sp-3); }
 .gx-driving__group { margin-top: var(--sp-5); }
@@ -1687,7 +1689,7 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
 .gx-media { display: block; max-width: 100%; height: auto; }
 .gx-media--spaced { margin-top: var(--sp-4); }
 .gx-pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.gx-truncate { overflow: hidden; text-overflow: ellipsis; }
+.gx-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gx-device-picker__row { display: flex; align-items: center; gap: var(--sp-1); }
 .gx-device-picker__form { padding: var(--sp-2); display: grid; gap: var(--sp-2); }
 .gx-install-help { padding-inline: var(--sp-3); }
@@ -1710,6 +1712,7 @@ progress { max-width: 100%; accent-color: var(--primary); }
 .gx-details dd { margin: 0; overflow-wrap: anywhere; }
 .gx-driving .gx-row { flex-wrap: wrap; }
 .gx-driving .gx-row > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.gx-bt-card > h3 { margin: 0 0 var(--sp-2); }
 .gx-bt-adapter__actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
 .gx-bt-adapter__actions > .gx-btn { padding-inline: var(--sp-2); white-space: nowrap; }
 .gx-row__desc.gx-bt-device__state { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
@@ -1756,9 +1759,8 @@ progress { max-width: 100%; accent-color: var(--primary); }
 .gx-spotify-now { display: grid; gap: var(--sp-3); }
 .gx-spotify-now__main { display: flex; gap: var(--sp-3); align-items: center; min-width: 0; }
 .gx-spotify-now__text { min-width: 0; }
-.gx-spotify-now__text h3, .gx-spotify-now__text p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-spotify-now__text h3, .gx-spotify-now__text p { margin: 0; }
 .gx-spotify-now__progress { display: grid; gap: 2px; }
-.gx-spotify-now__progress input, .gx-spotify-now__volume input { width: 100%; accent-color: var(--primary); }
 .gx-spotify-now__controls { align-items: center; flex-wrap: wrap; }
 .gx-spotify-now__play { min-width: 64px; font-size: 1.4rem; }
 .gx-spotify-now__volume { display: flex; flex: 1 1 160px; align-items: center; gap: var(--sp-2); min-width: 0; }
