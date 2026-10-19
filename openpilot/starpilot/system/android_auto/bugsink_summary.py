@@ -23,9 +23,13 @@ def overview(records):
   return [f"Connection: {', '.join(transports)}", f"Session commit: {software['commit']}", f"Branch: {software['branch']}"]
 
 
-def session_summary(session, assessment):
-  lines = overview([session]) + [f"Outcome: {session['outcome'].capitalize()} | Failures: {session['failures']} | Drops: {session['drops']}",
-    f"Assessment ({assessment['confidence']}): {assessment['summary']}", f"Evidence: {assessment['evidence']}"]
+def failure_summary(assessment):
+  return "\n".join([f"Assessment ({assessment['confidence']}): {assessment['summary']}", f"Evidence: {assessment['evidence']}",
+                    "Next steps:", *(f"  {index}. {step}" for index, step in enumerate(assessment["next_steps"], 1))])
+
+
+def session_timeline(session):
+  lines = [f"Outcome: {session['outcome'].capitalize()} | Failures: {session['failures']} | Drops: {session['drops']}"]
   if session.get("settings"):
     lines.append("Settings: " + ", ".join(f"{key}={value}" for key, value in session["settings"].items()))
   attempts = session.get("attempts", [])
@@ -40,8 +44,7 @@ def session_summary(session, assessment):
     lines.append(f"  {attempt['attempt']}. {stages or 'No stage recorded'} — {result}")
   if len(attempts) > 5:
     lines.append(f"  Showing last 5 of {len(attempts)} attempts; see session details.")
-  lines.extend(["Next steps:", *(f"  {index}. {step}" for index, step in enumerate(assessment["next_steps"], 1)),
-                f"Verify recovery: {assessment['verification']}", f"Log: {session['name']}"])
+  lines.append(f"Log: {session['name']}")
   return "\n".join(lines)
 
 

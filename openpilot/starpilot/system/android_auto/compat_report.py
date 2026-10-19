@@ -124,6 +124,7 @@ def summarize(events: list[dict]) -> dict:
   ignored: dict[tuple, dict] = {}
   projected = False  # the car acknowledged a frame; focus or the "streaming" stage alone do not show that
   failed_after = None
+  car_off = False
   for record in events:
     name = record["event"]
     if name == "session_start":
@@ -174,6 +175,7 @@ def summarize(events: list[dict]) -> dict:
     elif name == "video_acknowledged":
       projected = True
       failed_after = None
+      car_off = False
     elif name == "usb_gadget_prepared":
       report["usb"]["started_as"] = record.get("mode", "")
     elif name == "usb_no_accessory_start":
@@ -196,12 +198,15 @@ def summarize(events: list[dict]) -> dict:
       error = {"stage": record.get("stage", ""), "error": record.get("error", "")}
       if record.get("where"):
         error["where"] = record["where"][-1]  # the innermost frame: which call actually raised
+      if car_off:
+        error["after_car_shutdown"] = True
       if error not in report["errors"]:
         report["errors"].append(error)
-      if projected:
+      if projected and not car_off:
         failed_after = error["error"]
     elif name == "session_ended" and record.get("reason"):
       report["ended"].append(record["reason"])
+      car_off = car_off or str(record["reason"]).startswith("Head unit ended projection")
     elif name in ("stream_stall", "link_check_slow", "link_check_failed", "link_lost"):
       entry = report["health"].setdefault(name, {"count": 0, "max_ms": 0})
       entry["count"] += 1
@@ -219,8 +224,8 @@ def summarize(events: list[dict]) -> dict:
   report["furthest_stage"] = max(reached, key=STAGE_ORDER.index) if reached else ""
   if projected:
     report["outcome"] = f"projected, then failed: {failed_after}" if failed_after else "projected"
-  elif report["errors"]:
-    report["outcome"] = f"failed: {report['errors'][-1]['error']}"
+  elif errors := [error for error in report["errors"] if not error.get("after_car_shutdown")]:
+    report["outcome"] = f"failed: {errors[-1]['error']}"
   elif events:
     report["outcome"] = f"stopped at {report['furthest_stage'] or 'start'}"
   return report
@@ -236,7 +241,8 @@ def render_text(report: dict, name: str = "") -> str:
     lines.append("Car: " + ", ".join(f"{key.replace('_', ' ')}: {value}" for key, value in car.items()))
   lines.append("Stages: " + (" > ".join(report["stages"]) or "none"))
   for error in report["errors"][-5:]:
-    lines.append(f"Error ({error['stage']}): {error['error']}" + (f"  [at {error['where']}]" if error.get("where") else ""))
+    lines.append(f"Error ({error['stage']}{', after car shutdown' if error.get('after_car_shutdown') else ''}): {error['error']}" +
+                 (f"  [at {error['where']}]" if error.get("where") else ""))
   for reason in report["ended"][-3:]:
     lines.append(f"Ended by car: {reason}")
   for title, section in (("Wi-Fi", report["wifi"]), ("Bluetooth", report["bluetooth"]), ("TLS", report["tls"]),

@@ -80,12 +80,12 @@ def test_drive_event_groups_sessions_by_head_unit_and_weights_fps(tmp_path):
 def test_failures_are_part_of_the_drive_report_and_hide_names(tmp_path):
   event = br.drive_event([br.session_record(write_session(tmp_path, 1, FAILED))])
   assert event["fingerprint"] == ["android-auto-drive", "wireless", "unknown head unit", "failures"]
-  assert "1. wifi_join_failed at joining_wifi: TimeoutError (session 1)" in event["message"]
+  assert "1. wifi_join_failed at joining_wifi: TimeoutError (session 1, attempt 1)" in event["message"]
   assert event["tags"]["aa.cause"] == "wifi_join_failed" and event["tags"]["aa.failures"] == "1"
   text = json.dumps(event)
   for secret in ("AA:BB:CC:DD:EE:FF", "192.168.1.4", "Honda HFL"):
     assert secret not in text
-  assert "Stages: connecting_bluetooth > joining_wifi" in event["contexts"]["android_auto_failure_1"]["compat_report"]
+  assert "Stages: connecting_bluetooth > joining_wifi" in event["contexts"]["android_auto_compat_report_session_1"]["text"]
 
 
 def test_send_reports_once_as_one_event_per_batch(tmp_path):
@@ -115,6 +115,17 @@ def test_dropped_stream_breadcrumb_says_it_streamed_first(tmp_path):
   crumb = br.drive_event([session])["breadcrumbs"]["values"][0]
   assert crumb["level"] == "error"
   assert crumb["message"] == "Attempt 1: streamed 108.0s, then projection_interrupted at streaming: EOFError"
+
+
+def test_session_timeline_and_compat_report_appear_once(tmp_path):
+  path = write_session(tmp_path / "logs", 1, FAILED + [
+    (1, 0, "stage", {"state": "authenticating"}),
+    (1, 20, "attempt_failed", {"stage": "authenticating", "kind": "TimeoutError", "error": "timed out"}),
+  ])
+  event = br.drive_event([br.session_record(path)])
+  assert event["message"].count("Attempt timeline:") == 1 and event["message"].count("Next steps:") == 2
+  assert [key for key in event["contexts"] if key.startswith("android_auto_compat_report")] == ["android_auto_compat_report_session_1"]
+  assert "compat_report" not in event["contexts"]["android_auto_failure_1"]
 
 
 def test_clean_drives_keep_their_own_issue(tmp_path):

@@ -196,6 +196,15 @@ def write_log(directory, name, events):
   return path
 
 
+def test_retry_after_car_shutdown_is_not_the_outcome():
+  events = [{"event": "video_acknowledged"}, {"event": "session_ended", "reason": "Head unit ended projection: shutdown"},
+            {"event": "attempt_failed", "stage": "rfcomm", "error": "Host is down"}]
+  report = compat_report.summarize(events)
+  assert report["outcome"] == "projected"
+  assert report["errors"] == [{"stage": "rfcomm", "error": "Host is down", "after_car_shutdown": True}]
+  assert "Error (rfcomm, after car shutdown): Host is down" in compat_report.render_text(report)
+
+
 def test_session_logs_are_newest_first_by_number(tmp_path):
   write_log(tmp_path, "session-000009-20260927-121412.jsonl", [])
   write_log(tmp_path, "session-000010-20260728-080505.jsonl", [])  # the clock had not synced yet

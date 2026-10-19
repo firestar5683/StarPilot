@@ -15,7 +15,7 @@ from pathlib import Path
 
 from openpilot.starpilot.system.android_auto import identity as identity_store
 from openpilot.starpilot.system.android_auto.bugsink_diagnosis import attempt_records, diagnosis, elapsed, sanitize
-from openpilot.starpilot.system.android_auto.bugsink_summary import batch_summary, pairing_summary, session_summary, software_tags
+from openpilot.starpilot.system.android_auto.bugsink_summary import batch_summary, failure_summary, pairing_summary, session_timeline, software_tags
 
 STATE_PATH = identity_store.DATA_DIR / "bugsink_report.json"
 PAIRING_PATH = identity_store.LOG_DIR / "pairing.jsonl"
@@ -233,25 +233,29 @@ def drive_failures(sessions: list[dict]) -> list[dict]:
 
 
 def failure_detail(session: dict) -> dict:
-  from openpilot.starpilot.system.android_auto import compat_report
   stage = session["failed_stage"] or session["furthest_stage"] or "start"
   kind = session["error_kind"] or "no error"
   assessment = diagnosis(session)
+  names = session.get("_names", ())
+  return {
+    "title": f"{assessment['category']} at {stage}: {kind}",
+    "session": session["seq"],
+    "attempt": session.get("failed_attempt"),
+    "cause": assessment["category"], "stage": stage, "error_kind": kind,
+    "summary": sanitize(failure_summary(assessment), names),
+    "diagnosis": sanitize(assessment, names),
+  }
+
+
+def compat_text(session: dict) -> str:
+  from openpilot.starpilot.system.android_auto import compat_report
   names = session.get("_names", ())
   report = dict(session["_report"])
   report["car"] = {key: value for key, value in report["car"].items() if key not in ("bluetooth_name", "display_name")}
   report["errors"] = [{**error, "error": scrub(error.get("error", ""))} for error in report["errors"]]
   report["ended"] = [scrub(reason) for reason in report["ended"]]
   report["tls"] = {key: value for key, value in report["tls"].items() if key != "head_unit"}
-  return {
-    "title": f"{assessment['category']} at {stage}: {kind}",
-    "session": session["seq"],
-    "attempt": session.get("failed_attempt"),
-    "cause": assessment["category"], "stage": stage, "error_kind": kind,
-    "summary": sanitize(session_summary(session, assessment), names),
-    "diagnosis": sanitize(assessment, names),
-    "compat_report": sanitize(compat_report.render_text(report), names),
-  }
+  return sanitize(compat_report.render_text(report), names)
 
 
 def _attempt_time(session: dict, at_s) -> str | None:
@@ -294,12 +298,15 @@ def drive_event(sessions: list[dict]) -> dict:
   video = next((s["video"] for s in reversed(sessions) if s["video"].get("resolution")), {})
   label = _head_unit_label(head_unit)
   failures = [failure_detail(failure) for failure in drive_failures(sessions)]
+  failed = [session for session in sessions if session["seq"] in {failure["session"] for failure in failures}]
   heading = "failures" if failures else "sessions"
   message = f"Android Auto {heading}: {label} ({summary['transport'] or 'unknown'})\n\n" + batch_summary(sessions, summary)
   if failures:
-    message += "\n\nFailures:\n" + "\n".join(f"  {index}. {failure['title']} (session {failure['session']})"
+    message += "\n\nFailures:\n" + "\n".join(f"  {index}. {failure['title']} (session {failure['session']}, attempt {failure['attempt']})"
                                                for index, failure in enumerate(failures, 1))
     message += "".join(f"\n\n--- {index}. {failure['title']} ---\n{failure['summary']}" for index, failure in enumerate(failures, 1))
+    message += "".join(f"\n\n--- Session {session['seq']} ---\n" + sanitize(session_timeline(session), session.get("_names", ()))
+                       for session in failed)
   latest = failures[0] if failures else {}
   return {
     "message": message,
@@ -315,7 +322,8 @@ def drive_event(sessions: list[dict]) -> dict:
     "contexts": {"android_auto_drive": summary, "android_auto_head_unit": head_unit,
                  **{f"android_auto_session_{index + 1}": _public(session) for index, session in enumerate(sessions)},
                  **{f"android_auto_failure_{index + 1}": {key: value for key, value in failure.items() if key != "summary"}
-                    for index, failure in enumerate(failures)}},
+                    for index, failure in enumerate(failures)},
+                 **{f"android_auto_compat_report_session_{session['seq']}": {"text": compat_text(session)} for session in failed}},
   }
 
 
