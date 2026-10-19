@@ -29,7 +29,7 @@ FAVORITE_ICON_SIZE = 110
 CAR_EXIT_SIZE = (96, 96)
 CAR_EXIT_MIN_OPACITY = 25
 NOW_PLAYING_WIDGET = 'now_playing'
-NOW_PLAYING_SIZE = (520, 132)
+NOW_PLAYING_SIZE = (520, 96)
 NOW_PLAYING_OPACITY = (0, 100, 85)  # percent: min, max, default
 JETLINK_WIDGET = 'jetlink_status'
 JETLINK_SIZE = (420, 84)
@@ -116,8 +116,9 @@ def layout_metadata_for_viewport(viewport):
                                  'width': NOW_PLAYING_SIZE[0], 'height': NOW_PLAYING_SIZE[1], 'colors': {},
                                  'note': 'The song playing from Spotify or your phone over Bluetooth. Opacity sets the card background.',
                                  'opacity': {'min': NOW_PLAYING_OPACITY[0], 'max': NOW_PLAYING_OPACITY[1], 'default': NOW_PLAYING_OPACITY[2]},
+                                 'collapseToggle': True,
                                  'default': {'x': width - 30 - NOW_PLAYING_SIZE[0], 'y': height - 30 - NOW_PLAYING_SIZE[1],
-                                             'enabled': True, 'opacity': NOW_PLAYING_OPACITY[2]}}
+                                             'enabled': True, 'opacity': NOW_PLAYING_OPACITY[2], 'collapse': False}}
   widgets[JETLINK_WIDGET] = {'label': 'Jetlink status', 'kind': JETLINK_WIDGET,
                              'width': JETLINK_SIZE[0], 'height': JETLINK_SIZE[1], 'colors': {},
                              'note': 'Shown while Jetlink is on: connection, device and host processing time. Opacity sets the card background.',
@@ -261,6 +262,8 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
       placement.setdefault('opacity', 100)
     if key in CARD_WIDGETS and type(placement) is dict:
       placement.setdefault('opacity', CARD_WIDGETS[key][2])
+    if key == NOW_PLAYING_WIDGET and type(placement) is dict:
+      placement.setdefault('collapse', False)
     if key == 'driver_monitor' and type(placement) is dict and 'size' not in placement:
       for axis in ('x', 'y'):
         if type(placement.get(axis)) in (int, float):
@@ -270,6 +273,7 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
               ({'display'} if key in DISPLAY_WIDGETS else set()) |
               ({'opacity', 'background'} if key in ACTION_WIDGETS else set()) |
               ({'opacity'} if key == 'cruise_limits' or key in CARD_WIDGETS else set()) |
+              ({'collapse'} if key == NOW_PLAYING_WIDGET else set()) |
               ({'width', 'height', 'opacity'} if key == NAV_MAP else set()))
     if type(placement) is not dict or set(placement) != fields or type(placement['enabled']) is not bool:
       raise ValueError('Invalid projection widget')
@@ -285,6 +289,8 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
     if key in CARD_WIDGETS and (type(placement['opacity']) is not int or
                                 not CARD_WIDGETS[key][0] <= placement['opacity'] <= CARD_WIDGETS[key][1]):
       raise ValueError('Invalid card opacity')
+    if key == NOW_PLAYING_WIDGET and type(placement['collapse']) is not bool:
+      raise ValueError('Invalid now playing collapse setting')
     if key == CAR_EXIT and placement['opacity'] < CAR_EXIT_MIN_OPACITY:
       raise ValueError('Exit to car opacity must be at least 25%')
     if widget.get('resizable'):

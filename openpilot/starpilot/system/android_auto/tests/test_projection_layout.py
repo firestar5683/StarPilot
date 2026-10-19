@@ -405,7 +405,8 @@ class TestNowPlayingWidget(unittest.TestCase):
     placement = default_layout(SCREEN)['widgets']['now_playing']
     self.assertTrue(placement['enabled'])
     self.assertEqual(placement['opacity'], 85)
-    self.assertEqual(set(placement), {'x', 'y', 'enabled', 'opacity'})
+    self.assertFalse(placement['collapse'])
+    self.assertEqual(set(placement), {'x', 'y', 'enabled', 'opacity', 'collapse'})
 
   def test_opacity_is_validated_and_old_layouts_gain_the_card(self):
     document = default_layout(SCREEN)
@@ -418,6 +419,20 @@ class TestNowPlayingWidget(unittest.TestCase):
     old = copy.deepcopy(document)
     del old['widgets']['now_playing']
     self.assertEqual(validate_layout(old, SCREEN)['widgets']['now_playing'], document['widgets']['now_playing'])
+
+  def test_collapse_on_pause_is_a_validated_option_older_layouts_default_off(self):
+    document = default_layout(SCREEN)
+    document['widgets']['now_playing']['collapse'] = True
+    self.assertTrue(validate_layout(copy.deepcopy(document), SCREEN)['widgets']['now_playing']['collapse'])
+    self.assertTrue(layout_metadata(SCREEN)['widgets']['now_playing']['collapseToggle'])
+    for bad in (1, 'on', None):
+      broken = copy.deepcopy(document)
+      broken['widgets']['now_playing']['collapse'] = bad
+      with self.assertRaises(ValueError):
+        validate_layout(broken, SCREEN)
+    old = copy.deepcopy(document)
+    del old['widgets']['now_playing']['collapse']
+    self.assertFalse(validate_layout(old, SCREEN)['widgets']['now_playing']['collapse'])
 
   def test_card_stays_below_the_exit_control(self):
     order = layout_metadata(SCREEN)['widgetOrder']

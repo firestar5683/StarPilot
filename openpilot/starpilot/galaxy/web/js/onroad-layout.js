@@ -190,14 +190,14 @@ export const LayoutWidgetPreview = {
           style="filter: drop-shadow(2px 2px 1px #000000aa)">{{ clock24Hour ? '18:00' : '12:00 PM' }}</text>
       </template>
       <g v-else-if="widget.kind === 'now_playing'">
-        <rect x="0" y="0" :width="widget.width" :height="widget.height" rx="37" fill="#0f0d17" :fill-opacity="(widget.opacity ?? 85) / 100 * .92" />
-        <rect x="10" y="18" width="5" :height="widget.height - 36" rx="2.5" fill="#c7aef7" />
-        <text x="32" y="52" font-size="34" font-weight="600" fill="#f5f2fc">Midnight City</text>
-        <text x="32" y="96" font-size="26" fill="#b8b2c8">M83</text>
-        <rect x="32" :y="widget.height - 26" :width="widget.width - 64" height="6" rx="3" fill="#ffffff" fill-opacity=".2" />
-        <rect x="32" :y="widget.height - 26" :width="(widget.width - 64) * .38" height="6" rx="3" fill="#c7aef7" />
-        <rect :x="widget.width - 52" y="28" width="10" height="34" rx="4" fill="#c7aef7" />
-        <rect :x="widget.width - 34" y="28" width="10" height="34" rx="4" fill="#c7aef7" />
+        <rect x="0" y="0" :width="widget.width" :height="widget.height" :rx="widget.height / 2" fill="#0f0d17" :fill-opacity="(widget.opacity ?? 85) / 100 * .92" />
+        <circle :cx="widget.height / 2" :cy="widget.height / 2" r="30" fill="#c7aef7" />
+        <rect :x="widget.height / 2 - 9" :y="widget.height / 2 - 12" width="6" height="24" rx="3" fill="#0f0d17" />
+        <rect :x="widget.height / 2 + 3" :y="widget.height / 2 - 12" width="6" height="24" rx="3" fill="#0f0d17" />
+        <text :x="widget.height + 4" y="40" font-size="30" font-weight="600" fill="#f5f2fc">Midnight City</text>
+        <text :x="widget.height + 4" y="68" font-size="22" fill="#b8b2c8">M83</text>
+        <rect :x="widget.height + 4" :y="widget.height - 16" :width="widget.width - widget.height * 1.5 - 4" height="4" rx="2" fill="#ffffff" fill-opacity=".2" />
+        <rect :x="widget.height + 4" :y="widget.height - 16" :width="(widget.width - widget.height * 1.5 - 4) * .38" height="4" rx="2" fill="#c7aef7" />
       </g>
       <g v-else-if="widget.kind === 'jetlink_status'">
         <rect x="0" y="0" :width="widget.width" :height="widget.height" :rx="widget.height / 2" fill="#0f0d17" :fill-opacity="(widget.opacity ?? 85) / 100 * .92" />
@@ -447,7 +447,8 @@ export const OnroadLayoutPage = {
         return {
           ...widget, width, height, ...(widget.iconSize ? { display: this.layout[widget.id].display } : {}),
           ...(widget.opacity ? { opacity: this.layout[widget.id].opacity } : {}),
-          ...(widget.backgroundToggle ? { background: this.layout[widget.id].background } : {})
+          ...(widget.backgroundToggle ? { background: this.layout[widget.id].background } : {}),
+          ...(widget.collapseToggle ? { collapse: this.layout[widget.id].collapse } : {})
         }
       })
     },
@@ -1055,6 +1056,14 @@ export const OnroadLayoutPage = {
       this.recordChange(before)
       this.state.notice = ""
     },
+    setWidgetCollapse(value) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.collapseToggle) return
+      this.finishColorEdit()
+      const before = clone(this.state.draft)
+      this.selectedPosition.collapse = value === 'On'
+      this.recordChange(before)
+      this.state.notice = ""
+    },
     moveDrag(event) {
       const drag = this.state.drag
       if (!drag || drag.pointerId !== event.pointerId) return
@@ -1479,6 +1488,8 @@ export const OnroadLayoutPage = {
                 </template>
                 <GalaxySettingRow v-if="selectedWidget.backgroundToggle" :row="switchRow('Show background', selectedPosition.background === true)" :index="0"
                   :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setWidgetBackground(value)" />
+                <GalaxySettingRow v-if="selectedWidget.collapseToggle" :row="switchRow('Collapse when paused', selectedPosition.collapse === true)" :index="0"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setWidgetCollapse(value)" />
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
