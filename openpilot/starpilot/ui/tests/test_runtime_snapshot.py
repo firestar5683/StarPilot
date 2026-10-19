@@ -635,7 +635,9 @@ class TestRuntimeSnapshot(unittest.TestCase):
     self.assertFalse(RuntimeSnapshotAdapter(ui, bluetooth_powered=lambda: True).build(ShellMode.ONROAD, now_ns=NOW).home.bluetooth)
     ui.sm.valid["deviceState"] = False
     state = RuntimeSnapshotAdapter(ui, bluetooth_powered=lambda: False).build(ShellMode.HOME, now_ns=NOW).home
-    self.assertFalse(state.bluetooth)
+    self.assertEqual(state.bluetooth, "off")
+    for value in ("off", "on", "connected"):
+      self.assertEqual(RuntimeSnapshotAdapter(ui, bluetooth_powered=lambda value=value: value).build(ShellMode.HOME, now_ns=NOW).home.bluetooth, value)
     self.assertFalse(state.gpu_present)
     self.assertFalse(state.gpu_active)
     ui.sm.valid["deviceState"] = True

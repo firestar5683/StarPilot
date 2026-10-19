@@ -70,7 +70,7 @@ class HomeState:
   temperature_c: float | None = None
   vehicle_online: bool = True
   connection: str = "OFFLINE"
-  bluetooth: bool = False
+  bluetooth: str = ""  # off, on, connected; empty hides the icon
   gpu_present: bool = False
   gpu_active: bool = False
   recording_audio: bool = False

@@ -1,6 +1,9 @@
 """The Pair phone window and its permission checks."""
 import base64
 import json
+import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import unittest
@@ -119,6 +122,14 @@ class GalaxyCallTest(unittest.TestCase):
     self.assertEqual(json.loads(base64.b64decode(seen[0]['body'])), {'a': 1})
     self.assertEqual(call('GET', '/x')[0], 200)
     self.assertNotIn('body', seen[1])
+
+  def test_the_ui_imports_the_bridge_without_its_folder_on_the_path(self):
+    # Other bridge tests put the bridge folder on sys.path; the comma UI does not, so check in a clean process.
+    root = str(Path(__file__).resolve().parents[4])
+    code = 'from openpilot.starpilot.galaxy_bluetooth.phone_ui import galaxy_call; galaxy_call()'
+    result = subprocess.run([sys.executable, '-c', code], cwd=root, env={**os.environ, 'PYTHONPATH': root},
+                            capture_output=True, text=True, timeout=60)
+    self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class PermissionTest(unittest.TestCase):

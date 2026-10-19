@@ -1,11 +1,12 @@
-"""The compact Bluetooth glyph follows a fresh powered adapter, not pairing."""
+"""The compact Bluetooth glyph follows a fresh adapter state: off, on, or a device connected."""
 
 from concurrent.futures import Future
+import json
 import subprocess
 import unittest
 from unittest.mock import patch
 
-from openpilot.starpilot.ui.bluetooth_status import BluetoothStatusSource, read_adapter_powered
+from openpilot.starpilot.ui.bluetooth_status import BluetoothStatusSource, read_bluetooth_state
 
 
 class FakeExecutor:
@@ -23,15 +24,22 @@ class FakeExecutor:
 
 
 class TestBluetoothStatus(unittest.TestCase):
-  def test_exact_bluez_power_response_only(self):
-    for output, expected in (("b true\n", True), ("b false\n", False), ("s true\n", False), ("b true extra\n", False)):
+  def test_bluez_objects_give_off_on_or_connected(self):
+    def objects(powered, connected, powered_type="b"):
+      data = {"/org/bluez/hci0": {"org.bluez.Adapter1": {"Powered": {"type": powered_type, "data": powered}}},
+              "/org/bluez/hci0/dev_AA": {"org.bluez.Device1": {"Connected": {"type": "b", "data": connected}}}}
+      return json.dumps({"type": "a{oa{sa{sv}}}", "data": [data]})
+    for output, expected in ((objects(True, True), "connected"), (objects(True, False), "on"), (objects(False, True), "off"),
+                             (objects("true", True, "s"), "off"), ("not json", "off"), ('{"data": []}', "off")):
       with self.subTest(output=output), patch("openpilot.starpilot.ui.bluetooth_status.subprocess.run",
                                                return_value=subprocess.CompletedProcess([], 0, output, "")) as run:
-        self.assertIs(read_adapter_powered(), expected)
+        self.assertEqual(read_bluetooth_state(), expected)
         self.assertEqual(run.call_args.kwargs["timeout"], 1.5)
+    with patch("openpilot.starpilot.ui.bluetooth_status.subprocess.run", return_value=subprocess.CompletedProcess([], 1, "", "")):
+      self.assertEqual(read_bluetooth_state(), "off")
     with patch("openpilot.starpilot.ui.bluetooth_status.subprocess.run",
                side_effect=subprocess.TimeoutExpired(["busctl"], 1.5)):
-      self.assertFalse(read_adapter_powered())
+      self.assertEqual(read_bluetooth_state(), "off")
 
   def test_pending_failure_and_stale_result_never_show_icon(self):
     clock = [10_000_000_000]
@@ -40,15 +48,15 @@ class TestBluetoothStatus(unittest.TestCase):
     executor = FakeExecutor()
     self.enterContext(patch.object(source, "executor", executor))
     try:
-      self.assertFalse(source.snapshot())  # schedules work without blocking the render
+      self.assertEqual(source.snapshot(), "off")  # schedules work without blocking the render
       self.assertEqual(executor.calls, 1)
-      executor.future.set_result((True, clock[0]))
-      self.assertTrue(source.snapshot())
+      executor.future.set_result(("connected", clock[0]))
+      self.assertEqual(source.snapshot(), "connected")
       clock[0] += source.MAX_AGE_NS + 1
-      self.assertFalse(source.snapshot())
+      self.assertEqual(source.snapshot(), "off")
       self.assertEqual(executor.calls, 2)
       source.close()
-      self.assertFalse(source.snapshot())
+      self.assertEqual(source.snapshot(), "off")
       self.assertTrue(executor.closed)
     finally:
       source.close()
@@ -56,9 +64,14 @@ class TestBluetoothStatus(unittest.TestCase):
   def test_worker_rejects_failed_query(self):
     source = BluetoothStatusSource(request=lambda: (_ for _ in ()).throw(OSError("no adapter")), clock=lambda: 3)
     try:
-      self.assertEqual(source._poll(), (False, 3))
+      self.assertEqual(source._poll(), ("off", 3))
     finally:
       source.close()
+    unknown = BluetoothStatusSource(request=lambda: True, clock=lambda: 3)
+    try:
+      self.assertEqual(unknown._poll(), ("off", 3))
+    finally:
+      unknown.close()
 
 
 if __name__ == "__main__":

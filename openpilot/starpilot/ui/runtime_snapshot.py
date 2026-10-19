@@ -685,7 +685,8 @@ class RuntimeSnapshotAdapter:
       ping = int(device.lastAthenaPingTime)
       connection = "ONLINE" if 0 < ping <= now_ns and now_ns - ping < 80_000_000_000 else "OFFLINE"
     try:
-      bluetooth = self.bluetooth_powered() is True if mode == ShellMode.HOME and self.bluetooth_powered is not None else False
+      value = self.bluetooth_powered() if mode == ShellMode.HOME and self.bluetooth_powered is not None else ""
+      bluetooth = value if value in ("off", "on", "connected") else "on" if value is True else "off" if value is False else ""
     except (OSError, RuntimeError, ValueError):
       bluetooth = False
     self._jetlink.set_enabled(mode == ShellMode.HOME)
