@@ -333,6 +333,12 @@ class NetworkLease:
     while self._get(path, NM_DEVICE_IFACE, "State") < DEVICE_STATE_DISCONNECTED:
       self._wait_step(deadline, cancelled, f"NetworkManager did not take {self.interface}")
     self.device_ready = True
+    # A new interface has never scanned, so the car's BSSID would be rejected until a scan finds it.
+    try:
+      self._call(path, NM_WIRELESS_IFACE, "RequestScan", "a{sv}", ({},))
+      self.log("wifi_scan_requested", interface=self.interface)
+    except NetworkError as error:
+      self.log("wifi_scan_request_failed", error=str(error))
 
   def _pause_autoconnect(self) -> None:
     """Keep NetworkManager from rejoining home Wi-Fi between attempts; release(restore=True) turns it back on."""

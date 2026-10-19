@@ -246,8 +246,10 @@ def test_dedicated_network_lease_waits_for_networkmanager_to_list_aa0(monkeypatc
   lease = nm_lease(nm)
   lease.prepare_device()
   assert lease.device_path == "/dev/aa0" and lease.device_ready
+  assert "wifi_scan_requested" in lease.log.names()  # aa0 learns the car's access point before the join
   lease.acquire(credentials(), timeout=2.0)
-  assert nm.calls.count("AddAndActivateConnection2") == 1
+  assert nm.calls.count("AddAndActivateConnection2") == nm.calls.count("RequestScan") == 1
+  assert nm.calls.index("RequestScan") < nm.calls.index("AddAndActivateConnection2")
 
 
 def test_dedicated_network_lease_never_falls_back_to_another_device(monkeypatch):
