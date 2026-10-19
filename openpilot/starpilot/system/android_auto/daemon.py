@@ -231,6 +231,8 @@ def main() -> int:
             pass
 
     threading.Thread(target=housekeeping, daemon=True).start()
+    from openpilot.starpilot.system.android_auto.bugsink_report import Reporter
+    cleanup.callback(Reporter(parked=lambda: _offroad() and not supervisor.status()["running"]).start().close)
     server = Server(ANDROID_AUTO_SOCKET_PATH, supervisor, source_verifier, authority.configuration_allowed)
     cleanup.callback(server.server_close)
 
