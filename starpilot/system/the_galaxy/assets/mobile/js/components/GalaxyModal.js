@@ -1,3 +1,5 @@
+import { t } from "../i18n.js"
+
 export const GalaxyModal = {
   name: "GalaxyModal",
   props: {
@@ -64,12 +66,13 @@ export function GalaxyConfirm({ title, message, confirmLabel = "Confirm", cancel
     }
     app = createApp({
       render() {
+        // This host is outside #galaxy-app, so the DOM translator cannot reach it.
         return h(GalaxyModal, {
           modelValue: true,
-          title,
-          message,
-          confirmLabel,
-          cancelLabel,
+          title: title === undefined ? undefined : t(title),
+          message: t(message),
+          confirmLabel: t(confirmLabel),
+          cancelLabel: t(cancelLabel),
           danger,
           "onUpdate:modelValue": (v) => { if (!v) finish(false) },
           onConfirm: () => finish(true),
