@@ -122,6 +122,7 @@ DEFAULT_CONFIG = {
   "render_profile": True,      # car view: always-on sampling profile in logs/render_profile.txt (and .1.txt)
   "render_profile_kb": 256,    # size cap per render_profile file
   "wifi_interface": "wlan0",
+  "dedicated_wifi_interface": False,  # join the car on its own aa0 station so wlan0 stays on home Wi-Fi
   "device_name": "StarPilot",
   "version_status": 0,         # WifiVersionResponse status (0 = success) for receivers that negotiate a version
   "phone_class": True,         # while pairing/connecting, present as a phone: HFP gateway + smartphone Class of Device

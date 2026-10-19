@@ -4,15 +4,14 @@ import os
 import select
 import signal
 import subprocess
-import sys
 import threading
 import time
 
 from openpilot.starpilot.galaxy.hotspot import HotspotSettings, STATUS_PATH, atomic_json
+from openpilot.starpilot.system.pipe_worker import spawn
 
 
 def main():
-  from openpilot.common.basedir import BASEDIR
   from openpilot.common.hardware import PC
   if PC or os.environ.get('OPENPILOT_PREFIX'):
     raise RuntimeError('Hotspot requires the primary comma instance')
@@ -36,13 +35,7 @@ def main():
           runtime = {'active': False, 'state': 'disabled', 'reason': ''}
         else:
           if child is None:
-            child = subprocess.Popen(['sudo', '-n', 'systemd-run', '--quiet', '--pipe', '--wait', '--collect',
-                                      '--unit=starpilot-galaxy-hotspot', '--property=TimeoutStopSec=8',
-                                      '--property=KillMode=control-group', '--working-directory=' + str(BASEDIR),
-                                      sys.executable, '-u', '-m',
-                                      'openpilot.starpilot.galaxy.hotspot_worker'], cwd=BASEDIR,
-                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                     close_fds=True)
+            child = spawn('starpilot-galaxy-hotspot', 'openpilot.starpilot.galaxy.hotspot_worker')
             buffer = b''
             last_reply = time.monotonic()
             runtime = {'active': False, 'state': 'starting', 'reason': 'Starting hotspot service.'}

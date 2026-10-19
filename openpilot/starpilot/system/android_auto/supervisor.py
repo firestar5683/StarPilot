@@ -45,6 +45,8 @@ from openpilot.starpilot.system.android_auto.session import AuthenticationReject
 
 BACKOFF_SECONDS = (2.0, 4.0, 8.0, 15.0, 30.0)
 STABLE_SESSION_SECONDS = 30.0
+WIFI_RECOVER_RETRY_S = 30.0
+DEDICATED_STRIKES = 2         # sessions where aa0 failed but wlan0 joined, before a car stays on wlan0
 PEER_STOP_RETRY_SECONDS = 10.0
 FRAME_MAX_AGE = 0.5          # never send a UI frame older than this
 SOFTWARE_FPS = 15            # libx264 cadence; the hardware encoder runs at 30
@@ -179,7 +181,7 @@ class LinkWatch:
     wireless = not isinstance(self.lease, (NoLease, UsbLease))
     while not self._stop.is_set():
       if wireless:
-        self.wifi_dbm = _wifi_dbm()
+        self.wifi_dbm = _wifi_dbm(getattr(self.lease, "interface", "wlan0"))
       if check is not None:
         started = time.monotonic()
         try:
@@ -295,6 +297,8 @@ class Supervisor:
     self._source_session = source_session
     self._projection_enabled = projection_enabled
     self._lease_factory = lease_factory
+    self._dedicated_strikes: dict[str, int] = {}
+    self._wifi_recover_at = 0.0
     self._bt_client = bluetooth_client
     self._frame_path = frame_path
     self._lock = threading.RLock()
@@ -343,6 +347,7 @@ class Supervisor:
     status["wired_blocked"] = wired_blocker()
     status["pairing_ready"] = self._pairing_active()
     status["auto_connect"] = bool(self.config["auto_connect"])
+    status["dedicated_wifi_interface"] = bool(self.config["dedicated_wifi_interface"])
     status["auto_paused"] = self.auto.suppressed
     status["recent"] = list(self.log.recent)[-8:]
     return status
@@ -363,6 +368,13 @@ class Supervisor:
       self.config["auto_connect"] = bool(enabled)
       identity_store.save_config(self.config)
     self.log("auto_connect_selected", enabled=bool(enabled))
+
+  def set_dedicated_wifi(self, enabled: bool) -> None:
+    """Join the car on aa0 so wlan0 keeps its network; used from the next session."""
+    with self._lock:
+      self.config["dedicated_wifi_interface"] = bool(enabled)
+      identity_store.save_config(self.config)
+    self.log("dedicated_wifi_selected", enabled=bool(enabled))
 
   def start(self, trigger: str = "manual") -> None:
     with self._lock:
@@ -544,6 +556,7 @@ class Supervisor:
   def maintain(self, now: float | None = None) -> None:
     """Periodic housekeeping from the daemon thread: pairing window, auto-connect."""
     now = time.monotonic() if now is None else now
+    self.recover_wifi(now)
     owner = self._shared_bluetooth_owner
     if not self._projection_enabled():
       self._set(error='Android Auto was disabled')
@@ -806,10 +819,27 @@ class Supervisor:
       identity_store.save_config(self.config)
 
   def _lease(self):
-    if self._lease_factory is None:
+    factory = self._lease_factory
+    if factory is None:
       from openpilot.starpilot.system.android_auto.network import NetworkLease
-      return NetworkLease(self.log, self.config["wifi_interface"])
-    return self._lease_factory(self.log, self.config["wifi_interface"])
+      factory = NetworkLease
+    if self.config["dedicated_wifi_interface"]:
+      from openpilot.starpilot.system.android_auto.car_interface import DedicatedLease
+      strikes = self._dedicated_strikes.get(self.config["receiver_address"], 0)
+      if strikes >= DEDICATED_STRIKES:
+        self.log("wifi_dedicated_skipped", strikes=strikes)
+      lease = DedicatedLease(self.log, self.config["wifi_interface"], factory, enabled=strikes < DEDICATED_STRIKES)
+      lease.prepare()
+      return lease
+    return factory(self.log, self.config["wifi_interface"])
+
+  def _count_dedicated(self, lease) -> None:
+    """A car whose network keeps failing on aa0 but joining on wlan0 stays on wlan0 until the daemon restarts."""
+    address = self.config["receiver_address"]
+    if getattr(lease, "aa0_joined", False):
+      self._dedicated_strikes.pop(address, None)
+    elif getattr(lease, "aa0_failed", False):
+      self._dedicated_strikes[address] = self._dedicated_strikes.get(address, 0) + 1
 
   def _unselect_car_audio(self, address: str) -> None:
     if self._bt_client is None:
@@ -923,6 +953,8 @@ class Supervisor:
         lease.release(restore=True)
       except Exception as error:
         self.log("wifi_release_failed", error=str(error))
+      self._count_dedicated(lease)
+      self._wifi_recover_at = 0.0  # if the restore above failed, housekeeping retries it
       try:
         self._release_phone()
       except Exception as error:
@@ -1106,6 +1138,19 @@ class Supervisor:
         self.log("usb_cleanup_failed", step=name, error=str(error))
     if errors and not failed:
       raise errors[0]
+
+  def recover_wifi(self, now: float | None = None) -> None:
+    """Turn wlan0 autoconnect back on if a session paused it and crashed. Retried while idle until it works."""
+    now = time.monotonic() if now is None else now
+    if now < self._wifi_recover_at or self._session_alive():
+      return
+    from openpilot.starpilot.system.android_auto.network import recover_autoconnect
+    try:
+      done = recover_autoconnect(self.log)
+    except Exception as error:
+      self.log("wifi_autoconnect_recover_failed", error=str(error))
+      done = False
+    self._wifi_recover_at = float("inf") if done else now + WIFI_RECOVER_RETRY_S
 
   def recover_usb(self) -> None:
     """At startup: undo a wired session a crash interrupted, so the car stops seeing a dead accessory

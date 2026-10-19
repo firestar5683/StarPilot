@@ -1,4 +1,5 @@
 from unittest.mock import Mock
+import json
 import socket
 import ssl
 import struct
@@ -929,6 +930,7 @@ class FakeNetworkManager:
     self.states = {}
     self.added = []
     self.calls = []
+    self.autoconnect = True
 
   def call(self, path, interface, member, signature=None, body: tuple=(), timeout=10.0):
     from openpilot.starpilot.system.android_auto import network
@@ -951,7 +953,8 @@ class FakeNetworkManager:
 
   def get(self, path, interface, name):
     values = {"WirelessEnabled": True, "DeviceType": 2, "Interface": "wlan0", "ActiveConnection": self.active_device_connection,
-              "Connection": "/settings/home", "Ip4Config": "/ip4/1"}
+              "Connection": "/settings/home", "Ip4Config": "/ip4/1", "Autoconnect": self.autoconnect,
+              "ActiveAccessPoint": "/ap/1", "Frequency": 5745}
     if name == "State":
       return self.states.get(path, 4)
     if name == "AddressData":
@@ -975,7 +978,12 @@ def make_lease(nm):
     reopen()
     return nm.get(*args, **kwargs)
 
-  lease._call, lease._get = Mock(side_effect=call), Mock(side_effect=get)
+  def set_property(path, interface, name, signature, value):
+    reopen()
+    nm.calls.append(f"Set{name}={value}")
+    nm.autoconnect = value
+
+  lease._call, lease._get, lease._set = Mock(side_effect=call), Mock(side_effect=get), Mock(side_effect=set_property)
   lease._delete_stale_profiles = Mock(side_effect=lambda: None)
   return lease
 
@@ -1026,6 +1034,21 @@ def test_network_lease_does_not_undo_user_network_change():
   assert "ActivateConnection" not in nm.calls
 
 
+def test_network_lease_session_stop_after_a_failed_attempt_restores_home_wifi():
+  nm = FakeNetworkManager()
+  lease = make_lease(nm)
+  lease.acquire(credentials(), timeout=2.0)
+  assert "SetAutoconnect=False" in nm.calls  # home Wi-Fi does not rejoin between attempts
+  lease.release(restore=False)
+  nm.active_device_connection = "/"  # NetworkManager left wlan0 disconnected
+  assert lease.router is None and not nm.autoconnect
+  lease.release(restore=True)  # the session's last attempt failed; D-Bus is already closed
+  assert nm.calls[-2:] == ["SetAutoconnect=True", "ActivateConnection"] and nm.autoconnect
+  calls = len(nm.calls)
+  lease.release(restore=True)
+  assert len(nm.calls) == calls
+
+
 def test_network_lease_retry_keeps_previous_for_final_stop():
   nm = FakeNetworkManager()
   lease = make_lease(nm)
@@ -1035,3 +1058,74 @@ def test_network_lease_retry_keeps_previous_for_final_stop():
   lease.acquire(credentials(), timeout=2.0)
   lease.release(restore=True)
   assert nm.calls.count("ActivateConnection") == 1
+
+
+def test_paused_autoconnect_leaves_a_marker_until_restored(tmp_path):
+  nm = FakeNetworkManager()
+  lease = make_lease(nm)
+  lease.marker = tmp_path / "paused.json"
+  lease.acquire(credentials(), timeout=2.0)
+  assert lease.marker.exists() and json.loads(lease.marker.read_text())["interface"] == "wlan0"
+  lease.release(restore=True)
+  assert not lease.marker.exists() and nm.autoconnect
+
+
+def test_next_session_takes_over_a_pause_a_crash_left_behind(tmp_path):
+  nm = FakeNetworkManager()
+  crashed = make_lease(nm)
+  crashed.marker = tmp_path / "paused.json"
+  crashed.acquire(credentials(), timeout=2.0)  # the daemon dies here: no release
+  assert not nm.autoconnect
+  lease = make_lease(nm)
+  lease.marker = crashed.marker
+  lease.acquire(credentials(), timeout=2.0)
+  assert lease.autoconnect_paused
+  lease.release(restore=True)
+  assert nm.autoconnect and not lease.marker.exists()
+
+
+def test_recover_autoconnect_after_a_crash(tmp_path, monkeypatch):
+  from openpilot.starpilot.system.android_auto import network
+  marker = tmp_path / "paused.json"
+  log, sets = [], []
+  monkeypatch.setattr(network.NetworkLease, "_wifi_devices", lambda self: [("/dev/wlan0", "wlan0")])
+  monkeypatch.setattr(network.NetworkLease, "_set", lambda self, *args: sets.append(args))
+  assert network.recover_autoconnect(lambda event, **fields: log.append(event), marker)  # nothing to do
+  marker.write_text(json.dumps({"interface": "wlan0", "boot": network._boot_id()}))
+  assert network.recover_autoconnect(lambda event, **fields: log.append(event), marker)
+  assert sets == [("/dev/wlan0", network.NM_DEVICE_IFACE, "Autoconnect", "b", True)] and not marker.exists()
+  assert log == ["wifi_autoconnect_recovered"]
+  marker.write_text(json.dumps({"interface": "wlan0", "boot": "an earlier boot"}))
+  assert network.recover_autoconnect(lambda event, **fields: None, marker)  # a reboot already reset it
+  assert len(sets) == 1 and not marker.exists()
+
+
+def test_recover_autoconnect_keeps_the_marker_when_networkmanager_fails(tmp_path, monkeypatch):
+  from openpilot.starpilot.system.android_auto import network
+  marker = tmp_path / "paused.json"
+  marker.write_text(json.dumps({"interface": "wlan0", "boot": network._boot_id()}))
+
+  def unavailable(self):
+    raise network.NetworkError("NetworkManager is not running")
+  monkeypatch.setattr(network.NetworkLease, "_wifi_devices", unavailable)
+  assert not network.recover_autoconnect(lambda event, **fields: None, marker)
+  assert marker.exists()
+
+
+def test_supervisor_retries_wifi_recovery_while_idle(monkeypatch):
+  from openpilot.starpilot.system.android_auto import network, supervisor
+  results = [False, True]
+  calls = []
+  monkeypatch.setattr(network, "recover_autoconnect", lambda log: calls.append(1) or results.pop(0))
+  sup = supervisor.Supervisor.__new__(supervisor.Supervisor)
+  sup.log, sup._wifi_recover_at = (lambda *a, **k: None), 0.0
+  sup._session_alive = lambda: False
+  sup.recover_wifi(100)
+  sup.recover_wifi(110)  # waits before retrying
+  sup.recover_wifi(100 + supervisor.WIFI_RECOVER_RETRY_S)
+  sup.recover_wifi(1000)  # done
+  assert len(calls) == 2
+  sup._wifi_recover_at = 0.0
+  sup._session_alive = lambda: True
+  sup.recover_wifi(2000)  # never while a session owns wlan0
+  assert len(calls) == 2

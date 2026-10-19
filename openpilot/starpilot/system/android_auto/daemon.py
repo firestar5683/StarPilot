@@ -99,6 +99,8 @@ def handle(supervisor: Supervisor, request: dict[str, Any], verifier: GalaxySour
     supervisor.user_stop()
   elif command == "set_auto_connect":
     supervisor.set_auto_connect(bool(request.get("enabled", True)))
+  elif command == "set_dedicated_wifi":
+    supervisor.set_dedicated_wifi(request.get("enabled") is True)
   elif command == "select_receiver":
     supervisor.select_receiver(str(request.get("address", "")), str(request.get("name", "")))
   elif command == "forget_receiver":

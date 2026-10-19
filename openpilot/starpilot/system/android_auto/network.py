@@ -11,11 +11,14 @@ cellular default route and DNS are left alone (``never-default``,
 
 from __future__ import annotations
 
+import ipaddress
+import json
 import threading
 import time
 import uuid
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 
 from jeepney import DBusAddress, new_method_call
 from jeepney.io.threading import DBusRouter, open_dbus_connection
@@ -23,6 +26,7 @@ from jeepney.low_level import MessageType
 from jeepney.wrappers import Properties
 
 from openpilot.starpilot.system.android_auto.bootstrap import WifiCredentials
+from openpilot.starpilot.system.android_auto.identity import DATA_DIR
 
 NM = "org.freedesktop.NetworkManager"
 NM_PATH = "/org/freedesktop/NetworkManager"
@@ -31,7 +35,11 @@ NM_DEVICE_IFACE = "org.freedesktop.NetworkManager.Device"
 NM_ACTIVE_IFACE = "org.freedesktop.NetworkManager.Connection.Active"
 NM_SETTINGS_CONNECTION_IFACE = "org.freedesktop.NetworkManager.Settings.Connection"
 NM_IP4_CONFIG_IFACE = "org.freedesktop.NetworkManager.IP4Config"
+NM_WIRELESS_IFACE = "org.freedesktop.NetworkManager.Device.Wireless"
+NM_AP_IFACE = "org.freedesktop.NetworkManager.AccessPoint"
 DEVICE_TYPE_WIFI = 2
+DEVICE_STATE_DISCONNECTED = 30
+DEVICE_READY_TIMEOUT_S = 5.0
 ACTIVE_STATE_ACTIVATED = 2
 ACTIVE_STATE_DEACTIVATED = 4
 # The car sends its Wi-Fi details ~4 s after ignition, but a Honda's access point took ~55 s from ignition to appear
@@ -42,10 +50,58 @@ JOIN_TIMEOUT_S = 120.0
 BSSID_SHARE = 0.75
 CONNECTION_ID = "starpilot-android-auto"
 SECURITY_WPA3 = (32,)
+# Written before a session turns wlan0 autoconnect off, removed once it is back on; a crash leaves it for recovery.
+AUTOCONNECT_MARKER = DATA_DIR / "wifi_autoconnect_paused.json"
 
 
 class NetworkError(RuntimeError):
   pass
+
+
+class DedicatedUnavailable(NetworkError):
+  """The dedicated car interface cannot be used this session; projection falls back to wlan0."""
+
+
+class JoinTimeout(NetworkError):
+  """The car's network never came up in time."""
+
+
+def _boot_id() -> str:
+  try:
+    return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+  except OSError:
+    return ""
+
+
+def _paused_interface(marker: Path) -> str:
+  """The interface a session paused this boot and never restored, or ""; NetworkManager resets autoconnect on reboot."""
+  try:
+    state = json.loads(marker.read_text())
+  except (OSError, ValueError):
+    return ""
+  return state.get("interface", "") if isinstance(state, dict) and state.get("boot") == _boot_id() else ""
+
+
+def recover_autoconnect(log: Callable[..., None], marker: Path = AUTOCONNECT_MARKER) -> bool:
+  """Turn wlan0 autoconnect back on after a session that paused it ended without restoring it. True when done."""
+  if not marker.exists():
+    return True
+  interface = _paused_interface(marker)
+  if interface:
+    lease = NetworkLease(log, interface)
+    try:
+      path = next((path for path, name in lease._wifi_devices() if name == interface), "")
+      if path:
+        lease._set(path, NM_DEVICE_IFACE, "Autoconnect", "b", True)
+        log("wifi_autoconnect_recovered", interface=interface)
+    except NetworkError as error:
+      log("wifi_autoconnect_recover_failed", error=str(error))
+      return False
+    finally:
+      if lease.router is not None:
+        lease.router.close()
+  marker.unlink(missing_ok=True)
+  return True
 
 
 def connection_settings(credentials: WifiCredentials, interface: str) -> dict:
@@ -83,15 +139,20 @@ def connection_settings(credentials: WifiCredentials, interface: str) -> dict:
 
 
 class NetworkLease:
-  def __init__(self, log: Callable[..., None], interface: str = "wlan0"):
+  def __init__(self, log: Callable[..., None], interface: str = "wlan0", dedicated: bool = False):
+    """``dedicated``: the interface exists only for the car, so never fall back to another one or touch its previous network."""
     self.log = log
     self.interface = interface
+    self.dedicated = dedicated
     self.router: DBusRouter | None = None
     self.device_path = ""
     self.connection_path = ""
     self.active_path = ""
     self.previous_connection = ""
     self.local_ip = ""
+    self.device_ready = False
+    self.autoconnect_paused = False
+    self.marker = AUTOCONNECT_MARKER
     self._lock = threading.Lock()
 
   def _open(self) -> DBusRouter:
@@ -114,18 +175,36 @@ class NetworkLease:
       raise NetworkError(f"Cannot read {name}: {reply.body[0] if reply.body else ''}")
     return reply.body[0][1]
 
-  def _wifi_device(self) -> str:
-    fallback = ""
+  def _set(self, path: str, interface: str, name: str, signature: str, value) -> None:
+    address = DBusAddress(path, bus_name=NM, interface=interface)
+    reply = self._open().send_and_get_reply(Properties(address).set(name, signature, value), timeout=5.0)
+    if reply.header.message_type == MessageType.error:
+      raise NetworkError(f"Cannot set {name}: {reply.body[0] if reply.body else ''}")
+
+  def _wifi_devices(self) -> list[tuple[str, str]]:
+    devices = []
     for path in self._call(NM_PATH, NM_IFACE, "GetDevices")[0]:
-      if self._get(path, NM_DEVICE_IFACE, "DeviceType") != DEVICE_TYPE_WIFI:
-        continue
-      if self._get(path, NM_DEVICE_IFACE, "Interface") == self.interface:
+      try:
+        if self._get(path, NM_DEVICE_IFACE, "DeviceType") == DEVICE_TYPE_WIFI:
+          devices.append((path, self._get(path, NM_DEVICE_IFACE, "Interface")))
+      except NetworkError:
+        continue  # removed while listing
+    return devices
+
+  def _wifi_device(self) -> str:
+    devices = self._wifi_devices()
+    for path, name in devices:
+      if name == self.interface:
         return path
-      fallback = fallback or path
-    if not fallback:
+    if not devices:
       raise NetworkError("No Wi-Fi device found")
-    self.interface = self._get(fallback, NM_DEVICE_IFACE, "Interface")
-    return fallback
+    self.interface = devices[0][1]
+    return devices[0][0]
+
+  def prepare_device(self, cancelled: Callable[[], bool] = lambda: False) -> None:
+    """Dedicated mode, ahead of the join: wait for NetworkManager to take the new interface and keep saved networks off it."""
+    with self._lock:
+      self._prepare_device(cancelled)
 
   def acquire(self, credentials: WifiCredentials, timeout: float = JOIN_TIMEOUT_S, cancelled: Callable[[], bool] = lambda: False) -> str:
     """Join the projection network and return the comma's IPv4 address on it.
@@ -142,6 +221,8 @@ class NetworkLease:
       try:
         share = 1.0 if len(attempts) == 1 else (BSSID_SHARE if index == 0 else 1.0 - BSSID_SHARE)
         return self._acquire_once(attempt, timeout * share, cancelled)
+      except DedicatedUnavailable:
+        raise
       except NetworkError as error:
         last_error = error
         if cancelled() or index == len(attempts) - 1:
@@ -168,9 +249,13 @@ class NetworkLease:
     with self._lock:
       if not self._get(NM_PATH, NM_IFACE, "WirelessEnabled"):
         raise NetworkError("Wi-Fi is turned off on the comma")
-      self.device_path = self._wifi_device()
+      if self.dedicated:
+        self._prepare_device(cancelled)
+      else:
+        self.device_path = self._wifi_device()
+        self._pause_autoconnect()
       active = self._get(self.device_path, NM_DEVICE_IFACE, "ActiveConnection")
-      if active and active != "/" and not self.previous_connection:
+      if active and active != "/" and not self.previous_connection and not self.dedicated:
         try:
           previous = self._get(active, NM_ACTIVE_IFACE, "Connection")
           if self._connection_id(previous) != CONNECTION_ID:
@@ -198,11 +283,99 @@ class NetworkLease:
       if state == ACTIVE_STATE_DEACTIVATED:
         raise NetworkError("NetworkManager could not join the projection network")
       if time.monotonic() >= deadline:
-        raise NetworkError(f"Timed out joining the projection network after {timeout:.0f} s")
+        raise JoinTimeout(f"Timed out joining the projection network after {timeout:.0f} s")
       time.sleep(0.25)
     self.local_ip = self._ipv4()
-    self.log("wifi_joined", interface=self.interface, local_ip=self.local_ip)
+    if self.dedicated:
+      self._check_overlap()
+    self.log("wifi_joined", interface=self.interface, local_ip=self.local_ip, **self._radio())
     return self.local_ip
+
+  def _frequency(self, path: str) -> int:
+    access_point = self._get(path, NM_WIRELESS_IFACE, "ActiveAccessPoint")
+    return int(self._get(access_point, NM_AP_IFACE, "Frequency")) if access_point and access_point != "/" else 0
+
+  def _radio(self) -> dict:
+    """Channels at join time; a car and home Wi-Fi on different channels share the radio's airtime."""
+    radio = {}
+    try:
+      radio["freq"] = self._frequency(self.device_path)
+      if self.dedicated:
+        for path, name in self._wifi_devices():
+          if name == "wlan0":
+            radio["wlan0_state"] = int(self._get(path, NM_DEVICE_IFACE, "State"))
+            radio["wlan0_freq"] = self._frequency(path)
+    except NetworkError:
+      pass
+    return radio
+
+  def _wait_step(self, deadline: float, cancelled: Callable[[], bool], failure: str) -> None:
+    if cancelled():
+      raise NetworkError("cancelled")
+    if time.monotonic() >= deadline:
+      raise DedicatedUnavailable(failure)
+    time.sleep(0.25)
+
+  def _prepare_device(self, cancelled: Callable[[], bool]) -> None:
+    if self.device_ready:
+      return
+    deadline = time.monotonic() + DEVICE_READY_TIMEOUT_S
+    # NetworkManager registers a new interface a moment after the kernel creates it.
+    while not (path := next((path for path, name in self._wifi_devices() if name == self.interface), "")):
+      self._wait_step(deadline, cancelled, f"{self.interface} is not a NetworkManager Wi-Fi device")
+    self.device_path = path
+    # Before the device is ready, so a saved network can never autoconnect on it.
+    if self._get(path, NM_DEVICE_IFACE, "Autoconnect"):
+      try:
+        self._set(path, NM_DEVICE_IFACE, "Autoconnect", "b", False)
+      except NetworkError as error:
+        raise DedicatedUnavailable(f"Cannot stop saved networks joining {self.interface}") from error
+    while self._get(path, NM_DEVICE_IFACE, "State") < DEVICE_STATE_DISCONNECTED:
+      self._wait_step(deadline, cancelled, f"NetworkManager did not take {self.interface}")
+    self.device_ready = True
+
+  def _pause_autoconnect(self) -> None:
+    """Keep NetworkManager from rejoining home Wi-Fi between attempts; release(restore=True) turns it back on."""
+    if self.autoconnect_paused:
+      return
+    try:
+      if self._get(self.device_path, NM_DEVICE_IFACE, "Autoconnect"):
+        self._write_marker()
+        self._set(self.device_path, NM_DEVICE_IFACE, "Autoconnect", "b", False)
+        self.autoconnect_paused = True
+      elif _paused_interface(self.marker) == self.interface:
+        self.autoconnect_paused = True  # an earlier session paused it and never got to turn it back on
+    except NetworkError as error:
+      self.log("wifi_autoconnect_pause_failed", error=str(error))
+
+  def _write_marker(self) -> None:
+    try:
+      self.marker.parent.mkdir(parents=True, exist_ok=True)
+      self.marker.write_text(json.dumps({"interface": self.interface, "boot": _boot_id()}))
+    except OSError as error:
+      self.log("wifi_autoconnect_marker_failed", error=str(error))
+
+  def _networks(self, path: str) -> list:
+    config = self._get(path, NM_DEVICE_IFACE, "Ip4Config")
+    if not config or config == "/":
+      return []
+    return [ipaddress.ip_network(f"{entry['address'][1]}/{entry['prefix'][1]}", strict=False)
+            for entry in self._get(config, NM_IP4_CONFIG_IFACE, "AddressData") if "address" in entry and "prefix" in entry]
+
+  def _check_overlap(self) -> None:
+    """The car's subnet must not also be reachable through home Wi-Fi, or replies to the head unit leave on wlan0."""
+    ours = self._networks(self.device_path)
+    for path in self._call(NM_PATH, NM_IFACE, "GetDevices")[0]:
+      if path == self.device_path:
+        continue
+      try:
+        others = self._networks(path)
+      except NetworkError:
+        continue
+      for other in others:
+        if any(network.overlaps(other) for network in ours):
+          self.log("wifi_subnet_overlap", car=str(ours[0]), other=str(other))
+          raise DedicatedUnavailable(f"The car's network {ours[0]} overlaps {other}")
 
   def _connection_id(self, path: str) -> str:
     try:
@@ -247,7 +420,8 @@ class NetworkLease:
     reactivated only when the session finally stops, avoiding churn between attempts.
     """
     with self._lock:
-      if self.router is None:
+      # Each attempt's release closes D-Bus; the final one may still owe a restore.
+      if self.router is None and not (restore and (self.previous_connection or self.autoconnect_paused)):
         return
       ours_active = False
       try:
@@ -266,6 +440,13 @@ class NetworkLease:
           self._call(self.connection_path, NM_SETTINGS_CONNECTION_IFACE, "Delete")
         except NetworkError:
           pass  # volatile profiles delete themselves on deactivation
+      if restore and self.autoconnect_paused:
+        try:
+          self._set(self.device_path, NM_DEVICE_IFACE, "Autoconnect", "b", True)
+          self.marker.unlink(missing_ok=True)
+        except (NetworkError, OSError) as error:
+          self.log("wifi_autoconnect_restore_failed", error=str(error))  # the marker stays; the daemon retries while idle
+        self.autoconnect_paused = False
       if restore and ours_active and self.previous_connection and self.device_path:
         try:
           self._call(NM_PATH, NM_IFACE, "ActivateConnection", "ooo", (self.previous_connection, self.device_path, "/"))
@@ -276,6 +457,7 @@ class NetworkLease:
       if restore:
         self.previous_connection = ""
       try:
-        self.router.close()
+        if self.router is not None:
+          self.router.close()
       finally:
         self.router = None

@@ -1,4 +1,4 @@
-"""Small nl80211 client for the one Galaxy AP interface; no wlan0 mutations."""
+"""Small nl80211 client for the Galaxy AP and Android Auto car interfaces; no wlan0 mutations."""
 import socket
 import struct
 
@@ -67,12 +67,12 @@ class WirelessInterfaces:
             'phy': int.from_bytes(row[1], 'little'), 'type': int.from_bytes(row[5], 'little')}
             for row in self.query(self.family, 5, dump=True)}  # GET_INTERFACE
 
-  def create(self, name, primary='wlan0'):
+  def create(self, name, primary='wlan0', iftype=3):  # 3 = AP, 2 = station
     interfaces = self.interfaces()
     if name in interfaces or interfaces[primary]['type'] != 2:  # station
-      raise RuntimeError('Hotspot interface exists or primary Wi-Fi is not a client')
+      raise RuntimeError('Interface exists or primary Wi-Fi is not a client')
     payload = attribute(1, struct.pack('I', interfaces[primary]['phy']))
-    payload += attribute(4, name.encode() + b'\0') + attribute(5, struct.pack('I', 3))  # AP
+    payload += attribute(4, name.encode() + b'\0') + attribute(5, struct.pack('I', iftype))
     self.query(self.family, 7, payload, ack=True)  # NEW_INTERFACE
 
   def delete(self, name):

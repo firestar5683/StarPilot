@@ -449,7 +449,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if settings_gateway is None:
         from openpilot.common.params import Params
         params = Params()
-        settings_gateway = SettingsGateway(params, context_source(params))
+        settings_gateway = SettingsGateway(params, context_source(params), android_auto=aa_client)
         server.settings_source = settings_gateway
       return settings_gateway
 

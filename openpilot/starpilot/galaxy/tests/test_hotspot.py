@@ -1,15 +1,27 @@
 import json
 import stat
+import struct
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
 from openpilot.starpilot.galaxy.hotspot import DEFAULT, HotspotSettings, atomic_json, hotspot_name, validate_config
 from openpilot.starpilot.galaxy.hotspot_netlink import WirelessInterfaces, attribute, attributes
-from openpilot.starpilot.galaxy.hotspot_worker import HotspotBackend, HotspotController, hostapd_config, overlapping_routes, radio_channel
+from openpilot.starpilot.galaxy.hotspot_worker import (HOLD, STANDALONE_SETTLE_S, HotspotBackend, HotspotController, choose_channel,
+                                                       hostapd_config, nm_activating, overlapping_routes, radio_channel)
 
 CONFIG = {'enabled': True, 'ssid': 'TheGalaxy-6b86', 'password': '1234567890123456'}
 DONGLE = 'b0c4a280b2f96b86'
+
+
+def backend_mock(ready=True, ap_channel=None):
+  backend = Mock()
+  backend.alive.return_value = True
+  backend.ap_status.return_value = {'ready': ready, 'channel': ap_channel}
+  backend.activating.return_value = False
+  backend.connected = set()
+  return backend
 
 
 @pytest.mark.parametrize('change', [{'enabled': 1}, {'ssid': 'bad\nssid'}, {'password': 'short'},
@@ -79,7 +91,7 @@ def test_unregistered_name_is_not_invented(dongle):
 @pytest.mark.parametrize('status,expected', [('wpa_state=COMPLETED\nfreq=5745', ('a', 149)),
   ('wpa_state=COMPLETED\nfreq=2412', ('g', 1)), ('wpa_state=DISCONNECTED\nfreq=5745', ('g', 6)),
   ('wpa_state=INACTIVE', ('g', 6)), ('wpa_state=SCANNING', ('g', 6)),
-  ('wpa_state=ASSOCIATING', None), ('wpa_state=4WAY_HANDSHAKE\nfreq=5745', None),
+  ('wpa_state=ASSOCIATING', HOLD), ('wpa_state=4WAY_HANDSHAKE\nfreq=5745', HOLD),
   ('wpa_state=INTERFACE_DISABLED', None), ('FAIL', None),
   ('wpa_state=COMPLETED\nfreq=6000', None)])
 def test_channel(status, expected):
@@ -88,17 +100,154 @@ def test_channel(status, expected):
 
 def test_automatic_standalone_connected_and_back():
   now = [100]
-  backend = Mock()
-  backend.alive.return_value = backend.ready.return_value = True
+  backend = backend_mock()
   controller = HotspotController(backend, clock=lambda: now[0])
   for status, expected in [('DISCONNECTED', ('g', 6)), ('COMPLETED\nfreq=5745', ('a', 149)), ('DISCONNECTED', ('g', 6))]:
     backend.channel.return_value = radio_channel('wpa_state=' + status)
     assert controller.tick(CONFIG)['state'] == 'starting'
     backend.start.assert_called_with(CONFIG, expected)
     assert controller.tick(CONFIG)['active']
-    now[0] += 20
+    now[0] += STANDALONE_SETTLE_S + 1
   assert backend.start.call_count == 3
   assert controller.tick({**CONFIG, 'enabled': False})['state'] == 'disabled'
+
+
+@pytest.mark.parametrize('results,expected', [
+  ([('a', 149)], ('a', 149)), ([('g', 6)], ('g', 6)), ([None], None), ([HOLD, ('a', 149)], HOLD),
+  ([('a', 149), HOLD], HOLD), ([('g', 1), ('a', 149)], ('g', 1)), ([('g', 6), ('a', 149)], ('a', 149)),
+  ([None, ('a', 149)], ('a', 149)), ([('g', 6), None], ('g', 6))])
+def test_choose_channel(results, expected):
+  assert choose_channel(results) == expected
+
+
+@pytest.mark.parametrize('state,expected', [('30 (disconnected)', False), ('50 (connecting (configuring))', True),
+  ('60 (connecting (need authentication))', True), ('100 (connected)', False), ('', False), ('junk', False)])
+def test_nm_activating(state, expected):
+  assert nm_activating(state) == expected
+
+
+def test_join_leaves_running_ap_alone():
+  now = [100]
+  backend = backend_mock(ap_channel=1)
+  controller = HotspotController(backend, clock=lambda: now[0])
+  backend.channel.return_value = ('g', 1)
+  controller.tick(CONFIG)
+  assert controller.tick(CONFIG)['active']
+  backend.start.reset_mock()
+  backend.stop.reset_mock()
+  # Android Auto drops home Wi-Fi, scans, associates and joins the car on channel 149.
+  for channel in (('g', 6), HOLD, ('g', 6), HOLD):
+    backend.channel.return_value = channel
+    now[0] += 2
+    assert controller.tick(CONFIG)['active']
+  backend.stop.assert_not_called()
+  backend.start.assert_not_called()
+  backend.ap_status.return_value = {'ready': True, 'channel': 149}
+  backend.channel.return_value = ('a', 149)
+  assert controller.tick(CONFIG)['channel'] == 149
+  backend.stop.assert_not_called()
+  backend.start.assert_not_called()
+  # Only a station gone for good moves the AP to its standalone channel.
+  backend.channel.return_value = ('g', 6)
+  now[0] += STANDALONE_SETTLE_S - 1
+  assert controller.tick(CONFIG)['active']
+  backend.start.assert_not_called()
+  now[0] += 2
+  assert controller.tick(CONFIG)['state'] == 'starting'
+  backend.start.assert_called_once_with(CONFIG, ('g', 6))
+
+
+def test_hold_does_not_start_ap():
+  backend = backend_mock()
+  backend.channel.return_value = HOLD
+  controller = HotspotController(backend, clock=lambda: 100)
+  assert controller.tick(CONFIG)['state'] == 'waiting'
+  backend.start.assert_not_called()
+  backend.stop.assert_not_called()
+
+
+def test_backend_channel_reports_idle_stations_and_asks_networkmanager_only_for_them(tmp_path):
+  def command(args, **kwargs):
+    if args[0] == 'nmcli':
+      return Mock(returncode=0, stdout='50 (connecting (configuring))\n')
+    return Mock(returncode=0, stdout='wpa_state=DISCONNECTED\n')
+  run = Mock(side_effect=command)
+  backend = HotspotBackend(tmp_path, run=run, interfaces=Mock())
+  assert backend.channel() == ('g', 6) and backend.idle == ['wlan0']
+  assert all(call.args[0][0] != 'nmcli' for call in run.call_args_list)
+  assert backend.activating()
+  run.side_effect = lambda args, **kwargs: Mock(returncode=0, stdout='wpa_state=COMPLETED\nfreq=5745')
+  assert backend.channel() == ('a', 149) and backend.connected == {149}
+  assert not backend.activating()
+  assert all(call.args[0][-1] in ('status', 'wlan0') for call in run.call_args_list)
+
+
+def test_backend_skips_car_station_without_status(tmp_path, monkeypatch):
+  monkeypatch.setattr(Path, 'exists', lambda self: True)
+  def command(args, **kwargs):
+    if args[2] == 'aa0':
+      assert kwargs['check'] is False
+      return Mock(returncode=255, stdout='Failed to connect to non-global ctrl_ifname: aa0')
+    return Mock(returncode=0, stdout='wpa_state=COMPLETED\nfreq=2412')
+  backend = HotspotBackend(tmp_path, run=Mock(side_effect=command), interfaces=Mock())
+  assert backend.channel() == ('g', 1)
+
+
+def test_networkmanager_join_holds_the_running_ap():
+  now = [100]
+  backend = backend_mock(ap_channel=1)
+  controller = HotspotController(backend, clock=lambda: now[0])
+  backend.channel.return_value = ('g', 1)
+  controller.tick(CONFIG)
+  backend.start.reset_mock()
+  backend.channel.return_value = ('g', 6)
+  now[0] += STANDALONE_SETTLE_S + 1
+  backend.activating.return_value = True
+  assert controller.tick(CONFIG)['active']
+  backend.start.assert_not_called()
+  backend.activating.reset_mock()
+  backend.channel.return_value = ('g', 1)
+  backend.activating.return_value = False
+  controller.tick(CONFIG)
+  backend.activating.assert_not_called()  # nothing to change, so nothing to ask
+
+
+def test_ap_moved_by_the_driver_to_another_station_stays_there():
+  backend = backend_mock(ap_channel=36)
+  controller = HotspotController(backend, clock=lambda: 100)
+  backend.channel.return_value = ('a', 36)
+  controller.tick(CONFIG)
+  backend.start.reset_mock()
+  backend.stop.reset_mock()
+  backend.connected = {36, 149}
+  backend.ap_status.return_value = {'ready': True, 'channel': 149}
+  for _ in range(3):
+    assert controller.tick(CONFIG) == {'active': True, 'state': 'active', 'reason': '', 'channel': 149}
+  backend.start.assert_not_called()
+  backend.stop.assert_not_called()
+
+
+def test_dfs_channel_that_will_not_start_falls_back_to_standalone():
+  now = [100]
+  backend = backend_mock(ready=False)
+  controller = HotspotController(backend, clock=lambda: now[0])
+  backend.channel.return_value = ('a', 100)
+  assert controller.tick(CONFIG)['state'] == 'starting'
+  now[0] += 16
+  assert controller.tick(CONFIG)['state'] == 'error'
+  now[0] += 16
+  backend.ap_status.return_value = {'ready': True, 'channel': 6}
+  assert controller.tick(CONFIG)['state'] == 'starting'
+  backend.start.assert_called_with(CONFIG, ('g', 6))
+
+
+def test_backend_ap_status(tmp_path):
+  run = Mock(return_value=Mock(returncode=0, stdout='state=ENABLED\nchannel=149\n'))
+  backend = HotspotBackend(tmp_path, run=run, interfaces=Mock())
+  assert backend.ap_status() == {'ready': True, 'channel': 149}
+  assert run.call_count == 1
+  run.return_value = Mock(returncode=255, stdout='')
+  assert backend.ap_status() == {'ready': False, 'channel': None}
 
 
 def test_routes_and_config():
@@ -113,19 +262,18 @@ def test_routes_and_config():
 
 
 def test_controller_lifecycle_and_channel_recovery():
-  backend = Mock()
+  backend = backend_mock()
   backend.channel.return_value = ('a', 149)
-  backend.alive.return_value = backend.ready.return_value = True
   now = [100]
   controller = HotspotController(backend, clock=lambda: now[0])
   assert controller.tick(CONFIG)['state'] == 'starting'
   assert controller.tick(CONFIG)['active']
   backend.start.assert_called_once_with(CONFIG, ('a', 149))
-  backend.channel.return_value = ('g', 6)
+  backend.channel.return_value = ('a', 36)
   assert controller.tick(CONFIG)['state'] == 'error'  # rate limit restarts
   now[0] += 16
   assert controller.tick(CONFIG)['state'] == 'starting'
-  backend.start.assert_called_with(CONFIG, ('g', 6))
+  backend.start.assert_called_with(CONFIG, ('a', 36))
   backend.channel.return_value = None
   assert controller.tick(CONFIG)['state'] == 'waiting'
   assert controller.applied is None
@@ -134,10 +282,8 @@ def test_controller_lifecycle_and_channel_recovery():
 
 
 def test_controller_readiness_and_failed_child():
-  backend = Mock()
+  backend = backend_mock(ready=False)
   backend.channel.return_value = ('a', 149)
-  backend.alive.return_value = True
-  backend.ready.return_value = False
   now = [0]
   controller = HotspotController(backend, clock=lambda: now[0])
   assert controller.tick(CONFIG)['state'] == 'starting'
@@ -193,3 +339,16 @@ def test_netlink_encoding_and_refusal():
   wireless.query.assert_not_called()
   wireless.delete('galaxy0')
   wireless.query.assert_called_once_with(22, 8, attribute(3, b'\x07\0\0\0'), ack=True)
+
+
+def test_netlink_new_interface_payloads():
+  wireless = WirelessInterfaces.__new__(WirelessInterfaces)
+  wireless.interfaces = Mock(return_value={'wlan0': {'type': 2, 'phy': 0, 'index': 1}})
+  wireless.query = Mock()
+  wireless.family = 22
+  wireless.create('galaxy0')
+  ap = attribute(1, struct.pack('I', 0)) + attribute(4, b'galaxy0\0') + attribute(5, struct.pack('I', 3))
+  wireless.query.assert_called_with(22, 7, ap, ack=True)
+  wireless.create('aa0', iftype=2)
+  station = attribute(1, struct.pack('I', 0)) + attribute(4, b'aa0\0') + attribute(5, struct.pack('I', 2))
+  wireless.query.assert_called_with(22, 7, station, ack=True)

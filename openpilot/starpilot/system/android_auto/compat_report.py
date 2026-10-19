@@ -148,6 +148,13 @@ def summarize(events: list[dict]) -> dict:
       report["wifi"].update(security=record.get("security", ""), ap_type=record.get("ap_type"))
     elif name == "wifi_joined":
       report["wifi"]["joined"] = True
+      report["wifi"]["interface"] = record.get("interface", "")
+      if record.get("freq"):
+        report["wifi"]["car_freq"] = record["freq"]
+      if record.get("wlan0_freq"):
+        report["wifi"]["wlan0_freq"] = record["wlan0_freq"]
+        if record.get("freq") and record["freq"] != record["wlan0_freq"]:
+          report["wifi"]["radio"] = "MCC (2 channels)"
     elif name == "version":
       report["tls"]["protocol"] = f"{record.get('major')}.{record.get('minor')} (replied {record.get('reply')})"
     elif name == "tls_established":

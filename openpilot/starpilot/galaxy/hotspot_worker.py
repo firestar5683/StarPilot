@@ -5,33 +5,40 @@ EOF, ten seconds without a heartbeat, or SIGTERM tears down only our AP.
 """
 from __future__ import annotations
 
-import fcntl
 import ipaddress
 import json
 import os
 from pathlib import Path
 import select
 import shutil
-import signal
 import subprocess
 import sys
 import time
 
 from openpilot.starpilot.galaxy.hotspot import ADDRESS, INTERFACE, NETWORK, HotspotSettings, validate_config
 from openpilot.starpilot.galaxy.hotspot_netlink import WirelessInterfaces
+from openpilot.starpilot.system.pipe_worker import claim, owned, stop_event
 
 ALIAS = 'starpilot-galaxy-hotspot'
 RUNTIME = Path('/run/starpilot-galaxy-hotspot')
 STANDALONE_CHANNEL = ('g', 6)
+HOLD = 'hold'
+# wlan0 first; aa0 is Android Auto's own car link when it runs on a dedicated interface.
+STATIONS = ('wlan0', 'aa0')
+# Android Auto drops and rejoins the car between attempts; stay put through those gaps.
+STANDALONE_SETTLE_S = 30.0
+NEGOTIATING = ('AUTHENTICATING', 'ASSOCIATING', 'ASSOCIATED', '4WAY_HANDSHAKE', 'GROUP_HANDSHAKE')
 
 
 def radio_channel(status):
   fields = dict(line.split('=', 1) for line in status.splitlines() if '=' in line)
   # A disconnected station remains available for AA/Wi-Fi association. Do not
   # depend on an Internet connection to offer local access. Association itself
-  # gets priority: pause the AP while the station is negotiating its channel.
+  # gets priority: leave the AP untouched while the station negotiates its channel.
   if fields.get('wpa_state') in ('DISCONNECTED', 'INACTIVE', 'SCANNING'):
     return STANDALONE_CHANNEL
+  if fields.get('wpa_state') in NEGOTIATING:
+    return HOLD
   if fields.get('wpa_state') != 'COMPLETED':
     return None
   frequency = int(fields.get('freq', '0'))
@@ -40,6 +47,32 @@ def radio_channel(status):
   if 5180 <= frequency <= 5825 and frequency % 5 == 0:
     return 'a', (frequency - 5000) // 5
   return None
+
+
+def band_channel(number):
+  return ('g' if number <= 14 else 'a'), number
+
+
+def dfs(channel):
+  return channel[0] == 'a' and 52 <= channel[1] <= 144
+
+
+def choose_channel(results):
+  """Pick the AP channel from each station's radio_channel result, wlan0 first."""
+  if HOLD in results:
+    return HOLD
+  for result in results:
+    if isinstance(result, tuple) and result != STANDALONE_CHANNEL:
+      return result
+  return results[0] if results else None
+
+
+def nm_activating(state):
+  """NetworkManager device states 40-90 are the steps between disconnected and activated."""
+  try:
+    return 40 <= int(state.strip().split(' ', 1)[0]) < 100
+  except ValueError:
+    return False
 
 
 def overlapping_routes(rows):
@@ -69,19 +102,48 @@ class HotspotBackend:
     self.children = []
     self.owned = False
     self.firewall = shutil.which('iptables-legacy') or shutil.which('iptables')
+    self.connected = set()  # channel numbers of the stations that are connected
+    self.idle = []  # stations that reported no connection; NetworkManager may be about to join one
 
   def command(self, args, check=True):
     return self.run(args, check=check, text=True, capture_output=True, timeout=5)
 
   def channel(self):
-    return radio_channel(self.command(['/usr/sbin/wpa_cli', '-i', 'wlan0', 'status']).stdout)
+    results, self.connected, self.idle = [], set(), []
+    for station in STATIONS:
+      if station == STATIONS[0]:
+        result = radio_channel(self.command(['/usr/sbin/wpa_cli', '-i', station, 'status']).stdout)
+      else:
+        if not Path(f'/sys/class/net/{station}').exists():
+          continue
+        # Between creation and wpa_supplicant taking it, aa0 has no status yet; that is no reason to drop the AP.
+        reply = self.command(['/usr/sbin/wpa_cli', '-i', station, 'status'], check=False)
+        if reply.returncode != 0:
+          continue
+        result = radio_channel(reply.stdout)
+      if result == STANDALONE_CHANNEL:
+        self.idle.append(station)
+      elif isinstance(result, tuple):
+        self.connected.add(result[1])
+      results.append(result)
+    return choose_channel(results)
+
+  def activating(self):
+    for station in self.idle:
+      reply = self.command(['nmcli', '-t', '-g', 'GENERAL.STATE', 'device', 'show', station], check=False)
+      if reply.returncode == 0 and nm_activating(reply.stdout):
+        return True
+    return False
 
   def alive(self):
     return self.owned and len(self.children) == 2 and all(child.poll() is None for child in self.children)
 
-  def ready(self):
+  def ap_status(self):
+    """Whether the AP is up, and its current channel: the driver moves it by itself to follow a station."""
     reply = self.command(['/usr/sbin/hostapd_cli', '-p', str(self.root / 'control'), '-i', INTERFACE, 'status'], check=False)
-    return reply.returncode == 0 and 'state=ENABLED' in reply.stdout.splitlines()
+    lines = reply.stdout.splitlines() if reply.returncode == 0 else []
+    channel = next((line.split('=', 1)[1] for line in lines if line.startswith('channel=')), '')
+    return {'ready': 'state=ENABLED' in lines, 'channel': int(channel) if channel.isdigit() else None}
 
   def _wireless(self, method):
     client = self.interfaces()
@@ -91,10 +153,7 @@ class HotspotBackend:
       client.close()
 
   def stale_owned(self):
-    try:
-      return Path(f'/sys/class/net/{INTERFACE}/ifalias').read_text().strip() == ALIAS
-    except FileNotFoundError:
-      return False
+    return owned(INTERFACE, ALIAS)
 
   def stop(self):
     for child in self.children:
@@ -157,6 +216,9 @@ class HotspotController:
   def __init__(self, backend, clock=time.monotonic):
     self.backend, self.clock = backend, clock
     self.applied, self.retry_at, self.ready_deadline = None, 0.0, 0.0
+    self.station_seen = float('-inf')
+    self.attempted = None
+    self.refused = set()  # DFS channels hostapd would not start on; use the standalone channel instead
 
   def tick(self, config):
     if not config['enabled']:
@@ -165,27 +227,56 @@ class HotspotController:
       return {'active': False, 'state': 'disabled', 'reason': ''}
     try:
       channel = self.backend.channel()
+      running = self.applied is not None and self.backend.alive()
+      status = self.backend.ap_status() if running else None
+      if running and isinstance(channel, tuple) and self.applied[0] == config:
+        current = status['channel']
+        # The driver moves the AP onto a station's channel by itself; restarting it there would only move it back.
+        if current is not None and (current == channel[1] or current in self.backend.connected):
+          channel = band_channel(current)
+          self.applied = (self.applied[0], channel)
+      if channel == STANDALONE_CHANNEL:
+        if self.clock() - self.station_seen < STANDALONE_SETTLE_S:
+          channel = HOLD
+      elif channel is not None:
+        self.station_seen = self.clock()
+      if isinstance(channel, tuple) and channel[1] in self.refused:
+        channel = STANDALONE_CHANNEL
+      if channel != HOLD and (not running or (dict(config), channel) != self.applied) and self.backend.activating():
+        self.station_seen = self.clock()
+        channel = HOLD
       if channel is None:
         self.backend.stop()
         self.applied = None
         return {'active': False, 'state': 'waiting', 'reason': 'Waiting for Wi-Fi radio readiness or a supported connection channel.'}
       desired = (dict(config), channel)
-      if desired != self.applied or not self.backend.alive():
+      if channel == HOLD:
+        # Starting, stopping or moving the AP while a station joins makes the join fail.
+        if not running:
+          return {'active': False, 'state': 'waiting', 'reason': 'Waiting for Wi-Fi to finish connecting.'}
+        desired = self.applied
+        channel = desired[1]
+      if desired != self.applied or not running:
         self.backend.stop()
         self.applied = None
         if self.clock() < self.retry_at:
           return {'active': False, 'state': 'error', 'reason': 'Hotspot unavailable; retrying shortly.'}
         self.retry_at = self.clock() + 15
+        self.attempted = channel
         self.backend.start(config, channel)
         self.applied = desired
         self.ready_deadline = self.clock() + 15
         return {'active': False, 'state': 'starting', 'reason': 'Starting the local Wi-Fi network.', 'channel': channel[1]}
-      if not self.backend.ready():
+      if not status['ready']:
         if self.clock() >= self.ready_deadline:
           raise RuntimeError('Hotspot did not become ready')
         return {'active': False, 'state': 'starting', 'reason': 'Waiting for the Wi-Fi access point.', 'channel': channel[1]}
+      self.attempted = None
       return {'active': True, 'state': 'active', 'reason': '', 'channel': channel[1]}
     except (OSError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError):
+      if self.attempted is not None and dfs(self.attempted):
+        self.refused.add(self.attempted[1])
+      self.attempted = None
       self.backend.stop()
       self.applied = None
       self.retry_at = self.clock() + 15
@@ -193,26 +284,14 @@ class HotspotController:
 
 
 def main():
-  if os.geteuid() != 0:
-    raise RuntimeError('Hotspot worker requires network administration privileges')
-  os.umask(0o077)
-  RUNTIME.mkdir(mode=0o700, exist_ok=True)
-  if RUNTIME.is_symlink() or RUNTIME.stat().st_uid != 0:
-    raise RuntimeError('Unsafe hotspot runtime directory')
-  fd = os.open(RUNTIME / 'lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-  fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+  fd = claim(RUNTIME, 'Hotspot worker')
   backend = HotspotBackend()
   controller = HotspotController(backend)
-  stopped = False
-  def stop(*_):
-    nonlocal stopped
-    stopped = True
-  signal.signal(signal.SIGTERM, stop)
-  signal.signal(signal.SIGINT, stop)
+  stop = stop_event()
   config, buffer, last = None, b'', time.monotonic()
   try:
     backend.stop()  # clean an interface explicitly marked as ours after a crash
-    while not stopped and time.monotonic() - last < 10:
+    while not stop.is_set() and time.monotonic() - last < 10:
       if select.select([sys.stdin], [], [], 2)[0]:
         data = os.read(sys.stdin.fileno(), 4097)
         if not data:
