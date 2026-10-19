@@ -169,6 +169,8 @@ def message_lines(view, bridge=READY):
 
 def PairPhone(allowed):
   import pyray as rl
+  from openpilot.common.hardware import HARDWARE
+  from openpilot.system.ui.lib.text_measure import measure_text_cached
   from openpilot.system.ui.lib.application import gui_app, FontWeight
   from openpilot.system.ui.widgets import Widget
   from openpilot.system.ui.widgets.button import Button
@@ -180,7 +182,8 @@ def PairPhone(allowed):
       self.lock = threading.Lock()
       self.view = self.window.view()
       self.stop = threading.Event()
-      self.close_button = self._child(Button('Close', self._close, font_size=42))
+      self.c4 = HARDWARE.get_device_type() == 'mici'
+      self.close_button = self._child(Button('Close', self._close, font_size=24 if self.c4 else 42))
       threading.Thread(target=self._run, daemon=True).start()
 
     def _close(self):
@@ -210,6 +213,41 @@ def PairPhone(allowed):
       compact = rect.height < 600
       with self.lock:
         view = dict(self.view)
+      if self.c4:
+        margin = 16
+        width = rect.width - margin * 2
+
+        def text(line, x, y, size=22, color=rl.LIGHTGRAY, max_width=width):
+          label = line
+          while label and measure_text_cached(font, label, size).x > max_width:
+            line = line[:-1]
+            label = line + '…'
+          rl.draw_text_ex(font, label, rl.Vector2(x, y), size, 0, color)
+
+        x = rect.x + margin
+        text('Pair your phone', x, rect.y + 10, 26, rl.WHITE)
+        state = view['state']
+        if state == 'waiting':
+          lines = ['App: tap Pair in StarPilot.', 'Music: open phone Bluetooth settings.', view['adapter'] or 'Select this comma.']
+          if view['code']:
+            lines[2] = f'Confirm {view["code"]} on your phone.'
+          bridge = cached_setup_status()
+          if bridge != READY:
+            lines[2] = f'App link: {bridge}'
+        else:
+          lines = message_lines(view)[:2]
+        for i, line in enumerate(lines):
+          text(line, x, rect.y + 49 + i * 29)
+        half = width / 2
+        for i, (label, value) in enumerate((('App', view['app']), ('Music', view['music']))):
+          status = 'paired' if value else ('waiting' if state == 'waiting' else 'not paired')
+          text(f'{label}: {status}', x + i * half, rect.y + 141, 22,
+               rl.GREEN if value else rl.LIGHTGRAY, half - 8)
+        if state == 'waiting':
+          text(f'{view["left"] // 60}:{view["left"] % 60:02d} left', x, rect.y + rect.height - 46)
+        self.close_button.render(rl.Rectangle(rect.x + rect.width - margin - 160,
+                                             rect.y + rect.height - 62, 160, 48))
+        return
       rl.draw_text_ex(font, 'Pair your phone', rl.Vector2(rect.x + 28, rect.y + 16), 26 if compact else 48, 0, rl.WHITE)
       size, step = (22, 30) if compact else (34, 48)
       y = rect.y + (60 if compact else 100)
@@ -229,7 +267,7 @@ def open_pairing(allowed):
   from openpilot.system.ui.lib.application import gui_app
   if cached_setup_status() not in (READY, 'Bridge startup pending'):
     try:
-      retry_setup()
+      retry_setup(restart=False)
     except OSError:
       pass
   gui_app.push_widget(PairPhone(allowed))

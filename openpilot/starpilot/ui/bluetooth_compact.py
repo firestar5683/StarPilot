@@ -67,6 +67,7 @@ class BluetoothCompact(NavScroller):
     self.status = None
     self.pair_dialog = None
     self.pair_dialog_id = None
+    self.pairing_page = None
     super().hide_event()
 
   def _ready(self) -> bool:
@@ -236,34 +237,71 @@ class BluetoothCompact(NavScroller):
       if status.get("errorCode") in ("adapter_unavailable", "service_unavailable", "radio_preference_unavailable"):
         label = {"adapter_unavailable": "adapter", "service_unavailable": "service", "radio_preference_unavailable": "power setting"}
         cards.append(GreyBigButton(label[status["errorCode"]], "not responding"))
+      pairing = BigButton("pair a device", "phone app, music and other devices")
+      pairing.set_click_callback(self._open_pairing)
+      pairing.set_enabled(lambda: self._ready() or self._pairing_ready())
+      cards.append(pairing)
       if status.get("powered"):
-        cards.extend(self._pairing_cards())
-        for device in status.get("devices", ()):
-          name = device_label(device)
-          if not device.get("paired"):
-            button = BigButton(name, "tap to pair", scroll=True)
-            address = device["address"]
-            button.set_click_callback(lambda addr=address: self._open_device(addr))
-            button.set_enabled(self._ready)
-            cards.append(button)
-            continue
-          value = "connected" if device.get("connected") else "saved device"
-          button = BigButton(name, value, scroll=True)
-          address = device["address"]
-          button.set_click_callback(lambda addr=address: self._open_device(addr))
+        devices = [device for device in status.get("devices", ()) if device.get("paired") or device.get("connected")]
+        cards.append(GreyBigButton("your devices", "Bluetooth connections"))
+        for device in devices:
+          value = "Bluetooth connected" if device.get("connected") else "Bluetooth paired · disconnected"
+          button = BigButton(device_label(device), value, scroll=True)
+          button.set_click_callback(lambda addr=device["address"]: self._open_device(addr))
           button.set_enabled(self._ready)
           cards.append(button)
-        if not status.get("devices"):
-          cards.append(GreyBigButton("devices", "none found"))
-        scanning = bool(status.get("discovering"))
-        scan = BigButton("stop scan" if scanning else "scan for devices", "searching" if scanning else "scan")
-        scan.set_click_callback(lambda: self._request("stop_scan" if scanning else "scan"))
-        scan.set_enabled(lambda: self._ready() and bool(self.status and self.status.get("adapter")))
-        cards.append(scan)
-    from openpilot.starpilot.galaxy_bluetooth.phone_ui import compact_phone_cards
-    cards.extend(compact_phone_cards(self.phone_pairing_allowed))
+        from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import app_only, describe
+        try:
+          phones = app_only()
+        except (OSError, ValueError):
+          phones = []
+        for phone in phones:
+          cards.append(GreyBigButton(describe(phone), "StarPilot app paired · music not linked"))
+        if not devices and not phones:
+          cards.append(GreyBigButton("saved devices", "no saved pairings"))
+    if getattr(self, "pairing_page", None) is not None:
+      self._rebuild_pairing()
     self._scroller.items.clear()
     self._scroller.add_widgets(cards)
+
+  def _open_pairing(self):
+    self.pairing_page = NavScroller()
+    self._rebuild_pairing()
+    gui_app.push_widget(self.pairing_page)
+
+  def _rebuild_pairing(self):
+    from openpilot.starpilot.galaxy_bluetooth.phone_ui import app_only_count
+    pair = BigButton("pair phone", "StarPilot app + Bluetooth music")
+    pair.set_enabled(lambda: self.phone_pairing_allowed() and bool(self.status and self.status.get("powered")))
+    from openpilot.starpilot.galaxy_bluetooth.phone_ui import open_pairing
+    pair.set_click_callback(lambda: open_pairing(self.phone_pairing_allowed))
+    cards = [pair]
+    cards.extend(self._pairing_cards())
+    status = self.status or {}
+    scan = BigButton("stop search" if status.get("discovering") else "find other devices", "Bluetooth accessories")
+    scan.set_click_callback(lambda: self._request("stop_scan" if (self.status or {}).get("discovering") else "scan"))
+    scan.set_enabled(lambda: self._ready() and bool(self.status and self.status.get("powered")))
+    cards.append(scan)
+    for device in status.get("devices", ()):
+      if not device.get("paired") and not device.get("connected"):
+        button = BigButton(device_label(device), "tap to pair", scroll=True)
+        button.set_click_callback(lambda addr=device["address"]: self._open_device(addr))
+        button.set_enabled(self._ready)
+        cards.append(button)
+    if app_only_count():
+      cleanup = BigButton("remove app-only pairings", "phones paired for StarPilot without music")
+      cleanup.set_enabled(lambda: self.phone_pairing_allowed())
+      cleanup.set_click_callback(lambda: gui_app.push_widget(BigConfirmationDialog(
+        "Remove phones paired for the StarPilot app only?", self.icon,
+        lambda: self._forget_app_only(), red=True)))
+      cards.append(cleanup)
+    self.pairing_page._scroller.items.clear()
+    self.pairing_page._scroller.add_widgets(cards)
+
+  def _forget_app_only(self):
+    from openpilot.starpilot.galaxy_bluetooth.phone_ui import forget_app_only
+    forget_app_only(self.phone_pairing_allowed)
+    self._rebuild()
 
   def _forget(self, address: str):
     from openpilot.starpilot.galaxy_bluetooth.phone_ui import forget_phone_keys

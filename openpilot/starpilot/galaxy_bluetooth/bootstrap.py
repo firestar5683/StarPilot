@@ -40,8 +40,9 @@ def setup_status(data=DATA):
     return 'Bridge startup pending'
 
 
-def retry_setup(data=DATA):
-  write_json(data / 'retry-setup.json', {'requested': time.monotonic()})
+def retry_setup(data=DATA, *, restart=True):
+  filename = 'retry-setup.json' if restart else 'wake-setup.json'
+  write_json(data / filename, {'requested': time.monotonic()})
 
 
 class Bootstrap:
@@ -70,6 +71,10 @@ class Bootstrap:
     return self.command(['sudo', '-n', 'systemctl', *args], **kwargs)
 
   def step(self):
+    wake = self.data / 'wake-setup.json'
+    if wake.exists():
+      wake.unlink(missing_ok=True)
+      self.next_attempt = 0
     requested = self.data / 'retry-setup.json'
     if requested.exists():
       requested.unlink(missing_ok=True)
@@ -142,7 +147,7 @@ def main():
       # Once the bridge is up, systemd keeps it running; check back slowly unless the user acts.
       for _ in range(60 if worker.ready else 10):
         time.sleep(1)
-        if (DATA / 'retry-setup.json').exists():
+        if any((DATA / name).exists() for name in ('retry-setup.json', 'wake-setup.json')):
           break
 
 
