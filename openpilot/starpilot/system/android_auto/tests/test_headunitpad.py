@@ -26,8 +26,6 @@ def store(tmp_path, monkeypatch, identity):
   monkeypatch.setattr(identity_store, "CONFIG_PATH", data / "config.json")
   monkeypatch.setattr(identity_store, "LOG_DIR", data / "logs")
   monkeypatch.setattr(hw_encoder, "LIBRARY", tmp_path / "missing.so")
-  monkeypatch.setattr(supervisor_module, "HOTSPOT_ADDRESS", "127.0.0.1")
-  monkeypatch.setattr(supervisor_module, "HOTSPOT_NETWORK", "127.0.0.0/8")
   return data
 
 
@@ -93,12 +91,13 @@ def test_per_frame_acks_unchanged_for_cars(identity):
   assert hu.error is None, hu.error
 
 
-def test_supervisor_headunitpad_session_end_to_end(store, identity):
+@pytest.mark.parametrize("connection", ["headunitpad", "openheadunit"])
+def test_supervisor_headunitpad_session_end_to_end(store, identity, connection):
   port = free_port()
   sup = supervisor_module.Supervisor(synthetic=True)
-  sup.set_connection("headunitpad")
+  sup.set_connection(connection)
   sup.config["headunitpad_port"] = port
-  hu = FakeHeadUnit(identity, connect_to=("127.0.0.1", port), ack_fragments=True)
+  hu = FakeHeadUnit(identity, connect_to=("127.0.0.1", port), ack_fragments=connection == "headunitpad")
   try:
     sup.start()  # no car chosen: HeadunitPad needs none
     deadline = time.monotonic() + 20
@@ -106,12 +105,12 @@ def test_supervisor_headunitpad_session_end_to_end(store, identity):
       assert time.monotonic() < deadline, sup.status()
       time.sleep(0.05)
     status = sup.status()
-    assert status["connection"] == "headunitpad" and status["state"] == "streaming", status
+    assert status["connection"] == connection and status["state"] == "streaming", status
   finally:
     sup.stop()
     hu.close()
   assert hu.error is None, hu.error
-  assert identity_store.load_config()["connection"] == "headunitpad"
+  assert identity_store.load_config()["connection"] == connection
 
 
 def test_stop_while_waiting_for_the_ipad_closes_the_port(store):
@@ -130,9 +129,12 @@ def test_stop_while_waiting_for_the_ipad_closes_the_port(store):
     socket.create_connection(("127.0.0.1", port), timeout=1).close()
 
 
-def test_hotspot_off_reports_a_clear_error(store, monkeypatch):
-  monkeypatch.setattr(supervisor_module, "HOTSPOT_ADDRESS", "192.0.2.1")  # not on any interface
+def test_port_in_use_reports_a_clear_error(store):
+  port = free_port()
   sup = supervisor_module.Supervisor(synthetic=True)
   sup.set_connection("headunitpad")
-  with pytest.raises(RuntimeError, match="Galaxy hotspot"):
-    sup._attempt_headunitpad()
+  sup.config["headunitpad_port"] = port
+  with socket.socket() as busy:
+    busy.bind(("", port))
+    with pytest.raises(RuntimeError, match=f"port {port}"):
+      sup._attempt_headunitpad()

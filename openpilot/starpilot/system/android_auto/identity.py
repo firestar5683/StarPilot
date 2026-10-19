@@ -94,7 +94,7 @@ PIPELINE_RESET = ("gpu_nv12", "async_readback")
 # Older files get today's default (off).
 VERIFY_RESET = ("verify_head_unit",)
 
-CONNECTIONS = ("wireless", "wired", "headunitpad")
+CONNECTIONS = ("wireless", "wired", "headunitpad", "openheadunit")
 
 DEFAULT_CONFIG = {
   "config_version": CONFIG_VERSION,
@@ -105,7 +105,8 @@ DEFAULT_CONFIG = {
   "rfcomm_channel": 0,         # 0 = discover through SDP (normal); set only to work around a broken SDP record
   "verify_head_unit": False,   # verify the car's certificate against root-cert.pem when present
   "connection": "wireless",    # "wireless": Bluetooth + the car's Wi-Fi; "wired": USB cable from the car to the comma's USB-C port;
-                               # "headunitpad": an iPad running HeadunitPad joins the Galaxy hotspot and connects to the comma
+                               # "headunitpad": an iPad running HeadunitPad on the Galaxy hotspot or same LAN connects to the comma
+                               # "openheadunit": an Android tablet running Open Headunit does the same
   "headunitpad_port": 5277,    # HeadunitPad's "Headunit Server" port
   "usb_mode": "auto",          # wired: "auto" waits for the car's accessory handshake, then presents as an accessory itself;
                                # "handshake" waits for it only; "direct" presents as an accessory at once

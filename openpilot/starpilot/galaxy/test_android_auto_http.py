@@ -403,7 +403,7 @@ def test_existing_paired_car_controls_are_local_authenticated_and_source_bound(a
                  cookie=cookie, content_type='application/json')[0] == 401
 
 
-@pytest.mark.parametrize('connection', ['wired', 'headunitpad'])
+@pytest.mark.parametrize('connection', ['wired', 'headunitpad', 'openheadunit'])
 def test_wired_connection_requires_park_but_not_a_paired_receiver(api, connection):
   request, _, state, client = api
   code, _, headers = request('POST', '/api/auth/login', json.dumps({'password': 'password123'}),

@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import Any
 
 from openpilot.common.hardware import COMMA_HARDWARE
-from openpilot.starpilot.galaxy.hotspot import ADDRESS as HOTSPOT_ADDRESS, NETWORK as HOTSPOT_NETWORK
 from openpilot.starpilot.system.android_auto import identity as identity_store
 from openpilot.starpilot.system.android_auto.auto_connect import AutoConnectPolicy
 from openpilot.starpilot.system.android_auto.bootstrap import NAMES, BootstrapError, WirelessBootstrap
@@ -76,7 +75,7 @@ STATE_LABELS = {
   "negotiating": "negotiating video", "streaming": "projecting", "suspended": "car showing its own screen",
   "backoff": "retrying", "stopping": "stopping", "error": "error",
   "waiting_for_usb": "plug into the car's usb", "usb_accessory": "starting usb",
-  "waiting_for_ipad": "open headunitpad on the ipad",
+  "waiting_for_ipad": "open headunitpad on the ipad", "waiting_for_tablet": "open open headunit on the tablet",
 }
 
 
@@ -470,7 +469,7 @@ class Supervisor:
     self.log("view_selected", view=view)
 
   def set_connection(self, connection: str) -> None:
-    """Choose wireless (Bluetooth + car Wi-Fi), wired (USB) or HeadunitPad (iPad on the Galaxy hotspot) projection."""
+    """Choose wireless (Bluetooth + car Wi-Fi), wired (USB), or HeadunitPad or Open Headunit (on the Galaxy hotspot) projection."""
     if connection not in identity_store.CONNECTIONS:
       raise RuntimeError(f"Unknown connection {connection!r}")
     if connection == "wired" and (reason := wired_blocker()):
@@ -906,7 +905,7 @@ class Supervisor:
     self.log.open()
     connection = self.config["connection"]
     wireless = connection == "wireless"
-    receiver = {"wired": "usb", "headunitpad": "headunitpad"}.get(connection, self.config["receiver_name"])
+    receiver = {"wired": "usb", "headunitpad": "headunitpad", "openheadunit": "openheadunit"}.get(connection, self.config["receiver_name"])
     self.log("session_start", receiver=receiver, generation=generation, trigger=trigger)
     lease = self._lease() if wireless else NoLease()
     attempt = 0
@@ -976,7 +975,7 @@ class Supervisor:
     if self.config["connection"] == "wired":
       self._attempt_usb()
       return
-    if self.config["connection"] == "headunitpad":
+    if self.config["connection"] in ("headunitpad", "openheadunit"):
       self._attempt_headunitpad()
       return
     config = self.config
@@ -1083,32 +1082,32 @@ class Supervisor:
       self._release_usb(gadget, bridge, listener, failed)
 
   def _attempt_headunitpad(self) -> None:
-    """HeadunitPad: the iPad joins the Galaxy hotspot, finds this port and connects like a head unit."""
+    """HeadunitPad or Open Headunit: the tablet, on the Galaxy hotspot or the same LAN, finds this port and connects like a head unit."""
     ident = identity_store.load_identity()
+    headunitpad = self.config["connection"] == "headunitpad"
     port = int(self.config["headunitpad_port"])
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     self._track(listener)
     try:
-      listener.bind((HOTSPOT_ADDRESS, port))
+      listener.bind(("", port))
     except OSError as error:
-      raise RuntimeError(f"Turn on the Galaxy hotspot and join it from the iPad ({error})") from error
+      raise RuntimeError(f"Cannot listen on port {port} ({error})") from error
     listener.listen(1)
     listener.settimeout(1.0)
-    self._stage("waiting_for_ipad", f"{HOTSPOT_ADDRESS}:{port}")
+    self._stage("waiting_for_ipad" if headunitpad else "waiting_for_tablet", f"port {port}")
     sock = self._accept_headunitpad(listener)
     listener.close()
-    self._project(None, NoLease(), ident, connect=lambda: sock, fragment_acks=True)
+    self._project(None, NoLease(), ident, connect=lambda: sock, fragment_acks=headunitpad)
 
   def _accept_headunitpad(self, listener: socket.socket) -> socket.socket:
-    network = ipaddress.ip_network(HOTSPOT_NETWORK)
     while True:
       self._check_cancel()
       try:
         sock, (address, _) = listener.accept()
       except TimeoutError:
         continue
-      if ipaddress.ip_address(address) not in network:
+      if not ipaddress.ip_address(address).is_private:
         self.log("headunitpad_rejected", address=address)
         sock.close()
         continue

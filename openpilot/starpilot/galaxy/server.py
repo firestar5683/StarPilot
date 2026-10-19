@@ -2292,7 +2292,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(403, {'error': 'Park before changing automatic connection'})
             return
           command, arguments = 'set_auto_connect', {'enabled': payload['enabled']}
-        elif action == 'connection' and set(payload) == {'action', 'connection'} and payload['connection'] in ('wireless', 'wired', 'headunitpad'):
+        elif action == 'connection' and set(payload) == {'action', 'connection'} and payload['connection'] in ('wireless', 'wired', 'headunitpad', 'openheadunit'):
           if not configuration_allowed():
             self.json(403, {'error': 'Park before changing the connection type'})
             return
