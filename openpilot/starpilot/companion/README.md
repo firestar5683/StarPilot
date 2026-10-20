@@ -75,37 +75,18 @@ StarPilot normally; the app confirms the completed update on launch.
 | Kotlin/Java code, native bridge, updater, phone GPS, Bluetooth or services | Yes |
 | Android manifest, permissions, resources, icons, Gradle config or dependencies | Yes |
 | Files in `android/app/src/main/assets/`, including `bluetooth-fetch.js` | Yes |
-| Galaxy HTML/CSS/JS used over Bluetooth | Yes: Gradle bundles `galaxy/web` into the APK |
-| Galaxy HTML/CSS/JS used over Wi-Fi/LAN | No for those connections: screens load from comma. Rebuild too if Bluetooth should get the same change |
+| Galaxy HTML/CSS/JS used over Bluetooth | No, if comma's commit is on GitHub: the app downloads Galaxy from that exact commit (see below) |
+| Galaxy HTML/CSS/JS used over Wi-Fi/LAN | No: screens load from comma |
 | Comma-side Python/services/API changes only | No, unless the phone protocol or bundled UI also needs a change |
-| iOS-only code or documentation | No |
 
-Release checklist: increment both `versionCode` and `versionName`, run relevant
-host/unit tests, then run `build_apk.sh` (release build and lint). Keep the existing
-signing key so Android can update in place and retain pairing/settings. Verify the
-APK's package ID, version and signing certificate; distribute the generated APK
-and matching `.version` together. Test an upgrade on a phone: Update, Android
-confirmation, Reopen, and retained settings. Building does not deploy to comma.
-An old app without the native updater needs one manual APK installation first.
+### Galaxy updates over Bluetooth
 
-Build (JDK 17+, Android SDK 37):
-
-```sh
-openpilot/starpilot/companion/android/build_apk.sh
-```
-
-This builds and lints the release APK and copies it to
-`openpilot/starpilot/galaxy/bin/starpilot-companion.apk` with its `.version`.
-Bump `versionCode`/`versionName` in `android/app/build.gradle.kts` first.
-
-Signing uses `~/.starpilot/companion.jks` (alias `companion`, override with
-`COMPANION_KEYSTORE`) and the password in `~/.starpilot/companion-signing-password`
-or `COMPANION_KEY_PASSWORD`. The key is not in the repo. **Back it up** — without
-it, installed apps can't be updated. Certificate SHA-256:
-
-```
-d9e72cbb842e9530b4b686dec424cdeb8f2982109be6875fa73594c33332fc3a
-```
+The app downloads Galaxy from the repository and commit comma is running, so custom branches and their own pages
+work too. It learns them from `/api/software/status` (`operations.repository` and `installed.commit`), the same source the iPhone app uses, each time it connects,
+and checks when it opens or you choose **Check Galaxy updates** in the menu. Files come from GitHub over the phone's own
+internet, are verified against the commit's tree, and apply the next time Bluetooth Galaxy opens. If comma's remote
+isn't GitHub or the commit isn't pushed, or an update fails, the app keeps its current copy. A fresh install uses the
+copy bundled in the APK.
 
 ## Tests
 

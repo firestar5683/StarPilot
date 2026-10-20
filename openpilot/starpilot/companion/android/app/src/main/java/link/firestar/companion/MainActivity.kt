@@ -26,6 +26,7 @@ import android.webkit.*
 import android.widget.*
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.net.Inet4Address
 
 class MainActivity : Activity() {
@@ -321,7 +322,12 @@ class MainActivity : Activity() {
                 if (PhoneGpsService.enabled(prefs)) action("Stop sharing phone GPS") { setPhoneGps(false) }
                 else action("Share phone GPS with comma", "Comma uses it for navigation when its own GPS has no fix") { setPhoneGps(true) }
             }
-            .group("This app") { action("Notification settings") { appNotificationSettings() } }
+            .group("This app") {
+                action("Notification settings") { appNotificationSettings() }
+                action("Check Galaxy updates", GalaxyUpdates.store(this@MainActivity).status) {
+                    GalaxyUpdates.checkAsync(this@MainActivity) { status -> runOnUiThread { message(status) } }
+                }
+            }
             .show()
     }
     private fun appNotificationSettings() {
@@ -556,6 +562,8 @@ class MainActivity : Activity() {
     private fun showBluetooth(transport: BleTransport) {
         bluetoothMode = true
         origin = cachedOrigin
+        val galaxy = GalaxyUpdates.store(this)
+        val galaxyRoot = galaxy.readyRoot.also { galaxy.inUseRoot = it }
         val view = WebView(this); web = view
         view.setBackgroundColor(Color.rgb(7, 7, 18))
         view.settings.javaScriptEnabled = true; view.settings.domStorageEnabled = true
@@ -595,7 +603,9 @@ class MainActivity : Activity() {
                     var data = when (path) {
                         "/data/runtime.json" -> "{\"schemaVersion\":1,\"monitor\":\"local\"}".toByteArray()
                         "/bluetooth-fetch.js" -> assets.open("bluetooth-fetch.js").use { it.readBytes() }
-                        else -> assets.open("galaxy/" + if (path == "/") "index.html" else path.removePrefix("/")).use { it.readBytes() }
+                        else -> (if (path == "/") "index.html" else path.removePrefix("/")).let { file ->
+                            if (galaxyRoot != null) File(galaxyRoot, file).readBytes() else assets.open("galaxy/$file").use { it.readBytes() }
+                        }
                     }
                     if (path == "/" || path == "/index.html") data = String(data).replace("<head>", "<head><script src=\"/bluetooth-fetch.js\"></script>").toByteArray()
                     val type = when {
@@ -612,6 +622,10 @@ class MainActivity : Activity() {
             override fun onPageFinished(v: WebView, url: String) { if (web === v) share = null }
         }
         showWeb(view, Route.BLUETOOTH, "Bluetooth, controls only", waitForPage = false)
+        try { worker.execute { runCatching {
+            val reply = transport.request(JSONObject().put("method", "GET").put("path", "/api/software/status?history=0").put("headers", JSONObject()).put("body", ""))
+            if (reply.optInt("status") == 200) GalaxyUpdates.remember(this, JSONObject(String(Base64.getDecoder().decode(reply.optString("body")))))
+        } } } catch (_: RejectedExecutionException) {}
         view.loadUrl(if (share != null) "$origin/?share=${Uri.encode(share)}#/navigation" else "$origin/#/galaxy")
     }
     inner class Bridge {
@@ -631,7 +645,7 @@ class MainActivity : Activity() {
     }
     @Deprecated("Legacy back handling") override fun onBackPressed() { if (web?.canGoBack() == true) web?.goBack() else super.onBackPressed() }
     override fun onResume() {
-        super.onResume(); resumed = true; recovery.resumed(); AppUpdates.checkAsync(this)
+        super.onResume(); resumed = true; recovery.resumed(); AppUpdates.checkAsync(this); GalaxyUpdates.checkAsync(this)
         pendingInstallOrigin?.let { if (packageManager.canRequestPackageInstalls()) requestAppUpdate(it) }
     }
     override fun onPause() { resumed = false; super.onPause() }

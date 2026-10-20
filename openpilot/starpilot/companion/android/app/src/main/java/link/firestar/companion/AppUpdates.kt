@@ -68,6 +68,7 @@ object AppUpdates {
         val session = request(wifi.first, origin, "/api/auth/session")
         if (!session.first.optBoolean("authenticated") || !session.first.optBoolean("localAccess")) return
         val status = request(wifi.first, origin, "/api/companion/status", session.second).first
+        runCatching { GalaxyUpdates.remember(context, request(wifi.first, origin, "/api/software/status?history=0", session.second).first) }
         if (Thread.currentThread().isInterrupted) return
         val available = status.optString("shippedVersion")
         val manager = context.getSystemService(NotificationManager::class.java)
