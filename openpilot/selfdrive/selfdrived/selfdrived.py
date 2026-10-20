@@ -1637,12 +1637,18 @@ class SelfdriveD:
     if len(owners) != 1:
       return False
     from openpilot.starpilot.car.gm.aol import native_accepts_cp as gm_native_accepts_cp
+    from openpilot.starpilot.car.toyota.aol import qualified as toyota_aol_qualified
     # Pandad reads health before its final native permission read. A GM driver
     # withdrawal between those reads legitimately leaves the earlier health
     # controlsAllowed true. For an admitted OP-long GM profile, the current
     # LAT-only native mask itself proves controls_allowed has gone false.
     # Keep LONG withdrawn and leave disagreement to the ordinary mismatch owner.
+    # Toyota's native LONG mask also checks gas, brake and belt independently
+    # of controls_allowed. Health and that mask may precede the parsed pedal
+    # edge: honor LONG withdrawal while the existing native LAT grant stands.
+    # The exact Toyota policy and all proof/health checks above remain required.
     return bool(gm_native_accepts_cp(self.CP, native.safetyModel, native.safetyParam) or
+                toyota_aol_qualified(self.CP, marked_only=True) or
                 not native.pandaInventory[owners[0]].controlsAllowed and
                 not self.sm['pandaStates'][owners[0]].controlsAllowed)
 

@@ -82,7 +82,7 @@ const auth = new LocalAuth({ publish: (update) => {
 
 createApp({
   components: { BottomNav, GalaxyLoading, Home, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, SettingsRecoveryPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, MenuTile },
-  data: () => ({ state, authState, authForm, route, NAV, routeDirection: 1, updateRestart, UPDATE_RESTART_MESSAGE, nextLayoutLeavePresentation: "inline" }),
+  data: () => ({ state, authState, authForm, route, NAV, routeDirection: 1, updateRestart, deviceRestart, UPDATE_RESTART_MESSAGE, nextLayoutLeavePresentation: "inline" }),
   computed: {
     visibleTools() { return state.tools.filter(tool => tool.visibility !== "authenticated" ||
       (state.monitorMode === "local" && authState.status === "authenticated")).sort((a, b) =>
