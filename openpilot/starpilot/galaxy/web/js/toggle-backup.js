@@ -72,7 +72,7 @@ export const ToggleBackup = {
     },
   },
   template: `<section class="gx-card gx-panel gx-stack" :inert="busy" :aria-busy="busy || undefined">
-    <h3>Toggle backup</h3><p class="gx-note">Save your editable toggles, onroad layout and colors. Restore compatible settings while parked.</p>
+    <h3>Toggle backup</h3><p class="gx-note">Savesssssss your editable toggles, onroad layout and colors. Restore compatible settings while parked.</p>
     <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="exportBackup">Back up toggles</button>
       <button type="button" class="gx-btn gx-btn--tonal" @click="$refs.file.click()">Restore toggles</button>
       <input ref="file" type="file" accept=".json,application/json" class="gx-sr-only" tabindex="-1" aria-label="Choose toggle backup" @change="chooseFile"></div>
