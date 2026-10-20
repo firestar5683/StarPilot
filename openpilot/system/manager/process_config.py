@@ -139,6 +139,8 @@ procs = [
   PythonProcess("navigationd", "openpilot.starpilot.navigation.runtime", always_run),
   PythonProcess("navtilesd", "openpilot.starpilot.navigation.navtilesd", always_run, enabled=platform.system() == "Linux"),
   PythonProcess("galaxy", "openpilot.starpilot.galaxy.managed", galaxy_local),
+  PythonProcess("galaxy_phone", "openpilot.starpilot.galaxy_bluetooth.bootstrap", galaxy_local,
+                enabled=COMMA_HARDWARE and not os.environ.get("OPENPILOT_PREFIX"), restart_on_exit=True),
   PythonProcess("replay_owner", "openpilot.starpilot.replay.owner", only_offroad,
                 enabled=platform.system() == "Linux", restart_on_exit=True),
   PythonProcess("galaxy_hotspot", "openpilot.starpilot.galaxy.hotspot_daemon", galaxy_local,

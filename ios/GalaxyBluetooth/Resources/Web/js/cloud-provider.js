@@ -1,0 +1,73 @@
+import { GxState } from "./state.js"
+import { PollTimer, connectionError } from "./polling.js"
+import { requestJson } from "./startup.js"
+import { GalaxySelect } from "./galaxy-select.js"
+import { GxNotice } from "./notice.js"
+
+export const validProviderStatus = value => value && ["comma", "konik"].includes(value.active) &&
+  ["comma", "konik"].includes(value.selected) && /^[a-f0-9]{64}$/.test(value.revision) &&
+  typeof value.restartRequired === "boolean" && typeof value.canSelect === "boolean" &&
+  Array.isArray(value.providers) && value.providers.length === 2 &&
+  ["comma", "konik"].every(name => value.providers.filter(p => p.id === name).length === 1) &&
+  value.providers.every(p => ["comma", "konik"].includes(p.id) && typeof p.label === "string" &&
+    p.url === (p.id === "comma" ? "https://connect.comma.ai" : "https://stable.konik.ai"))
+
+export const CloudProviderPage = {
+  name: "CloudProviderPage",
+  components: { GxState, GalaxySelect, GxNotice },
+  props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
+  data: () => ({ status: null, selection: null, busy: false, error: "", request: null }),
+  mounted() { this.activePage = true; this.poller = new PollTimer({ read: () => this.load() }); this.poller.start(); this.load() },
+  beforeUnmount() { this.activePage = false; this.poller.stop(); this.request?.abort() },
+  computed: {
+    active() { return this.status?.providers.find(p => p.id === this.status.active) },
+    selected() { return this.status?.providers.find(p => p.id === this.status.selected) },
+  },
+  methods: {
+    async call(body) {
+      this.request?.abort()
+      const controller = new AbortController()
+      this.request = controller
+      try {
+        const value = await requestJson("./api/connect/provider", { request: { signal: controller.signal,
+          ...(body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) } })
+        if (this.request !== controller || !this.activePage) return
+        if (!validProviderStatus(value)) throw new Error("Cloud provider status is unavailable")
+        this.error = ""
+        this.status = value
+      } finally {
+        if (this.request === controller) this.request = null
+      }
+    },
+    async load() {
+      if (this.mode !== "local" || this.busy || this.request) return
+      try { await this.call() } catch (error) { if (error.status === 401) this.unauthorized(); else this.error = connectionError(error) }
+    },
+    async select(name) {
+      if (!this.status?.canSelect || this.busy || !this.status.providers.some(p => p.id === name)) return
+      const label = this.status.providers.find(p => p.id === name).label
+      if (!window.confirm(`Use ${label} after the next device reboot? The current session stays unchanged. Returning to comma restores its saved cloud identity.`)) return
+      this.busy = true
+      this.selection = name
+      this.error = ""
+      try { await this.call({ provider: name, revision: this.status.revision, confirmed: true }) }
+      catch (error) { if (error.status === 401) this.unauthorized(); else this.error = connectionError(error) }
+      finally { this.selection = null; this.busy = false }
+    },
+  },
+  template: `<div class="gx-settings__developer-body">
+    <GxState v-if="mode !== 'local'">Open this Developer page on your device to choose a cloud provider.</GxState>
+    <template v-else>
+      <GxNotice v-if="status && !status.canSelect" tone="warn">Turn off the vehicle to change this Developer setting.</GxNotice>
+      <section class="gx-card gx-settings__section" :inert="busy" :aria-busy="busy || undefined"><div class="gx-section__header"><i class="bi bi-code-slash" aria-hidden="true"></i><span class="gx-section__title">Developer</span></div><div class="gx-row"><div class="gx-row__info">
+      <label class="gx-settings__developer-provider">Cloud provider
+        <GalaxySelect class="gx-field gx-field--full" aria-label="Cloud provider" :value="selection ?? status?.selected ?? ''"
+          :disabled="!status?.canSelect" @change="select($event.target.value)">
+          <option v-for="provider in status?.providers || []" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+        </GalaxySelect>
+      </label></div></div></section>
+      <GxNotice v-if="status?.restartRequired" tone="warn">{{ selected?.label }} applies after the next reboot. No automatic reboot will occur.</GxNotice>
+
+      <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
+    </template></div>`,
+}
