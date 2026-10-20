@@ -19,6 +19,9 @@ class RemotePairingTest(unittest.TestCase):
   def setUp(self):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
+    claim_path = mock.patch('openpilot.starpilot.galaxy_bluetooth.bridge.claim.CLAIM_PATH', Path(temporary.name) / 'claim.json')
+    claim_path.start()
+    self.addCleanup(claim_path.stop)
     root = Path(temporary.name)
     self.owner = GalaxyAccessOwner(root / 'credentials')
     self.pairing = RemotePairing(root / 'pairing')
@@ -186,7 +189,7 @@ class RemotePairingTest(unittest.TestCase):
     wrong_cookie = 'galaxy_session=' + record['slug'] + '%3A' + 'a' * 64
     self.assertEqual(self.request(self.remote, '/api/galaxy/device-name', host=host, cookie=wrong_cookie)[0], 401)
     created = []
-    def bluetooth_factory(authority, session_valid):
+    def bluetooth_factory(authority, session_valid, **_kwargs):
       owner = mock.Mock()
       owner.session_valid = session_valid
       owner.identities = []
@@ -200,7 +203,7 @@ class RemotePairingTest(unittest.TestCase):
          mock.patch('openpilot.starpilot.galaxy.settings.LiveContextSource'):
       status, body, _ = self.request(self.remote, '/api/bluetooth/status', host=host, cookie=cookie)
     self.assertEqual(status, 200)
-    self.assertEqual(json.loads(body), {'available': True})
+    self.assertIs(json.loads(body)['available'], True)
     bluetooth = created[0]
     identity = bluetooth.identities[0]
     self.assertTrue(bluetooth.session_valid(identity))

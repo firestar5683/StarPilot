@@ -191,6 +191,24 @@ export const LayoutWidgetPreview = {
           :font-size="profile === 'large' ? 48 : 21" font-weight="600"
           style="filter: drop-shadow(2px 2px 1px #000000aa)">{{ clock24Hour ? '18:00' : '12:00 PM' }}</text>
       </template>
+      <g v-else-if="widget.kind === 'now_playing'">
+        <rect x="0" y="0" :width="widget.width" :height="widget.height" :rx="widget.height / 2" fill="#0f0d17" :fill-opacity="(widget.opacity ?? 85) / 100 * .92" />
+        <circle :cx="widget.height / 2" :cy="widget.height / 2" r="30" fill="#c7aef7" />
+        <rect :x="widget.height / 2 - 9" :y="widget.height / 2 - 12" width="6" height="24" rx="3" fill="#0f0d17" />
+        <rect :x="widget.height / 2 + 3" :y="widget.height / 2 - 12" width="6" height="24" rx="3" fill="#0f0d17" />
+        <text :x="widget.height + 4" y="40" font-size="30" font-weight="600" fill="#f5f2fc">Midnight City</text>
+        <text :x="widget.height + 4" y="68" font-size="22" fill="#b8b2c8">M83</text>
+        <rect :x="widget.height + 4" :y="widget.height - 16" :width="widget.width - widget.height * 1.5 - 4" height="4" rx="2" fill="#ffffff" fill-opacity=".2" />
+        <rect :x="widget.height + 4" :y="widget.height - 16" :width="(widget.width - widget.height * 1.5 - 4) * .38" height="4" rx="2" fill="#c7aef7" />
+      </g>
+      <g v-else-if="widget.kind === 'jetlink_status'">
+        <rect x="0" y="0" :width="widget.width" :height="widget.height" :rx="widget.height / 2" fill="#0f0d17" :fill-opacity="(widget.opacity ?? 85) / 100 * .92" />
+        <circle :cx="widget.height / 2" :cy="widget.height / 2" r="9" fill="#46c86e" />
+        <text :x="widget.height - 6" y="38" font-size="28" font-weight="600" fill="#f5f2fc">Link up</text>
+        <text :x="widget.height - 6" y="66" font-size="22" fill="#b8b2c8">Jetlink • iPhone</text>
+        <text :x="widget.width - 70" :y="widget.height / 2 + 12" text-anchor="end" font-size="34" font-weight="600" fill="#f5f2fc">24.6</text>
+        <text :x="widget.width - 30" :y="widget.height / 2 + 12" text-anchor="end" font-size="22" fill="#b8b2c8">ms</text>
+      </g>
       <template v-else-if="widget.kind === 'speed_limit'">
         <text x="0" y="10" font-size="24" font-weight="500">LIMIT</text>
         <path v-if="pending(scene)" d="M90 12 V-8 M84 -2 L90 -8 L96 -2" fill="none" :stroke="palette.text || '#ffffff'" stroke-width="2" />
@@ -415,10 +433,12 @@ export const OnroadLayoutPage = {
     projectionHasPipWidget() {
       return ["pip_left", "pip_right"].some(id => this.state.draft?.layouts?.large?.[id]?.enabled === true)
     },
-    widgets() { return Object.entries(this.profile?.widgets || {}).map(([id, widget]) => ({ id, ...widget })) },
+    widgets() { return Object.entries(this.profile?.widgets || {})
+      .filter(([id, widget]) => widget.available !== false || this.layout?.[id]?.enabled)
+      .map(([id, widget]) => ({ id, ...widget })) },
     layerWidgets() {
       return orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)
-        .slice().reverse().map(id => this.widgets.find(widget => widget.id === id)).filter(widget => this.layout[widget.id].enabled)
+        .slice().reverse().map(id => this.widgets.find(widget => widget.id === id)).filter(widget => widget && this.layout[widget.id].enabled)
     },
     listWidgets() { return this.state.layerDrag ? this.state.layerDrag.rows.map(id => this.widgets.find(widget => widget.id === id)) : this.layerWidgets },
     selectionBox() {
@@ -442,11 +462,13 @@ export const OnroadLayoutPage = {
         return {
           ...widget, width, height, ...(widget.iconSize ? { display: this.layout[widget.id].display } : {}),
           ...(widget.opacity ? { opacity: this.layout[widget.id].opacity } : {}),
-          ...(widget.backgroundToggle ? { background: this.layout[widget.id].background } : {})
+          ...(widget.backgroundToggle ? { background: this.layout[widget.id].background } : {}),
+          ...(widget.collapseToggle ? { collapse: this.layout[widget.id].collapse } : {})
         }
       })
     },
-    inactiveWidgets() { return this.widgets.filter(({ id }) => !this.layout[id].enabled || (this.state.drag?.fromTray && this.state.drag.id === id)) },
+    inactiveWidgets() { return this.widgets.filter(({ id, available }) => available !== false &&
+      (!this.layout[id].enabled || (this.state.drag?.fromTray && this.state.drag.id === id))) },
     availableProfiles() { return this.state.data?.supportedProfiles || (this.state.data?.activeProfile ? [this.state.data.activeProfile] : []) },
     selectedWidget() { return this.profile?.widgets[this.state.selected] },
     selectedPosition() { return this.layout?.[this.state.selected] },
@@ -801,7 +823,7 @@ export const OnroadLayoutPage = {
       this.state.notice = ""
     },
     add(id) {
-      if (!this.editable || this.state.drag || !Object.hasOwn(this.profile.widgets, id)) return
+      if (!this.editable || this.state.drag || !Object.hasOwn(this.profile.widgets, id) || this.profile.widgets[id].available === false) return
       const before = clone(this.state.draft)
       this.layout[id].enabled = true
       if (this.sceneHidden(id)) this.state.scene = "general"
@@ -957,6 +979,7 @@ export const OnroadLayoutPage = {
     },
     startDrag(id, event, fromTray = false) {
       if (!this.editable || event.button > 0 || this.state.drag || !Object.hasOwn(this.profile.widgets, id)) return
+      if (fromTray && this.profile.widgets[id].available === false) return
       if (fromTray && this.sceneHidden(id)) this.state.scene = "general"
       const point = previewPoint(event, this.$refs.preview.getBoundingClientRect(), this.profile)
       if (!point) return
@@ -1043,6 +1066,14 @@ export const OnroadLayoutPage = {
       this.finishColorEdit()
       const before = clone(this.state.draft)
       this.selectedPosition.background = value === 'On'
+      this.recordChange(before)
+      this.state.notice = ""
+    },
+    setWidgetCollapse(value) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.collapseToggle) return
+      this.finishColorEdit()
+      const before = clone(this.state.draft)
+      this.selectedPosition.collapse = value === 'On'
       this.recordChange(before)
       this.state.notice = ""
     },

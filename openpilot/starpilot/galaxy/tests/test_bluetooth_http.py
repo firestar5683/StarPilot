@@ -47,6 +47,9 @@ class BluetoothHttpTest(unittest.TestCase):
   def setUp(self):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
+    claim_path = mock.patch('openpilot.starpilot.galaxy_bluetooth.bridge.claim.CLAIM_PATH', Path(temporary.name) / 'claim.json')
+    claim_path.start()
+    self.addCleanup(claim_path.stop)
     access = GalaxyAccessOwner(Path(temporary.name) / 'access')
     self.assertTrue(access.configure('password123', lambda: True))
     self.access = access
@@ -77,12 +80,68 @@ class BluetoothHttpTest(unittest.TestCase):
     finally:
       connection.close()
 
+  def test_accept_pair_opens_a_window_and_prepares_the_music_receiver(self):
+    self.stop()
+    aa_setup = mock.Mock()
+    aa_setup.enabled.return_value = False
+    self.server = make_server(port=0, owner=self.access, bluetooth=self.bluetooth, android_auto_setup=aa_setup, parked=lambda: True)
+    self.worker = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True)
+    self.worker.start()
+    _, _, headers = self.request('/api/auth/login', {'password': 'password123'})
+    cookie = headers['Set-Cookie'].split(';', 1)[0]
+    with mock.patch('openpilot.starpilot.galaxy.spotify_setup.SpotifySetup.prepare_phone_pairing') as prepare:
+      self.assertEqual(self.request('/api/bluetooth/action', {'operation': 'accept_pair'}, cookie)[0], 200)
+      prepare.assert_called_once_with()
+      self.assertEqual(self.request('/api/bluetooth/action', {'operation': 'accept_pair', 'address': 'AA:BB:CC:DD:EE:FF'}, cookie)[0], 400)
+      prepare.assert_called_once_with()
+    operation, address, *_ = self.bluetooth.calls[-1]
+    self.assertEqual((operation, address), ('accept_pair', None))
+    self.assertEqual(len(self.bluetooth.calls), 1)
+
+  def test_the_music_window_also_opens_and_closes_the_app_claim(self):
+    from openpilot.starpilot.galaxy_bluetooth.bridge import claim
+    self.stop()
+    aa_setup = mock.Mock()
+    aa_setup.enabled.return_value = False
+    self.server = make_server(port=0, owner=self.access, bluetooth=self.bluetooth, android_auto_setup=aa_setup, parked=lambda: True)
+    self.worker = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True)
+    self.worker.start()
+    _, _, headers = self.request('/api/auth/login', {'password': 'password123'})
+    cookie = headers['Set-Cookie'].split(';', 1)[0]
+    with tempfile.TemporaryDirectory() as directory, mock.patch.object(claim, 'CLAIM_PATH', Path(directory) / 'claim.json'), \
+         mock.patch('openpilot.starpilot.galaxy.spotify_setup.SpotifySetup.prepare_phone_pairing'), \
+         mock.patch.object(self.bluetooth, 'snapshot', return_value={'adapterAddress': 'AA:BB:CC:DD:EE:FF', 'adapterName': 'comma'}):
+      self.assertIsNone(claim.window(claim.CLAIM_PATH))
+      self.assertEqual(self.request('/api/bluetooth/action', {'operation': 'accept_pair'}, cookie)[0], 200)
+      window = claim.window(claim.CLAIM_PATH)
+      self.assertEqual((window['adapterAddress'], window['adapterName']), ('AA:BB:CC:DD:EE:FF', 'comma'))
+      self.assertEqual(self.request('/api/bluetooth/action', {'operation': 'cancel_pair'}, cookie)[0], 200)
+      self.assertIsNone(claim.window(claim.CLAIM_PATH))
+      self.assertEqual(self.request('/api/bluetooth/action', {'operation': 'scan'}, cookie)[0], 200)
+      self.assertIsNone(claim.window(claim.CLAIM_PATH))
+
+  def test_forgetting_a_device_also_forgets_its_app_key(self):
+    self.stop()
+    aa_setup = mock.Mock()
+    aa_setup.enabled.return_value = False
+    self.server = make_server(port=0, owner=self.access, bluetooth=self.bluetooth, android_auto_setup=aa_setup, parked=lambda: True)
+    self.worker = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True)
+    self.worker.start()
+    _, _, headers = self.request('/api/auth/login', {'password': 'password123'})
+    cookie = headers['Set-Cookie'].split(';', 1)[0]
+    with mock.patch('openpilot.starpilot.galaxy_bluetooth.bridge.pairing.remove_by_address') as remove:
+      self.assertEqual(self.request('/api/bluetooth/action', {'operation': 'connect', 'address': 'AA:BB:CC:DD:EE:FF'}, cookie)[0], 200)
+      remove.assert_not_called()
+      self.assertEqual(self.request('/api/bluetooth/action', {'operation': 'forget', 'address': 'AA:BB:CC:DD:EE:FF'}, cookie)[0], 200)
+      remove.assert_called_once_with('AA:BB:CC:DD:EE:FF')
+
   def test_authenticated_status_and_parked_mutation(self):
     self.assertEqual(self.request('/api/bluetooth/status')[0], 401)
     code, _, headers = self.request('/api/auth/login', {'password': 'password123'})
     self.assertEqual(code, 200)
     cookie = headers['Set-Cookie'].split(';', 1)[0]
     self.assertEqual(self.request('/api/bluetooth/status', cookie=cookie)[1]['powered'], True)
+    self.assertEqual(self.request('/api/bluetooth/status', cookie=cookie)[1]['claim']['open'], False)
     self.assertEqual(self.request('/api/bluetooth/action', {'operation': 'connect', 'address': 'AA:BB:CC:DD:EE:FF'}, cookie)[0], 200)
     self.assertEqual(self.bluetooth.calls[0][:3], ('connect', 'AA:BB:CC:DD:EE:FF', None))
     self.bluetooth.parked = False

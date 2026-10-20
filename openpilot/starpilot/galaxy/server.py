@@ -5,6 +5,7 @@ import hashlib
 from contextlib import nullcontext
 from http.cookies import SimpleCookie
 import json
+import os
 import re
 import secrets
 import select
@@ -18,7 +19,7 @@ from openpilot.starpilot.galaxy.batch_routes import change_drive_state, delete_r
 from openpilot.starpilot.galaxy.access import AccessStatus, default_owner
 from openpilot.starpilot.galaxy.auth import LocalSessions
 from openpilot.starpilot.galaxy.http_server import (_LocalHTTPHandler, _LocalHTTPServer, allowed_authority,
-                                                  direct_local_connection, static_asset)
+                                                  direct_local_connection, install_origin_allowed, static_asset)
 from openpilot.starpilot.galaxy.camera_snapshot import CameraSnapshot, SnapshotDenied, SnapshotUnavailable
 from openpilot.starpilot.galaxy.remote import default_remote_pairing, gateway_cookie_valid
 from openpilot.starpilot.galaxy.crash_reports import CrashChanged, CrashMissing, CrashReports, CrashUnavailable
@@ -59,6 +60,34 @@ from openpilot.starpilot.audio.downloads import SoundDownloads, SoundDownloadErr
 
 WEB = Path(__file__).resolve().parent / 'web'
 INSTANCE = secrets.token_hex(8)
+
+
+def phone_claim_view():
+  from openpilot.starpilot.galaxy_bluetooth.bridge import claim
+  return claim.view(claim.CLAIM_PATH)
+
+
+def link_music_phone(address):
+  """Music paired in the window an app claimed (either order): remember which device is the app's phone."""
+  try:
+    from openpilot.starpilot.galaxy_bluetooth.bridge import claim, pairing
+    claim.note_paired(address)
+    linked = claim.take_link()
+    if linked:
+      pairing.link_address(*linked)
+  except (OSError, ValueError):
+    pass
+
+
+def forget_app_keys(address):
+  """Forgetting a Bluetooth device also forgets the app key that was paired with it."""
+  try:
+    from openpilot.starpilot.galaxy_bluetooth.bridge import pairing
+    pairing.remove_by_address(address)
+  except (OSError, ValueError):
+    pass
+
+
 def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashes=None, software=None, maps=None, models=None, settings=None,
                 plots=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
                 sentry_events=None, notifications=None, training_results=None, bluetooth=None, vehicle_selection=None,
@@ -66,8 +95,13 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
                 android_auto_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
-                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None, toyota_tools=None, replay_client=None, replay_root=None):
+                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None, toyota_tools=None, replay_client=None, replay_root=None,
+                spotify_setup=None, companion=None, phone_location=None):
+  from openpilot.starpilot.galaxy.companion import CompanionRegistry, APK_PATH
+  from openpilot.starpilot.gps.phone import PhoneGpsPublisher
+  companion_source = companion if companion is not None else CompanionRegistry()
   training_results_source = training_results if training_results is not None else FlmTrainingResults()
+  phone_location_source = phone_location if phone_location is not None else PhoneGpsPublisher()
   cloud = cloud_provider
   hotspot_source = hotspot
   hotspot_source_lock = threading.Lock()
@@ -175,6 +209,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   bluetooth_lock = threading.Lock()
   bluetooth_source = bluetooth
   aa_setup_source = android_auto_setup
+  spotify_setup_source = spotify_setup
   aa_client_source = android_auto_client
   aa_source_lock = threading.Lock()
   aa_registry_source = None
@@ -304,13 +339,18 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       return record is not None and generation == remote_generation(current, record) and \
              (sessions.valid(token, generation) or gateway_cookie_valid(token, record))
 
+  def bluetooth_paired(address, name, uuids):
+    link_music_phone(address)
+    spotify_owner().adopt_phone(address, name, uuids)
+
   def bluetooth_owner():
     nonlocal bluetooth_source
     with bluetooth_lock:
       if bluetooth_source is None:
         from openpilot.common.params import Params
         authority = context_source(Params())
-        bluetooth_source = BluetoothOwner(authority.configuration_allowed, session_valid=bluetooth_session_valid)
+        bluetooth_source = BluetoothOwner(authority.configuration_allowed, session_valid=bluetooth_session_valid,
+                                          on_paired=bluetooth_paired)
         server.bluetooth_authority = authority
         server.bluetooth_source = bluetooth_source
     return bluetooth_source
@@ -342,6 +382,18 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                                           enable_bluetooth=enable_bluetooth)
         server.android_auto_setup_source = aa_setup_source
     return aa_setup_source
+
+  def spotify_owner():
+    nonlocal spotify_setup_source
+    with bluetooth_lock:
+      if spotify_setup_source is None:
+        from openpilot.starpilot.galaxy.spotify_setup import SpotifySetup
+        def paired_devices(identity):
+          return bluetooth_owner().snapshot(session=identity).get('devices', [])
+        spotify_setup_source = SpotifySetup(parked=configuration_allowed, session_valid=bluetooth_session_valid,
+                                            paired_devices=paired_devices)
+        server.spotify_setup_source = spotify_setup_source
+    return spotify_setup_source
 
   def aa_source_registry():
     nonlocal aa_registry_source
@@ -389,7 +441,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if settings_gateway is None:
         from openpilot.common.params import Params
         params = Params()
-        settings_gateway = SettingsGateway(params, context_source(params))
+        settings_gateway = SettingsGateway(params, context_source(params), android_auto=aa_client)
         server.settings_source = settings_gateway
       return settings_gateway
 
@@ -515,6 +567,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       return not getattr(self.server, 'remote_transport', False) and \
              direct_local_connection(self.client_address[0], self.connection.getsockname()[0], self.headers)
 
+    def spotify_install_allowed(self):
+      return install_origin_allowed(self.client_address[0], self.connection.getsockname()[0], self.headers,
+                                    getattr(self.server, 'remote_transport', False))
+
     def authenticated(self):
       return self.settings_session() is not None
 
@@ -563,6 +619,48 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         return aa_client().call(command, source=source, **arguments)
       finally:
         aa_source_registry().revoke_source(source)
+
+    def phone_claim(self, operation, result):
+      """The same window that lets a phone pair for music also lets the StarPilot app claim its key."""
+      from openpilot.starpilot.galaxy_bluetooth.bridge import claim
+      try:
+        if operation == 'cancel_pair':
+          claim.clear()
+        elif type(result) is dict:
+          claim.arm(result.get('adapterAddress', ''), result.get('adapterName', ''))
+      except OSError:
+        pass
+
+    def aa_phone_window(self, identity, operation, payload=None):
+      """The phone pairing window inside a running Android Auto projection; handled False when none holds the adapter."""
+      registry = aa_source_registry()
+      minted = operation == 'accept_pair'
+      source = registry.mint(identity) if minted else registry.current(identity)
+      if source is None:
+        return {'handled': False}
+      arguments = {}
+      if operation == 'pairing_response' and payload is not None:
+        arguments = {'prompt_id': payload['promptId'], 'accepted': payload['accepted'], 'value': payload.get('value', '')}
+      try:
+        if self.settings_session() != identity:
+          raise ValueError('Galaxy session changed')
+        delegated = aa_client().call('phone_window', source=source, operation=operation, **arguments)
+      except (OSError, RuntimeError):
+        delegated = {'handled': False}
+      if type(delegated) is not dict or type(delegated.get('handled')) is not bool:
+        delegated = {'handled': False}
+      if minted and (not delegated['handled'] or 'error_code' in delegated) or operation == 'cancel_pair' and delegated['handled']:
+        registry.revoke_source(source)
+      found = delegated.get('bluetooth')
+      paired = found.pop('windowPaired', None) if type(found) is dict else None
+      if type(paired) is dict:
+        link_music_phone(paired.get('address', ''))
+      if type(paired) is dict and configuration_allowed():
+        try:
+          spotify_owner().adopt_phone(paired['address'], paired['name'], tuple(paired['uuids']))
+        except Exception:
+          pass
+      return delegated
 
     def do_GET(self):
       if not self.local_request():
@@ -626,6 +724,33 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         else:
           if self.require_session():
             self.json(200, result)
+      elif path in ('/app.apk', '/api/companion/app.apk'):
+        if getattr(self.server, 'remote_transport', False):
+          self.json(403, {'error': 'Download the app over local Wi-Fi'})
+          return
+        if not self.direct_local() and not self.require_session():
+          return
+        try:
+          handle = APK_PATH.open('rb')
+        except OSError:
+          self.json(404, {'error': 'Companion APK is not installed'})
+          return
+        with handle:
+          self.send_response(200)
+          self.send_header('Content-Type', 'application/vnd.android.package-archive')
+          self.send_header('Content-Length', str(os.fstat(handle.fileno()).st_size))
+          self.send_header('Content-Disposition', 'attachment; filename="starpilot-companion.apk"')
+          self.send_header('Cache-Control', 'no-store')
+          self.end_headers()
+          if self.command != 'HEAD':
+            while chunk := handle.read(65536):
+              self.wfile.write(chunk)
+      elif path == '/api/companion/status':
+        if self.require_session():
+          try:
+            self.json(200, companion_source.snapshot())
+          except (OSError, ValueError):
+            self.json(503, {'error': 'Companion settings unavailable'})
       elif path == '/api/galaxy/hotspot':
         if not self.require_session():
           return
@@ -648,15 +773,16 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                         'tunnelClientAvailable': frpc_binary() is not None,
                         'legacyPassword': access.status().status == AccessStatus.LEGACY_IMPORT_AVAILABLE,
                         'legacyPairingAvailable': legacy_available is True})
-      elif path == '/api/galaxy/qr.svg':
+      elif path in ('/api/galaxy/qr.svg', '/api/companion/qr.svg'):
         if not self.require_session():
           return
         record = pairing.read()
-        if record is None:
+        if record is None and path == '/api/galaxy/qr.svg':
           self.json(404, {'error': 'Galaxy is not paired'})
           return
         from openpilot.common.qrcode import _Qr, _capacity
-        raw = pairing.url(record['slug']).encode()
+        from openpilot.starpilot.galaxy.hotspot import ADDRESS
+        raw = (f"http://{ADDRESS}:8082/app.apk" if path == '/api/companion/qr.svg' or record is None else pairing.url(record['slug'])).encode()
         version = next(version for version in range(1, 21)
                        if 4 + 8 + len(raw) * 8 <= _capacity(version) * 8)
         matrix = _Qr(version, raw).modules
@@ -666,7 +792,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" shape-rendering="crispEdges">' +
                f'<rect width="100%" height="100%" fill="white"/><g fill="black">{cells}</g></svg>')
         self.respond(200, svg.encode(), 'image/svg+xml')
-      elif path == '/data/runtime.json':
+      elif path in ('/data/runtime.json', '/api/companion/runtime'):
         self.json(200, {'schemaVersion': 1, 'monitor': 'local', 'instance': INSTANCE})
       elif path in ('/api/local-access', '/api/tmux/live', '/api/troubleshoot'):
         if not self.require_session():
@@ -821,6 +947,11 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           return
         try:
           result = bluetooth_owner().snapshot(session=identity)
+          result['claim'] = phone_claim_view()
+          if result.get('pairing') is None and aa_setup_owner().enabled():
+            delegated = self.aa_phone_window(identity, 'status')
+            if delegated['handled'] and type(delegated.get('bluetooth')) is dict:
+              result['pairing'] = delegated['bluetooth'].get('pairing')
         except (OSError, RuntimeError):
           self.json(503, {'error': 'Bluetooth is unavailable', 'code': 'unavailable'})
         else:
@@ -839,6 +970,22 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           result = aa_setup_owner().status(identity)
         except Exception:
           self.json(503, {'error': 'Android Auto setup is unavailable'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+      elif path == '/api/spotify/setup':
+        if not self.require_session():
+          return
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          result = {**spotify_owner().status(identity), 'uploadAllowed': self.spotify_install_allowed()}
+        except Exception:
+          self.json(503, {'error': 'Spotify setup is unavailable'})
         else:
           if self.settings_session() == identity:
             self.json(200, result)
@@ -1352,12 +1499,52 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         finally:
           self.connection.settimeout(old_timeout)
         return
+      if path == '/api/spotify/upload':
+        if not self.require_session():
+          return
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        if not self.spotify_install_allowed():
+          self.json(403, {'error': 'Install Spotify over your local network or the Galaxy tunnel'})
+          return
+        if self.headers.get('Transfer-Encoding') is not None or \
+           self.headers.get('Content-Type', '').lower() != 'application/octet-stream':
+          self.json(415, {'error': 'Binary .tar.gz upload required'})
+          return
+        try:
+          size = int(self.headers.get('Content-Length', ''))
+        except ValueError:
+          size = -1
+        from openpilot.starpilot.soloist.package import MAX_UPLOAD_BYTES
+        if not 0 < size <= MAX_UPLOAD_BYTES:
+          self.json(413, {'error': 'Soloist download size is invalid'})
+          return
+        from openpilot.starpilot.galaxy.spotify_setup import SetupRejected as SpotifyRejected
+        old_timeout = self.connection.gettimeout()
+        try:
+          self.connection.settimeout(30.0)
+          result = spotify_owner().upload(identity, self.rfile, size)
+        except SpotifyRejected as error:
+          self.json(409, {'error': str(error)})
+        except (OSError, TimeoutError):
+          self.json(503, {'error': 'Soloist upload failed'})
+        else:
+          if self.settings_session() == identity:
+            self.json(202, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+        finally:
+          self.connection.settimeout(old_timeout)
+        return
       if path.startswith('/api/flm/'):
         self.close_connection = True
         if self.require_session():
           self.json(404, {'error': 'Not found'})
         return
-      if path not in ('/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
+      if path not in ('/api/companion/uplink', '/api/companion/settings', '/api/companion/location',
+                      '/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
                       '/api/replay/start', '/api/replay/control', '/api/replay/stop',
@@ -1365,6 +1552,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/galaxy/pair', '/api/galaxy/unpair', '/api/galaxy/device-name', '/api/galaxy/hotspot', '/api/cameras/snapshot',
                       '/api/android-auto/layout', '/api/android-auto/enable', '/api/android-auto/control', '/api/android-auto/pairing',
                       '/api/android-auto/pairing/response', '/api/android-auto/pairing/cancel', '/api/android-auto/pairing/select',
+                      '/api/spotify/enable', '/api/spotify/key', '/api/spotify/preferences', '/api/spotify/control', '/api/spotify/maintenance',
                       '/api/ui/layout', '/api/ui/layout/preview', '/api/favorites/slots',
                       '/api/maps/start', '/api/maps/cancel',
                         '/api/bluetooth/action', '/api/controllers/action',
@@ -1377,8 +1565,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/toyota-tools/action', '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
         return
-      if (path.startswith(('/api/replay/', '/api/recordings/', '/api/connect/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/bluetooth/',
-                           '/api/android-auto/', '/api/controllers/', '/api/vehicle-selection/', '/api/toyota-tools/',
+      if (path.startswith(('/api/companion/', '/api/replay/', '/api/recordings/', '/api/connect/', '/api/cameras/', '/api/settings/', '/api/maps/',
+                           '/api/bluetooth/',
+                           '/api/android-auto/', '/api/spotify/', '/api/controllers/', '/api/vehicle-selection/', '/api/toyota-tools/',
                            '/api/models/', '/api/ui/', '/api/favorites/', '/api/sounds/', '/api/software/',
                            '/api/drives/', '/api/navigation/', '/api/drive-state/', '/api/sentry/', '/api/crash-reports/')) and
           not self.require_session()):
@@ -1410,6 +1599,33 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         return
       if path.startswith('/api/replay/'):
         replay_api.post(self, path, payload)
+        return
+      if path == '/api/companion/location':
+        if getattr(self.server, 'remote_transport', False) or not self.direct_local():
+          self.json(403, {'error': 'Phone location requires a direct local connection'})
+          return
+        try:
+          self.json(200, phone_location_source.publish(payload))
+        except ValueError as error:
+          self.json(400, {'error': str(error)})
+        return
+      if path in ('/api/companion/uplink', '/api/companion/settings'):
+        if getattr(self.server, 'remote_transport', False) or not self.direct_local():
+          self.json(403, {'error': 'Companion controls require a direct local connection'})
+          return
+        try:
+          result = (companion_source.heartbeat(payload, self.client_address[0]) if path.endswith('/uplink')
+                    else companion_source.save(payload))
+        except PermissionError as error:
+          self.json(403, {'error': str(error)})
+        except FileExistsError as error:
+          self.json(409, {'error': str(error)})
+        except ValueError as error:
+          self.json(400, {'error': str(error)})
+        except OSError:
+          self.json(503, {'error': 'Companion settings unavailable'})
+        else:
+          self.json(200, result)
         return
       if path == '/api/galaxy/hotspot':
         identity = self.settings_session()
@@ -1949,6 +2165,37 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             aa_registry_source.revoke(identity)
         self.respond(200, b'{"authenticated":false}', cookie='galaxy_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
         return
+      if path.startswith('/api/spotify/'):
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        from openpilot.starpilot.galaxy.spotify_setup import SetupRejected as SpotifyRejected
+        try:
+          owner = spotify_owner()
+          if path == '/api/spotify/enable' and type(payload) is dict and set(payload) == {'enabled'}:
+            result = owner.enable(identity, payload['enabled'])
+          elif path == '/api/spotify/key' and type(payload) is dict and set(payload) == {'key'}:
+            result = owner.set_key(identity, payload['key'])
+          elif path == '/api/spotify/preferences' and type(payload) is dict:
+            result = owner.save_preferences(identity, payload)
+          elif path == '/api/spotify/control' and type(payload) is dict and set(payload) in ({'action'}, {'action', 'args'}):
+            result = owner.control(identity, payload['action'], payload.get('args', {}))
+          elif path == '/api/spotify/maintenance' and type(payload) is dict and set(payload) == {'action'}:
+            result = owner.maintenance(identity, payload['action'])
+          else:
+            self.json(400, {'error': 'Invalid Spotify request'})
+            return
+        except SpotifyRejected as error:
+          self.json(409, {'error': str(error)})
+        except (OSError, RuntimeError):
+          self.json(503, {'error': 'Spotify is unavailable'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+        return
       if path == '/api/android-auto/enable':
         if type(payload) is not dict or set(payload) not in ({'enabled'}, {'enabled', 'enableBluetooth'}) or \
            type(payload['enabled']) is not bool or type(payload.get('enableBluetooth', False)) is not bool or \
@@ -2008,7 +2255,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(403, {'error': 'Park before changing automatic connection'})
             return
           command, arguments = 'set_auto_connect', {'enabled': payload['enabled']}
-        elif action == 'connection' and set(payload) == {'action', 'connection'} and payload['connection'] in ('wireless', 'wired'):
+        elif (action == 'connection' and set(payload) == {'action', 'connection'} and
+              payload['connection'] in ('wireless', 'wired', 'headunitpad', 'openheadunit')):
           if not configuration_allowed():
             self.json(403, {'error': 'Park before changing the connection type'})
             return
@@ -2030,7 +2278,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           runtime = aa_client().call('status')['status']
           if runtime.get('pairing_ready'):
             raise ValueError('Finish or cancel pairing first')
-          if command == 'start' and not runtime.get('receiver_address') and runtime.get('connection') != 'wired':
+          if command == 'start' and not runtime.get('receiver_address') and runtime.get('connection') == 'wireless':
             raise ValueError('Select a car first')
           if command == 'start' and not aa_setup_owner().identity_status().get('installed'):
             raise ValueError('Verify your Android Auto package first')
@@ -2220,7 +2468,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           if payload['operation'] == 'power':
             if set(payload) != {'operation', 'enabled'} or type(payload['enabled']) is not bool:
               raise ValueError('Invalid Bluetooth request')
-          elif payload['operation'] in ('scan', 'stop_scan', 'cancel_pair'):
+          elif payload['operation'] in ('scan', 'stop_scan', 'cancel_pair', 'accept_pair'):
             if set(payload) != {'operation'}:
               raise ValueError('Invalid Bluetooth request')
           elif payload['operation'] == 'pairing_response':
@@ -2238,18 +2486,33 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               self.json(401, {'error': 'Sign in to Galaxy'})
               return
             delegated = {'handled': False}
-            if payload['operation'] in ('connect', 'disconnect') and aa_setup_owner().enabled():
-              delegated = self.aa_command(identity, 'bluetooth_action', operation=payload['operation'],
-                                          address=normalized_address(payload['address']))
+            if payload['operation'] == 'accept_pair' and configuration_allowed():
+              spotify_owner().prepare_phone_pairing()
+            if payload['operation'] in ('connect', 'disconnect', 'forget') and aa_setup_owner().enabled():
+              try:
+                delegated = self.aa_command(identity, 'bluetooth_action', operation=payload['operation'],
+                                            address=normalized_address(payload['address']))
+              except (OSError, RuntimeError):
+                # Without a running Android Auto service nothing else holds the adapter, so forgetting is local.
+                if payload['operation'] != 'forget':
+                  raise
+                delegated = {'handled': False}
               if type(delegated) is not dict or type(delegated.get('handled')) is not bool:
                 raise BluetoothUnavailable('service_unavailable')
               if 'error_code' in delegated:
                 code = delegated['error_code']
-                if type(code) is str and code in ('busy', 'park_required', 'changed', 'session_expired'):
+                if type(code) is str and code in ('busy', 'park_required', 'changed', 'session_expired', 'projection_active'):
                   raise BluetoothRejected('Android Auto could not complete the Bluetooth change', code=code)
                 unavailable = ('service_unavailable', 'adapter_unavailable', 'radio_unavailable', 'radio_preference_unavailable')
                 raise BluetoothUnavailable('Android Auto Bluetooth service is unavailable',
                                            code=code if type(code) is str and code in unavailable else 'service_unavailable')
+            elif payload['operation'] in ('accept_pair', 'pairing_response', 'cancel_pair') and aa_setup_owner().enabled():
+              delegated = self.aa_phone_window(identity, payload['operation'], payload)
+              if 'error_code' in delegated:
+                code = delegated['error_code']
+                if type(code) is str and code in ('busy', 'park_required', 'changed', 'session_expired'):
+                  raise BluetoothRejected('Android Auto could not complete the Bluetooth change', code=code)
+                raise BluetoothUnavailable('Android Auto Bluetooth service is unavailable')
             if delegated['handled']:
               result = delegated.get('bluetooth')
               if type(result) is not dict:
@@ -2258,6 +2521,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               result = bluetooth_owner().request(payload['operation'], address=payload.get('address'), enabled=payload.get('enabled'),
                                                  session=identity, prompt_id=payload.get('promptId'),
                                                  accepted=payload.get('accepted'), value=payload.get('value', ''))
+            if payload['operation'] in ('accept_pair', 'cancel_pair'):
+              self.phone_claim(payload['operation'], result)
+            elif payload['operation'] == 'forget':
+              forget_app_keys(payload['address'])
         except ValueError:
           if self.settings_session() == identity:
             self.json(400, {'error': 'Invalid Bluetooth request'})
@@ -2425,6 +2692,26 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
 
     def do_DELETE(self):
       if not self.local_request(mutation=True):
+        return
+      if urlsplit(self.path).path == '/api/spotify':
+        if not self.require_session():
+          return
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        from openpilot.starpilot.galaxy.spotify_setup import SetupRejected as SpotifyRejected
+        try:
+          result = spotify_owner().remove(identity)
+        except SpotifyRejected as error:
+          self.json(409, {'error': str(error)})
+        except (OSError, RuntimeError):
+          self.json(503, {'error': 'Spotify data could not be removed'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
         return
       if urlsplit(self.path).path != '/api/android-auto/identity':
         self.json(405, {'error': 'Method unavailable'})

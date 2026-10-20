@@ -7,13 +7,14 @@ import { CrashReportsFeed } from "./crash-reports.js"
 import { storedSize } from "./record-deletion.js"
 import { AndroidAutoLogsFeed, BUNDLE_URL, fileUrl, outcomeLabel } from "./android-auto-logs.js"
 import { MenuTile } from "./menu-tile.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 
 export const Logs = {
   name: "Logs",
-  components: { GxState, GxNotice, SystemMonitor, TroubleshootPage, TmuxPage, MenuTile },
+  components: { GxState, GxNotice, BluetoothNotice, SystemMonitor, TroubleshootPage, TmuxPage, MenuTile },
   props: { path: { type: String, required: true }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ crashes: { reports: [], scanIncomplete: false, listLimited: false, status: "idle", error: "", selected: null, preview: null, previewStatus: "idle", deleting: false, storageBytes: 0, reportCount: 0 }, search: "",
-    aaLogs: { sessions: [], others: [], status: "idle", error: "" } }),
+    aaLogs: { sessions: [], others: [], status: "idle", error: "" }, bluetooth: bluetoothConnection() }),
   computed: {
     visibleReports() { return this.crashes.reports.filter((item) => item.name.toLowerCase().includes(this.search.toLowerCase())) },
   },
@@ -101,7 +102,8 @@ export const Logs = {
       <section v-else-if="path === '/logs/android-auto' && mode === 'local'" class="gx-settings gx-aa-logs" aria-labelledby="gx-aa-logs-title">
         <header class="gx-settings__header gx-page-header"><div><h2 id="gx-aa-logs-title">Android Auto Logs</h2>
           <p>The last 20 connection sessions, newest first. The archive includes every session, a readable report for each, Android Auto settings, the car view's renderer logs, and a snapshot of the device (Wi-Fi, Bluetooth and kernel logs, build, CPU load). Hardware addresses are masked.</p></div></header>
-        <div class="gx-settings__controls gx-actions"><a class="gx-btn" :href="bundleUrl()" download><i class="bi bi-file-earmark-zip" aria-hidden="true"></i><span>Download all logs</span><span class="gx-aa-logs__format">ZIP</span></a><button type="button" class="gx-btn gx-btn--tonal" @click="aaFeed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Refresh</span></button></div>
+        <BluetoothNotice v-if="bluetooth" feature="Log downloads">Log summaries remain available.</BluetoothNotice>
+        <div class="gx-settings__controls gx-actions"><a v-if="!bluetooth" class="gx-btn" :href="bundleUrl()" download><i class="bi bi-file-earmark-zip" aria-hidden="true"></i><span>Download all logs</span><span class="gx-aa-logs__format">ZIP</span></a><button type="button" class="gx-btn gx-btn--tonal" @click="aaFeed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Refresh</span></button></div>
 
         <GxState v-if="aaLogs.status === 'loading'" loading>Loading Android Auto logs…</GxState>
         <GxNotice v-else-if="aaLogs.status === 'unavailable'" tone="danger">{{ aaLogs.error || 'Android Auto logs are unavailable.' }}</GxNotice>
@@ -109,7 +111,7 @@ export const Logs = {
         <div v-if="aaLogs.status === 'ready'" class="gx-aa-log-list">
           <article v-for="log in aaLogs.sessions" :key="log.name" class="gx-card gx-aa-log">
             <div class="gx-aa-log__body"><strong>{{ outcomeLabel(log.outcome) }}</strong><span>{{ log.car || 'Car not identified' }}{{ log.transport ? ' · ' + log.transport : '' }}{{ log.trigger ? ' · ' + log.trigger : '' }}</span><span>{{ reportDate(log.modifiedAt) }} · {{ reportSize(log.size) }}</span></div>
-            <a class="gx-icon-btn gx-aa-log__download" :href="fileUrl(log.name)" :download="log.name" :aria-label="'Download ' + log.name" :title="'Download ' + log.name"><i class="bi bi-download" aria-hidden="true"></i></a>
+            <a v-if="!bluetooth" class="gx-icon-btn gx-aa-log__download" :href="fileUrl(log.name)" :download="log.name" :aria-label="'Download ' + log.name" :title="'Download ' + log.name"><i class="bi bi-download" aria-hidden="true"></i></a>
           </article>
         </div>
         <template v-if="aaLogs.status === 'ready' && aaLogs.others.length">
@@ -117,7 +119,7 @@ export const Logs = {
           <div class="gx-aa-log-list">
             <article v-for="log in aaLogs.others" :key="log.name" class="gx-card gx-aa-log">
               <div class="gx-aa-log__body"><strong>{{ log.name }}</strong><span>{{ reportDate(log.modifiedAt) }} · {{ reportSize(log.size) }}</span></div>
-              <a class="gx-icon-btn gx-aa-log__download" :href="fileUrl(log.name)" :download="log.name" :aria-label="'Download ' + log.name" :title="'Download ' + log.name"><i class="bi bi-download" aria-hidden="true"></i></a>
+              <a v-if="!bluetooth" class="gx-icon-btn gx-aa-log__download" :href="fileUrl(log.name)" :download="log.name" :aria-label="'Download ' + log.name" :title="'Download ' + log.name"><i class="bi bi-download" aria-hidden="true"></i></a>
             </article>
           </div>
         </template>

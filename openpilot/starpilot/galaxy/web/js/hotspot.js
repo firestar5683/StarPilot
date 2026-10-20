@@ -61,7 +61,7 @@ export const GalaxyHotspot = {
       if (!this.active || this.busy || !this.snapshot?.editable || !this.passwordValid) return
       clearTimeout(this.timer); this.controller?.abort()
       const generation = ++this.generation
-      this.controller = new AbortController(); this.busy = true; this.saveError = ''; this.notice = ''
+      this.controller = new AbortController(); this.busy = true; this.error = ''; this.saveError = ''; this.notice = ''
       try {
         const value = await requestJson('./api/galaxy/hotspot', { request: { signal: this.controller.signal,
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -90,7 +90,7 @@ export const GalaxyHotspot = {
       <div class="gx-stack">
         <p>Network name: <strong>{{ snapshot.config.ssid }}</strong></p>
         <p class="gx-note">Fixed to TheGalaxy- plus the last four characters of your comma dongle ID. Once saved, the switch and password survive restarts.</p>
-        <label class="gx-field-group">Password <input class="gx-field" :type="showPassword ? 'text' : 'password'" v-model="draft.password" :disabled="busy || !snapshot.editable" maxlength="63" autocomplete="new-password" placeholder="Blank generates a password" /></label>
+        <label class="gx-field-group">Password <input class="gx-field" :type="showPassword ? 'text' : 'password'" v-model="draft.password" :disabled="busy || !snapshot.editable" maxlength="63" autocomplete="new-password" placeholder="Blank generates a password" @input="saveError = ''" /></label>
         <div class="gx-row gx-row--borderless"><div class="gx-row__info"><span class="gx-row__label">Show password</span></div>
           <label class="gx-switch"><input type="checkbox" role="switch" aria-label="Show password" v-model="showPassword" :disabled="busy || !snapshot.editable"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label></div>
         <p v-if="!passwordValid" class="gx-note">Use a 12–63 character password without spaces, or leave it blank to generate one.</p>
@@ -107,6 +107,6 @@ export const GalaxyHotspot = {
       <li><i class="bi bi-arrow-repeat" aria-hidden="true"></i><span>Network or channel changes may interrupt access. Changing the password or disabling the hotspot disconnects phones.</span></li>
       <li><i class="bi bi-globe" aria-hidden="true"></i><span>The public galaxy.firestar.link address still needs Internet and its tunnel.</span></li>
     </ul>
-    <GxNotice v-if="error" tone="danger">{{ error }}</GxNotice><GxNotice v-if="saveError" tone="danger">{{ saveError }}</GxNotice><GxNotice v-if="notice" tone="success">{{ notice }}</GxNotice>
+    <GxNotice v-if="error || saveError" tone="danger">{{ saveError || error }}</GxNotice><GxNotice v-if="notice" tone="success">{{ notice }}</GxNotice>
   </section>`,
 }

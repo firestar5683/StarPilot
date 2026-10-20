@@ -85,6 +85,14 @@
       "description": "Show StarPilot on your car\u2019s screen",
       "availability": "local-only",
       "visibility": "authenticated"
+    },
+    {
+      "name": "Spotify and Phone Audio",
+      "path": "/spotify",
+      "icon": "bi-spotify",
+      "description": "Play Spotify or forward phone music through your comma to your car",
+      "availability": "local-only",
+      "visibility": "authenticated"
     }
   ]
 }

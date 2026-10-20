@@ -93,3 +93,14 @@ for (const [code, words] of [["busy", /another operation/], ["park_required", /P
   errorFeed.stop()
 }
 assert.equal(validBluetoothStatus({ ...status, errorCode: "service_unavailable" }), true)
+
+// A window opened for a phone has no address until the first phone asks, and only phone windows may omit it.
+assert.equal(validBluetoothStatus({ ...status, adapterAddress: "AA:BB:CC:DD:EE:FF", adapterName: "comma",
+  pairing: { address: "", state: "pairing", prompt: null, incoming: true, name: "" } }), true)
+assert.equal(validBluetoothStatus({ ...status,
+  pairing: { address: "11:22:33:44:55:66", state: "pairing", prompt, incoming: true, name: "Pixel" } }), true)
+assert.equal(validBluetoothStatus({ ...status, pairing: { address: "", state: "pairing", prompt: null } }), false)
+assert.equal(validBluetoothStatus({ ...status, pairing: { address: "not-an-address", state: "pairing", prompt: null, incoming: true, name: "" } }), false)
+assert.equal(validBluetoothStatus({ ...status, adapterName: 5 }), false)
+assert.match(BluetoothPage.template, /Pair phone/)
+assert.match(BluetoothPage.template, /action\('accept_pair'\)/)

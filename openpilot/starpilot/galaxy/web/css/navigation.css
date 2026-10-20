@@ -121,3 +121,7 @@
 }
 
 .gx-navigation__token-link { margin-bottom: var(--sp-4); }
+
+.gx-navigation__gps { scroll-margin-top: 100px; }
+.gx-navigation__gps li { margin-block: var(--sp-2); line-height: 1.5; }
+.gx-navigation__gps summary { cursor: pointer; min-height: 44px; display: list-item; align-content: center; }

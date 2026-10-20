@@ -3,6 +3,7 @@ import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { LiveCameraPreview } from "./cameras.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { SettingsFeed, isPipCropRow, settingsBusy } from "./settings.js"
 import { GalaxySettingRow } from "./galaxy-setting-row.js"
 import { displayPoint, FORMATS, maskDraft, sourcePoint } from "./pip-geometry.js"
@@ -14,7 +15,7 @@ const SIDES = [
 
 export const PipPage = {
   name: "PipPage",
-  components: { GxDialog, GxState, GxNotice, GalaxySettingRow },
+  components: { GxDialog, GxState, GxNotice, BluetoothNotice, GalaxySettingRow },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   setup(props) {
@@ -41,7 +42,7 @@ export const PipPage = {
         }
       }
     } })
-    return { state, feed, FORMATS, SIDES }
+    return { state, feed, FORMATS, SIDES, bluetooth: bluetoothConnection() }
   },
   mounted() {
     this._dragIndex = -1
@@ -173,20 +174,21 @@ export const PipPage = {
     <section class="gx-settings gx-pip" aria-label="Blind Spot Camera and Preview saved settings" :inert="busy" :aria-busy="busy || undefined">
       <header class="gx-settings__header gx-page-header"><div><h2>Blind Spot Camera and Preview</h2>
         <p>Shows a close-up of the cabin window as you drive. Whether it appears on your turn signal or when a car is in your blind spot depends on your settings. Choose which window each side covers and how much to zoom in.</p></div>
-        <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" :disabled="state.cameraWarming" @click="liveCamera.refresh()"><i class="bi bi-camera" aria-hidden="true"></i> Take new snapshot</button><button type="button" class="gx-icon-btn" aria-label="Position side cameras" title="Position side cameras" @click="go('/theme_maker')"><i class="bi bi-layout-wtf" aria-hidden="true"></i></button></div></header>
+        <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" :disabled="bluetooth || state.cameraWarming" @click="liveCamera.refresh()"><i class="bi bi-camera" aria-hidden="true"></i> Take new snapshot</button><button type="button" class="gx-icon-btn" aria-label="Position side cameras" title="Position side cameras" @click="go('/theme_maker')"><i class="bi bi-layout-wtf" aria-hidden="true"></i></button></div></header>
       <GxState v-if="mode !== 'local'">Local saved settings are unavailable in preview.</GxState>
       <template v-else>
         <GxNotice v-if="state.data && !state.data.parked" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
         <GxState v-if="state.status === 'loading'" loading>Reading blind-spot camera preferences and crop positions…</GxState>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read blind-spot camera preferences or crop positions. Reconnecting automatically…</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
-        <GxNotice tone="danger" v-if="state.cameraError">{{ state.cameraError }}</GxNotice>
+        <BluetoothNotice v-if="bluetooth" feature="Cabin camera preview">Saved settings remain available.</BluetoothNotice>
+        <GxNotice tone="danger" v-else-if="state.cameraError">{{ state.cameraError }}</GxNotice>
         <div v-if="state.data" class="gx-settings__body">
 
           <section class="gx-card gx-vasm__editor" aria-label="Blind Spot Camera crop editor">
             <div class="gx-section__header"><i class="bi bi-crop" aria-hidden="true"></i><span class="gx-section__title">Camera Crop</span></div>
             <p class="gx-note">Drag a circle onto the cabin window you want to watch. Both crops share one size.</p>
-            <p class="gx-note gx-camera-status" role="status">{{ state.cameraWarming ? "Warming up the camera · about 10 seconds…" : state.imageName ? "Snapshot ready" : "Take a cabin snapshot while parked." }}</p>
+            <p v-if="!bluetooth" class="gx-note gx-camera-status" role="status">{{ state.cameraWarming ? "Warming up the camera · about 10 seconds…" : state.imageName ? "Snapshot ready" : "Take a cabin snapshot while parked." }}</p>
             <div class="gx-actions">
               <button v-for="side in SIDES" :key="side.key" type="button" class="gx-btn gx-btn--tonal" :disabled="!editable" :aria-pressed="state.activeSide === side.key" :aria-label="side.label" @click="choose(side.key)">{{ side.key === "centerRight" ? "Left" : "Right" }}</button>
               <button type="button" class="gx-icon-btn" :disabled="!editable || !state[state.activeSide]" aria-label="Clear selected camera crop" title="Clear selected crop" @click="clear(state.activeSide)"><i class="bi bi-eraser"></i></button>

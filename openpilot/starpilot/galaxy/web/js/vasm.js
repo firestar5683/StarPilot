@@ -5,11 +5,12 @@ import { SettingsFeed, settingsBusy } from "./settings.js"
 import { GalaxySettingRow } from "./galaxy-setting-row.js"
 import { LiveCameraPreview } from "./cameras.js"
 import { GxNotice } from "./notice.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { FORMATS, annotationDraft, displaySide, sourcePoint } from "./vasm-geometry.js"
 
 export const VasmPage = {
   name: "VasmPage",
-  components: { GxDialog, GxState, GalaxySettingRow, GxNotice },
+  components: { GxDialog, GxState, GalaxySettingRow, GxNotice, BluetoothNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   setup(props) {
@@ -33,7 +34,7 @@ export const VasmPage = {
           "This saved camera size cannot be edited here. Choose a supported size and redraw the regions."
       }
     } })
-    return { state, feed, FORMATS, displaySide }
+    return { state, feed, FORMATS, displaySide, bluetooth: bluetoothConnection() }
   },
   mounted() {
     this._dragIndex = -1
@@ -165,20 +166,21 @@ export const VasmPage = {
     <section class="gx-settings gx-vasm" aria-label="V-ASM saved settings" :inert="busy" :aria-busy="busy || undefined">
       <header class="gx-settings__header gx-page-header"><div><h2>V-ASM Spot Monitoring</h2>
         <p>Highlight the side windows a driver would check in the cabin camera, and tune visual spot-monitoring options.</p></div>
-        <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" :disabled="state.cameraWarming" @click="liveCamera.refresh()"><i class="bi bi-camera" aria-hidden="true"></i> Take new snapshot</button></div></header>
+        <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" :disabled="bluetooth || state.cameraWarming" @click="liveCamera.refresh()"><i class="bi bi-camera" aria-hidden="true"></i> Take new snapshot</button></div></header>
       <GxNotice v-if="mode === 'local' && state.data && !state.data.parked" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
       <GxState v-if="mode !== 'local'">Local saved settings are unavailable in preview.</GxState>
       <template v-else>
         <GxState v-if="state.status === 'loading'" loading>Reading camera regions and spot-monitoring preferences…</GxState>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read camera regions or spot-monitoring preferences. Reconnecting automatically…</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
-        <GxNotice tone="danger" v-if="state.cameraError">{{ state.cameraError }}</GxNotice>
+        <BluetoothNotice v-if="bluetooth" feature="Cabin camera preview">Saved settings remain available.</BluetoothNotice>
+        <GxNotice tone="danger" v-else-if="state.cameraError">{{ state.cameraError }}</GxNotice>
         <div v-if="state.data" class="gx-settings__body">
 
           <section class="gx-card gx-vasm__editor" aria-label="Camera window region editor">
             <div class="gx-section__header"><i class="bi bi-bounding-box" aria-hidden="true"></i><span class="gx-section__title">Camera Window Regions</span></div>
             <p>The display is mirrored: vehicle left is camera right; vehicle right is camera left. Trace visible side glass, leaving pillars and interior out.</p>
-            <p class="gx-note gx-camera-status" role="status">{{ state.cameraWarming ? "Warming up the camera · about 10 seconds…" : state.imageName ? "Snapshot ready" : "Take a cabin snapshot while parked." }}</p>
+            <p v-if="!bluetooth" class="gx-note gx-camera-status" role="status">{{ state.cameraWarming ? "Warming up the camera · about 10 seconds…" : state.imageName ? "Snapshot ready" : "Take a cabin snapshot while parked." }}</p>
             <div class="gx-actions">
               <button v-for="side in ['cameraRight', 'cameraLeft']" :key="side" type="button" class="gx-btn gx-btn--tonal" :aria-pressed="state.activeSide === side" :disabled="!drawable" :aria-label="displaySide(side)" @click="state.activeSide=side">{{ side === 'cameraRight' ? 'Left' : 'Right' }}</button>
               <button type="button" class="gx-icon-btn" :disabled="!drawable || !state[state.activeSide]?.length" aria-label="Undo last region point" title="Undo last point" @click="undo(state.activeSide)"><i class="bi bi-arrow-counterclockwise"></i></button>
