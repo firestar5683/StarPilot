@@ -6,13 +6,11 @@ on:
     paths:
       - 'openpilot/starpilot/companion/ios/**'
       - 'openpilot/starpilot/galaxy_bluetooth/**'
-      - 'openpilot/starpilot/galaxy/web/**'
       - '.github/workflows/ios-companion.yaml'
   pull_request:
     paths:
       - 'openpilot/starpilot/companion/ios/**'
       - 'openpilot/starpilot/galaxy_bluetooth/**'
-      - 'openpilot/starpilot/galaxy/web/**'
       - '.github/workflows/ios-companion.yaml'
   workflow_dispatch:
 
@@ -24,25 +22,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  bundle:
-    name: iOS web bundle matches Galaxy web
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: false
-          lfs: false
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Check the bundled web UI has not drifted
-        run: python openpilot/starpilot/companion/ios/tools/sync_web_bundle.py --check
-
   app:
     name: Swift tests and iOS Simulator build
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 25
     defaults:
       run:

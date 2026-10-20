@@ -21,4 +21,4 @@ app source: `natehuby76/ios-clone`, branch `codex/secretgood-galaxy`, commit `08
 
 `GalaxyBluetooth/Resources/Web` is a copy of `galaxy/web`. After changing anything under `galaxy/web`, run
 `python3 openpilot/starpilot/companion/ios/tools/sync_web_bundle.py` to update the copy and its manifest.
-CI runs the same script with `--check` and fails when the bundle has drifted.
+`galaxy/tests/test_ios_bundle_sync.py` fails when the bundle has drifted.
