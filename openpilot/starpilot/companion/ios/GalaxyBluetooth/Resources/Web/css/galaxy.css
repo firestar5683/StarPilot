@@ -277,6 +277,8 @@ body {
   50% { opacity: 1; transform: rotateZ(0.05deg) scale(1.2); }
 }
 
+#galaxy-bg.galaxy-stars-paused .galaxy-hero { animation-play-state: paused; }
+
 @media (prefers-reduced-motion: reduce) {
   #galaxy-bg .galaxy-hero { animation: none !important; }
 }

@@ -23,6 +23,7 @@ const PlotsPage = page(() => import("./plots.js").then((module) => module.PlotsP
 const FlmPage = page(() => import("./flm.js").then((module) => module.FlmPage))
 import { LocalAuth } from "./auth-client.js"
 import { Home } from "./home.js"
+import { LocalAccess } from "./local-access.js"
 import { MenuTile } from "./menu-tile.js"
 const LocalRecordingsPage = page(() => import("./record-history.js").then((module) => module.LocalRecordingsPage))
 const CamerasPage = page(() => import("./cameras.js").then((module) => module.CamerasPage))
@@ -40,7 +41,7 @@ const OnroadLayoutPage = page(() => import("./onroad-layout.js").then((module) =
 const GalaxyPage = page(() => import("./galaxy.js").then((module) => module.GalaxyPage))
 import { DevicePicker } from "./device-picker.js"
 import { DeviceState } from "./device-state.js"
-import { spawnAmbientStars } from "./ambient-stars.js"
+import { spawnAmbientStars, pauseStarsOnSlowFirefoxScroll } from "./ambient-stars.js"
 
 function page(loader) {
   return defineAsyncComponent({
@@ -85,7 +86,7 @@ const auth = new LocalAuth({ publish: (update) => {
 
 
 createApp({
-  components: { BottomNav, Home, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, SettingsRecoveryPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, SpotifyPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, MenuTile },
+  components: { BottomNav, Home, LocalAccess, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, SettingsRecoveryPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, SpotifyPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, MenuTile },
   data: () => ({ state, authState, authForm, route, NAV, routeDirection: 1, updateRestart, deviceRestart, nextLayoutLeavePresentation: "inline" }),
   computed: {
     visibleTools() { return state.tools.filter(tool => tool.visibility !== "authenticated" ||
@@ -200,7 +201,7 @@ createApp({
         <div class="gx-nav-section"><div class="gx-nav-section__title">Main</div>
           <button v-for="item in NAV.slice(0,3)" :key="item.path" type="button" class="gx-nav-item" :class="{active:isActive(item.path)}" @click="goFromMenu(item.path)"><i class="bi" :class="item.icon"></i><span>{{ item.name }}</span></button>
         </div>
-        <div v-if="authState.localAccess" class="gx-nav-section"><div class="gx-nav-section__title">Routes</div><button type="button" class="gx-nav-item" :class="{active:isActive('/recordings')}" @click="goFromMenu('/recordings')"><i class="bi bi-camera-reels"></i><span>Routes</span></button></div>
+        <div class="gx-nav-section"><div class="gx-nav-section__title">Routes</div><button type="button" class="gx-nav-item" :class="{active:isActive('/recordings')}" @click="goFromMenu('/recordings')"><i class="bi bi-camera-reels"></i><span>Routes</span></button></div>
         <div class="gx-nav-section"><div class="gx-nav-section__title">Tools</div>
           <button v-for="tool in visibleTools.filter(tool => tool.path !== '/galaxy')" :key="tool.path" type="button" class="gx-nav-item" :class="{active:isActive(tool.path)}" @click="goFromMenu(tool.path)"><i class="bi" :class="tool.icon"></i><span>{{ tool.name }}</span></button>
 
@@ -226,7 +227,10 @@ createApp({
         <GxNotice v-else-if="state.pageError" tone="danger">{{ state.pageError }} <button class="gx-btn" @click="reloadPage">Reload page</button></GxNotice>
         <Home v-else-if="route.path === '/'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <LocalRecordingsPage v-else-if="isActive('/recordings') && authState.localAccess" :mode="state.monitorMode" :unauthorized="sessionExpired" :route-path="route.path" :go="go" />
-        <GxState v-else-if="isActive('/recordings')">Routes require a local Galaxy connection. Open a local address from Home while connected to the comma's hotspot or local network.</GxState>
+        <div v-else-if="isActive('/recordings')" class="gx-stack">
+          <GxState title="Local connection required">Routes are unavailable through the Galaxy tunnel. Open Galaxy locally to access Routes.</GxState>
+          <LocalAccess :mode="state.monitorMode" :on-unauthorized="sessionExpired" />
+        </div>
         <CamerasPage v-else-if="route.path === '/cameras'" :mode="state.monitorMode" :go="go" :unauthorized="sessionExpired" />
         <SentryEventsPage v-else-if="['/cameras/events', '/cameras/sentry-settings'].includes(route.path)" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <PipPage v-else-if="route.path === '/cameras/pip'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
@@ -260,12 +264,14 @@ createApp({
         </div>
         <GxState v-else :title="pageName">This capability is unavailable in this build. No operation was attempted.</GxState>
       </div></Transition></div></main>
-      <BottomNav :path="route.path" :local-access="authState.localAccess" @navigate="go" />
+      <BottomNav :path="route.path" @navigate="go" />
     </div>
   `,
 }).component("GxState", GxState).component("GxNotice", GxNotice).mount("#galaxy-app")
 
-spawnAmbientStars(document.getElementById("galaxy-bg"))
+const galaxyBackground = document.getElementById("galaxy-bg")
+spawnAmbientStars(galaxyBackground)
+pauseStarsOnSlowFirefoxScroll(galaxyBackground)
 
 startRouter()
 
