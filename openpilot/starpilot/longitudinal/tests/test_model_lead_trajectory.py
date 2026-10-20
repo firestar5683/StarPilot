@@ -114,8 +114,8 @@ class TestModelLeadTrajectory(unittest.TestCase):
       return NS(**{**good.to_dict(), **changes})
     variants = [model(prob=.5), model(x=[1.]), model(x=[float('nan')]*len(good.x)),
                 model(v=[float('inf')]*len(good.v)), None]
-    for model in variants:
-      np.testing.assert_array_equal(mpc.process_lead(lead, model, model_v_ego=20.), mpc.process_lead(lead))
+    for model_variant in variants:
+      np.testing.assert_array_equal(mpc.process_lead(lead, model_variant, model_v_ego=20.), mpc.process_lead(lead))
     lead.aLeadK = -.51
     np.testing.assert_array_equal(mpc.process_lead(lead, good, model_v_ego=20.), mpc.process_lead(lead))
     lead.aLeadK = 0.

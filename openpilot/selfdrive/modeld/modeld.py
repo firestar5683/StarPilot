@@ -158,6 +158,8 @@ def input_view(buffer: Buffer, shape: tuple[int, ...], dtype: DType, offset: int
 
 
 class ModelState:
+  lat_delay: float
+  frame_drop_ratio: float
   prev_desire: np.ndarray  # for tracking the rising edge of the pulse
   get_action_from_model = staticmethod(get_action_from_model)
 

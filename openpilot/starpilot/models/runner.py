@@ -141,6 +141,8 @@ def action_from_outputs(outputs: dict[str, np.ndarray], version: str, previous: 
 class CatalogModelState:
   """Current modeld interface around a current-pin unified catalog artifact."""
 
+  lat_delay: float
+  frame_drop_ratio: float
   vision_input_names = ("img", "big_img")
 
   def __init__(self, cam_w: int, cam_h: int, artifact_path: Path, behavior_version: str, chestnut: bool):

@@ -65,7 +65,19 @@ class CarParamsFirstPublishTest(unittest.TestCase):
       params.put_bool('SpeedLimitController', True, block=True)
       params.put('SLCPriority1', 'Vision', block=True)
       self.assertFalse(vision_slc_development(True, params, car.CarParams.new_message()))
+      # Display-only vision follows finalized vehicle capability, including stock longitudinal.
+      self.assertTrue(vision_slc_development(True, params, stock))
+      self.assertFalse(vision_slc_development(False, params, stock))
+      for flag in ('notCar', 'dashcamOnly', 'passive'):
+        unsupported = car.CarParams.new_message(**stock.to_dict())
+        setattr(unsupported, flag, True)
+        self.assertFalse(vision_slc_development(True, params, unsupported))
+      params.put_bool('SpeedLimitController', False, block=True)
+      self.assertTrue(vision_slc_development(True, params, stock))  # Display still requests vision.
+      params.put_bool('ShowSpeedLimits', False, block=True)
       self.assertFalse(vision_slc_development(True, params, stock))
+      params.put_bool('ShowSpeedLimits', True, block=True)
+      params.put_bool('SpeedLimitController', True, block=True)
 
       Car.state_publish(card, state, None)
       published = publisher.car_params()

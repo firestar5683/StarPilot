@@ -146,6 +146,7 @@ class TestGlobalFeaturePresentation(unittest.TestCase):
     row = next(row for row in rows if row.key == 'LaneCentering')
     request = row_change(row, 1)
     self.assertIsNotNone(request)
+    assert request is not None
     self.assertTrue(row.available)
     self.assertTrue(owner.apply(request))
     self.assertTrue(self.params.get_bool('LaneCentering'))

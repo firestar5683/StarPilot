@@ -13,6 +13,8 @@ import unittest
 from unittest import mock
 
 from opendbc.car.structs import car
+from opendbc.car.toyota.interface import CarInterface as ToyotaInterface
+from opendbc.car.toyota.values import CAR as ToyotaCar
 from openpilot.common.params import Params
 from openpilot.starpilot.galaxy.settings import (
   AuthorityContext, LiveContextSource, SettingsChanged, SettingsGateway,
@@ -38,9 +40,11 @@ class SettingsGatewayTest(unittest.TestCase):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
     self.params = Params(temporary.name)
+    native = ToyotaInterface.get_non_essential_params(ToyotaCar.TOYOTA_COROLLA_TSS2)
     cp = SimpleNamespace(carFingerprint="TOYOTA_COROLLA_TSS2", openpilotLongitudinalControl=True,
                          pcmCruise=False, notCar=False, dashcamOnly=False, passive=False,
-                         brand="toyota", steerControlType="torque", carVin="",
+                         brand="toyota", steerControlType=native.steerControlType, carVin="",
+                         lateralTuning=native.lateralTuning, minSteerSpeed=native.minSteerSpeed, safetyConfigs=native.safetyConfigs,
                          transmissionType=car.CarParams.TransmissionType.automatic)
     self.context = MutableContext(cp)
     self.gateway = SettingsGateway(self.params, self.context, clock=lambda: 100.0)
@@ -1072,6 +1076,7 @@ class SettingsGatewayTest(unittest.TestCase):
 
   def test_turn_assist_gateway_saves_next_drive_choice_onroad_with_selection_binding(self):
     unrelated = self.context.value
+    unrelated.cp.safetyConfigs = []
     cp, root = self._live_lane_context()
     self.context.value = AuthorityContext(True, cp, self.context.value.cp_raw)
     page = self.page("torque")
@@ -1142,9 +1147,13 @@ class SettingsGatewayTest(unittest.TestCase):
       self.assertFalse(any(row["available"] for row in self.page("lane")["rows"]))
     self.context.value = AuthorityContext(False, SimpleNamespace(brand="unknown", carFingerprint="OTHER", notCar=False,
                                         dashcamOnly=False, passive=False), b"other")
-    rows = self.page("lane")["rows"]
+    page = self.page("lane")
+    rows = page["rows"]
     self.assertFalse(next(row for row in rows if row["label"] == "Lane Centering Strength")["available"])
-    self.assertTrue(next(row for row in rows if row["label"] == "Enable Lane Centering")["available"])
+    index = next(i for i, row in enumerate(rows) if row["label"] == "Enable Lane Centering")
+    self.assertFalse(rows[index]["available"])
+    with self.assertRaises(SettingsChanged):
+      self.gateway.preview(page["view"], index, 1, self.session, self.generation)
 
   def test_live_lane_retains_range_session_source_and_cp_guards(self):
     tagged, root = self._live_lane_context()
@@ -1179,9 +1188,12 @@ class SettingsGatewayTest(unittest.TestCase):
       def put(self, key, value, block=True):
         (root / key).write_bytes(str(value).encode())
     self.gateway = SettingsGateway(Files(), self.context, clock=lambda: 100.0)
+    self.context.value.cp.safetyConfigs = []
     page = self.page("lane")
     index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Lane Centering Strength")
     self.assertFalse(page["rows"][index]["available"])
+    with self.assertRaises(SettingsChanged):
+      self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=200)
     self.context.value = AuthorityContext(True, tagged, tagged.as_reader().as_builder().to_bytes())
     page = self.page("lane")
     self.assertTrue(page["rows"][index]["available"])
@@ -1481,9 +1493,11 @@ class SettingsHttpTest(unittest.TestCase):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
     self.params = Params(temporary.name)
+    native = ToyotaInterface.get_non_essential_params(ToyotaCar.TOYOTA_COROLLA_TSS2)
     cp = SimpleNamespace(carFingerprint="TOYOTA_COROLLA_TSS2", openpilotLongitudinalControl=True,
                          pcmCruise=False, notCar=False, dashcamOnly=False, passive=False,
-                         brand="toyota", steerControlType="torque", carVin="",
+                         brand="toyota", steerControlType=native.steerControlType, carVin="",
+                         lateralTuning=native.lateralTuning, minSteerSpeed=native.minSteerSpeed, safetyConfigs=native.safetyConfigs,
                          transmissionType=car.CarParams.TransmissionType.automatic)
     self.context = MutableContext(cp)
     self.gateway = SettingsGateway(self.params, self.context)

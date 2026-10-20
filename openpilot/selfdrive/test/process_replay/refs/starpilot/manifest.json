@@ -118,8 +118,8 @@
       "segment": "regen7366F13F6A1|2025-04-08--23-07-07--0",
       "process": "controlsd",
       "file": "regen7366F13F6A1_2025-04-08--23-07-07--0_controlsd.zst",
-      "bytes": 344980,
-      "sha256": "9fe580f915f8b6fdd4bfd20d5fe0a3f68a2e8b75ee7b2d7d88e44f70a8e91688",
+      "bytes": 343523,
+      "sha256": "1bc657997895c768162416c8b0e6e08fe932c97e3aae0253682f7d34eb866211",
       "input_sha256": "f501c1c99bae27ca710f40f723a1960ea4e898836d7edfb57ea6397591e5aff2",
       "input_bytes": 9393878,
       "official_baseline_commit": "ec95db3f1fa19f76940497fedfdb62e09ea19912",
@@ -129,8 +129,28 @@
       "official_baseline_sha256": "250dcc78707bf7671db682a56bc7f89fba37b22ad9ea6f62751aa4dc3eee73f5",
       "config_sha256": "132acceff1ba3e33c903694e42a6442e42bbf71319bcf4e0de1b020cbfc97111",
       "car_fingerprint": "SUBARU_OUTBACK",
-      "contract": "Default lane-change pacing; disabling pacing alone restores exact official outputs.",
-      "producing_source_snapshot": "7395-production"
+      "contract": "Default lane-change pacing retains the intentional native-rate unwind exemption: when previous*(desired-previous)<0, bypass additional pacing while preserving existing final controller and native clipping. Paired exact old-limiter ablation restores the prior reference with zero full-comparator differences. Only lateral command and dependent lateral-controller state fields change; longitudinal, activation, cancel and health fields are unchanged.",
+      "producing_source_snapshot": "3a815cfdd467c22e495f03998b88da9a19927c49",
+      "intentional_contract_source_commit": "13d7b725b90a3b5d7860830ae23ce0046b8aa385",
+      "review_evidence": {
+        "comparison_reference_sha256": "9fe580f915f8b6fdd4bfd20d5fe0a3f68a2e8b75ee7b2d7d88e44f70a8e91688",
+        "difference_fields": {
+          "carControl.actuators.torque": 494,
+          "controlsState.lateralControlState.torqueState.error": 360,
+          "controlsState.lateralControlState.torqueState.p": 341,
+          "controlsState.lateralControlState.torqueState.f": 549,
+          "controlsState.lateralControlState.torqueState.output": 494,
+          "controlsState.lateralControlState.torqueState.desiredLateralAccel": 360,
+          "controlsState.lateralControlState.torqueState.desiredLateralJerk": 558
+        },
+        "old_limiter_full_comparator_difference_count": 0,
+        "actual_current_limiter_calls": 6001,
+        "actual_current_unwind_exemption_calls": 70,
+        "actual_old_limiter_calls": 6001,
+        "command_and_activation_negative_controls": true,
+        "ordinary_per_service_validity_threshold": 0.9,
+        "scope": "Recorded controlsd only; no sendCAN/Panda or physical proof."
+      }
     },
     {
       "segment": "regen1271097D038|2025-04-09--03-26-00--0",
@@ -190,8 +210,8 @@
       "segment": "regen5FCAC896BBE|2025-04-08--23-13-35--0",
       "process": "controlsd",
       "file": "regen5FCAC896BBE_2025-04-08--23-13-35--0_controlsd.zst",
-      "bytes": 323642,
-      "sha256": "8ba5beb185e63b2fbda9f3fa303b76c4d95b1ccd4423b983bcc68b725a9bdfde",
+      "bytes": 322963,
+      "sha256": "0d7f8d7c736b71a8024d281b45c52a9ed6c4eb7e452abb98ee011230676dce42",
       "input_sha256": "2f2574c057b7cb55fbb2e05c99c5f1b1d6d894222422c4b51d4363ad66e6c840",
       "input_bytes": 11022997,
       "official_baseline_commit": "ec95db3f1fa19f76940497fedfdb62e09ea19912",
@@ -201,15 +221,36 @@
       "official_baseline_sha256": "5f7c91fe6ebfc90433f3ed1e5fe75f7d8ea04e830badb44f9dabebb5a325c294",
       "config_sha256": "132acceff1ba3e33c903694e42a6442e42bbf71319bcf4e0de1b020cbfc97111",
       "car_fingerprint": "RIVIAN_R1",
-      "contract": "Default lane-change pacing; disabling pacing alone restores exact official outputs.",
-      "producing_source_snapshot": "7395-production"
+      "contract": "Default lane-change pacing retains the intentional native-rate unwind exemption: when previous*(desired-previous)<0, bypass additional pacing while preserving existing final controller and native clipping. Paired exact old-limiter ablation restores the prior reference with zero full-comparator differences. Only lateral command and dependent lateral-controller state fields change; longitudinal, activation, cancel and health fields are unchanged.",
+      "producing_source_snapshot": "3a815cfdd467c22e495f03998b88da9a19927c49",
+      "intentional_contract_source_commit": "13d7b725b90a3b5d7860830ae23ce0046b8aa385",
+      "review_evidence": {
+        "comparison_reference_sha256": "8ba5beb185e63b2fbda9f3fa303b76c4d95b1ccd4423b983bcc68b725a9bdfde",
+        "difference_fields": {
+          "carControl.actuators.torque": 422,
+          "controlsState.lateralControlState.torqueState.error": 427,
+          "controlsState.lateralControlState.torqueState.p": 418,
+          "controlsState.lateralControlState.torqueState.f": 474,
+          "controlsState.lateralControlState.torqueState.output": 422,
+          "controlsState.lateralControlState.torqueState.desiredLateralAccel": 404,
+          "controlsState.lateralControlState.torqueState.desiredLateralJerk": 657,
+          "controlsState.lateralControlState.torqueState.i": 969
+        },
+        "old_limiter_full_comparator_difference_count": 0,
+        "actual_current_limiter_calls": 6001,
+        "actual_current_unwind_exemption_calls": 95,
+        "actual_old_limiter_calls": 6001,
+        "command_and_activation_negative_controls": true,
+        "ordinary_per_service_validity_threshold": 0.9,
+        "scope": "Recorded controlsd only; no sendCAN/Panda or physical proof."
+      }
     },
     {
       "segment": "regen755D8CB1E1F|2025-04-08--23-13-43--0",
       "process": "controlsd",
       "file": "regen755D8CB1E1F_2025-04-08--23-13-43--0_controlsd.zst",
-      "bytes": 234081,
-      "sha256": "fd6fb0e92c7aea24126e43a8d799c922b56180ba27a98b80490eccdf0ce5c2cb",
+      "bytes": 231567,
+      "sha256": "0d25fc30cb712b10194023ee2f58a81b0786e198af4bfba1805a6cf6561286d1",
       "input_sha256": "786dfef08325d24e8205320862adc940706ff3475ae082ea104127fb5da62823",
       "input_bytes": 11315727,
       "official_baseline_commit": "ec95db3f1fa19f76940497fedfdb62e09ea19912",
@@ -219,8 +260,23 @@
       "official_baseline_sha256": "7e6979128fc936c54cf583f5437e7464786744185c1dee8cb1b837a077f41d15",
       "config_sha256": "132acceff1ba3e33c903694e42a6442e42bbf71319bcf4e0de1b020cbfc97111",
       "car_fingerprint": "FORD_BRONCO_SPORT_MK1",
-      "contract": "Default lane-change pacing; disabling pacing alone restores exact official outputs. Ford ordinary engagement regression is fixed.",
-      "producing_source_snapshot": "7395-with-ford-engagement-fix"
+      "contract": "Default lane-change pacing retains the intentional native-rate unwind exemption: when previous*(desired-previous)<0, bypass additional pacing while preserving existing final controller and native clipping. Paired exact old-limiter ablation restores the prior reference with zero full-comparator differences. Only lateral command and dependent lateral-controller state fields change; longitudinal, activation, cancel and health fields are unchanged.",
+      "producing_source_snapshot": "3a815cfdd467c22e495f03998b88da9a19927c49",
+      "intentional_contract_source_commit": "13d7b725b90a3b5d7860830ae23ce0046b8aa385",
+      "review_evidence": {
+        "comparison_reference_sha256": "fd6fb0e92c7aea24126e43a8d799c922b56180ba27a98b80490eccdf0ce5c2cb",
+        "difference_fields": {
+          "carControl.actuators.steeringAngleDeg": 541,
+          "controlsState.lateralControlState.angleState.steeringAngleDesiredDeg": 541
+        },
+        "old_limiter_full_comparator_difference_count": 0,
+        "actual_current_limiter_calls": 6001,
+        "actual_current_unwind_exemption_calls": 141,
+        "actual_old_limiter_calls": 6001,
+        "command_and_activation_negative_controls": true,
+        "ordinary_per_service_validity_threshold": 0.9,
+        "scope": "Recorded controlsd only; no sendCAN/Panda or physical proof."
+      }
     },
     {
       "segment": "regen755D8CB1E1F|2025-04-08--23-13-43--0",

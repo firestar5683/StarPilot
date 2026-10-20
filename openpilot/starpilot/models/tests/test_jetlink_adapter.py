@@ -80,10 +80,12 @@ def test_one_action_call_for_every_small_model():
 
   small = runner.CatalogModelState.__new__(runner.CatalogModelState)
   small.behavior_version = "v9"
-  outputs, previous = object(), object()
+  outputs: dict[str, np.ndarray] = {}
+  previous = object()
   with patch.object(runner, "action_from_outputs", return_value="catalog") as catalog:
     assert small.get_action_from_model(outputs, previous, .4, .7, 12.) == "catalog"
   catalog.assert_called_once_with(outputs, "v9", previous, .4, .7, 12., modeld.LAT_SMOOTH_SECONDS, modeld.LONG_SMOOTH_SECONDS)
+  assert catalog.call_args.args[0] is outputs and catalog.call_args.args[2] is previous
   assert modeld.ModelState.get_action_from_model is modeld.get_action_from_model
 
 
@@ -175,32 +177,35 @@ POLICY = {"features_buffer": (1, 3, 4), "desire_pulse": (1, 3, 8), "traffic_conv
 def test_the_small_models_history_clears_in_place(layout):
   # after the big model drove, the catalog runner starts from a zero history on the buffers its JIT captured
   from tinygrad import Device, Tensor
+  from tinygrad.helpers import Context
   from jetlink.openpilot import warp
   from openpilot.starpilot.models import compile as catalog
   from openpilot.starpilot.models.runner import CatalogModelState
 
-  queues, npy = {"split": lambda: catalog.make_split_input_queues(VISION, POLICY, 2, Device.DEFAULT),
-                 "supercombo": lambda: catalog.make_supercombo_input_queues({**VISION, **POLICY}, 2, Device.DEFAULT),
-                 "stateful": lambda: catalog.make_stateful_input_queues(STATEFUL, Device.DEFAULT)}[layout]()
-  small = CatalogModelState.__new__(CatalogModelState)
-  small.input_queues, small.npy, small.prev_desire = queues, npy, np.ones(8, dtype=np.float32)
-  buffers = {name: q.uop.base.buffer for name, q in queues.items()}
-  warp.init_device(logging.getLogger(__name__))  # as modeld: the reset's kernels compile with no compile pool
-  reset = adapter.adapter().small_reset(small)
-  history = [name for name, q in queues.items() if q.device != "NPY" and name not in adapter.FRAME_INPUTS]
-  for _ in range(3):
-    for name in history:
-      queues[name].assign(Tensor.full(queues[name].shape, 7, dtype=queues[name].dtype, device=queues[name].device)).realize()
-    for array in npy.values():
-      array.fill(3)
-    small.prev_desire.fill(1)
-    reset()
-    assert {name: q.uop.base.buffer for name, q in queues.items()} == buffers
-    for name in history:
-      assert not queues[name].numpy().any(), name
-    assert not any(array.any() for array in npy.values())
-    assert not queues["packed_npy_inputs"].numpy().any()
-    assert not small.prev_desire.any()
+  # Host conformance uses real CPU buffers; never discover hardware under the guard.
+  with Context(DEV="CPU"):
+    queues, npy = {"split": lambda: catalog.make_split_input_queues(VISION, POLICY, 2, Device.DEFAULT),
+                   "supercombo": lambda: catalog.make_supercombo_input_queues({**VISION, **POLICY}, 2, Device.DEFAULT),
+                   "stateful": lambda: catalog.make_stateful_input_queues(STATEFUL, Device.DEFAULT)}[layout]()
+    small = CatalogModelState.__new__(CatalogModelState)
+    small.input_queues, small.npy, small.prev_desire = queues, npy, np.ones(8, dtype=np.float32)
+    buffers = {name: q.uop.base.buffer for name, q in queues.items()}
+    warp.init_device(logging.getLogger(__name__))  # as modeld: the reset's kernels compile with no compile pool
+    reset = adapter.adapter().small_reset(small)
+    history = [name for name, q in queues.items() if q.device != "NPY" and name not in adapter.FRAME_INPUTS]
+    for _ in range(3):
+      for name in history:
+        queues[name].assign(Tensor.full(queues[name].shape, 7, dtype=queues[name].dtype, device=queues[name].device)).realize()
+      for array in npy.values():
+        array.fill(3)
+      small.prev_desire.fill(1)
+      reset()
+      assert {name: q.uop.base.buffer for name, q in queues.items()} == buffers
+      for name in history:
+        assert not queues[name].numpy().any(), name
+      assert not any(array.any() for array in npy.values())
+      assert not queues["packed_npy_inputs"].numpy().any()
+      assert not small.prev_desire.any()
 
 
 def test_the_reset_reads_what_the_catalog_runner_keeps():

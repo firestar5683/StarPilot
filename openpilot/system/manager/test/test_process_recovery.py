@@ -6,7 +6,7 @@ from openpilot.system.manager import process
 
 class Child:
   def __init__(self, **kwargs):
-    self.exitcode = None
+    self.exitcode: int | None = None
     self.pid = 123
     self.joined = False
 
@@ -106,9 +106,11 @@ class TestProcessRecovery(unittest.TestCase):
     from openpilot.system.manager.process_config import managed_processes
     configured = managed_processes["jetlinkd"]
     self.assertTrue(configured.restart_on_exit)
-    p = type(configured)("jetlinkd", "unused", lambda started, params, cp: True, restart_on_exit=configured.restart_on_exit)
+    assert isinstance(configured, process.PythonProcess)
+    p = process.PythonProcess("jetlinkd", "unused", lambda started, params, cp: True, restart_on_exit=configured.restart_on_exit)
     self.step(p)
     old = p.proc
+    assert isinstance(old, Child)
     old.exitcode = 1
     self.step(p)
     self.assertIs(p.proc, old)
