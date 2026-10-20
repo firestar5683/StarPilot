@@ -80,7 +80,7 @@ for (const component of [PipPage, VasmPage]) {
   const view = mount(component, {}, presentation)
   try {
     notice(view.host, 'Cabin camera preview')
-    const refresh = all(view.host).find(item => item.props['aria-label'] === 'Take a new cabin snapshot')
+    const refresh = all(view.host).find(item => item.type === 'button' && text(item).includes('Take new snapshot'))
     assert.equal(refresh.props.disabled, true)
     assert.match(text(view.host), /Saved settings remain available/)
   } finally { view.unmount() }

@@ -205,7 +205,7 @@ export const GalaxySettingRow = {
     <div class="gx-row" :class="{ disabled: dimmed, 'gx-row--stack': control === 'slider' }" :inert="busy || updating" :aria-busy="busy || updating || undefined">
       <div class="gx-row__info">
         <span class="gx-row__label">{{ row.label }}</span>
-        <span v-if="presentedRow.reason" class="gx-row__desc">{{ presentedRow.reason.replace('https://firestar.link/discord', '') }}<a v-if="presentedRow.reason.includes('https://firestar.link/discord')" href="https://firestar.link/discord" target="_blank" rel="noopener">StarPilot Discord</a></span>
+        <span v-if="presentedRow.reason" class="gx-row__desc">{{ ' ' + presentedRow.reason.replace('https://firestar.link/discord', '') }}<a v-if="presentedRow.reason.includes('https://firestar.link/discord')" href="https://firestar.link/discord" target="_blank" rel="noopener">StarPilot Discord</a></span>
         <span v-if="control === 'group' || control === 'action'" class="gx-row__desc">{{ presentedRow.value }}</span>
       </div>
       <button v-if="control !== 'slider' && showDefault" type="button"

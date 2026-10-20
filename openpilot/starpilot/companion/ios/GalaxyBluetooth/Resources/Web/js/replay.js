@@ -1,6 +1,6 @@
 import { requestJson } from "./startup.js"
-import { GxDialog } from "./dialog.js"
 import { GxNotice } from "./notice.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { GxState } from "./state.js"
 import { GxIconButton } from "./icon-button.js"
 import { markRaw } from "../vendor/vue/vue.esm-browser.js"
@@ -10,13 +10,13 @@ const STATES = new Set(["idle", "preparing", "buffering", "playing", "paused", "
 const TERMINAL = new Set(["idle", "failed"])
 const number = value => typeof value === "number" && Number.isFinite(value)
 const integer = value => Number.isSafeInteger(value) && value >= 0
-const token = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("")
+export const replayToken = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("")
 const mediaSources = () => [globalThis.MediaSource, globalThis.ManagedMediaSource].filter(Source => typeof Source === "function")
 const STREAMING_UNAVAILABLE = "Replay video streaming is unavailable in this browser. Update your browser or try another browser."
 const PLAY_BUFFER = .5, MAX_BUFFER_AHEAD = 1, MEDIA_INTERVAL = 50
 export const replayableSegment = segment => !!((segment.files.rlog || segment.files.qlog) && (segment.files.fcamera || segment.files.qcamera))
 export function validReplayStatus(value) {
-  const ranges = value?.seekRanges
+  const ranges = value?.seekRanges, segments = value?.segmentRanges
   return value?.schemaVersion === 1 && ID.test(value.ownerId) && STATES.has(value.state) &&
     (value.sessionId === null || ID.test(value.sessionId)) && integer(value.revision) && integer(value.epoch) &&
     [value.position, value.start, value.end].every(number) && value.start <= value.end &&
@@ -24,7 +24,11 @@ export function validReplayStatus(value) {
     (value.codec == null || typeof value.codec === "string" && value.codec.length <= 128) &&
     (ranges === undefined || Array.isArray(ranges) && ranges.length <= 512 && ranges.every((range, i) =>
       Array.isArray(range) && range.length === 2 && range.every(number) && value.start <= range[0] && range[0] <= range[1] &&
-      range[1] <= value.end && (i === 0 || ranges[i-1][1] <= range[0])))
+      range[1] <= value.end && (i === 0 || ranges[i-1][1] <= range[0]))) &&
+    (segments === undefined || Array.isArray(segments) && segments.length <= 512 &&
+      (!segments.length || segments.length === ranges?.length) && new Set(segments.map(row => row?.[0])).size === segments.length &&
+      segments.every((row, i) => Array.isArray(row) && row.length === 3 && integer(row[0]) && row[0] <= 999999 &&
+        row[1] === ranges[i][0] && row[2] === ranges[i][1]))
 }
 export function replaySeekPosition(status, position) {
   const bounded = Math.min(status.end, Math.max(status.start, position)), ranges = status.seekRanges || []
@@ -50,7 +54,7 @@ export const replayTime = seconds => `${Math.floor(Math.max(0, seconds) / 60)}:$
 export class ReplayClient {
   constructor({ publish, unauthorized, video, fetcher = (...args) => fetch(...args),
     mediaSource = Source => new Source(), createURL = value => URL.createObjectURL(value), revokeURL = value => URL.revokeObjectURL(value),
-    later = (fn, ms) => setTimeout(fn, ms), cancelTimer = id => clearTimeout(id), clientId = token() }) {
+    later = (fn, ms) => setTimeout(fn, ms), cancelTimer = id => clearTimeout(id), clientId = replayToken() }) {
     Object.assign(this, { publish, unauthorized, video, fetcher, mediaSource, createURL, revokeURL, later, cancelTimer, clientId })
     this.active = false
     this.generation = this.mediaGeneration = 0
@@ -81,7 +85,7 @@ export class ReplayClient {
   }
   async open(routeId, startSegment = null) {
     this.close(false)
-    this.active = true
+    this.active = true; this.stopping = false
     this.status = this.detail = null; this.error = ""
     this.routeId = routeId
     this.startSegment = startSegment
@@ -91,7 +95,7 @@ export class ReplayClient {
       const [detail] = await Promise.all([this.json(`detail?routeId=${encodeURIComponent(routeId)}`), this.refresh()])
       if (!this.active || generation !== this.generation) return
       this.detail = detail; this.emit()
-      if (!this.error && detail?.playable && this.status?.offroad && TERMINAL.has(this.status.state)) await this.start()
+      if (!this.stopping && !this.error && detail?.playable && this.status?.offroad && TERMINAL.has(this.status.state)) await this.start()
     } catch (error) { if (this.active) { this.error = error.message; this.emit() } }
   }
   async refresh() {
@@ -115,10 +119,10 @@ export class ReplayClient {
   receive(status) {
     const prior = this.status
     if (prior?.ownerId === status.ownerId && prior.sessionId === status.sessionId && status.revision < prior.revision) return
-    if (!this.ownedSession && this.startAttempted && status.owned && ID.test(status.sessionId) && status.routeId === this.routeId) { this.ownedSession = status.sessionId; this.error = "" }
+    if (!this.ownedSession && status.purpose !== "export" && status.owned && ID.test(status.sessionId) && status.routeId === this.routeId) { this.ownedSession = status.sessionId; this.error = "" }
     this.status = status
     if (status.lastRequestId === this.pendingAction || TERMINAL.has(status.state) || !status.offroad) { this.pendingAction = null; this.busy = false }
-    if (this.ownedSession && (status.sessionId !== this.ownedSession || !status.owned)) { this.ownedSession = null; this.retireMedia() }
+    if (this.ownedSession && (status.purpose === "export" || status.sessionId !== this.ownedSession || !status.owned)) { this.ownedSession = null; this.retireMedia() }
     if (!status.offroad || TERMINAL.has(status.state) || ["preparing", "seeking", "stopping"].includes(status.state) || status.mediaReady === false) this.retireMedia()
     else if (status.sessionId === this.ownedSession && status.codec &&
       ((!this.source && !this.videoFailed) || prior?.epoch !== status.epoch)) this.beginMedia(status)
@@ -172,7 +176,7 @@ export class ReplayClient {
   }
   async action(operation, extra = {}) {
     if (!this.active || operation !== "stop" && (this.busy || !this.status)) return
-    const generation = this.generation, requestId = token()
+    const generation = this.generation, requestId = replayToken()
     this.pendingAction = operation === "control" ? requestId : null
     this.busy = true; this.error = ""; this.emit()
     try {
@@ -193,8 +197,8 @@ export class ReplayClient {
     if (!this.active || this.busy || !this.status) return
     if (!mediaSources().length) { this.error = STREAMING_UNAVAILABLE; this.emit(); return }
     this.startAttempted = true; this.videoFailed = false; this.autoplay = true
-    return this.action("start", { routeId: this.routeId, target: "web", expectedOwnerId: this.status.ownerId,
-      ...(this.startSegment == null ? {} : { segment: this.startSegment }) })
+    return this.starting = this.action("start", { routeId: this.routeId, target: "web", expectedOwnerId: this.status.ownerId,
+      ...(this.startSegment == null ? {} : { segment: this.startSegment }) }).finally(() => { this.starting = null })
   }
   control(action, value) {
     this.autoplay = false
@@ -204,6 +208,25 @@ export class ReplayClient {
       ...(action === "pause" ? { paused: value } : action === "seek" ? { position: value } : { rate: value }) })
   }
   stop() { return this.ownedSession && this.action("stop", { sessionId: this.ownedSession }) }
+  async stopAndWait() {
+    this.stopping = true
+    this.retireMedia()
+    if (this.starting) await this.starting
+    const session = this.ownedSession
+    if (session) {
+      await this.stop()
+      const deadline = performance.now() + 6000
+      while (this.active && this.status?.sessionId === session) {
+        if (performance.now() >= deadline) throw new Error("Replay is still stopping. Wait a moment and try again.")
+        await new Promise(resolve => this.later(resolve, 150))
+        const status = await this.json(`status?clientId=${this.clientId}`)
+        if (!status || !validReplayStatus(status)) throw new Error("Could not confirm that replay stopped. Try again.")
+        this.receive(status)
+      }
+      if (!this.active) throw new Error("Replay disconnected before its shutdown was confirmed.")
+    }
+    this.close(false)
+  }
   retireMedia() {
     this.mediaGeneration++
     this.mediaRequest?.abort(); this.mediaRequest = null
@@ -352,7 +375,7 @@ export class ReplayClient {
   }
   sendStop(sessionId) {
     this.fetcher("./api/replay/stop", { method: "POST", credentials: "same-origin", keepalive: true,
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId, clientId: this.clientId, requestId: token() }) }).catch(() => {})
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId, clientId: this.clientId, requestId: replayToken() }) }).catch(() => {})
   }
   close(stop = true) {
     if (stop && this.active && this.ownedSession) this.sendStop(this.ownedSession)
@@ -364,10 +387,10 @@ export class ReplayClient {
 }
 
 export const ReplayViewer = {
-  components: { GxDialog, GxNotice, GxState, GxIconButton },
-  props: { routeId: { type: String, required: true }, startSegment: { type: Number, default: null }, unauthorized: { type: Function, required: true } },
-  emits: ["close"],
-  data: () => ({ client: null, replay: null, replayBusy: false, replayError: "", replayDetail: null, replayVideoReady: false, replayBuffering: false, seekPosition: null }),
+  components: { GxNotice, BluetoothNotice, GxState, GxIconButton },
+  props: { clientId: { type: String, required: true }, routeId: { type: String, required: true }, startSegment: { type: Number, default: null }, unauthorized: { type: Function, required: true } },
+  emits: ["segment", "busy"],
+  data: () => ({ bluetooth: bluetoothConnection(), client: null, replay: null, replayBusy: false, replayError: "", replayDetail: null, replayVideoReady: false, replayBuffering: false, seekPosition: null }),
   computed: {
     playing() { return this.client?.ownedSession === this.replay?.sessionId && !!this.replay?.sessionId && !TERMINAL.has(this.replay.state) },
     controlsBusy() { return this.replayBusy || !this.replay?.offroad || ["preparing", "seeking", "stopping"].includes(this.replay.state) },
@@ -375,15 +398,22 @@ export const ReplayViewer = {
     canStart() { return this.replay?.offroad && TERMINAL.has(this.replay.state) && !this.replayBusy && this.replayDetail?.playable === true },
   },
   mounted() {
-    this.client = markRaw(new ReplayClient({ video: () => this.$refs.video, unauthorized: this.unauthorized, publish: update => Object.assign(this.$data, update) }))
-    this.visibility = () => { if (document.hidden) { this.client.close(); this.$emit("close") } }
+    if (this.bluetooth) return
+    this.client = markRaw(new ReplayClient({ clientId: this.clientId, video: () => this.$refs.video, unauthorized: this.unauthorized, publish: update => {
+      Object.assign(this.$data, update)
+      this.$emit("busy", this.controlsBusy)
+      const current = update.replay?.segmentRanges?.find(([, start, end]) => start <= update.replay.position && update.replay.position < end)
+      if (this.playing && current && current[0] !== this.startSegment && !this.controlsBusy) this.$emit("segment", current[0])
+    } }))
+    this.visibility = () => { if (document.hidden) { this.client.close() } }
     document.addEventListener("visibilitychange", this.visibility)
     this.client.open(this.routeId, this.startSegment)
   },
-  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.client.close() },
+  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.client?.close() },
   methods: {
     replayTime,
-    close() { this.client.close(); this.$emit("close") },
+    stopAndWait() { return this.client.stopAndWait() },
+    close() { return this.client?.stop() },
     seek(value) { this.seekPosition = null; this.client.control("seek", Number(value)) },
     cycleRate() {
       const rates = [.5, 1, 2]
@@ -391,12 +421,23 @@ export const ReplayViewer = {
     },
     fullscreen() { return document.fullscreenElement === this.$refs.player ? document.exitFullscreen() : this.$refs.player.requestFullscreen?.() },
   },
-  template: `<GxDialog class="gx-replay" labelledby="gx-replay-title" @close="close">
-    <div class="gx-recordings__player-head"><div><h3 id="gx-replay-title">Route replay</h3><p class="gx-note">{{ routeId }}<template v-if="startSegment !== null"> · from segment {{ startSegment }}</template> · Recorded driving view · Vehicle offroad only</p></div><GxIconButton label="Close replay" icon="bi-x-lg" @click="close" /></div>
+  watch: {
+    startSegment(value) {
+      if (!this.client) return
+      this.client.startSegment = value
+      const range = this.replay?.segmentRanges?.find(row => row[0] === value)
+      if (this.playing && range && !(range[1] <= this.replay.position && this.replay.position < range[2])) this.seek(range[1])
+    },
+  },
+  template: `<div class="gx-replay">
+    <BluetoothNotice v-if="bluetooth" feature="Route replay and video" />
+    <template v-else>
     <div ref="player" class="gx-replay__player">
+    <div class="gx-replay__screen">
     <video ref="video" class="gx-replay__video" playsinline muted aria-label="Recorded route with driving interface" @waiting="client?.videoWaiting()" @error="client?.videoError()"></video>
     <GxState class="gx-replay__loading" v-if="!replayError && (!replay || replayBuffering || !replayVideoReady && (playing || replayBusy || !replayDetail) || ['preparing', 'seeking'].includes(replay.state))" loading>{{ replay?.state === 'seeking' ? 'Seeking recorded route…' : replayBuffering ? 'Buffering replay…' : 'Loading replay…' }}</GxState>
     <GxIconButton v-if="playing" class="gx-replay__fullscreen" label="Fullscreen video" icon="bi-fullscreen" @click="fullscreen" />
+    </div>
     <div v-if="playing" class="gx-replay__media-controls">
       <label class="gx-replay__timeline"><span>{{ replayTime((seekPosition ?? replay.position)-replay.start) }} / {{ replayTime(replay.end-replay.start) }}</span><input type="range" aria-label="Replay route position" :min="replay.start" :max="replay.end" step="0.05" :value="seekPosition ?? replay.position" :disabled="controlsBusy" @input="seekPosition=Number($event.target.value)" @change="seek($event.target.value)" /></label>
       <div class="gx-replay__controls">
@@ -414,6 +455,8 @@ export const ReplayViewer = {
     <GxNotice v-if="replay?.errorCode" tone="warn">Replay stopped: {{ replay.errorCode.replaceAll('_', ' ') }}</GxNotice>
     <GxNotice v-if="replay?.sessionId && !playing && !canStart" tone="info">Another replay is active. Close it in its viewer before starting this route.</GxNotice>
     <p v-if="replayDetail?.reason" class="gx-note">{{ replayDetail.reason }}</p>
-    <p v-if="playing && seekGaps.length" class="gx-note">Missing recordings: <span v-for="(gap, i) in seekGaps" :key="i">{{ i ? ", " : "" }}{{ replayTime(gap[0]-replay.start) }}–{{ replayTime(gap[1]-replay.start) }}</span>. Seeks move to the nearest recorded position.</p>
-  </GxDialog>`,
+    <details v-if="playing && seekGaps.length" class="gx-route-workspace__help gx-replay__gaps"><summary>{{ seekGaps.length }} missing recording {{ seekGaps.length === 1 ? 'range' : 'ranges' }}</summary><p class="gx-note">Missing recordings: <span v-for="(gap, i) in seekGaps" :key="i">{{ i ? ", " : "" }}{{ replayTime(gap[0]-replay.start) }}–{{ replayTime(gap[1]-replay.start) }}</span>. Seeks move to the nearest recorded position.</p></details>
+    <button v-if="canStart && !replayError" class="gx-btn gx-btn--tonal" @click="client.open(routeId, startSegment)">Play replay</button>
+    </template>
+  </div>`,
 }

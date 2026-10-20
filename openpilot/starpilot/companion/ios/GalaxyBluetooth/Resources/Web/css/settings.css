@@ -108,6 +108,10 @@ input[type="range"].gx-slider:disabled { cursor: default; opacity: .4; }
 }
 
 .gx-row.disabled .gx-row__label, .gx-row.disabled .gx-row__desc { opacity: 0.45; }
+.gx-row.disabled .gx-switch, .gx-row.disabled .gx-row__value,
+.gx-row.disabled .gx-field, .gx-row.disabled .gx-slider-row,
+.gx-row.disabled .gx-btn, .gx-row.disabled .bi { opacity: 0.45; }
+.gx-row.disabled .gx-switch { cursor: not-allowed; }
 .gx-row--stack { align-items: stretch; flex-direction: column; }
 .gx-row--stack .gx-row__info { flex: none; }
 .gx-row--stack .gx-field,
@@ -202,7 +206,7 @@ input[type="range"].gx-slider {
   height: 8px;
   outline: none;
   -webkit-tap-highlight-color: transparent;
-  touch-action: none;
+  touch-action: pan-y;
   width: 100%;
 }
 

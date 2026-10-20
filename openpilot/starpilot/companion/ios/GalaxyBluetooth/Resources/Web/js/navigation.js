@@ -1,8 +1,11 @@
+import { parseSharedDestination } from "./share-destination.js"
 import { GxNotice } from "./notice.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { connectionError } from "./polling.js"
 import { NavigationMap } from "./navigation-map.js"
 import { MapOperationsPanel } from "./map-operations.js"
 import { OfflineRoadMapsPanel } from "./offline-road-maps.js"
+import { GalaxySelect } from "./galaxy-select.js"
 
 export function searchUuid() {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -20,6 +23,9 @@ export function remainingLocationLease(lease, requestStarted, now = performance.
 const STATUS = new Set(["disabled", "needsKey", "noDestination", "waitingForLocation", "routing", "guiding", "arrived", "routeUnavailable", "stale"])
 const ROUTE_AVOIDANCES = [{ key: "avoidTolls", label: "Avoid tolls" }, { key: "avoidHighways", label: "Avoid highways" },
   { key: "avoidFerries", label: "Avoid ferries" }]
+const GPS_MODES = [{ value: "backup", label: "Phone GPS as backup" }, { value: "comma", label: "Comma and car GPS only" },
+  { value: "phone", label: "Prefer phone GPS" }]
+const GPS_NAMES = { comma: "Comma", car: "Car", phone: "Phone" }
 const coordinate = (value) => !!value && Number.isFinite(value.latitude) && Math.abs(value.latitude) <= 90 &&
   Number.isFinite(value.longitude) && Math.abs(value.longitude) <= 180
 const text = (value, limit) => typeof value === "string" && value.trim().length > 0 && value.length <= limit
@@ -38,12 +44,14 @@ export function validNavigation(value) {
       !Number.isInteger(value.selectedRoute) || value.selectedRoute < 0 || value.selectedRoute > 2)) return false
   return !!value && typeof value.enabled === "boolean" && typeof value.isMetric === "boolean" && typeof value.hasKey === "boolean" && STATUS.has(value.status) &&
     ROUTE_AVOIDANCES.every(({ key }) => value[key] === undefined || typeof value[key] === "boolean") &&
+    (value.gpsSource === undefined || GPS_MODES.some((mode) => mode.value === value.gpsSource)) &&
     (value.network === undefined || ["online", "offline", "unknown"].includes(value.network)) &&
     typeof value.revision === "string" && value.revision.length > 0 && value.revision.length <= 128 &&
     (value.destination === null || validDestination(value.destination)) && Array.isArray(value.favorites) && value.favorites.length <= 100 &&
     (value.recents === undefined || Array.isArray(value.recents) && value.recents.length <= 10 && value.recents.every(validDestination)) &&
     (value.routeKey === undefined || typeof value.routeKey === "string" && /^[0-9a-f]{16}$/.test(value.routeKey)) &&
-    (value.location == null || coordinate(value.location) && Number.isFinite(value.location.validForMs) && value.location.validForMs >= 0 && value.location.validForMs <= 2500) &&
+    (value.location == null || coordinate(value.location) && Number.isFinite(value.location.validForMs) && value.location.validForMs >= 0 && value.location.validForMs <= 2500 &&
+      (value.location.source === undefined || value.location.source in GPS_NAMES)) &&
     value.favorites.every(validDestination) && Array.isArray(value.route) && value.route.length <= 512 && value.route.every(coordinate) &&
     (instruction === null || !!instruction && ["text", "maneuverType", "maneuverModifier"].every((key) =>
       typeof instruction[key] === "string" && instruction[key].length <= 1024) &&
@@ -285,14 +293,20 @@ export const FavoriteChoices = {
 
 export const NavigationPage = {
   name: "NavigationPage",
-  components: { GxNotice, MapOperationsPanel, NavigationMap, OfflineRoadMapsPanel, FavoriteChoices },
+  components: { GxNotice, BluetoothNotice, MapOperationsPanel, NavigationMap, OfflineRoadMapsPanel, FavoriteChoices, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, default: null }, initialTab: { type: String, default: "route" } },
-  data() { return { data: null, results: [], busy: false, error: "", stale: false, tab: this.initialTab, query: "", token: "", searched: false,
+  data() { return { bluetooth: bluetoothConnection(), data: null, results: [], busy: false, error: "", stale: false, tab: this.initialTab, gpsGuide: "android", query: "", token: "", searched: false,
     suggestions: [], suggestOpen: false, savedSuggestionPlaces: {}, favoritePicker: null, searchPending: false } },
   watch: { initialTab(value) { this.tab = value } },
   computed: {
     routeAvoidances() { return ROUTE_AVOIDANCES },
+    gpsModes() { return GPS_MODES },
+    gpsLabel() {
+      if (this.mode !== "local" || !this.ready || this.stale) return "GPS Source"
+      const source = this.data?.location?.lastKnown ? null : GPS_NAMES[this.data?.location?.source]
+      return source ? `GPS: ${source}` : "GPS: No fix"
+    },
     controlsAvailable() { return this.mode === "local" && !!this.data && !this.stale },
     available() { return this.controlsAvailable && !this.busy && !this.searchPending },
     ready() { return !!this.data?.enabled && !!this.data?.hasKey },
@@ -341,10 +355,31 @@ export const NavigationPage = {
     if (this.mode !== "local") return
     this.visibilityHandler = () => document.visibilityState === "hidden" ? this.client.stop() : this.client.start()
     document.addEventListener("visibilitychange", this.visibilityHandler)
-    if (document.visibilityState !== "hidden") this.client.start()
+    if (document.visibilityState !== "hidden") {
+      this.client.start().then(async () => {
+        const params = new URLSearchParams(location.search)
+        const share = params.get('share')
+        if (!share || !this.client.data || this.client.stale || !this.client.active) return
+        params.delete('share')
+        history.replaceState(history.state, '', `${location.pathname}${params.size ? '?' + params : ''}${location.hash}`)
+        const parsed = parseSharedDestination(share)
+        if (parsed.destination) await this.client.action('select', { destination: parsed.destination })
+        else {
+          // Text shares can be ambiguous ("Starbucks"); show the results and let the driver pick.
+          this.query = parsed.query
+          await this.client.search(parsed.query)
+        }
+      })
+    }
   },
   beforeUnmount() { document.removeEventListener("visibilitychange", this.visibilityHandler); clearTimeout(this.suggestTimer); this.client.stop(); this.token = "" },
   methods: {
+    async openGpsSetup() {
+      this.selectTab('setup')
+      await this.$nextTick()
+      this.$refs.gpsSetup?.focus()
+      this.$refs.gpsSetup?.scrollIntoView({ block: 'start' })
+    },
     selectTab(tab) {
       this.tab = tab
       this.go?.(tab === 'route' ? '/navigation' : `/navigation/${tab}`)
@@ -436,6 +471,7 @@ export const NavigationPage = {
       <div class="gx-tabs gx-actions" role="group" aria-label="Navigation tools">
         <button v-for="item in [{id:'route',label:'Destination'},{id:'maps',label:'Offline Maps'},{id:'setup',label:'Setup'}]" :key="item.id"
           type="button" class="gx-btn" :class="tab === item.id ? '' : 'gx-btn--tonal'" :aria-pressed="tab === item.id" @click="selectTab(item.id)">{{ item.label }}</button>
+        <button type="button" class="gx-btn gx-btn--tonal" @click="openGpsSetup">{{ gpsLabel }}</button>
       </div>
       <div v-if="tab === 'maps'" class="gx-navigation__offline">
         <OfflineRoadMapsPanel :mode="mode" :unauthorized="unauthorized" :has-key="!!data?.hasKey" :metric="data?.isMetric !== false" />
@@ -444,11 +480,44 @@ export const NavigationPage = {
       <template v-else-if="tab === 'setup'">
         <p v-if="mode !== 'local'" class="gx-note">Connect to your comma to set up navigation and choose a destination.</p>
         <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
-        <section class="gx-card gx-navigation__section">
-          <h3>Navigation</h3>
-          <p>Show directions on your comma. Navigation works with every driving model. Route guidance helps prepare for turns; steering and speed control follow your normal engagement settings.</p>
+        <section class="gx-card gx-navigation__section gx-navigation__enable">
+          <div><h3>Navigation</h3>
+          <p>Show directions on your comma. Navigation works with every driving model. Route guidance helps prepare for turns; steering and speed control follow your normal engagement settings.</p></div>
           <button v-if="data" type="button" class="gx-btn" :class="{'gx-btn--tonal':data.enabled}" :disabled="!controlsAvailable"
             @click="client.action('configure',{patch:{enabled:!data.enabled}})">{{ data.enabled ? 'Turn off navigation' : 'Turn on navigation' }}</button>
+        </section>
+        <section ref="gpsSetup" tabindex="-1" class="gx-card gx-navigation__section gx-navigation__gps" aria-labelledby="navigation-gps-heading">
+          <h3 id="navigation-gps-heading">GPS Source</h3>
+          <p>Choose where your comma gets its position for navigation and map speed limits. Phone GPS comes from the StarPilot app over Bluetooth or local Wi-Fi.</p>
+          <div class="gx-row gx-row--stack gx-row--borderless">
+            <span class="gx-row__label" id="navigation-gps-mode">Use</span>
+            <GalaxySelect class="gx-field gx-field--full" aria-labeledby="navigation-gps-mode" :value="data?.gpsSource || 'backup'" :disabled="!available || !data"
+              @change="client.action('configure', {patch: {gpsSource: $event.target.value}})">
+              <option v-for="option in gpsModes" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </GalaxySelect>
+          </div>
+          <h4>Set up GPS sharing</h4>
+          <div class="gx-actions" role="group" aria-label="GPS setup guides">
+            <button v-for="source in [{id:'android',label:'Android App'},{id:'iphone',label:'iPhone'}]" :key="source.id"
+              type="button" class="gx-btn" :class="gpsGuide === source.id ? '' : 'gx-btn--tonal'" :aria-pressed="gpsGuide === source.id"
+              @click="gpsGuide = source.id">{{ source.label }}</button>
+          </div>
+          <div v-if="gpsGuide === 'android'">
+            <ol><li>Open the StarPilot companion app and connect to your comma over Bluetooth or Galaxy Wi-Fi.</li>
+              <li>Open Connections → Phone GPS → <strong>Share phone GPS with comma</strong>.</li>
+              <li>Allow precise location. Keep the app’s GPS-sharing notification active while driving.</li></ol>
+            <p>To stop, open Connections and select <strong>Stop sharing phone GPS</strong>.</p>
+          </div>
+          <div v-else>
+            <ol><li>Open the StarPilot iPhone companion app and connect to your comma over Bluetooth or Wi-Fi.</li>
+              <li>On the app’s main Settings page, turn on <strong>Share Phone Location</strong>.</li>
+              <li>Set location access to <strong>Always</strong> and enable Precise Location in iPhone Settings. The app continues sharing in the background while the switch is on.</li></ol>
+            <p>Turn off <strong>Share Phone Location</strong> on the app’s main Settings page to stop sharing.</p>
+          </div>
+          <details><summary>About phone GPS and switching phones</summary>
+            <p>The GPS source you choose is used for navigation and for map-based speed limits and curves. The phone must reach the comma over Bluetooth or local Wi-Fi; the remote tunnel doesn't carry GPS.</p>
+            <p>To change phones, stop GPS sharing in the old app and enable it in the other app. Both apps need a version with phone GPS support, and your comma must support receiving it.</p>
+          </details>
         </section>
         <section class="gx-card gx-navigation__section">
           <h3>Route preferences</h3>
@@ -583,7 +652,8 @@ export const NavigationPage = {
         <section class="gx-card gx-navigation__preview" aria-label="Route preview">
           <div class="gx-navigation__preview-head"><div class="gx-navigation__step"><div><h3>Your route</h3><p role="status">{{ stale ? 'Reconnecting · last received route' : statusLabel }}</p></div></div>
             <span v-if="summary" class="gx-navigation__trip">{{ duration(summary.duration) }} · {{ distance(summary.distance) }}</span></div>
-          <NavigationMap v-if="ready" :data="data" :stale="stale" />
+          <BluetoothNotice v-if="bluetooth" feature="Map preview">Destination controls remain available.</BluetoothNotice>
+          <NavigationMap v-else-if="ready" :data="data" :stale="stale" />
           <div v-else class="gx-navigation__empty"><i class="bi bi-signpost-split" aria-hidden="true"></i><p>{{ mode !== 'local' ? 'Connect to your comma to use navigation.' : 'Set up navigation to show the map.' }}</p><button v-if="mode === 'local' && data" type="button" class="gx-btn gx-btn--tonal" @click="selectTab('setup')">Open navigation setup</button></div>
         </section>
         </div>

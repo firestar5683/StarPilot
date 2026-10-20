@@ -226,7 +226,7 @@ export class SettingsFeed {
     this.publish({ status: "saving", data: this.data, pending: null, error: "" })
     const page = this.page
     const operation = this.run((signal) => post(this.fetcher, "./api/settings/confirm",
-      { intent, confirmed: true }, signal), { saving: true })
+      { intent, confirmed: true, page }, signal), { saving: true })
     const attempt = this.generation
     const result = await operation
     if (result?.saved === true) {
@@ -235,6 +235,13 @@ export class SettingsFeed {
       }
     }
     if (this.active && this.generation === attempt) {
+      if (result?.saved === true && result.page?.page === page && result.page?.view) {
+        this.data = result.page
+        this.error = ""
+        this.publish({ status: "ready", data: this.data, pending: null, error: "" })
+        this.scheduleParkedRefresh()
+        return
+      }
       const reload = this.load(page, { keepData: true, quiet: false })
       const refreshed = this.generation
       await reload
@@ -423,11 +430,12 @@ export const SettingsPage = {
       <p class="gx-page-description" v-else-if="initialPage === 'sentry'">{{ state.data?.subtitle || "Checking motion monitor…" }}</p>
       <GxState v-if="mode !== 'local'">Local settings are unavailable in preview.</GxState>
       <template v-else>
+        <GxNotice v-if="state.data && state.data.vehicleIdentified === false" tone="info">Vehicle not identified yet. Turn on the car and wait for fingerprinting; vehicle-specific settings will then appear here.</GxNotice>
         <CloudProviderPage ref="cloudProvider" v-if="state.developerOpen" :mode="mode" :unauthorized="unauthorized" />
         <Teleport to="body">
           <p class="gx-settings__save-status gx-settings__save-status--animated"
             :class="{ 'is-visible': saveStatusVisible }"
-            :aria-hidden="!saveStatusVisible" role="status">Saving preferences…</p>
+            :aria-hidden="!saveStatusVisible" role="status">{{ savingPreference ? "Saving preferences…" : "Saved" }}</p>
         </Teleport>
         <GxState v-if="state.status === 'loading'" loading>Reading your device’s saved preferences…</GxState>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read these preferences. Reconnecting automatically…</GxNotice>

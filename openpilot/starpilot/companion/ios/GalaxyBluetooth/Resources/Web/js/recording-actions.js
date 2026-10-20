@@ -4,10 +4,10 @@ import { requestJson } from "./startup.js"
 
 export const RecordingActions = {
   components: { GxDialog, GxNotice },
-  props: { recording: { type: Object, required: true }, all: Boolean,
+  props: { recording: { type: Object, required: true }, all: Boolean, compact: Boolean, collapsed: Boolean,
     unauthorized: { type: Function, required: true } },
   emits: ["changed"],
-  data: () => ({ action: "", name: "", busy: false, error: "", includePreserved: false }),
+  data: () => ({ action: "", managementOpen: false, name: "", busy: false, error: "", includePreserved: false }),
   methods: {
     edit(action) {
       this.action = action
@@ -25,11 +25,10 @@ export const RecordingActions = {
           request: { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
         })
         this.action = ""
-        this.$emit("changed")
+        this.$emit("changed", action)
       } catch (error) {
         if (error.status === 401) this.unauthorized()
-        else this.error = error.status === 409 ? "Turn off the vehicle before managing recordings." :
-          error.message || "Recording action failed. Refresh the library before trying again."
+        else this.error = error.message || "Recording action failed. Refresh the library before trying again."
       } finally { this.busy = false }
     },
   },
@@ -38,8 +37,9 @@ export const RecordingActions = {
       <template v-if="!all">
         <button class="gx-icon-btn" :aria-label="recording.preserved ? 'Unpreserve drive' : 'Preserve drive'" :title="recording.preserved ? 'Unpreserve' : 'Preserve'" @click="save('preserve')"><i class="bi" :class="recording.preserved ? 'bi-heart-fill' : 'bi-heart'"></i></button>
         <slot></slot>
-        <button class="gx-icon-btn" aria-label="Rename drive" title="Rename" @click="edit('rename')"><i class="bi bi-pencil"></i></button>
-        <button class="gx-icon-btn gx-recordings__danger" aria-label="Delete drive" title="Delete" @click="edit('delete')"><i class="bi bi-trash"></i></button>
+        <button v-if="!compact && collapsed" class="gx-icon-btn" aria-label="More route actions" title="More route actions" :aria-expanded="managementOpen" @click="managementOpen=!managementOpen" @keydown.esc="managementOpen=false"><i class="bi bi-three-dots" aria-hidden="true"></i></button>
+        <button v-if="!compact && (!collapsed || managementOpen)" class="gx-icon-btn" aria-label="Rename drive" title="Rename" @click="edit('rename')"><i class="bi bi-pencil"></i></button>
+        <button v-if="!compact && (!collapsed || managementOpen)" class="gx-icon-btn gx-recordings__danger" aria-label="Delete drive" title="Delete" @click="edit('delete')"><i class="bi bi-trash"></i></button>
       </template>
       <template v-else>
         <button class="gx-btn gx-btn--tonal" @click="includePreserved=false; edit('delete')">Delete non-preserved</button>

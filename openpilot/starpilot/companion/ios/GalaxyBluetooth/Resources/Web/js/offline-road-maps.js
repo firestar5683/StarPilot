@@ -2,6 +2,7 @@ import { markRaw } from "../vendor/vue/vue.esm-browser.js"
 import { GxNotice } from "./notice.js"
 import { PollTimer, connectionError } from "./polling.js"
 import { RasterMap } from "./navigation-map.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
 // Road-line maps for the Android Auto overlay: areas saved on the comma, save-as-you-drive, and the downloader's progress.
@@ -118,10 +119,10 @@ export class OfflineRoadsClient {
 
 export const OfflineRoadMapsPanel = {
   name: "OfflineRoadMapsPanel",
-  components: { GxNotice, GalaxySettingRow },
+  components: { GxNotice, BluetoothNotice, GalaxySettingRow },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     hasKey: { type: Boolean, default: false }, metric: { type: Boolean, default: true } },
-  data: () => ({ data: null, busy: false, error: "", point: null, name: "", radius: null, confirmDelete: null, notice: "" }),
+  data: () => ({ bluetooth: bluetoothConnection(), data: null, busy: false, error: "", point: null, name: "", radius: null, confirmDelete: null, notice: "" }),
   created() { this.client = new OfflineRoadsClient({ publish: (update) => Object.assign(this.$data, update), unauthorized: this.unauthorized }) },
   mounted() {
     if (this.mode !== "local") return
@@ -177,7 +178,7 @@ export const OfflineRoadMapsPanel = {
   methods: {
     formatBytes, areaLabel, radiusLabel, switchRow,
     ensureMap() {
-      if (this.map || !this.hasKey || !this.$refs.canvas) return
+      if (this.bluetooth || this.map || !this.hasKey || !this.$refs.canvas) return
       this.map = markRaw(new RasterMap(this.$refs.canvas, () => {}))
       this.map.onTap = (point) => this.pick({ ...point, name: "" })
       this.map.update({}, false)
@@ -245,7 +246,8 @@ export const OfflineRoadMapsPanel = {
         <GalaxySettingRow :row="switchRow('Save roads as you drive', data?.settings.saveDriven, 'Downloads road lines around and ahead of your car while the map overlay is on and internet is available. Saved lines keep the overlay visible offline; older driven areas are removed when its 600 MB cache fills.')"
           :index="0" :busy="busy" :disabled="!data" :save-value="(index, value) => setSaveDriven(value === 'On')" />
         <div class="gx-offline-roads__picker">
-          <div v-if="hasKey" class="gx-offline-roads__map"><canvas ref="canvas" tabindex="0" aria-label="Map. Tap or press Enter to center a new offline area; drag or use arrow keys to pan."></canvas>
+          <BluetoothNotice v-if="bluetooth" feature="Offline area map preview">Saved map settings remain available.</BluetoothNotice>
+          <div v-else-if="hasKey" class="gx-offline-roads__map"><canvas ref="canvas" tabindex="0" aria-label="Map. Tap or press Enter to center a new offline area; drag or use arrow keys to pan."></canvas>
             <div class="gx-navigation-map__controls"><button class="gx-btn" type="button" @click="zoom(1)" aria-label="Zoom in">+</button>
               <button class="gx-btn" type="button" @click="zoom(-1)" aria-label="Zoom out">−</button></div>
             <span class="gx-offline-roads__hint">{{ point ? 'Adjust the radius, name it, then save.' : 'Tap the map to center a new area.' }}</span></div>

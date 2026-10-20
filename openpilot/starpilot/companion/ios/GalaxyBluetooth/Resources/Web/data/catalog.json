@@ -73,9 +73,9 @@
     },
     {
       "name": "Plots & Analysis",
-      "path": "/tuning",
+      "path": "/tuning/plots",
       "icon": "bi-sign-turn-right",
-      "description": "Live steering and acceleration plots, and recorded-drive analysis",
+      "description": "Live control plots and StarPilot Auto Learn results",
       "availability": "local-only"
     },
     {
@@ -89,7 +89,15 @@
       "name": "Android Auto",
       "path": "/android-auto",
       "icon": "bi-phone",
-      "description": "Show StarPilot on your car’s screen",
+      "description": "Show StarPilot on your car\u2019s screen",
+      "availability": "local-only",
+      "visibility": "authenticated"
+    },
+    {
+      "name": "Spotify and Phone Audio",
+      "path": "/spotify",
+      "icon": "bi-spotify",
+      "description": "Play Spotify or forward phone music through your comma to your car",
       "availability": "local-only",
       "visibility": "authenticated"
     }

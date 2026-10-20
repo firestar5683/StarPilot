@@ -1,6 +1,7 @@
 import { MenuTile } from "./menu-tile.js"
 import { GxNotice } from "./notice.js"
 import { GalaxySelect } from "./galaxy-select.js"
+import { BluetoothNotice, bluetoothConnection } from "./bluetooth-notice.js"
 
 export class CameraSnapshotFeed {
   constructor({ publish, unauthorized, fetcher = (...args) => fetch(...args),
@@ -24,6 +25,7 @@ export class CameraSnapshotFeed {
   }
   async capture(camera) {
     this.stop()
+    if (bluetoothConnection()) return
     const request = new AbortController()
     this.request = request
     this.publish({ image: "", capturing: true, error: "" })
@@ -31,15 +33,15 @@ export class CameraSnapshotFeed {
     const deadline = new Promise((_, reject) => { this.rejectRequest = expire = reject })
     this.timer = this.later(() => {
       if (this.request !== request) return
-      expire(new Error("Snapshot timed out. Turn off the vehicle and try again."))
-    }, 13500)
+      expire(new Error("Snapshot timed out. Try taking a new snapshot."))
+    }, camera === "cabin" ? 26000 : 13500)
     try {
       const response = await Promise.race([this.fetcher("./api/cameras/snapshot", { method: "POST", credentials: "same-origin",
         cache: "no-store", signal: request.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ camera }) }), deadline])
       if (this.request !== request || request.signal.aborted) return
       if (response.status === 401) { this.stop(); this.unauthorized(); return }
       if (!response.ok) throw new Error(response.status === 409 ? "Turn the vehicle off before taking a snapshot." :
-        "Turn off the vehicle and open its camera preview, then try again.")
+        "Camera frame unavailable. Try taking a new snapshot.")
       if (response.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase() !== "image/jpeg") throw new Error("Camera image is unavailable.")
       const blob = await Promise.race([response.blob(), deadline])
       if (this.request !== request || request.signal.aborted) return
@@ -63,10 +65,10 @@ export class CameraSnapshotFeed {
 
 export const CamerasPage = {
   name: "CamerasPage",
-  components: { GxNotice, GalaxySelect, MenuTile },
+  components: { GxNotice, BluetoothNotice, GalaxySelect, MenuTile },
   props: { mode: { type: String, required: true }, go: { type: Function, required: true },
     unauthorized: { type: Function, required: true } },
-  data: () => ({ camera: "cabin", image: "", capturing: false, error: "" }),
+  data: () => ({ bluetooth: bluetoothConnection(), camera: "cabin", image: "", capturing: false, error: "" }),
   created() { this.snapshots = new CameraSnapshotFeed({ publish: (state) => Object.assign(this.$data, state), unauthorized: this.unauthorized }) },
   methods: {
     chooseCamera(event) { this.camera = event.target.value; this.snapshots.stop() },
@@ -87,7 +89,8 @@ export const CamerasPage = {
       </div>
       <section class="gx-card gx-panel gx-stack"><h2>Camera Snapshot</h2>
         <p>Turn off the vehicle, choose a camera, then take a snapshot.</p>
-        <template v-if="mode === 'local'">
+        <BluetoothNotice v-if="bluetooth" feature="Camera snapshots" />
+        <template v-else-if="mode === 'local'">
           <label>Camera
             <GalaxySelect class="gx-field gx-field--full" aria-label="Camera" :value="camera" :disabled="capturing" @change="chooseCamera">
               <option value="cabin">Cabin</option><option value="wide">Wide road</option><option value="narrow">Road</option>
@@ -111,7 +114,6 @@ export class LiveCameraPreview {
     this.stopped = true
     this.snapshots = new CameraSnapshotFeed({ unauthorized, publish: update => this.receive(update) })
     this.visibility = () => {
-      this.cancelTimer(this.timer)
       this.snapshots.stop()
       if (!document.hidden && this.warming) this.poll()
     }
@@ -154,39 +156,29 @@ export class LiveCameraPreview {
     image.src = update.image
   }
   start() {
+    if (bluetoothConnection()) return
     this.stopped = false
     document.addEventListener("visibilitychange", this.visibility)
     this.refresh()
   }
   refresh() {
-    this.cancelTimer(this.warmupTimer)
-    this.cancelTimer(this.timer)
     this.warming = true
     this.lastError = ""
     this.publish({ cameraWarming: true, cameraError: "" })
-    this.warmupTimer = this.later(() => this.freeze(), 5000)
     this.poll()
-  }
-  freeze() {
-    this.generation++
-    this.cancelTimer(this.decodeTimer)
-    this.warming = false
-    this.pollGeneration = (this.pollGeneration || 0) + 1
-    this.cancelTimer(this.timer)
-    this.snapshots.stop()
-    this.publish({ cameraWarming: false, cameraError: this.image ? "" : this.lastError || "No cabin frame was available. Turn off the vehicle and take a new snapshot." })
   }
   async poll() {
     if (this.stopped || !this.warming) return
     const generation = this.pollGeneration = (this.pollGeneration || 0) + 1
     if (this.enabled() && !document.hidden) await this.snapshots.capture("cabin")
-    if (!this.stopped && this.warming && generation === this.pollGeneration) this.timer = this.later(() => this.poll(), 1000)
+    if (!this.stopped && generation === this.pollGeneration) {
+      this.warming = false
+      this.publish({ cameraWarming: false, cameraError: this.image ? "" : this.lastError || "No cabin frame was available. Try taking a new snapshot." })
+    }
   }
   stop() {
     this.stopped = true
     this.warming = false
-    this.cancelTimer(this.warmupTimer)
-    this.cancelTimer(this.timer)
     document.removeEventListener("visibilitychange", this.visibility)
     this.clear()
   }
