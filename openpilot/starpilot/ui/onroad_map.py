@@ -29,7 +29,7 @@ import numpy as np
 import pyray as rl
 
 from openpilot.starpilot.gps.acquisition import GpsAcquisition, acquisition_progress
-from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS
+from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS, PHONE_MAX_AGE_NS
 from openpilot.starpilot.navigation.road_tiles import (
   DATA_ZOOM, EXTENT, LINK, MAJOR, MINOR, MOTORWAY, STREET, RoadTile, TileFormatError, TileKey, decode_road_tile,
   encode_road_tile, meters_per_tile, world_xy,
@@ -72,6 +72,7 @@ ROUTE_GLOW = (150, 110, 255, 90)
 ROUTE_CORE = (178, 150, 255, 255)
 ROUTE_DONE = (118, 104, 150, 200)
 GLASS = (8, 12, 20, 132)
+SOURCE_LABELS = {"comma": "Comma GPS", "car": "Car GPS", "phone": "Phone GPS"}
 REFERENCE_M_PER_PX = 1.4
 
 
@@ -279,6 +280,7 @@ class MapInput:
   satellites: int | None = None
   gps_wait_seconds: float = 0.0
   destination: str = ''                             # where navigation is going: "Home", "Work" or the place name
+  source: str = ''                                  # where the fix comes from: comma, car or phone
 
 
 class TileReader:
@@ -443,7 +445,7 @@ class MapOverlay:
 
   def _advance(self, data: MapInput, now: float) -> None:
     self._input = data
-    self.status = "live" if data.fix is not None and 0 <= now - data.fix.monotonic <= GPS_MAX_AGE_NS / 1e9 else "waiting"
+    self.status = "live" if data.fix is not None and 0 <= now - data.fix.monotonic <= fix_hold_seconds(data.source) else "waiting"
     fix = data.fix
     dt = 0.0 if self._last_prepare is None else min(0.2, max(0.0, now - self._last_prepare))
     self._last_prepare = now
@@ -723,6 +725,7 @@ class MapOverlay:
     if self.status == "waiting":
       self._draw_gps_status(rect)
       return
+    self._draw_source_chip(rect)
     if self._starting_navigation():
       self._draw_starting_navigation(rect)
       return
@@ -732,6 +735,24 @@ class MapOverlay:
       measured = self.fonts.measure(text, FontRole.MEDIUM, 26)
       self.fonts.draw(text, FontRole.MEDIUM, 26, rect.x + (rect.width - measured.width) / 2,
                       rect.y + rect.height * CAR_ANCHOR + 40, rl.Color(225, 228, 238, round(200 * opacity)))
+
+  def _draw_source_chip(self, rect: rl.Rectangle) -> None:
+    """Where the fix comes from, left of the compass; solid whatever the map's opacity so it always reads."""
+    label = SOURCE_LABELS.get(self._input.source)
+    if label is None or self.fonts is None:
+      return
+    from openpilot.starpilot.ui.presentation import FontRole
+    scale = max(.7, min(1.0, rect.width / 560, rect.height / 420))
+    size, pad_x, height = 17 * scale, 10 * scale, 26 * scale
+    inset = max(22.0, min(rect.width, rect.height) * 0.09)
+    measured = self.fonts.measure(label, FontRole.SEMI_BOLD, size)
+    width = measured.width + 2 * pad_x
+    chip = rl.Rectangle(rect.x + rect.width - inset - 13 - 8 * scale - width, rect.y + inset - height / 2, width, height)
+    if chip.x < rect.x + 4:
+      return
+    rl.draw_rectangle_rounded(chip, 1.0, 10, rl.Color(15, 13, 23, 255))
+    rl.draw_rectangle_rounded_lines_ex(chip, 1.0, 10, 1.5, rl.Color(150, 140, 200, 255))
+    self.fonts.draw(label, FontRole.SEMI_BOLD, size, chip.x + pad_x, chip.y + (height - measured.height) / 2, rl.Color(240, 242, 250, 255))
 
   def _draw_starting_navigation(self, rect: rl.Rectangle) -> None:
     """Shown while navigation is starting; solid whatever the map's opacity so it always reads."""
@@ -807,16 +828,21 @@ class MapOverlay:
 
 # ---------------------------------------------------------------- live input
 
+def fix_hold_seconds(source: str) -> float:
+  return (PHONE_MAX_AGE_NS if source == "phone" else GPS_MAX_AGE_NS) / 1e9
+
+
 class MapFeed:
   """The same GPS choice as navigation (either receiver, then the car's own), and the active route."""
 
   def __init__(self, sm=None, *, acquisition=None):
-    from openpilot.starpilot.gps.source import GPS_SOURCES
+    from openpilot.starpilot.gps.source import GPS_SERVICES
     if sm is None:
       from openpilot.cereal import messaging
-      sm = messaging.SubMaster(list(GPS_SOURCES))
+      sm = messaging.SubMaster(list(GPS_SERVICES))
     self.sm = sm
     self._fix: MapFix | None = None
+    self._source = ''
     self._route_stamp = None
     self._route_valid_until = 0
     self._route: tuple[tuple[float, float], ...] = ()
@@ -826,20 +852,22 @@ class MapFeed:
     self._acquisition_polled = -math.inf
 
   def read(self, navigation_sm=None, *, navigation_requested=None, destination=None) -> MapInput:
-    from openpilot.starpilot.gps.source import bearing, select_location
+    from openpilot.starpilot.gps.source import bearing, select_source
     self.sm.update(0)
     now = time.monotonic()
     now_ns = time.monotonic_ns()
-    selected = select_location(self.sm, now_ns)
+    chosen = select_source(self.sm, now_ns)
+    selected = chosen[1] if chosen is not None else None
     if selected is not None:
       stamp, gps = selected
       speed = float(getattr(gps, "speed", float("nan")))
       if math.isfinite(speed) and -85 < gps.latitude < 85:
         # The fix's own timestamp, so dead reckoning starts from when it was measured.
         self._fix = MapFix(gps.latitude, gps.longitude, bearing(gps), max(0.0, speed), stamp / 1e9)
-    if self._fix is not None and now - self._fix.monotonic > 5.0:
+        self._source = chosen[0]
+    if self._fix is not None and now - self._fix.monotonic > max(5.0, fix_hold_seconds(self._source)):
       self._fix = None
-    fresh = self._fix is not None and 0 <= now - self._fix.monotonic <= GPS_MAX_AGE_NS / 1e9
+    fresh = self._fix is not None and 0 <= now - self._fix.monotonic <= fix_hold_seconds(self._source)
     if fresh:
       self._acquisition.reset()
       self._acquisition_polled = -math.inf
@@ -882,7 +910,8 @@ class MapFeed:
       acquisition_elapsed = now - acquisition_since
     return MapInput(self._fix, route, active if navigation_requested is None else navigation_requested,
                     None if fresh else self._acquisition.satellites(now),
-                    acquisition_elapsed, self._destination if destination is None else destination)
+                    acquisition_elapsed, self._destination if destination is None else destination,
+                    self._source if self._fix is not None else '')
 
 
 # ---------------------------------------------------------------- parked preview

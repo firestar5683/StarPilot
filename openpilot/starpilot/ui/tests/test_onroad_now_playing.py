@@ -8,11 +8,11 @@ TRACK = {'source': 'spotify', 'status': 'playing', 'title': 'Midnight City', 'ar
 
 @pytest.fixture
 def widget(monkeypatch):
-  import pyray
+  from openpilot.starpilot.ui import onroad_now_playing
+  from openpilot.starpilot.ui.onroad_now_playing import NowPlayingWidget
   drawn = []
   for name in ('draw_rectangle_rounded', 'draw_triangle', 'draw_circle_v'):
-    monkeypatch.setattr(pyray, name, lambda *args, name=name: drawn.append((name, args)))
-  from openpilot.starpilot.ui.onroad_now_playing import NowPlayingWidget
+    monkeypatch.setattr(onroad_now_playing.rl, name, lambda *args, name=name: drawn.append((name, args)))
   texts = []
   fonts = SimpleNamespace(measure=lambda text, role, size: SimpleNamespace(width=len(text) * size * .5),
                           draw=lambda text, *args: texts.append(text))

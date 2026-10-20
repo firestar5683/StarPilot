@@ -75,7 +75,7 @@ def test_read_archive_keeps_known_files_and_accepts_one_folder(tmp_path):
   (archive({'../soloist': elf()}), 'UNSAFE'),
   (archive({'a/b/c/soloist': elf()}), 'NO_PLAYER'),
   (archive()[:200], 'CORRUPT'),
-])
+], ids=['not_gzip', 'no_player', 'links', 'parent_path', 'nested', 'truncated'])
 def test_read_archive_rejects_unsafe_or_wrong_archives(tmp_path, data, code):
   with pytest.raises(package.ImportFailed) as error:
     package.read_archive(write(tmp_path, data))
@@ -93,7 +93,7 @@ def test_read_archive_bounds_decompressed_bytes(tmp_path):
   (elf(elf_class=1), 'WRONG_ARCH'),
   (elf(interpreter=b'/lib/ld-linux-armhf.so.3'), 'INCOMPATIBLE'),
   (b'#!/bin/sh\necho hi\n' + b'\x00' * 64, 'NO_PLAYER'),
-])
+], ids=['x86_64', 'elf32', 'armhf', 'script'])
 def test_check_executable(binary, code):
   with pytest.raises(package.ImportFailed) as error:
     package.check_executable(binary)

@@ -8,11 +8,11 @@ import re
 import uuid
 from typing import Any
 
-from openpilot.starpilot.gps.source import GPS_SOURCES, select_location
+from openpilot.starpilot.gps.source import GPS_SERVICES, select_location
 from openpilot.starpilot.analytics.report import ReportClient, build_payload, fetch_branch_commit
 
 SERVICES = ('deviceState', 'carParams', 'carState', 'carControl', 'selfdriveState',
-            'modelV2', 'drivingModelData', 'managerState', *GPS_SOURCES)
+            'modelV2', 'drivingModelData', 'managerState', *GPS_SERVICES)
 COUNTERS = ('drives', 'meters', 'seconds', 'current_months_meters', 'total_tracked_seconds',
             'total_lateral_seconds', 'total_longitudinal_seconds', 'total_aol_seconds')
 

@@ -491,8 +491,8 @@ def main() -> None:
     pass
   daemon = TileDaemon()
   owner = NavigationOwner()
-  from openpilot.starpilot.gps.source import GPS_SOURCES
-  sm = messaging.SubMaster(["deviceState", *GPS_SOURCES, "starpilotNavigation"])
+  from openpilot.starpilot.gps.source import GPS_SERVICES
+  sm = messaging.SubMaster(["deviceState", *GPS_SERVICES])
   map_enabled, layout_checked = False, -math.inf
   while True:
     sm.update(0)

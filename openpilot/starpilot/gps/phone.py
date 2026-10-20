@@ -1,3 +1,4 @@
+import json
 import math
 import threading
 import time
@@ -53,20 +54,40 @@ def phone_gps(payload, now_ns):
   }
 
 
+def handoff_path():
+  import tempfile
+  from pathlib import Path
+  shm = Path("/dev/shm")
+  return (shm if shm.is_dir() else Path(tempfile.gettempdir())) / "starpilot_phone_gps.json"
+
+
 class PhoneGpsPublisher:
-  def __init__(self, pm_factory=None, mono_clock=time.monotonic_ns):
-    self._pm_factory, self._mono_clock = pm_factory, mono_clock
-    self._pm = None
+  """Hands the newest validated phone fix to navigationd, which publishes it inside starpilotNavigation."""
+
+  def __init__(self, path=None, mono_clock=time.monotonic_ns):
+    self._path, self._mono_clock = path, mono_clock
     self._lock = threading.Lock()
 
   def publish(self, payload):
-    from openpilot.cereal import messaging
-    now = self._mono_clock()
-    gps = phone_gps(payload, now)
-    message = messaging.new_message("phoneGps", valid=True, logMonoTime=now)
-    message.phoneGps.gps = gps
+    gps = phone_gps(payload, self._mono_clock())
+    path = self._path or handoff_path()
+    temporary = path.with_name(path.name + ".tmp")
     with self._lock:
-      if self._pm is None:
-        self._pm = self._pm_factory() if self._pm_factory is not None else messaging.PubMaster(["phoneGps"])
-      self._pm.send("phoneGps", message)
+      temporary.write_text(json.dumps(gps))
+      temporary.replace(path)
     return {"ok": True}
+
+
+def read_phone_gps(now_ns, path=None):
+  """The handed-off fix as a Gps-like object, or None when absent, malformed or older than the phone hold."""
+  from types import SimpleNamespace
+  from openpilot.starpilot.gps.source import PHONE_MAX_AGE_NS, valid_fix
+  try:
+    with (path or handoff_path()).open("rb") as source:
+      gps = json.loads(source.read(1 << 16))
+    stamp = gps["sourceMonoTime"]
+    if type(stamp) is not int:
+      return None
+    return valid_fix(SimpleNamespace(**gps), stamp, stamp, now_ns, PHONE_MAX_AGE_NS)
+  except (OSError, ValueError, KeyError, TypeError):
+    return None

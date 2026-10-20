@@ -1,16 +1,20 @@
 import math
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from openpilot.cereal import log, messaging
-from openpilot.starpilot.gps.phone import PhoneGpsPublisher, phone_gps
+from openpilot.starpilot.gps.phone import PhoneGpsPublisher, phone_gps, read_phone_gps
 from openpilot.starpilot.gps import source
-from openpilot.starpilot.gps.source import GPS_SOURCES, gps_mode, select_location
+from openpilot.starpilot.gps.source import GPS_SERVICES, PHONE_MAX_AGE_NS, gps_mode, select_location, select_source
+from openpilot.starpilot.navigation.runtime import publish_status
 from openpilot.starpilot.navigation.status import NavigationStatusSource
 
 NOW = 101_000_000_000
+PATH = Path(tempfile.gettempdir()) / "phone_gps.json"
 FIX = {"latitude": 40., "longitude": -110., "horizontalAccuracy": 5., "ageMs": 300, "speed": 20., "bearing": 90.,
        "bearingAccuracy": 10., "timestamp": 1_790_000_000_000}
 
@@ -18,11 +22,11 @@ FIX = {"latitude": 40., "longitude": -110., "horizontalAccuracy": 5., "ageMs": 3
 class Messages:
   def __init__(self):
     self.data = {}
-    self.valid = dict.fromkeys(GPS_SOURCES, False)
-    self.logMonoTime = dict.fromkeys(GPS_SOURCES, 0)
-    self.alive = dict.fromkeys(GPS_SOURCES, True)
-    self.seen = dict.fromkeys(GPS_SOURCES, True)
-    self.recv_time = dict.fromkeys(GPS_SOURCES, 0.)
+    self.valid = dict.fromkeys(GPS_SERVICES, False)
+    self.logMonoTime = dict.fromkeys(GPS_SERVICES, 0)
+    self.alive = dict.fromkeys(GPS_SERVICES, True)
+    self.seen = dict.fromkeys(GPS_SERVICES, True)
+    self.recv_time = dict.fromkeys(GPS_SERVICES, 0.)
 
   def __getitem__(self, key):
     return self.data[key]
@@ -33,16 +37,31 @@ class Messages:
   def send(self, service, message):
     with log.Event.from_bytes(message.to_bytes()) as event:
       value = getattr(event, service).to_dict()
-      if service in ("starpilotCarState", "phoneGps"):
+      if service == "starpilotCarState":
         value["gps"] = SimpleNamespace(**getattr(event, service).gps.to_dict())
+      if service == "starpilotNavigation":
+        value["phoneGps"] = SimpleNamespace(**getattr(event, service).phoneGps.to_dict())
       self.data[service] = SimpleNamespace(**value)
       self.valid[service] = event.valid
       self.logMonoTime[service] = event.logMonoTime
       self.recv_time[service] = event.logMonoTime / 1e9
 
 
-def publish(sm, payload=FIX, now=NOW):
-  return PhoneGpsPublisher(pm_factory=lambda: sm, mono_clock=lambda: now).publish(dict(payload))
+class Bus:
+  def __init__(self, sm, now):
+    self.sm, self.now = sm, now
+
+  def send(self, service, message):
+    message.logMonoTime = self.now
+    self.sm.send(service, message)
+
+
+def publish(sm, payload=FIX, now=NOW, tmp_path=None):
+  """Galaxy hands the fix over; navigationd publishes it inside starpilotNavigation."""
+  path = (tmp_path or PATH.parent) / "phone_gps.json"
+  result = PhoneGpsPublisher(path=path, mono_clock=lambda: now).publish(dict(payload))
+  publish_status(Bus(sm, now), {"status": "idle"}, read_phone_gps(now, path))
+  return result
 
 
 def test_phone_is_used_only_without_another_fix():
@@ -62,11 +81,28 @@ def test_phone_is_used_only_without_another_fix():
   assert select_location(sm, NOW)[1].longitude == -90.
 
 
-def test_phone_fix_expires_on_comma_clock():
+def test_phone_fix_is_held_through_sparse_updates_then_expires():
   sm = Messages()
   publish(sm)
-  assert select_location(sm, NOW + 2_100_000_000) is not None
-  assert select_location(sm, NOW + 2_300_000_000) is None
+  stamp = NOW - 300_000_000
+  assert select_location(sm, NOW + 2_300_000_000) is not None
+  assert select_location(sm, stamp + PHONE_MAX_AGE_NS) is not None
+  assert select_location(sm, stamp + PHONE_MAX_AGE_NS + 1) is None
+
+
+def test_navigation_leaves_phone_empty_without_a_fresh_fix(tmp_path):
+  sm = Messages()
+  publish(sm, tmp_path=tmp_path)
+  later = NOW + PHONE_MAX_AGE_NS + 1_000_000_000
+  assert read_phone_gps(later, tmp_path / "phone_gps.json") is None
+  publish_status(Bus(sm, later), {"status": "idle"}, None)
+  assert select_location(sm, later) is None
+
+
+def test_phone_handoff_ignores_missing_and_damaged_files(tmp_path):
+  assert read_phone_gps(NOW, tmp_path / "missing.json") is None
+  (tmp_path / "bad.json").write_text("{")
+  assert read_phone_gps(NOW, tmp_path / "bad.json") is None
 
 
 def test_unknown_values_are_not_used():
@@ -84,7 +120,7 @@ def test_invalid_fixes_are_rejected(change):
 def test_inaccurate_phone_fix_is_published_but_not_selected():
   sm = Messages()
   publish(sm, {**FIX, "horizontalAccuracy": 60.})
-  assert sm.valid["phoneGps"] and select_location(sm, NOW) is None
+  assert sm.valid["starpilotNavigation"] and select_location(sm, NOW) is None
 
 
 def test_navigation_status_ranks_phone_below_native():
@@ -114,7 +150,7 @@ def test_gps_modes_choose_phone_first_or_never():
   assert select_location(sm, NOW, "backup")[1].longitude == -90.
   assert select_location(sm, NOW, "comma")[1].longitude == -90.
   assert select_location(sm, NOW, "phone")[1].longitude == -110.
-  assert select_location(sm, NOW + 2_300_000_000, "phone")[1].longitude == -90.
+  assert select_location(sm, NOW + 2_300_000_000, "phone")[1].longitude == -110.
 
 
 def test_gps_mode_follows_navigation_settings(tmp_path, monkeypatch):
@@ -157,3 +193,17 @@ def test_car_gps_ranks_against_the_phone_in_every_mode():
   for mode, name in (("backup", "car"), ("comma", "car"), ("phone", "phone")):
     with patch('openpilot.starpilot.navigation.status.gps_mode', return_value=mode):
       assert (status.map_position() or {})['source'] == name
+
+
+def test_selected_source_is_named():
+  sm = Messages()
+  assert select_source(sm, NOW) is None
+  publish(sm)
+  assert select_source(sm, NOW)[0] == "phone"
+  car = messaging.new_message("starpilotCarState", valid=True, logMonoTime=NOW)
+  car.starpilotCarState.gps = {"sourceMonoTime": NOW - 1, "latitude": 41., "longitude": -111., "horizontalAccuracy": 5., "hasFix": True}
+  sm.send("starpilotCarState", car)
+  assert select_source(sm, NOW)[0] == "car"
+  native(sm)
+  assert select_source(sm, NOW)[0] == "comma"
+  assert select_source(sm, NOW, "phone")[0] == "phone"

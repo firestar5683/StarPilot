@@ -9,14 +9,15 @@ import uuid
 from openpilot.starpilot.navigation.owner import ConflictError, NavigationOwner, ValidationError, ROUTE_AVOIDANCES
 from openpilot.starpilot.navigation.route_engine import MapboxRouteEngine
 
-from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS, GPS_SOURCES, bearing, select_location
+from openpilot.starpilot.gps.phone import read_phone_gps
+from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS, GPS_SERVICES, bearing, select_location
 
 ARRIVED_NS = 5_000_000_000      # stopped at the destination this long shows "You have arrived"
 END_ROUTE_NS = 15_000_000_000   # ...and this long ends navigation, like tapping End navigation
 
 
-def location(sm, now_ns: int):
-  fix = select_location(sm, now_ns)
+def location(sm, now_ns: int, phone_fix=None):
+  fix = select_location(sm, now_ns, phone_fix=phone_fix)
   if fix is None:
     return None
   stamp, gps = fix
@@ -148,11 +149,19 @@ class RouteRuntime:
       self.ended_revision = revision
 
 
-def publish_status(pm, value: dict) -> None:
+def phone_gps_dict(phone_fix) -> dict | None:
+  if phone_fix is None:
+    return None
+  gps = dict(vars(phone_fix[1]))
+  gps["vNED"] = list(gps.get("vNED", ()))
+  return gps
+
+
+def publish_status(pm, value: dict, phone_fix=None) -> None:
   from openpilot.cereal import messaging
   message = messaging.new_message('starpilotNavigation', valid=True)
   from openpilot.starpilot.navigation.wire import navigation_envelope
-  message.starpilotNavigation = navigation_envelope(value)
+  message.starpilotNavigation = {**navigation_envelope(value), **({'phoneGps': gps} if (gps := phone_gps_dict(phone_fix)) else {})}
   pm.send('starpilotNavigation', message)
 
 
@@ -162,7 +171,7 @@ def main():
   from openpilot.common.swaglog import cloudlog
   owner = NavigationOwner()
   runtime = RouteRuntime(owner)
-  sm = messaging.SubMaster(['deviceState', *GPS_SOURCES])
+  sm = messaging.SubMaster(['deviceState', *(service for service in GPS_SERVICES if service != 'starpilotNavigation')])
   pm = messaging.PubMaster(['starpilotNavigation'])
   rate = Ratekeeper(1.)
   try:
@@ -174,8 +183,9 @@ def main():
       drive_id = (device.startedMonoTime if sm.valid['deviceState'] and device.started and
                   0 < device.startedMonoTime <= device_stamp <= now <= device_stamp + 2_000_000_000 else 0)
       try:
-        value = runtime.update(now, location(sm, now), drive_id)
-        publish_status(pm, value)
+        phone_fix = read_phone_gps(now)
+        value = runtime.update(now, location(sm, now, phone_fix), drive_id)
+        publish_status(pm, value, phone_fix)
       except (ValidationError, OSError, ValueError):
         cloudlog.warning('navigation settings or route unavailable')
       rate.keep_time()

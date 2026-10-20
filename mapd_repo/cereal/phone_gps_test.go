@@ -19,11 +19,11 @@ func phoneGpsWire(t *testing.T, source, envelope uint64) []byte {
 	}
 	event.SetLogMonoTime(envelope)
 	event.SetValid(true)
-	phone, err := event.NewPhoneGps()
+	navigation, err := event.NewStarpilotNavigation()
 	if err != nil {
 		t.Fatal(err)
 	}
-	gps, err := phone.NewGps()
+	gps, err := navigation.NewPhoneGps()
 	if err != nil {
 		t.Fatal(err)
 	}

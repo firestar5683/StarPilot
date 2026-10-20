@@ -47,9 +47,9 @@ func CarGpsReader(evt log.Event) (custom.StarPilotCarState_Gps, error) {
 }
 
 func PhoneGpsReader(evt log.Event) (custom.StarPilotCarState_Gps, error) {
-	phone, err := evt.PhoneGps()
+	navigation, err := evt.StarpilotNavigation()
 	if err != nil {
 		return custom.StarPilotCarState_Gps{}, err
 	}
-	return phone.Gps()
+	return navigation.PhoneGps()
 }

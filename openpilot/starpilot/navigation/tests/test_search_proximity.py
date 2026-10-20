@@ -8,7 +8,7 @@ import pytest
 
 from openpilot.cereal import log, messaging
 from openpilot.starpilot.navigation.owner import NavigationOwner, ValidationError
-from openpilot.starpilot.navigation.status import GPS_SOURCES, NavigationStatusSource
+from openpilot.starpilot.navigation.status import GPS_SERVICES, GPS_SOURCES, NavigationStatusSource
 
 POI = {'mapbox_id': 'poi/id', 'name': 'Coffee', 'feature_type': 'poi'}
 
@@ -24,7 +24,7 @@ class Clock:
 class Messages:
   def __init__(self, clock):
     self.clock = clock
-    names = ['starpilotNavigation', *GPS_SOURCES, 'deviceState']
+    names = ['starpilotNavigation', *GPS_SERVICES, 'deviceState']
     self.seen = dict.fromkeys(names, True)
     self.alive = dict.fromkeys(names, True)
     self.valid = dict.fromkeys(names, True)
@@ -53,7 +53,7 @@ def source():
   messages = Messages(clock)
   with patch('openpilot.cereal.messaging.SubMaster', return_value=messages) as factory:
     result = NavigationStatusSource(mono_clock=lambda: clock.mono, boot_clock=clock.boot)
-  assert factory.call_args.args[0] == ['starpilotNavigation', 'gpsLocationExternal', 'gpsLocation', 'starpilotCarState', 'phoneGps', 'deviceState']
+  assert factory.call_args.args[0] == ['starpilotNavigation', 'gpsLocationExternal', 'gpsLocation', 'starpilotCarState', 'deviceState']
   clock.mono += 100_000_000
   messages.fix('gpsLocationExternal')
   messages.fix('gpsLocation', stamp=clock.mono - 30_000_000, longitude=-90., latitude=40.)

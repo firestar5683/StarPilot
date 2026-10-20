@@ -2623,12 +2623,12 @@ struct Event {
     # DO change the name of the field and struct
     # DON'T change the ID (e.g. @107)
     # DON'T change which struct it points to
-    customReserved0 @107 :Custom.CustomReserved0;
+    starpilotNavigation @107 :Custom.StarPilotCarControl;
     customReserved1 @108 :Custom.CustomReserved1;
     starpilotCarState @109 :Custom.StarPilotCarState;
     customReserved3 @110 :Custom.CustomReserved3;
     customReserved4 @111 :Custom.CustomReserved4;
-    phoneGps @112 :Custom.PhoneGps;
+    customReserved5 @112 :Custom.CustomReserved5;
     customReserved6 @113 :Custom.CustomReserved6;
     customReserved7 @114 :Custom.CustomReserved7;
     customReserved8 @115 :Custom.CustomReserved8;

@@ -3296,7 +3296,7 @@ struct Event {
     STARPILOT_CAR_STATE,
     STARPILOT_LONGITUDINAL_PLAN,
     SLC_VISION_OBSERVATION,
-    PHONE_GPS,
+    CUSTOM_RESERVED5,
     CUSTOM_RESERVED6,
     STARPILOT_RADAR_STATE,
     STARPILOT_SELFDRIVE_STATE,
@@ -23221,9 +23221,9 @@ public:
   inline bool hasSlcVisionObservation() const;
   inline  ::cereal::StarPilotModelDataV2::Reader getSlcVisionObservation() const;
 
-  inline bool isPhoneGps() const;
-  inline bool hasPhoneGps() const;
-  inline  ::cereal::PhoneGps::Reader getPhoneGps() const;
+  inline bool isCustomReserved5() const;
+  inline bool hasCustomReserved5() const;
+  inline  ::cereal::CustomReserved5::Reader getCustomReserved5() const;
 
   inline bool isCustomReserved6() const;
   inline bool hasCustomReserved6() const;
@@ -24304,13 +24304,13 @@ public:
   inline void adoptSlcVisionObservation(::capnp::Orphan< ::cereal::StarPilotModelDataV2>&& value);
   inline ::capnp::Orphan< ::cereal::StarPilotModelDataV2> disownSlcVisionObservation();
 
-  inline bool isPhoneGps();
-  inline bool hasPhoneGps();
-  inline  ::cereal::PhoneGps::Builder getPhoneGps();
-  inline void setPhoneGps( ::cereal::PhoneGps::Reader value);
-  inline  ::cereal::PhoneGps::Builder initPhoneGps();
-  inline void adoptPhoneGps(::capnp::Orphan< ::cereal::PhoneGps>&& value);
-  inline ::capnp::Orphan< ::cereal::PhoneGps> disownPhoneGps();
+  inline bool isCustomReserved5();
+  inline bool hasCustomReserved5();
+  inline  ::cereal::CustomReserved5::Builder getCustomReserved5();
+  inline void setCustomReserved5( ::cereal::CustomReserved5::Reader value);
+  inline  ::cereal::CustomReserved5::Builder initCustomReserved5();
+  inline void adoptCustomReserved5(::capnp::Orphan< ::cereal::CustomReserved5>&& value);
+  inline ::capnp::Orphan< ::cereal::CustomReserved5> disownCustomReserved5();
 
   inline bool isCustomReserved6();
   inline bool hasCustomReserved6();
@@ -57727,57 +57727,57 @@ inline ::capnp::Orphan< ::cereal::StarPilotModelDataV2> Event::Builder::disownSl
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 
-inline bool Event::Reader::isPhoneGps() const {
-  return which() == Event::PHONE_GPS;
+inline bool Event::Reader::isCustomReserved5() const {
+  return which() == Event::CUSTOM_RESERVED5;
 }
-inline bool Event::Builder::isPhoneGps() {
-  return which() == Event::PHONE_GPS;
+inline bool Event::Builder::isCustomReserved5() {
+  return which() == Event::CUSTOM_RESERVED5;
 }
-inline bool Event::Reader::hasPhoneGps() const {
-  if (which() != Event::PHONE_GPS) return false;
+inline bool Event::Reader::hasCustomReserved5() const {
+  if (which() != Event::CUSTOM_RESERVED5) return false;
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline bool Event::Builder::hasPhoneGps() {
-  if (which() != Event::PHONE_GPS) return false;
+inline bool Event::Builder::hasCustomReserved5() {
+  if (which() != Event::CUSTOM_RESERVED5) return false;
   return !_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline  ::cereal::PhoneGps::Reader Event::Reader::getPhoneGps() const {
-  KJ_IREQUIRE((which() == Event::PHONE_GPS),
+inline  ::cereal::CustomReserved5::Reader Event::Reader::getCustomReserved5() const {
+  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED5),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::PhoneGps>::get(_reader.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved5>::get(_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline  ::cereal::PhoneGps::Builder Event::Builder::getPhoneGps() {
-  KJ_IREQUIRE((which() == Event::PHONE_GPS),
+inline  ::cereal::CustomReserved5::Builder Event::Builder::getCustomReserved5() {
+  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED5),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::PhoneGps>::get(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved5>::get(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void Event::Builder::setPhoneGps( ::cereal::PhoneGps::Reader value) {
+inline void Event::Builder::setCustomReserved5( ::cereal::CustomReserved5::Reader value) {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::PHONE_GPS);
-  ::capnp::_::PointerHelpers< ::cereal::PhoneGps>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED5);
+  ::capnp::_::PointerHelpers< ::cereal::CustomReserved5>::set(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), value);
 }
-inline  ::cereal::PhoneGps::Builder Event::Builder::initPhoneGps() {
+inline  ::cereal::CustomReserved5::Builder Event::Builder::initCustomReserved5() {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::PHONE_GPS);
-  return ::capnp::_::PointerHelpers< ::cereal::PhoneGps>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED5);
+  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved5>::init(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void Event::Builder::adoptPhoneGps(
-    ::capnp::Orphan< ::cereal::PhoneGps>&& value) {
+inline void Event::Builder::adoptCustomReserved5(
+    ::capnp::Orphan< ::cereal::CustomReserved5>&& value) {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::PHONE_GPS);
-  ::capnp::_::PointerHelpers< ::cereal::PhoneGps>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED5);
+  ::capnp::_::PointerHelpers< ::cereal::CustomReserved5>::adopt(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::cereal::PhoneGps> Event::Builder::disownPhoneGps() {
-  KJ_IREQUIRE((which() == Event::PHONE_GPS),
+inline ::capnp::Orphan< ::cereal::CustomReserved5> Event::Builder::disownCustomReserved5() {
+  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED5),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::PhoneGps>::disown(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved5>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 

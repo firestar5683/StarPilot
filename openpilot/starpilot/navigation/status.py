@@ -4,7 +4,7 @@ from openpilot.starpilot.parked_evidence import RESUME_SKEW_NS
 
 from openpilot.starpilot.navigation.wire import navigation_state
 
-from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS as GPS_TTL_NS, GPS_SOURCES, SOURCE_NAMES, bearing, gps_mode, gps_priority, observation
+from openpilot.starpilot.gps.source import GPS_SERVICES, GPS_SOURCES, SOURCE_NAMES, SOURCE_SERVICES, bearing, gps_mode, gps_priority, max_age_ns, observation
 
 
 def boot_time_ns():
@@ -14,7 +14,7 @@ def boot_time_ns():
 class NavigationStatusSource:
   def __init__(self, *, mono_clock=time.monotonic_ns, boot_clock=boot_time_ns):
     from openpilot.cereal import messaging
-    self.sm = messaging.SubMaster(['starpilotNavigation', *GPS_SOURCES, 'deviceState'])
+    self.sm = messaging.SubMaster(list(dict.fromkeys(['starpilotNavigation', *GPS_SERVICES, 'deviceState'])))
     self.mono_clock, self.boot_clock = mono_clock, boot_clock
     self.gps_after_mono_ns = mono_clock()
     self.gps_offset_ns = None
@@ -80,14 +80,15 @@ class NavigationStatusSource:
         if fix is None:
           continue
         stamp, gps = fix
-        receipt = int(self.sm.recv_time[service] * 1e9)
-        if (self.sm.seen[service] and self.sm.alive[service] and self.gps_after_mono_ns < stamp and
-            0 <= after - receipt <= GPS_TTL_NS):
+        carrier, ttl = SOURCE_SERVICES.get(service, service), max_age_ns(service)
+        receipt = int(self.sm.recv_time[carrier] * 1e9)
+        if (self.sm.seen[carrier] and self.sm.alive[carrier] and self.gps_after_mono_ns < stamp and
+            0 <= after - receipt <= ttl):
           direction = bearing(gps)
           candidates.append((priority, stamp,
                              {'longitude': float(gps.longitude), 'latitude': float(gps.latitude), 'source': SOURCE_NAMES[service],
                               **({'bearing': direction} if direction is not None else {}),
-                              'validForMs': min(stamp + GPS_TTL_NS - after, receipt + GPS_TTL_NS - after) / 1e6}))
+                              'validForMs': min(stamp + ttl - after, receipt + ttl - after) / 1e6}))
       except (AttributeError, KeyError, TypeError, ValueError, OverflowError, RuntimeError):
         continue
     return max(candidates, default=(-1, 0, None), key=lambda row: row[:2])[2]

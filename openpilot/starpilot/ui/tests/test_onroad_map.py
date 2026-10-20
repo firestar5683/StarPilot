@@ -375,6 +375,30 @@ def test_gps_status_card_is_inside_bottom_of_map(tmp_path, active, satellites, s
     overlay.close()
 
 
+def test_gps_source_chip_is_solid_and_inside_the_widget(tmp_path):
+  import pyray as rl
+  fonts = Mock()
+  fonts.measure.side_effect = lambda text, _role, size: NS(width=len(text) * size * .65, height=size * 1.25)
+  overlay = MapOverlay(tmp_path, fonts=fonts)
+  try:
+    rect = rl.Rectangle(100, 200, 560, 420)
+    for source, label in (("comma", "Comma GPS"), ("car", "Car GPS"), ("phone", "Phone GPS")):
+      overlay._input = MapInput(MapFix(*CENTER, 0, 0, 100), source=source)
+      fonts.draw.reset_mock()
+      with patch('pyray.draw_rectangle_rounded') as chip, patch('pyray.draw_rectangle_rounded_lines_ex'):
+        overlay._draw_source_chip(rect)
+      assert [call.args[0] for call in fonts.draw.call_args_list] == [label]
+      assert chip.call_args.args[3].a == 255 and fonts.draw.call_args.args[5].a == 255
+      box = chip.call_args.args[0]
+      assert rect.x < box.x and box.x + box.width < rect.x + rect.width and box.y >= rect.y
+    fonts.draw.reset_mock()
+    overlay._input = MapInput(MapFix(*CENTER, 0, 0, 100))
+    overlay._draw_source_chip(rect)
+    assert not fonts.draw.called
+  finally:
+    overlay.close()
+
+
 def test_starting_navigation_overlay_until_route_is_drawn(tmp_path):
   import pyray as rl
   fonts = Mock()

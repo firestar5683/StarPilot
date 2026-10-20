@@ -18,7 +18,7 @@ const (
 	externalFixMaxAge     = 500_000_000   // 10 Hz source: 500 ms
 	internalFixMaxAge     = 2_000_000_000 // 1 Hz source: 2 s
 	carFixMaxAge          = 2_500_000_000 // Optional CAN observation: 2.5 s
-	phoneFixMaxAge        = 2_500_000_000 // Companion app over Bluetooth or Wi-Fi: 2.5 s
+	phoneFixMaxAge        = 10_000_000_000 // Companion app in the background sends sparsely: 10 s
 	gpsModeRefresh        = 1_000_000_000 // Galaxy navigation setting reread interval
 	maxHorizontalAccuracy = 50.0          // input sanity ceiling, not road-match qualification
 	maxClockPairSkew      = 1_000_000     // an interrupted pair cannot date a source event
@@ -338,7 +338,7 @@ func (s *GpsSub) Close() {
 func GetGpsSub() (gpsSub GpsSub) {
 	return GpsSub{
 		carGps:              optionalWrappedGpsSubscriber("starpilotCarState", CarGpsReader),
-		phoneGps:            optionalWrappedGpsSubscriber("phoneGps", PhoneGpsReader),
+		phoneGps:            optionalWrappedGpsSubscriber("starpilotNavigation", PhoneGpsReader),
 		gpsLocation:         NewSubscriber("gpsLocation", GpsLocationReader, true, ms.Settings.SubscriberSettings.ShadowGpsLocation),
 		gpsLocationExternal: NewSubscriber("gpsLocationExternal", GpsLocationExternalReader, true, ms.Settings.SubscriberSettings.ShadowGpsLocationExternal),
 	}

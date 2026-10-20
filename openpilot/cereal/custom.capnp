@@ -90,6 +90,8 @@ struct StarPilotCarControl @0x81c2f05a394cf4af {
     }
     version @12 :UInt16;
   }
+
+  phoneGps @3 :StarPilotCarState.Gps;  # sourceMonoTime is comma receive time minus the phone's fix age
 }
 struct StarPilotCarParams @0xaedffd8f31e7b55d {
   alternativeExperience @0 :Int16;
@@ -588,8 +590,7 @@ struct StarPilotModelDataV2 @0x80ae746ee2596b11 {
   }
 }
 
-struct PhoneGps @0xa5cd762cd951a455 {
-  gps @0 :StarPilotCarState.Gps;  # sourceMonoTime is comma receive time minus the phone's fix age
+struct CustomReserved5 @0xa5cd762cd951a455 {
 }
 
 struct CustomReserved6 @0xf98d843bfd7004a3 {

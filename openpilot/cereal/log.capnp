@@ -2643,8 +2643,7 @@ struct Event {
     starpilotCarState @109 :Custom.StarPilotCarState;
     starpilotLongitudinalPlan @110 :Custom.StarPilotLongitudinalPlan;
     slcVisionObservation @111 :Custom.StarPilotModelDataV2;
-    # Was upstream's spare customReserved5; tell upstream so they don't reuse @112.
-    phoneGps @112 :Custom.PhoneGps;
+    customReserved5 @112 :Custom.CustomReserved5;
     # Temporary historical starpilotPlan replay transport.
     # When old-route replay support is removed, retain reserved slot @113.
     # Adapter: openpilot/starpilot/ui/old_starpilot_route_shim.py.
