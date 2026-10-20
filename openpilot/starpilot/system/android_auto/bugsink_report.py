@@ -63,7 +63,8 @@ def video_summary(events: list[dict]) -> dict:
   """The video mode and the frame rate delivered while the car showed StarPilot, from the 30 s stats lines."""
   ready = next((event for event in reversed(events) if event["event"] == "projection_ready"), {})
   pipeline = next((event for event in reversed(events) if event["event"] == "frame_pipeline"), {})
-  mode = ready.get("mode") if isinstance(ready.get("mode"), dict) else {}
+  mode = ready.get("mode")
+  mode = mode if isinstance(mode, dict) else {}
   stats = [event for event in events if event["event"] == "stats" and event.get("focused") is not False]
   fps = [value for event in stats if (value := _number(event.get("fps"))) is not None]
   encode = [value for event in stats if (value := _number(event.get("encode_ms"))) is not None]

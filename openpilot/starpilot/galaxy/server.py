@@ -339,6 +339,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       return record is not None and generation == remote_generation(current, record) and \
              (sessions.valid(token, generation) or gateway_cookie_valid(token, record))
 
+  def bluetooth_paired(address, name, uuids):
+    link_music_phone(address)
+    spotify_owner().adopt_phone(address, name, uuids)
+
   def bluetooth_owner():
     nonlocal bluetooth_source
     with bluetooth_lock:
@@ -346,7 +350,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         from openpilot.common.params import Params
         authority = context_source(Params())
         bluetooth_source = BluetoothOwner(authority.configuration_allowed, session_valid=bluetooth_session_valid,
-                                          on_paired=lambda address, name, uuids: (link_music_phone(address), spotify_owner().adopt_phone(address, name, uuids)))
+                                          on_paired=bluetooth_paired)
         server.bluetooth_authority = authority
         server.bluetooth_source = bluetooth_source
     return bluetooth_source
@@ -635,7 +639,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if source is None:
         return {'handled': False}
       arguments = {}
-      if operation == 'pairing_response':
+      if operation == 'pairing_response' and payload is not None:
         arguments = {'prompt_id': payload['promptId'], 'accepted': payload['accepted'], 'value': payload.get('value', '')}
       try:
         if self.settings_session() != identity:
@@ -778,7 +782,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           return
         from openpilot.common.qrcode import _Qr, _capacity
         from openpilot.starpilot.galaxy.hotspot import ADDRESS
-        raw = (f"http://{ADDRESS}:8082/app.apk" if path == '/api/companion/qr.svg' else pairing.url(record['slug'])).encode()
+        raw = (f"http://{ADDRESS}:8082/app.apk" if path == '/api/companion/qr.svg' or record is None else pairing.url(record['slug'])).encode()
         version = next(version for version in range(1, 21)
                        if 4 + 8 + len(raw) * 8 <= _capacity(version) * 8)
         matrix = _Qr(version, raw).modules

@@ -59,12 +59,12 @@ class DeveloperSettingsOwner:
     return result.committed and result.verified
 
   def _apply_android_auto(self, request):
-    enabled = self._android_auto_enabled()
-    if (enabled is None or request.value not in ("Off", "On") or request.expected != (b"1" if enabled else b"0") or
+    enabled, client = self._android_auto_enabled(), self.android_auto
+    if (enabled is None or client is None or request.value not in ("Off", "On") or request.expected != (b"1" if enabled else b"0") or
         not self.authorized()):
       return False
     try:
-      self.android_auto().call("set_dedicated_wifi", enabled=request.value == "On")
+      client().call("set_dedicated_wifi", enabled=request.value == "On")
     except (OSError, RuntimeError, ValueError):
       return False
     return self._android_auto_enabled() == (request.value == "On")

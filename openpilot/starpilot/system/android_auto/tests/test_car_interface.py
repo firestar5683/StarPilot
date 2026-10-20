@@ -135,8 +135,10 @@ def test_repeated_aa0_timeouts_fall_back_for_the_session():
 def test_skipped_car_uses_wlan0_without_creating_aa0():
   log = Log()
   leases = []
+  def no_aa0(log):
+    raise AssertionError("aa0 created")
   lease = DedicatedLease(log, "wlan0", lambda log, interface, dedicated=False: leases.append(FakeLease(log, interface)) or leases[-1],
-                         interface_factory=lambda log: pytest.fail("aa0 created"), enabled=False)
+                         interface_factory=no_aa0, enabled=False)
   lease.prepare()
   lease.acquire(credentials())
   lease.release(restore=True)
@@ -216,7 +218,7 @@ class FakeNM:
 def nm_lease(nm, dedicated=True, monkeypatch=None):
   lease = NetworkLease(Log(), "aa0", dedicated=dedicated)
   lease._call, lease._get, lease._set = nm.call, nm.get, nm.set_property
-  lease._delete_stale_profiles = lambda: None
+  lease._delete_stale_profiles = lambda: None  # ty: ignore[invalid-assignment]  # test double
   lease.router = type("R", (), {"close": lambda self: None})()
   return lease
 
@@ -310,7 +312,7 @@ def test_supervisor_uses_dedicated_lease_only_when_enabled(monkeypatch, tmp_path
   config = identity.load_config(tmp_path / "missing.json")
   assert config["dedicated_wifi_interface"] is True
   sup = supervisor.Supervisor.__new__(supervisor.Supervisor)
-  sup.log, sup._lease_factory, sup.config, sup._dedicated_strikes = Log(), FakeLease, config, {}
+  sup.log, sup._lease_factory, sup.config, sup._dedicated_strikes = Log(), FakeLease, config, {}  # ty: ignore[invalid-assignment]  # test double
   assert isinstance(sup._lease(), DedicatedLease)
   sup.config = {**config, "dedicated_wifi_interface": False}
   assert isinstance(sup._lease(), FakeLease)
@@ -321,7 +323,7 @@ def test_supervisor_keeps_a_car_on_wlan0_after_repeated_aa0_failures(monkeypatch
   monkeypatch.setattr(car_interface, "DedicatedInterface", FakeInterface)
   config = {**identity.load_config(None), "dedicated_wifi_interface": True, "receiver_address": "AA:BB:CC:DD:EE:FF"}
   sup = supervisor.Supervisor.__new__(supervisor.Supervisor)
-  sup.log, sup._lease_factory, sup.config, sup._dedicated_strikes = Log(), FakeLease, config, {}
+  sup.log, sup._lease_factory, sup.config, sup._dedicated_strikes = Log(), FakeLease, config, {}  # ty: ignore[invalid-assignment]  # test double
   for _ in range(supervisor.DEDICATED_STRIKES):
     lease = sup._lease()
     assert lease.enabled

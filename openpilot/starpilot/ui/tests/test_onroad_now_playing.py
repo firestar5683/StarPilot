@@ -10,7 +10,7 @@ TRACK = {'source': 'spotify', 'status': 'playing', 'title': 'Midnight City', 'ar
 def widget(monkeypatch):
   import pyray
   drawn = []
-  for name in ('draw_rectangle_rounded', 'draw_triangle'):
+  for name in ('draw_rectangle_rounded', 'draw_triangle', 'draw_circle_v'):
     monkeypatch.setattr(pyray, name, lambda *args, name=name: drawn.append((name, args)))
   from openpilot.starpilot.ui.onroad_now_playing import NowPlayingWidget
   texts = []

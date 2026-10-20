@@ -316,12 +316,12 @@ def test_supervisor_records_build_at_session_start(monkeypatch):
       records.append({"event": name, **values})
 
   sup = object.__new__(supervisor.Supervisor)
-  sup.log = Log()
+  sup.log = Log()  # ty: ignore[invalid-assignment]  # test double
   sup.config = {"connection": "wired", "receiver_name": ""}
   sup._stop = threading.Event()
   sup._stop.set()
-  sup._set = lambda **_: None
-  sup._count_dedicated = lambda _: None
-  sup._release_phone = lambda: None
+  sup._set = lambda **_: None  # ty: ignore[invalid-assignment]  # test double
+  sup._count_dedicated = lambda _: None  # ty: ignore[invalid-assignment]  # test double
+  sup._release_phone = lambda: None  # ty: ignore[invalid-assignment]  # test double
   sup._run(1)
   assert records[0]["software"] == {"commit": "session-build", "branch": "session-branch"}

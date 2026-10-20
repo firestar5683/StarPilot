@@ -9,7 +9,7 @@ GPS_MAX_AGE_NS = 2_500_000_000
 # backup: phone only without comma or car GPS; comma: never the phone; phone: the phone whenever it has a fix.
 GPS_MODES = ("backup", "comma", "phone")
 SOURCE_NAMES = {"gpsLocationExternal": "comma", "gpsLocation": "comma", "starpilotCarState": "car", "phoneGps": "phone"}
-_mode = [-math.inf, "backup"]
+_mode: list = [-math.inf, "backup"]
 
 
 def gps_mode(now=None):

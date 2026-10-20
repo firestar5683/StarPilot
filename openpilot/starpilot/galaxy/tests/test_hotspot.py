@@ -99,7 +99,7 @@ def test_channel(status, expected):
 
 
 def test_automatic_standalone_connected_and_back():
-  now = [100]
+  now = [100.]
   backend = backend_mock()
   controller = HotspotController(backend, clock=lambda: now[0])
   for status, expected in [('DISCONNECTED', ('g', 6)), ('COMPLETED\nfreq=5745', ('a', 149)), ('DISCONNECTED', ('g', 6))]:
@@ -127,7 +127,7 @@ def test_nm_activating(state, expected):
 
 
 def test_join_leaves_running_ap_alone():
-  now = [100]
+  now = [100.]
   backend = backend_mock(ap_channel=1)
   controller = HotspotController(backend, clock=lambda: now[0])
   backend.channel.return_value = ('g', 1)
@@ -194,7 +194,7 @@ def test_backend_skips_car_station_without_status(tmp_path, monkeypatch):
 
 
 def test_networkmanager_join_holds_the_running_ap():
-  now = [100]
+  now = [100.]
   backend = backend_mock(ap_channel=1)
   controller = HotspotController(backend, clock=lambda: now[0])
   backend.channel.return_value = ('g', 1)
@@ -228,7 +228,7 @@ def test_ap_moved_by_the_driver_to_another_station_stays_there():
 
 
 def test_dfs_channel_that_will_not_start_falls_back_to_standalone():
-  now = [100]
+  now = [100.]
   backend = backend_mock(ready=False)
   controller = HotspotController(backend, clock=lambda: now[0])
   backend.channel.return_value = ('a', 100)
@@ -264,7 +264,7 @@ def test_routes_and_config():
 def test_controller_lifecycle_and_channel_recovery():
   backend = backend_mock()
   backend.channel.return_value = ('a', 149)
-  now = [100]
+  now = [100.]
   controller = HotspotController(backend, clock=lambda: now[0])
   assert controller.tick(CONFIG)['state'] == 'starting'
   assert controller.tick(CONFIG)['active']

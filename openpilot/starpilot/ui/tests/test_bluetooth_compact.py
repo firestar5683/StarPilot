@@ -26,7 +26,7 @@ class TestBluetoothCompact(unittest.TestCase):
   def test_forget_falls_back_to_galaxy_when_android_auto_holds_the_adapter(self):
     from openpilot.starpilot.bluetooth.owner import BluetoothRejected
     page = BluetoothCompact.__new__(BluetoothCompact)
-    page.owner = NS(request=Mock(side_effect=BluetoothRejected("busy elsewhere", code="busy")))
+    page.owner = NS(request=Mock(side_effect=BluetoothRejected("busy elsewhere", code="busy")))  # ty: ignore[invalid-assignment]  # test double
     call = Mock(return_value=(200, {"devices": []}))
     with patch("openpilot.starpilot.galaxy_bluetooth.phone_ui.galaxy_call", return_value=call):
       self.assertEqual(page._device_request("forget", "AA:BB:CC:DD:EE:FF"), {"devices": []})

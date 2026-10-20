@@ -40,8 +40,8 @@ def session_with_input(focused):
   session = ProjectionSession.__new__(ProjectionSession)
   session.audio, session.mode, session.input_channel, session.input_events = None, None, 3, 0
   session.touch, session.focused, session.keys = None, focused, KeyTracker()
-  session.touch_events, session.events, session.actions = [], [], []
-  session.event = lambda name, **values: session.events.append((name, values))
+  session.touch_events, session.events, session.actions = [], [], []  # ty: ignore[invalid-assignment]  # test double
+  session.event = lambda name, **values: session.events.append((name, values))  # ty: ignore[invalid-assignment]  # test double
   session.media_control = session.actions.append
   return session
 

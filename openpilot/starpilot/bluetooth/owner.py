@@ -348,7 +348,8 @@ class BlueZ:
     if props.get('Powered') is not True or props.get('Discovering') is True:
       raise BluetoothUnavailable('Bluetooth adapter is not ready for phone pairing')
     pairable, discoverable = props.get('Pairable') is True, props.get('Discoverable') is True
-    original_class = props.get('Class') if type(props.get('Class')) is int else 0
+    device_class = props.get('Class')
+    original_class = device_class if type(device_class) is int else 0
 
     def claim(device_path: str) -> bool:
       device = self._objects().get(device_path, {}).get(DEVICE)
@@ -658,7 +659,7 @@ class BluetoothOwner:
 
   def snapshot(self, *, session: tuple | None = None) -> dict:
     parked = self.parked()
-    result = {'version': 1, 'available': self.radio_helper.is_file(), 'parked': parked,
+    result: dict[str, Any] = {'version': 1, 'available': self.radio_helper.is_file(), 'parked': parked,
               'powered': False, 'discovering': False, 'devices': [], 'errorCode': None, 'pairing': None}
     if not result['available']:
       with self.lock:
@@ -687,10 +688,11 @@ class BluetoothOwner:
       pairing = self.pairing
       if pairing is not None and session == pairing.identity:
         with pairing.condition:
-          result['pairing'] = {'address': pairing.address, 'state': pairing.state,
-                               'prompt': dict(pairing.prompt) if pairing.prompt is not None else None}
+          info: dict[str, Any] = {'address': pairing.address, 'state': pairing.state,
+                                  'prompt': dict(pairing.prompt) if pairing.prompt is not None else None}
           if isinstance(pairing, OpenPairingSession):
-            result['pairing'].update(incoming=True, name=pairing.name)
+            info.update(incoming=True, name=pairing.name)
+          result['pairing'] = info
       else:
         result['pairing'] = None
     return result

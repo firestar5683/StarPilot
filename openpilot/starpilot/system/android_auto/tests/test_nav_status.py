@@ -260,7 +260,9 @@ def test_non_square_cluster_image_uses_descriptor_width_and_height():
   import io
   from PIL import Image
   options = ns.parse_navigation(bytes.fromhex('08 f4 03 10 02 1a 05 08 40 10 80 01'))
-  with Image.open(io.BytesIO(ns.turn_image('turn', 'left', options['image_width'], options['image_height']))) as icon:
+  image = ns.turn_image('turn', 'left', options['image_width'], options['image_height'])
+  assert image is not None
+  with Image.open(io.BytesIO(image)) as icon:
     assert icon.size == (128, 64)
 
 

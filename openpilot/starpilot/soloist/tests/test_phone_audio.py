@@ -167,7 +167,7 @@ def test_phone_connects_only_paired_selected_audio_source_and_pauses_its_player(
   from openpilot.starpilot.bluetooth.owner import ADAPTER, DEVICE
   path = '/org/bluez/hci0/dev_11_22_33_44_55_66'
   props = {'Address': PHONE, 'Paired': True, 'Connected': True, 'UUIDs': [phone_audio.A2DP_SOURCE]}
-  objects = {'/org/bluez/hci0': {ADAPTER: {'Powered': True}}, path: {DEVICE: props},
+  objects: dict = {'/org/bluez/hci0': {ADAPTER: {'Powered': True}}, path: {DEVICE: props},
              path + '/player0': {phone_audio.MEDIA_PLAYER: {}}, '/other/player0': {phone_audio.MEDIA_PLAYER: {}}}
   class BlueZ:
     def __init__(self): self.calls = []
@@ -175,7 +175,7 @@ def test_phone_connects_only_paired_selected_audio_source_and_pauses_its_player(
     def _call(self, *args, **kwargs): self.calls.append(args)
     def close(self): pass
   phone = phone_audio.PhoneInput()
-  phone.client = BlueZ()
+  phone.client = BlueZ()  # ty: ignore[invalid-assignment]  # test double
   assert phone.powered() and phone.ready(PHONE, 100)
   assert phone.client.calls == [(path, DEVICE, 'ConnectProfile', 's', (phone_audio.A2DP_SOURCE,))]
   phone.ready(PHONE, 101)

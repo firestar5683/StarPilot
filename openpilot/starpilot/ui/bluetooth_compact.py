@@ -130,7 +130,7 @@ class BluetoothCompact(NavScroller):
     self.return_to_root = return_to_root
     self._rebuild()
 
-  def _device_request(self, operation: str, address: str) -> dict:
+  def _device_request(self, operation: str, address: str | None) -> dict:
     try:
       return self.owner.request(operation, address=address)
     except BluetoothRejected as error:

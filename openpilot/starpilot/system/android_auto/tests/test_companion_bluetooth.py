@@ -16,7 +16,7 @@ SESSION = ('galaxy', 'live-proof')
 class CompanionTests(unittest.TestCase):
   def setUp(self):
     self.state: dict = {'parked': True, 'valid': True, 'enabled': True, 'selected': ADAPTER}
-    self.devices = {CAR: {'address': CAR, 'path': '/org/bluez/hci0/dev_00_92_A5_2F_68_32',
+    self.devices: dict[str, dict] = {CAR: {'address': CAR, 'path': '/org/bluez/hci0/dev_00_92_A5_2F_68_32',
       'paired': True, 'connected': False, 'uuids': [HFP]},
       ADAPTER: {'address': ADAPTER, 'path': '/org/bluez/hci0/dev_50_5A_65_8B_8B_82',
       'paired': True, 'connected': True, 'uuids': []}}

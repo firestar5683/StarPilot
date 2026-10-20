@@ -34,7 +34,7 @@ class PhoneWindowTest(unittest.TestCase):
     self.lease = SimpleNamespace(released=False, session=None, discovering=False, close_agent=None, phone=Mock(),
                                  adapter_path='/org/bluez/hci0', bluez_sender=SENDER, was_pairable=True, was_discoverable=False,
                                  process_lock=Mock(), receiver=CAR)
-    self.owner.phone_lease = self.lease
+    self.owner.phone_lease = self.lease  # ty: ignore[invalid-assignment]  # test double
 
   def claimed(self):
     for _ in range(300):
@@ -46,6 +46,7 @@ class PhoneWindowTest(unittest.TestCase):
 
   def test_window_pairs_a_phone_without_touching_the_lease_or_its_journal(self):
     started = self.owner.phone_window('accept_pair', SESSION)
+    assert started is not None
     self.assertTrue(started['pairing']['incoming'])
     prompt = self.claimed()
     self.assertEqual(prompt['address'], '11:22:33:44:55:66')
@@ -53,6 +54,7 @@ class PhoneWindowTest(unittest.TestCase):
     FakeWindowBlueZ.bonded.set()
     self.assertTrue(self.owner.pairing.done.wait(2))
     final = self.owner.phone_window('status', SESSION)
+    assert final is not None
     self.assertEqual(final['pairing']['state'], 'paired')
     self.assertEqual(final['windowPaired'], {'address': '11:22:33:44:55:66', 'name': 'Pixel', 'uuids': [A2DP_SOURCE]})
     self.assertIs(self.owner.phone_lease, self.lease)
@@ -96,7 +98,7 @@ class PhoneWindowTest(unittest.TestCase):
     self.claimed()
     window = self.owner.pairing
     self.assertIsInstance(window, OpenPairingSession)
-    self.owner.release_phone_role(self.lease)
+    self.owner.release_phone_role(self.lease)  # ty: ignore[invalid-argument-type]  # test double
     self.assertTrue(window.done.is_set())
     self.assertEqual(FakeWindowBlueZ.instances[-1].visibility[-1], ('/org/bluez/hci0', True, False))
     self.assertFalse(self.owner.journal_path.exists())

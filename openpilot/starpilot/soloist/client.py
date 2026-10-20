@@ -11,7 +11,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 from urllib.parse import urlsplit
 
 MAX_FRAME = 256 * 1024
@@ -42,6 +42,10 @@ def _artwork(entity: dict) -> str:
   return ''
 
 
+def _number(value: Any) -> TypeGuard[int | float]:
+  return type(value) in (int, float)
+
+
 def track(entity: Any) -> dict | None:
   if not isinstance(entity, dict) or not entity.get('uri') and not _name(entity):
     return None
@@ -51,7 +55,7 @@ def track(entity: Any) -> dict | None:
   kind = entity.get('entity_type') if entity.get('entity_type') in ('track', 'episode', 'ad') else 'unknown'
   return {'title': _name(entity), 'artists': ', '.join(c for c in creators if c)[:MAX_TEXT],
           'album': _name((decorations.get('parent') or {}).get('entity')), 'artwork': _artwork(entity), 'kind': kind,
-          'durationMs': int(duration) if type(duration) in (int, float) and 0 <= duration < 86400000 else None}
+          'durationMs': int(duration) if _number(duration) and 0 <= duration < 86400000 else None}
 
 
 def position(value: Any) -> dict | None:
@@ -70,7 +74,7 @@ class PlayerState:
     self.reset()
 
   def reset(self) -> None:
-    self.value = {'connected': False, 'loggedIn': False, 'active': False, 'deviceName': '', 'status': 'idle', 'track': None,
+    self.value: dict[str, Any] = {'connected': False, 'loggedIn': False, 'active': False, 'deviceName': '', 'status': 'idle', 'track': None,
                   'position': None, 'volume': None, 'shuffle': False, 'repeat': 'off', 'actions': [], 'updated': 0.0}
 
   def apply(self, message: dict) -> None:

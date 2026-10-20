@@ -28,7 +28,9 @@ def snapshot(source: str, status: str, title: str, artist: str, album: str, dura
 
 
 def from_spotify(player: dict | None) -> dict | None:
-  track = player.get('track') if isinstance(player, dict) and player.get('loggedIn') else None
+  if not isinstance(player, dict) or not player.get('loggedIn'):
+    return None
+  track = player.get('track')
   if not isinstance(track, dict) or player.get('status') not in ('playing', 'paused') or not player.get('active'):
     return None
   return snapshot('spotify', player['status'], track.get('title'), track.get('artists'), track.get('album'),

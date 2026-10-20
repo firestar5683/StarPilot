@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -177,7 +178,7 @@ def make_supervisor(layout, spawned):
       backend.runtime_paths(layout)['socket'].touch()
     return process
   now = [100.0]
-  sup = supervisor.Supervisor(layout, spawn=spawn, clock=lambda: now[0], make_client=FakeClient)
+  sup = supervisor.Supervisor(layout, spawn=spawn, clock=lambda: now[0], make_client=FakeClient)  # ty: ignore[invalid-argument-type]  # test double
   return sup, now
 
 
@@ -270,7 +271,8 @@ def test_control_socket_round_trip(layout, tmp_path):
   from openpilot.starpilot.galaxy.spotify_setup import SpotifyClient
   sup, _ = make_supervisor(layout, [])
   import tempfile
-  path = tempfile.mktemp(prefix='sp-', suffix='.sock', dir='/tmp')  # AF_UNIX paths are short on macOS
+  folder = tempfile.mkdtemp(prefix='sp-', dir='/tmp')  # AF_UNIX paths are short on macOS
+  path = folder + '/s.sock'
   stop = threading.Event()
   thread = threading.Thread(target=supervisor.serve, args=(sup, path, stop), daemon=True)
   thread.start()
@@ -286,6 +288,7 @@ def test_control_socket_round_trip(layout, tmp_path):
   stop.set()
   thread.join(timeout=2)
   Path(path).unlink(missing_ok=True)
+  os.rmdir(folder)
 
 
 def test_reap_orphans_only_targets_feature_binaries(layout, tmp_path, monkeypatch):

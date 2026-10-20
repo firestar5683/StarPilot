@@ -1120,14 +1120,14 @@ def test_supervisor_retries_wifi_recovery_while_idle(monkeypatch):
   calls = []
   monkeypatch.setattr(network, "recover_autoconnect", lambda log: calls.append(1) or results.pop(0))
   sup = supervisor.Supervisor.__new__(supervisor.Supervisor)
-  sup.log, sup._wifi_recover_at = (lambda *a, **k: None), 0.0
-  sup._session_alive = lambda: False
+  sup.log, sup._wifi_recover_at = (lambda *a, **k: None), 0.0  # ty: ignore[invalid-assignment]  # test double
+  sup._session_alive = lambda: False  # ty: ignore[invalid-assignment]  # test double
   sup.recover_wifi(100)
   sup.recover_wifi(110)  # waits before retrying
   sup.recover_wifi(100 + supervisor.WIFI_RECOVER_RETRY_S)
   sup.recover_wifi(1000)  # done
   assert len(calls) == 2
   sup._wifi_recover_at = 0.0
-  sup._session_alive = lambda: True
+  sup._session_alive = lambda: True  # ty: ignore[invalid-assignment]  # test double
   sup.recover_wifi(2000)  # never while a session owns wlan0
   assert len(calls) == 2

@@ -3,6 +3,7 @@ import io
 import os
 import struct
 import tarfile
+from typing import Any
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -58,7 +59,7 @@ def official(data: bytes):
 
 def run_import(layout, path, data=None, **kwargs):
   data = path.read_bytes() if data is None else data
-  options = {'digest': official(data), 'probe': lambda _exe: VERSION_LINE, 'now': NOW, **kwargs}
+  options: dict[str, Any] = {'digest': official(data), 'probe': lambda _exe: VERSION_LINE, 'now': NOW, **kwargs}
   return package.import_archive(layout, path, **options)
 
 

@@ -228,7 +228,7 @@ class HotspotController:
     try:
       channel = self.backend.channel()
       running = self.applied is not None and self.backend.alive()
-      status = self.backend.ap_status() if running else None
+      status = self.backend.ap_status() if running else {'ready': False, 'channel': None}
       if running and isinstance(channel, tuple) and self.applied[0] == config:
         current = status['channel']
         # The driver moves the AP onto a station's channel by itself; restarting it there would only move it back.
@@ -252,7 +252,7 @@ class HotspotController:
       desired = (dict(config), channel)
       if channel == HOLD:
         # Starting, stopping or moving the AP while a station joins makes the join fail.
-        if not running:
+        if not running or self.applied is None:
           return {'active': False, 'state': 'waiting', 'reason': 'Waiting for Wi-Fi to finish connecting.'}
         desired = self.applied
         channel = desired[1]

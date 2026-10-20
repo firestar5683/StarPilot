@@ -251,6 +251,7 @@ class AcceptPairOwnerTest(unittest.TestCase):
       self.request_when_free('accept_pair', session=self.identity)
       self.wait_for_claim()
       window = self.owner.pairing
+      assert window is not None
       window.path = ''
       address = None if operation == 'scan' else '11:22:33:44:55:66'
       self.request_when_free(operation, address=address, session=self.identity)

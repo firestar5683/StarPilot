@@ -495,8 +495,8 @@ class TestProjectionOnroad(unittest.TestCase):
     self.assertEqual(shown.alert.text1, 'Experimental Mode')
     quiet = view._with_mode_notice(conditional('cruising', False), 10_000_000_000)
     self.assertEqual(quiet.alert.text1, '')
-    parked = State(experimental_enabled=True, conditional_configured=ModeChoice.CEM, engaged=False)
-    self.assertIs(view._with_mode_notice(parked, 20_000_000_000), parked)
+    stopped = State(experimental_enabled=True, conditional_configured=ModeChoice.CEM, engaged=False)
+    self.assertIs(view._with_mode_notice(stopped, 20_000_000_000), stopped)
     view.close()
 
   def test_negotiated_viewport_overrides_landscape_fallback(self):

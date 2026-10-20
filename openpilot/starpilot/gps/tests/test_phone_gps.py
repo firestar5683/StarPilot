@@ -93,11 +93,11 @@ def test_navigation_status_ranks_phone_below_native():
     status = NavigationStatusSource(mono_clock=lambda: NOW - 1_000_000_000, boot_clock=lambda: NOW)
   status.mono_clock = lambda: NOW
   publish(sm)
-  assert status.map_position()['longitude'] == -110.
+  assert (status.map_position() or {})['longitude'] == -110.
   native = messaging.new_message("gpsLocation", valid=True, logMonoTime=NOW - 500_000_000)
   native.gpsLocation = {"source": "qcomdiag", "hasFix": True, "horizontalAccuracy": 5., "longitude": -90., "latitude": 30.}
   sm.send("gpsLocation", native)
-  assert status.map_position()['longitude'] == -90.
+  assert (status.map_position() or {})['longitude'] == -90.
 
 
 def native(sm):
@@ -139,7 +139,7 @@ def test_navigation_status_reports_the_source_it_follows(mode, longitude, name):
   native(sm)
   with patch('openpilot.starpilot.navigation.status.gps_mode', return_value=mode):
     position = status.map_position()
-  assert position['longitude'] == longitude and position['source'] == name
+  assert position is not None and position['longitude'] == longitude and position['source'] == name
 
 
 def test_car_gps_ranks_against_the_phone_in_every_mode():
@@ -156,4 +156,4 @@ def test_car_gps_ranks_against_the_phone_in_every_mode():
   status.mono_clock = lambda: NOW
   for mode, name in (("backup", "car"), ("comma", "car"), ("phone", "phone")):
     with patch('openpilot.starpilot.navigation.status.gps_mode', return_value=mode):
-      assert status.map_position()['source'] == name
+      assert (status.map_position() or {})['source'] == name

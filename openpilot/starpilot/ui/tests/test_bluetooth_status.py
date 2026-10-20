@@ -67,7 +67,7 @@ class TestBluetoothStatus(unittest.TestCase):
       self.assertEqual(source._poll(), ("off", 3))
     finally:
       source.close()
-    unknown = BluetoothStatusSource(request=lambda: True, clock=lambda: 3)
+    unknown = BluetoothStatusSource(request=lambda: True, clock=lambda: 3)  # ty: ignore[invalid-argument-type]  # unexpected reply type
     try:
       self.assertEqual(unknown._poll(), ("off", 3))
     finally:

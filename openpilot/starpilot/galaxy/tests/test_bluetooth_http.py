@@ -47,6 +47,9 @@ class BluetoothHttpTest(unittest.TestCase):
   def setUp(self):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
+    claim_path = mock.patch('openpilot.starpilot.galaxy_bluetooth.bridge.claim.CLAIM_PATH', Path(temporary.name) / 'claim.json')
+    claim_path.start()
+    self.addCleanup(claim_path.stop)
     access = GalaxyAccessOwner(Path(temporary.name) / 'access')
     self.assertTrue(access.configure('password123', lambda: True))
     self.access = access

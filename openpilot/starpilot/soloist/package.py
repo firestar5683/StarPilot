@@ -21,6 +21,7 @@ import urllib.error
 import urllib.request
 import zlib
 from collections.abc import Callable
+from typing import Any
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -86,7 +87,7 @@ def read_archive(path: Path, *, max_unpacked: int = MAX_UNPACKED_BYTES) -> dict[
   try:
     with gzip.open(path, 'rb') as raw:
       stream = _Bounded(raw, max_unpacked + 1024 * 1024)  # tar headers and padding
-      with tarfile.open(fileobj=stream, mode='r|') as archive:
+      with tarfile.open(fileobj=stream, mode='r|') as archive:  # ty: ignore[no-matching-overload]  stream mode only reads
         for member in archive:
           entries += 1
           if entries > MAX_ENTRIES:
@@ -346,7 +347,7 @@ def import_archive(layout: Layout, path: Path, *, progress: Callable[..., None] 
                          'Download it again from Spotify and upload the new file.', 'NOT_OFFICIAL')
 
   progress(stage='testing')
-  metadata = {'sha256': sha, 'md5': md5.hexdigest(), 'size': size, 'verified': (now or _now()).isoformat()}
+  metadata: dict[str, Any] = {'sha256': sha, 'md5': md5.hexdigest(), 'size': size, 'verified': (now or _now()).isoformat()}
   private_dir(layout.root)
   release = stage_release(layout, files, metadata)
   try:
@@ -410,7 +411,7 @@ class ImportJob:
       self._set(**values)
 
     try:
-      options = {'glibc_minor': system_glibc_minor(), **self.overrides}
+      options: dict[str, Any] = {'glibc_minor': system_glibc_minor(), **self.overrides}
       metadata = import_archive(self.layout, path, progress=progress, may_activate=lambda: enabled() and may_activate(), **options)
       self._set(state='done', stage='done', finished=_now().timestamp(), version=metadata.get('version'), expires=metadata.get('expires'))
       on_installed()

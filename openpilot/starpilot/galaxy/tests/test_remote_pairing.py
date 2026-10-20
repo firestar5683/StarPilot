@@ -19,6 +19,9 @@ class RemotePairingTest(unittest.TestCase):
   def setUp(self):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
+    claim_path = mock.patch('openpilot.starpilot.galaxy_bluetooth.bridge.claim.CLAIM_PATH', Path(temporary.name) / 'claim.json')
+    claim_path.start()
+    self.addCleanup(claim_path.stop)
     root = Path(temporary.name)
     self.owner = GalaxyAccessOwner(root / 'credentials')
     self.pairing = RemotePairing(root / 'pairing')

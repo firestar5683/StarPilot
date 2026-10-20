@@ -281,7 +281,7 @@ def test_gadget_detach_settles_for_switch_restore_and_crash_recovery(tmp_path, m
   recovered = usb.AccessoryGadget(lambda *a, **k: None, configfs=configfs, run=run, adb_wanted=lambda: None)
   before = len(calls)
   recovered.prepare()
-  assert calls[before:before + 2] == [("tee", str(root / "UDC"), ""), ("sleep", usb.UDC_SETTLE_SECONDS)]  # ty: ignore[unsupported-operator]
+  assert calls[before:before + 2] == [("tee", str(root / "UDC"), ""), ("sleep", usb.UDC_SETTLE_SECONDS)]
   gadget.restore()
   after = len(calls)
   gadget.restore()

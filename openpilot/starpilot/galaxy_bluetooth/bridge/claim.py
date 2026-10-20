@@ -74,13 +74,16 @@ def window(path=CLAIM_PATH, now=None):
 def view(path=CLAIM_PATH, now=None):
   """What Galaxy shows: seconds left in the window, the phone that claimed the app key, and whether music paired."""
   now = time.monotonic() if now is None else now
+  closed = {"open": False, "left": 0, "claimed": "", "paired": False}
   try:
     value = _read(path)
   except (OSError, ValueError):
-    return {"open": False, "left": 0, "claimed": "", "paired": False}
-  deadline = value.get("deadline") if isinstance(value, dict) else None
+    return closed
+  if not isinstance(value, dict):
+    return closed
+  deadline = value.get("deadline")
   if type(deadline) not in (int, float) or now >= deadline + GRACE_SECONDS:
-    return {"open": False, "left": 0, "claimed": "", "paired": False}
+    return closed
   return {"open": now < deadline, "left": max(0, int(deadline - now + 0.999)),
           "claimed": str(value.get("claimed", ""))[:MAX_NAME] if value.get("used") is True else "",
           "paired": bool(value.get("pairedAddress"))}

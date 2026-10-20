@@ -6,6 +6,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.server import make_server
@@ -38,7 +39,7 @@ class AA:
   def call(self, command, **kwargs):
     assert command == 'phone_window'
     self.calls.append(kwargs)
-    code, data, _ = self.http('/api/android-auto/source/' + kwargs['source'])
+    code, data, _ = self.http('/api/android-auto/source/' + kwargs['source'])  # ty: ignore[call-non-callable]  # set by the test
     assert code == 200 and data == {'valid': True}, 'Source proof was not live'
     if not self.window:
       return {'handled': False}
@@ -51,6 +52,9 @@ class ProjectionPhoneWindowHttpTest(unittest.TestCase):
   def setUp(self):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
+    claim_path = mock.patch('openpilot.starpilot.galaxy_bluetooth.bridge.claim.CLAIM_PATH', Path(temporary.name) / 'claim.json')
+    claim_path.start()
+    self.addCleanup(claim_path.stop)
     root = Path(temporary.name)
     self.params = Params(root)
     self.access = GalaxyAccessOwner(root / 'access')

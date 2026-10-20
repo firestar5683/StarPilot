@@ -20,7 +20,7 @@ def endpoint():
       self.end_headers()
       self.wfile.write(json.dumps({'id': event['event_id']}).encode())
 
-    def log_message(self, *_):
+    def log_message(self, format, *args):  # noqa: A002 - Match BaseHTTPRequestHandler.
       pass
 
   server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)

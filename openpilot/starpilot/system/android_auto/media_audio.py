@@ -20,6 +20,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from openpilot.starpilot.system.android_auto.wire import field, one, signed
 
@@ -157,7 +158,7 @@ class MediaAudio:
     self.last_sound = -1e9
     self.car_paused = False
     self.source_generation = getattr(source, 'generation', None)
-    self.stats = {'chunks_sent': 0, 'acked': 0, 'dropped_ms': 0, 'focus': None}
+    self.stats: dict[str, Any] = {'chunks_sent': 0, 'acked': 0, 'dropped_ms': 0, 'focus': None}
     self.track_info = None  # MediaStatus for the car's own displays, when the head unit offers it
 
   @classmethod

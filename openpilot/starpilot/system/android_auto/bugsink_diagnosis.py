@@ -4,6 +4,7 @@ import ipaddress
 import math
 import re
 from datetime import datetime
+from typing import Any
 
 ADDRESS = re.compile(r"\b(?:[0-9A-Fa-f]{2}[:_-]){5}[0-9A-Fa-f]{2}\b")
 IPV4 = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
@@ -53,7 +54,9 @@ def elapsed(start, end):
 
 
 def attempt_records(events):
-  attempts, current, first_frame = [], None, None
+  attempts: list[dict] = []
+  current: dict[str, Any] | None = None
+  first_frame = None
   shutdown = False
   start = events[0] if events else {}
   for event in events:

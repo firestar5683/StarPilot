@@ -291,7 +291,7 @@ class RuntimeSnapshotAdapter:
   """Build one coherent display snapshot after each UIState.update()."""
 
   def __init__(self, ui_state: Any, galaxy_access: GalaxyAccessOwner | None = None,
-               bluetooth_powered: Callable[[], bool] | None = None,
+               bluetooth_powered: Callable[[], str | bool] | None = None,
                *, mono_clock: Callable[[], int] = time.monotonic_ns,
                boot_clock: Callable[[], int] = _boot_time_ns):
     self.ui_state = ui_state
@@ -693,7 +693,7 @@ class RuntimeSnapshotAdapter:
       value = self.bluetooth_powered() if mode == ShellMode.HOME and self.bluetooth_powered is not None else ""
       bluetooth = value if value in ("off", "on", "connected") else "on" if value is True else "off" if value is False else ""
     except (OSError, RuntimeError, ValueError):
-      bluetooth = False
+      bluetooth = ""
     self._jetlink.set_enabled(mode == ShellMode.HOME)
     jetlink_port = self._jetlink.snapshot().port
     jetlink = "connected" if jetlink_port == "connected" else "plugged" if jetlink_port == "device" else "off"

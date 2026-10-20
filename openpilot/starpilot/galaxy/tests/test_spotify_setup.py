@@ -47,8 +47,9 @@ def owner(tmp_path):
   state = {'parked': True, 'valid': True}
   layout = Layout(tmp_path / 'soloist')
   client = FakeClient()
-  setup = SpotifySetup(parked=lambda: state['parked'], session_valid=lambda _s: state['valid'], layout=layout, client=client,
-                       import_job=FakeImport(layout), paired_devices=lambda _s: DEVICES)
+  setup = SpotifySetup(parked=lambda: state['parked'], session_valid=lambda _s: state['valid'], layout=layout,
+                       client=client, import_job=FakeImport(layout),  # ty: ignore[invalid-argument-type]  # test doubles
+                       paired_devices=lambda _s: DEVICES)
   return setup, state, layout, client
 
 

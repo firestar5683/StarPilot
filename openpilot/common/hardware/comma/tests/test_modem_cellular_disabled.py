@@ -5,9 +5,9 @@ from openpilot.common.hardware.comma.modem import Modem, State
 
 def _modem(params):
   m = Modem()
-  m._read_param = lambda key: params.get(key, "")
-  m._publish_state = lambda **kw: m.S.update(kw)
-  m._atv = lambda cmd, pfx: '2,1' if cmd in ("AT+CREG?", "AT+CGREG?") else None
+  m._read_param = lambda key: params.get(key, "")  # ty: ignore[invalid-assignment]  # test double
+  m._publish_state = lambda **kw: m.S.update(kw)  # ty: ignore[invalid-assignment]  # test double
+  m._atv = lambda cmd, pfx: '2,1' if cmd in ("AT+CREG?", "AT+CGREG?") else None  # ty: ignore[invalid-assignment]  # test double
   return m
 
 

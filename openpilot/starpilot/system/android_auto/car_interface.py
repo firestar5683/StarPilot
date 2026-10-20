@@ -15,6 +15,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from openpilot.starpilot.system.android_auto.network import DedicatedUnavailable, JoinTimeout, NetworkError
 from openpilot.starpilot.system.pipe_worker import claim, owned, spawn, stop_event
@@ -201,7 +202,7 @@ class DedicatedLease:
       self.timeouts = 0
 
 
-def serve(wireless: Callable[..., object], stdin: int, stop: threading.Event, run=subprocess.run, is_owned=owned,
+def serve(wireless: Callable[..., Any], stdin: int, stop: threading.Event, run=subprocess.run, is_owned=owned,
           lease_timeout: float = LEASE_TIMEOUT_S) -> None:
   """Create aa0, report on stdout, and hold it until stdin closes, heartbeats stop or ``stop`` is set."""
   created = False
