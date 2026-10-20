@@ -104,6 +104,9 @@ class SettingsView:
         rl.draw_texture_ex(background, rl.Vector2(x, top), 0, 1, rl.WHITE)
         font_size = 40 if destination == Destination.FORCE_DRIVE else 42 if destination == Destination.DRIVING_MODEL else (
           48 if destination in (Destination.GALAXY, Destination.PAIR) else 64)
+        if destination == Destination.DRIVING_CONTROLS:
+          font_size = 56
+          text = text.replace(" ", "\n", 1)
         measured = self.fonts.measure(text, FontRole.BOLD, font_size)
         self.fonts.draw(text, FontRole.BOLD, font_size, x + 40, top + 180 - 23 - measured.height,
                         rl.Color(255, 255, 255, 229))
