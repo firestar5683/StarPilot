@@ -128,19 +128,15 @@ kept.recovery.start({ ...baseline, instance: 'one' })
 kept.recovery.start({ ...baseline, instance: 'two' })
 assert.equal(JSON.parse(kept.values.get(UPDATE_RESTART_KEY)).instance, 'one')
 
-// Only update-related restarts/disconnects trigger the full-screen handoff.
+// Keep update progress visible until Galaxy actually loses the device connection.
 const restarts = []
 const feed = new SoftwareStatusFeed({ publish() {}, restarting: value => restarts.push(value) })
-feed.data = status(baseline.commit, pending)
-feed.error = 'Connection lost'
+feed.installBaseline = baseline
+feed.data = status(baseline.commit, { action: 'update', state: 'pending' })
+feed.emit('ready')
+feed.error = 'Updater status is unavailable'
 feed.emit('ready')
 assert.equal(restarts.length, 0)
-feed.installBaseline = baseline
-feed.error = 'Server rejected request'
-feed.emit('ready')
-assert.equal(restarts.length, 1)
-feed.data.operations.request = null
-feed.error = 'Connection lost'
 feed.connectionLost = true
 feed.emit('ready')
-assert.equal(restarts.length, 2)
+assert.deepEqual(restarts, [baseline])

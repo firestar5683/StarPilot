@@ -86,7 +86,13 @@ await restartingUpdate.reply(0, snapshot({ operations: { ...operations, canFastU
 restartingUpdate.feed.action("update", "Dom")
 assert.equal(preparedUpdates.length, 1, "update intent is saved before the request can disconnect")
 await restartingUpdate.reply(1, snapshot({ operations: { ...operations, canFastUpdate: true, request: request("update", "pending", "Dom") } }))
-assert.equal(restartScreens.at(-1).target, "Dom", "accepted updates show the reconnect screen before disconnect")
+assert.deepEqual(restartScreens, [], "accepted updates keep their progress page visible")
+restartingUpdate.fire(1000)
+await restartingUpdate.reply(2, { error: "Updater status is unavailable" }, 503)
+assert.deepEqual(restartScreens, [], "an updater status error does not mean the device restarted")
+restartingUpdate.fire(2000)
+await restartingUpdate.fail(3)
+assert.equal(restartScreens.at(-1).target, "Dom", "connection loss starts the reconnect screen")
 restartingUpdate.feed.stop()
 
 let canceledPreparation = 0

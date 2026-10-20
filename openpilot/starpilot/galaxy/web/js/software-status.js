@@ -104,9 +104,7 @@ export class SoftwareStatusFeed {
   }
 
   emit(status) {
-    if (this.installBaseline && (this.connectionLost || this.error === "Updater status is unavailable" ||
-        this.data?.operations?.request?.state === "pending" &&
-        ["update", "fast", "rollback", "version", "install"].includes(this.data.operations.request.action))) this.restarting(this.installBaseline)
+    if (this.installBaseline && this.connectionLost) this.restarting(this.installBaseline)
     this.publish({ status, data: this.data, busy: this.busy, uncertain: this.uncertain,
     notice: this.notice, error: this.error }) }
 
