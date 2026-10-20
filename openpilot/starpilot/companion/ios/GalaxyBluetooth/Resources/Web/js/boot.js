@@ -1,11 +1,8 @@
-import { savedUpdateRestart, UPDATE_RESTART_MESSAGE } from "./update-restart.js"
+import { savedUpdateRestart } from "./update-restart.js"
 import { requestJson } from "./startup.js"
+import { bootScreenMode, dismissBootScreen, showBootScreen, showRestartScreen } from "./boot-screen.js"
 
-const status = document.getElementById("galaxy-boot")
-const message = status.querySelector("p")
-const retry = status.querySelector("button")
-if (savedUpdateRestart()) { message.textContent = UPDATE_RESTART_MESSAGE; retry.textContent = "↻ Refresh Galaxy"; retry.hidden = false }
-retry.addEventListener("click", () => location.reload())
+if (savedUpdateRestart()) showRestartScreen()
 let probe = null, sawOffline = false, opened = false
 function reloadWhenBack() {
   if (probe !== null || opened) return
@@ -18,18 +15,10 @@ function reloadWhenBack() {
       else { sawOffline ||= !online; reloadWhenBack() }
     }), 3000)
 }
-function failed() {
+function failed(force = false) {
   reloadWhenBack()
-  if (savedUpdateRestart()) return
-  message.textContent = "Galaxy could not finish opening. Check your connection and try again."
-  status.classList.add("gx-boot--failed")
-  retry.hidden = false
-}
-function dismiss() {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { status.remove(); return }
-  status.classList.add("gx-boot--done")
-  status.addEventListener("transitionend", () => status.remove(), { once: true })
-  setTimeout(() => status.remove(), 800)
+  if (!force && bootScreenMode() !== "opening") return
+  showBootScreen("failed", "Galaxy could not finish opening. Check your connection and try again.", true)
 }
 const timer = setTimeout(failed, 10000)
 // Local pages use their local origin; public pages use the authenticated tunnel.
@@ -37,6 +26,9 @@ const timer = setTimeout(failed, 10000)
 import("./connection-migration.js").then(module => module.retireLegacyPhone()).catch(() => {})
 import("./app.js").then(() => {
     clearTimeout(timer)
-    if (document.querySelector("#galaxy-app .gx-app")) { opened = true; clearTimeout(probe); probe = null; dismiss() }
-    else failed()
-  }).catch(() => { clearTimeout(timer); failed() })
+    if (document.querySelector("#galaxy-app .gx-app")) {
+      opened = true; clearTimeout(probe); probe = null
+      if (bootScreenMode() === "opening" || bootScreenMode() === "failed") dismissBootScreen()
+    }
+    else failed(true)
+  }).catch(() => { clearTimeout(timer); failed(true) })

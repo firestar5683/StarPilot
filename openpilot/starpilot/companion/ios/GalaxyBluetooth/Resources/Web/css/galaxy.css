@@ -1400,10 +1400,10 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
 .gx-home__model-tag { min-width: 0; overflow-wrap: anywhere; }
 .gx-camera-status, .gx-tool-footer { font-size: var(--fs-xs); color: var(--text-muted); }
 
-.gx-boot { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-4); padding: var(--panel-padding); text-align: center; background: radial-gradient(ellipse at center, #382054 0%, #151020 65%, #0c0a14 100%); color: #f5edff; transition: opacity 460ms cubic-bezier(0.16, 1, 0.3, 1); }
-.gx-boot--restart { isolation: isolate; overflow: hidden; background: url("../assets/restart-background.webp") center 42% / cover no-repeat #0c0a14; }
-.gx-boot--restart::before { content: ""; position: absolute; inset: 0; z-index: -1; background: radial-gradient(ellipse at center, #38205499 0%, #151020c7 65%, #0c0a14f2 100%); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.gx-boot { position: fixed; inset: 0; z-index: 1000; isolation: isolate; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-4); padding: var(--panel-padding); text-align: center; background: url("../assets/restart-background.webp") center 42% / cover no-repeat #0c0a14; color: #f5edff; transition: opacity 460ms cubic-bezier(0.16, 1, 0.3, 1); }
+.gx-boot::before { content: ""; position: absolute; inset: 0; z-index: -1; background: radial-gradient(ellipse at center, #38205499 0%, #151020c7 65%, #0c0a14f2 100%); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .gx-boot--done { opacity: 0; }
+.gx-boot[hidden] { display: none; }
 .gx-boot h1, .gx-boot p { margin: 0; }
 .gx-boot h1 { font-size: clamp(2rem, 7vw, 3rem); letter-spacing: .08em; }
 .gx-boot p { max-width: 30rem; color: #c9b6e3; }
