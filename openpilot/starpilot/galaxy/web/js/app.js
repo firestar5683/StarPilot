@@ -101,7 +101,8 @@ createApp({
       return authState.status === "checking" ? "Connecting…" : "Not connected"
     },
   },
-  errorCaptured() {
+  errorCaptured(error, _instance, info) {
+    console.error("Galaxy page error", info, error)
     if (updateRestart.prepared) updateRestart.start(updateRestart.prepared, { provisional: true })
     else state.pageError = "This page could not finish loading."
     return false
