@@ -338,10 +338,25 @@ private final class LocalConnection {
         }
     }
 
+    private var packageTimeout = false
+
     private func consume(_ chunk: Data?, ended: Bool, failure: NWError?) {
         guard !closed else { return }
         data.append(chunk ?? Data())
-        guard failure == nil, data.count <= Wire.maxBody + 16_388 else { close(); return }
+        guard failure == nil, data.count <= LocalRequest.maxPackageBody + 16_388 else { close(); return }
+        if !packageTimeout, let end = data.range(of: Data("\r\n\r\n".utf8)),
+           let header = String(data: data[..<end.lowerBound], encoding: .utf8),
+           let first = header.components(separatedBy: "\r\n").first {
+            let parts = first.split(separator: " ")
+            if parts.count == 3, LocalRequest.isPackageUpload(method: String(parts[0]), target: String(parts[1])) {
+                packageTimeout = true
+                headerTimeout?.cancel()
+                headerTimeout = Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 120_000_000_000)
+                    if !Task.isCancelled { self?.close() }
+                }
+            }
+        }
         do {
             guard let request = try LocalRequest.parse(data) else {
                 if ended { close() } else { receive() }

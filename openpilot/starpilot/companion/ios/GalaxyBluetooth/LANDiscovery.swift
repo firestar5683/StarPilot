@@ -14,6 +14,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
     @Published private(set) var searching = false
     @Published private(set) var status = "Find comma on the same Wi-Fi or hotspot, without Bluetooth."
     var onEvent: ((String) -> Void)?
+    var onDevicesChanged: (() -> Void)?
     private var browser: NetServiceBrowser?
     private var services: [String: NetService] = [:]
     private var deadline: Task<Void, Never>?
@@ -48,6 +49,12 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
         searching = false
     }
 
+    func networkChanged() {
+        stop()
+        devices = []
+        status = "Network changed. Looking for comma on the current network."
+    }
+
     private func key(_ service: NetService) -> String { service.name + "/" + service.type + "/" + service.domain }
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
         guard searching, browser === self.browser, services.count < 16, services[key(service)] == nil else { return }
@@ -60,6 +67,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
         let id = key(service)
         services.removeValue(forKey: id)?.stop()
         devices.removeAll { $0.id == id }
+        onDevicesChanged?()
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
         guard browser === self.browser else { return }
@@ -74,13 +82,36 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
         let txt = sender.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
         guard txt["protocol"] == Data("galaxy-lan-1".utf8) else { return }
         guard let address = (sender.addresses ?? []).compactMap(Self.privateIPv4).first else { return }
-        let device = DiscoveredComma(id: key(sender), name: String(sender.name.prefix(80)), address: address)
+        let suffix = "-" + address.replacingOccurrences(of: ".", with: "-")
+        let name = sender.name.hasSuffix(suffix) ? String(sender.name.dropLast(suffix.count)) : sender.name
+        let device = DiscoveredComma(id: key(sender), name: String(name.prefix(80)), address: address)
         devices.removeAll { $0.id == device.id }
         devices.append(device)
         devices.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         status = "Found \(devices.count) comma device(s). Select one below."
         onEvent?("Wi-Fi discovery found a Galaxy service")
+        onDevicesChanged?()
     }
+    static func networkSignature() -> String {
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&interfaces) == 0 else { return "" }
+        defer { freeifaddrs(interfaces) }
+        var values: [String] = []
+        var current = interfaces
+        while let pointer = current {
+            let interface = pointer.pointee
+            current = interface.ifa_next
+            guard let address = interface.ifa_addr, address.pointee.sa_family == sa_family_t(AF_INET),
+                  interface.ifa_flags & UInt32(IFF_UP) != 0 else { continue }
+            var ip = UnsafeRawPointer(address).assumingMemoryBound(to: sockaddr_in.self).pointee.sin_addr
+            var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            if inet_ntop(AF_INET, &ip, &buffer, socklen_t(buffer.count)) != nil {
+                values.append(String(cString: interface.ifa_name) + ":" + String(cString: buffer))
+            }
+        }
+        return values.sorted().joined(separator: ",")
+    }
+
     static func privateIPv4(_ data: Data) -> String? {
         guard data.count >= MemoryLayout<sockaddr_in>.size else { return nil }
         var socketAddress = sockaddr_in()

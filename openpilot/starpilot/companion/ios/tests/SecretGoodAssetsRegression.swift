@@ -10,8 +10,9 @@ import CryptoKit
         let bundled = root.appendingPathComponent("bundle")
         try manager.createDirectory(at: bundled, withIntermediateDirectories: true)
         let defaults = UserDefaults(suiteName: "secretgood-assets-" + UUID().uuidString)!
-        defer { defaults.removeObject(forKey: "galaxy.secretgood.assets.manifest"); defaults.removeObject(forKey: "galaxy.secretgood.commit") }
+        defer { defaults.removeObject(forKey: "galaxy.device.assets.manifest"); defaults.removeObject(forKey: "galaxy.device.commit") }
         let commit = String(repeating: "a", count: 40)
+        var source = try GalaxySource(repository: "owner/fork", commit: commit, branch: "test-branch")
         var files = ["index.html": Data("<html>Galaxy</html>".utf8), "js/boot.js": Data("import './app.js'".utf8), "js/app.js": Data("const galaxy = true".utf8), "data/catalog.json": Data("{}".utf8), "sentry-push-worker.js": Data("self.addEventListener('push', () => {})".utf8)]
         var rawCalls = 0
         var corrupt = false
@@ -26,6 +27,7 @@ import CryptoKit
         let fetch: (URLRequest, Int) async throws -> (Data, HTTPURLResponse) = { request, _ in
             if networkFailure { throw URLError(.notConnectedToInternet) }
             let url = request.url!
+            precondition(!url.path.contains("/commits/"), "Never substitute a branch tip for the installed commit")
             let data: Data
             if url.path.contains("/commits/") { data = try JSONSerialization.data(withJSONObject: ["sha": corrupt ? String(repeating: "b", count: 40) : commit]) }
             else if url.path.contains("/git/trees/") { data = try JSONSerialization.data(withJSONObject: ["truncated": false, "tree": inventory()]) }
@@ -38,29 +40,40 @@ import CryptoKit
         }
         let cache = root.appendingPathComponent("cache")
         let store = GalaxyAssetStore(bundledRoot: bundled, cacheRoot: cache, defaults: defaults, fetch: fetch)
-        await store.check()
+        await store.check(source: source)
         precondition(store.readyRoot != nil && rawCalls == 5)
         let first = store.readyRoot
-        await store.check()
+        await store.check(source: source)
         precondition(rawCalls == 5, "Same revision must not download assets twice")
         let restored = GalaxyAssetStore(bundledRoot: bundled, cacheRoot: cache, defaults: defaults, fetch: fetch)
+        precondition(restored.readyRoot == nil, "Do not assume the previous comma at launch")
+        await restored.check(source: source)
         precondition(restored.readyRoot == first, "Saved assets must validate after restart")
         files["js/app.js"] = Data("changed app".utf8); corrupt = true
-        await store.check()
-        precondition(store.readyRoot == first, "Corrupt update must preserve the last verified UI")
+        source = try GalaxySource(repository: "owner/fork", commit: String(repeating: "b", count: 40), branch: "test-branch")
+        await store.check(source: source)
+        precondition(store.readyRoot == nil, "Never use another revision as an exact match")
         precondition(store.status.contains("verification failed"), "Do not hide verification failures as network failures")
         httpStatus = 403
-        await store.check()
-        precondition(store.status.contains("HTTP 403") && store.readyRoot == first)
+        await store.check(source: source)
+        precondition(store.status.contains("HTTP 403") && store.readyRoot == nil)
         httpStatus = 200; networkFailure = true
-        await store.check()
-        precondition(store.status.contains("network error -1009") && store.readyRoot == first)
+        await store.check(source: source)
+        precondition(store.status.contains("network error -1009") && store.readyRoot == nil)
         let offline = GalaxyAssetStore(bundledRoot: bundled, cacheRoot: root.appendingPathComponent("empty"), defaults: UserDefaults(suiteName: UUID().uuidString)!, fetch: fetch)
-        await offline.check()
+        await offline.check(source: source)
         precondition(offline.status.contains("included with this app"), "Bundled fallback must not be described as a saved update")
         try Data("tampered".utf8).write(to: first!.appendingPathComponent("js/app.js"))
         let tampered = GalaxyAssetStore(bundledRoot: bundled, cacheRoot: cache, defaults: defaults, fetch: fetch)
         precondition(tampered.readyRoot == nil, "Reject altered saved UI")
+        for repository in ["https://evil.test/x", "../fork", "owner/fork/extra", "owner/fork?x=1", "owner/"] {
+            do { _ = try GalaxySource(repository: repository, commit: commit, branch: "main"); preconditionFailure("Unsafe repository") } catch {}
+        }
+        networkFailure = false; corrupt = false
+        let selected = try GalaxySource(repository: "another/fork", commit: commit, branch: "device-branch")
+        let switched = GalaxyAssetStore(bundledRoot: bundled, cacheRoot: root.appendingPathComponent("switched"), defaults: UserDefaults(suiteName: UUID().uuidString)!, fetch: fetch)
+        await switched.check(source: selected, stillCurrent: { false })
+        precondition(switched.readyRoot == nil, "A switched comma must not activate its download")
         print("SecretGood assets: Git object verification, atomic update fallback and saved UI validation passed")
     }
 }

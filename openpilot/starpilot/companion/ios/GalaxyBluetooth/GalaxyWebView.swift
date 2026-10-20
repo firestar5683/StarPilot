@@ -28,6 +28,7 @@ final class GalaxyPageDiagnostics: ObservableObject {
     }
 
     var recover: ((Bool) -> Void)?
+    @Published var darkAppearance: Bool?
     @Published var landscapeEditor = false
     @Published var copied = false
     @Published var stalled = false
@@ -61,7 +62,7 @@ final class GalaxyPageDiagnostics: ObservableObject {
     func report(server: LoopbackServer, connection: String) -> String {
         let info = Bundle.main.infoDictionary ?? [:]
         return """
-        StarPilot Galaxy diagnostics
+        StarPilot BT Galaxy diagnostics
         \(ISO8601DateFormatter().string(from: Date()))
         App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))
         iOS: \(UIDevice.current.systemVersion)
@@ -162,6 +163,18 @@ private struct GalaxyPage: UIViewRepresentable {
             }
             syncTheme();
           });
+          const reportTheme = () => {
+            const theme = document.documentElement?.dataset.theme;
+            if (theme !== 'dark' && theme !== 'light') return;
+            try { window.webkit.messageHandlers.galaxyDiagnostics.postMessage({kind: 'theme', dark: theme === 'dark'}); } catch (_) {}
+          };
+          const watchTheme = () => {
+            if (!document.documentElement) return;
+            new MutationObserver(reportTheme).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+            reportTheme();
+          };
+          if (document.documentElement) watchTheme();
+          else document.addEventListener('DOMContentLoaded', watchTheme, {once: true});
           let nativeVisible = \(isActive ? "true" : "false");
           Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => nativeVisible ? 'visible' : 'hidden'});
           Object.defineProperty(document, 'hidden', {configurable: true, get: () => !nativeVisible});
@@ -316,6 +329,13 @@ private struct GalaxyPage: UIViewRepresentable {
                   let body = message.body as? [String: Any], let kind = body["kind"] as? String else { return }
             let path = LoopbackServer.reportPath(body["path"] as? String ?? "")
             switch kind {
+            case "theme":
+                if message.frameInfo.isMainFrame, let dark = body["dark"] as? Bool {
+                    diagnostics.darkAppearance = dark
+                    let background = dark ? UIColor(red: 0.06, green: 0.05, blue: 0.09, alpha: 1) : .systemBackground
+                    message.webView?.backgroundColor = background
+                    message.webView?.scrollView.backgroundColor = background
+                }
             case "editorFocus":
                 if message.frameInfo.isMainFrame, let active = body["active"] as? Bool {
                     diagnostics.landscapeEditor = active

@@ -1,4 +1,7 @@
 import Foundation
+#if os(iOS)
+import AVFAudio
+#endif
 
 /// After this iPhone is paired for Galaxy, also pair it with comma for Bluetooth music.
 /// iOS apps cannot start a classic Bluetooth pairing, so comma opens a short window and the
@@ -11,6 +14,7 @@ final class AudioPairing: ObservableObject {
         case waiting(commaName: String)
         case confirm(code: String, promptID: String, commaName: String)
         case done
+        case connected
         case message(String)
     }
 
@@ -27,12 +31,24 @@ final class AudioPairing: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     private let transport: () -> (any GalaxyRequestTransport)?
     private let pause: () async -> Void
+    private let audioOutput: (String) -> Bool
     private let attempts: Int
     private var task: Task<Void, Never>?
 
     init(transport: @escaping () -> (any GalaxyRequestTransport)?, attempts: Int = 125,
+         audioOutput: ((String) -> Bool)? = nil,
          pause: @escaping () async -> Void = { try? await Task.sleep(nanoseconds: 1_000_000_000) }) {
-        self.transport = transport; self.attempts = attempts; self.pause = pause
+        self.transport = transport; self.attempts = attempts; self.pause = pause; self.audioOutput = audioOutput ?? { AudioPairing.isAudioOutput($0) }
+    }
+
+    static func isAudioOutput(_ commaName: String) -> Bool {
+        #if os(iOS)
+        return AVAudioSession.sharedInstance().currentRoute.outputs.contains {
+            $0.portType == .bluetoothA2DP && $0.portName == commaName
+        }
+        #else
+        return false
+        #endif
     }
 
     var active: Bool { phase != .idle }
@@ -51,11 +67,12 @@ final class AudioPairing: ObservableObject {
                         code: (prompt?["value"] as? String) ?? "", displayOnly: (prompt?["displayOnly"] as? Bool) ?? false)
     }
 
-    func start() {
+    /// `windowOpen`: comma's pairing window is already open because the person just paired the app from comma's Pair phone.
+    func start(windowOpen: Bool = false) {
         guard task == nil else { return }
         phase = .opening
         task = Task { [weak self] in
-            await self?.run()
+            await self?.run(windowOpen: windowOpen)
             self?.task = nil
         }
     }
@@ -72,12 +89,12 @@ final class AudioPairing: ObservableObject {
     func cancel() {
         task?.cancel()
         task = nil
-        let wasOpen = phase != .idle && phase != .done
+        let wasOpen = phase != .idle && phase != .done && phase != .connected
         phase = .idle
         if wasOpen { Task { [weak self] in _ = try? await self?.post(["operation": "cancel_pair"]) } }
     }
 
-    func dismiss() { if case .message = phase { phase = .idle } else if phase == .done { phase = .idle } else { cancel() } }
+    func dismiss() { if case .message = phase { phase = .idle } else if phase == .done || phase == .connected { phase = .idle } else { cancel() } }
 
     private func post(_ payload: [String: Any]) async throws -> BridgeResponse? {
         guard let transport = transport(), transport.connected else { return nil }
@@ -93,24 +110,28 @@ final class AudioPairing: ObservableObject {
         return Self.parse(response.bodyData)
     }
 
-    private func run() async {
+    private func run(windowOpen: Bool) async {
         guard let first = await status() else { phase = .message("Phone music wasn't set up. Connect to your comma and try again."); return }
         // An older comma reports no adapter address and has no pairing window.
         guard Self.validAddress(first.adapterAddress) else { phase = .idle; return }
         let name = first.adapterName.isEmpty ? "comma" : first.adapterName
-        let opened: BridgeResponse?
-        do { opened = try await post(["operation": "accept_pair"]) } catch { opened = nil }
-        switch opened?.status {
-        case 200?: break
-        case 400?: phase = .idle; return
-        case 409?: phase = .message("Phone music wasn't set up because comma's Bluetooth is busy. Park, stop Android Auto pairing, then try Set up phone music again."); return
-        default: phase = .message("Phone music wasn't set up. Try Set up phone music again."); return
+        if audioOutput(name) { phase = .connected; return }
+        if !windowOpen {
+            let opened: BridgeResponse?
+            do { opened = try await post(["operation": "accept_pair"]) } catch { opened = nil }
+            switch opened?.status {
+            case 200?: break
+            case 400?: phase = .idle; return
+            case 409?: phase = .message("Phone music wasn't set up because comma's Bluetooth is busy. Park, stop Android Auto pairing, then try Set up phone music again."); return
+            default: phase = .message("Phone music wasn't set up. Try Set up phone music again."); return
+            }
         }
         phase = .waiting(commaName: name)
         var answered: String?
         for _ in 0..<attempts {
             await pause()
             if Task.isCancelled { return }
+            if audioOutput(name) { phase = .connected; return }
             guard let current = await status() else { continue }
             if let id = current.promptID, !current.displayOnly, current.promptKind == "confirmation", id != answered {
                 answered = id

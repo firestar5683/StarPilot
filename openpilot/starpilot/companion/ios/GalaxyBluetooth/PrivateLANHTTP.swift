@@ -65,7 +65,8 @@ final class PrivateLANHTTP {
         }
         guard text.utf8.count <= 16_384 else { finish(.failure(BridgeError.message("HTTP headers are too large."))); return }
         text += "\r\n"
-        connection.send(content: Data(text.utf8) + body, completion: .contentProcessed { [weak self] error in
+        connection.send(content: Data(text.utf8), isComplete: false, completion: .idempotent)
+        connection.send(content: body, completion: .contentProcessed { [weak self] error in
             Task { @MainActor in
                 guard let self, !self.finished else { return }
                 if error != nil { self.finish(.failure(URLError(.networkConnectionLost))) }

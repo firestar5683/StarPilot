@@ -46,8 +46,15 @@ final class AppModel: ObservableObject {
     @Published var showDiagnostics = false
     @Published var showAudioPairing = false
     private var offerAudioPairing = false
+    private var audioWindowOpen = false
+    private let claimer = ClaimTransport()
     lazy var audioPairing = AudioPairing(transport: { [weak self] in self?.transport })
-    @Published var tab: CompanionTab = .galaxy
+    lazy var phoneLocation: PhoneLocation = {
+        let value = PhoneLocation(transport: { [weak self] in self?.transport })
+        value.onSharingChanged = { [weak self] _ in self?.updateMonitoring() }
+        return value
+    }()
+    @Published var tab: CompanionTab = .connections
     @Published var developerMode = UserDefaults.standard.bool(forKey: "galaxy.app.developerMode") {
         didSet {
             UserDefaults.standard.set(developerMode, forKey: "galaxy.app.developerMode")
@@ -87,10 +94,11 @@ final class AppModel: ObservableObject {
     private var phoneActive = false
     private var carPlayActive = false
     private var monitorTask: Task<Void, Never>?
-    func setPhoneActive(_ active: Bool) { phoneActive = active; diagnostics.phoneActive = active; if !active { discovery.stop() }; updateMonitoring() }
+    func setPhoneActive(_ active: Bool) { phoneActive = active; if !active { automaticLAN?.cancel() }; diagnostics.phoneActive = active; if !active { discovery.stop() }; updateMonitoring() }
     func setCarPlayActive(_ active: Bool) { carPlayActive = active; diagnostics.carPlayActive = active; updateMonitoring() }
     private func updateMonitoring() {
-        if phoneActive || carPlayActive {
+        // Sharing phone GPS keeps the app running in the background, so keep reconnecting too.
+        if phoneActive || carPlayActive || phoneLocation.sharing {
             if monitorTask == nil { monitorTask = Task { await monitor() } }
         } else { monitorTask?.cancel(); monitorTask = nil }
     }
@@ -102,6 +110,7 @@ final class AppModel: ObservableObject {
     @Published var networkDetails = "Comma can use a hotspot, Wi-Fi or its SIM for internet. Your connection here controls how this iPhone reaches comma."
     @Published var mode = ConnectionMode(rawValue: UserDefaults.standard.string(forKey: "galaxy.connection.mode") ?? "") ?? .automatic {
         didSet {
+            automaticLAN?.cancel(); lanProbeTask?.cancel()
             transport.mode = mode
             UserDefaults.standard.set(mode.rawValue, forKey: "galaxy.connection.mode")
             if mode == .lan { bluetooth.disconnect() }
@@ -110,7 +119,7 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var showConnections = false
-    @Published var showPairingScanner = false
+    @Published var pairingInProgress = false
     @Published var opened = false
     @Published var connectionMessage = "Choose a connection, or use Automatic for Wi-Fi with Bluetooth fallback."
     @Published var wantsConnection = true
@@ -128,12 +137,33 @@ final class AppModel: ObservableObject {
     private var lastAddressCheck = Date.distantPast
     private var identitySession = ""
     private var addressCheckSession = ""
-    func importPairingKey(_ code: PairingCode) {
-        // Save imported keys only after the encrypted handshake.
+    private var localAddressNetwork = ""
+    private var automaticLAN: Task<Void, Never>?
+    private var lanProbeTask: Task<Void, Never>?
+    private var lastLANDiscovery = Date.distantPast
+    private var triedLANAddresses = Set<String>()
+    /// One step for the app and music: comma's open pairing window gives this iPhone its key, then music is set up in the same window.
+    func pairWithComma() {
+        guard !pairingInProgress else { return }
+        pairingInProgress = true
+        offerAudioPairing = false
+        showAudioPairing = false
+        bluetooth.disconnect(reason: "Starting new phone pairing")
+        connectionMessage = "Open Settings → Bluetooth → Pair phone on comma (or Pair phone in Galaxy). Looking for comma…"
+        Task { @MainActor in
+            defer { pairingInProgress = false }
+            do { importClaim(try await claimer.claim(name: UIDevice.current.name)) }
+            catch is CancellationError { connectionMessage = "Pairing cancelled." }
+            catch { connectionMessage = error.localizedDescription }
+        }
+    }
+    func cancelPairing() { claimer.cancel() }
+    private func importClaim(_ outcome: ClaimTransport.Outcome) {
+        // The key is saved only after the encrypted handshake, like any imported key.
         opened = false
-        wantsConnection = false
+        wantsConnection = true
         bluetooth.forgetSavedDevice()
-        PairingKeyStore.stage(code)
+        PairingKeyStore.stage(PairingCode(key: outcome.result.key, id: outcome.result.id))
         lan.clearEndpoint()
         lan.bind(to: nil)
         address = ""
@@ -141,11 +171,15 @@ final class AppModel: ObservableObject {
         addressCheckSession = ""
         UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
         UserDefaults.standard.removeObject(forKey: "galaxy.lan.address")
-        pairingKey = code.key
+        UserDefaults.standard.set(outcome.deviceID.uuidString, forKey: "galaxy.bluetooth.device")
+        pairingKey = outcome.result.key
         if mode == .lan { mode = .automatic }
-        connectionMessage = "Code scanned. Select your comma below to finish pairing."
+        connectionMessage = "Paired. Connecting to comma…"
         offerAudioPairing = true
-        bluetooth.scan()
+        audioWindowOpen = true
+        lastReconnect = Date()
+        bluetooth.reconnectSaved(pairingKey: pairingKey)
+        if !bluetooth.connecting { bluetooth.scan() }
     }
     init() {
         let bluetooth = BluetoothTransport()
@@ -153,6 +187,7 @@ final class AppModel: ObservableObject {
         let transport = PreferredTransport(lan: lan, bluetooth: bluetooth, invalidateLAN: { lan.invalidate(reason: $0) })
         let assets = GalaxyAssetStore()
         self.bluetooth = bluetooth; self.lan = lan; self.transport = transport; self.assets = assets
+        lan.bind(to: UserDefaults.standard.string(forKey: "galaxy.comma.identity"))
         let cache = GalaxyReadCache(transport: transport, sessionID: {
             transport.usesLAN ? "lan-" + lan.generation : "ble-" + bluetooth.sessionIdentifier
         })
@@ -162,8 +197,10 @@ final class AppModel: ObservableObject {
         galaxyPage.recover = { [weak self] automatic in self?.recoverGalaxy(automatic: automatic) }
         server.start()
         discovery.onEvent = { [weak self] reason in self?.connectionLog.record(reason) }
+        discovery.onDevicesChanged = { [weak self] in self?.discoverAutomaticLAN() }
         lan.onEvent = { [weak self] reason in self?.logConnection(reason) }
         bluetooth.onEvent = { [weak self] reason in self?.logConnection(reason) }
+        claimer.onEvent = { [weak self] reason in self?.connectionLog.record(reason) }
         pathMonitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor in
                 guard let self else { return }
@@ -172,15 +209,21 @@ final class AppModel: ObservableObject {
                 let interfaces = path.availableInterfaces
                     .filter { path.usesInterfaceType($0.type) }
                     .map { "\($0.name):\($0.index)" }.sorted().joined(separator: ",")
-                let fingerprint = "\(path.status)|\(route)|\(interfaces)|ipv4=\(path.supportsIPv4)"
+                let fingerprint = "\(path.status)|\(route)|\(interfaces)|ipv4=\(path.supportsIPv4)|\(LANDiscovery.networkSignature())"
                 guard fingerprint != self.lastNetworkPath else { return }
                 self.lastNetworkPath = fingerprint
                 self.connectionLog.record(reason)
+                self.automaticLAN?.cancel(); self.lanProbeTask?.cancel()
+                self.discovery.networkChanged()
+                self.triedLANAddresses.removeAll()
+                self.lastLANDiscovery = .distantPast
                 self.lan.invalidate(reason: reason)
                 self.lastAddressCheck = .distantPast
+                self.discoverAutomaticLAN()
             }
         }
         pathMonitor.start(queue: .main)
+        updateMonitoring()
     }
     deinit { pathMonitor.cancel() }
     private func logConnection(_ reason: String) {
@@ -202,24 +245,63 @@ final class AppModel: ObservableObject {
             wantsConnection = true
             lastReconnect = .distantPast
             lastAddressCheck = .distantPast
+            localAddressNetwork = ""
             connectionMessage = "Checking your comma…"
         } catch { connectionMessage = error.localizedDescription }
     }
     func startAudioPairing() {
         guard transport.connected else { return }
         showAudioPairing = true
-        audioPairing.start()
+        let windowOpen = audioWindowOpen
+        audioWindowOpen = false
+        audioPairing.start(windowOpen: windowOpen)
     }
-    func openIfReady() {
-        guard wantsConnection, transport.connected, !opened else { return }
-        let root = assets.readyRoot ?? assets.bundledRoot
+    private var openingGalaxy = false
+    @Published private(set) var matchingGalaxy = false
+    private var lastGalaxyMatch = Date.distantPast
+
+    func applyMatchedGalaxy() {
+        guard opened, let root = assets.readyRoot, root != assets.inUseRoot else { return }
         assets.inUseRoot = root
         server.useWebRoot(root)
-        opened = true
-        if tab == .connections { tab = .galaxy }
+        recoverGalaxy(automatic: false)
+    }
+
+    func checkGalaxyUpdates() async {
+        guard wantsConnection, transport.connected, !matchingGalaxy else { return }
+        matchingGalaxy = true
+        lastGalaxyMatch = Date()
+        defer { matchingGalaxy = false }
+        let bleSession = bluetooth.sessionIdentifier
+        let lanSession = lan.generation
+        do {
+            let response = try await transport.request(path: "/api/software/status?history=0", method: "GET", headers: [:], body: Data())
+            guard wantsConnection, transport.connected, bluetooth.sessionIdentifier == bleSession, lan.generation == lanSession else { return }
+            guard response.status == 200 else { throw BridgeError.message("Comma’s Galaxy version could not be read.") }
+            let source = try GalaxySource.parse(response.bodyData)
+            await assets.check(source: source, stillCurrent: { self.wantsConnection && self.transport.connected && self.bluetooth.sessionIdentifier == bleSession && self.lan.generation == lanSession })
+        } catch {
+            if bluetooth.sessionIdentifier == bleSession && lan.generation == lanSession {
+                assets.unavailable("Couldn’t match Galaxy to comma.")
+            }
+        }
+    }
+    func openIfReady() {
+        guard wantsConnection, transport.connected, !opened, !openingGalaxy else { return }
+        openingGalaxy = true
+        Task { @MainActor in
+            defer { openingGalaxy = false }
+            await checkGalaxyUpdates()
+            guard wantsConnection, transport.connected, !opened else { return }
+            let root = assets.readyRoot ?? assets.bundledRoot
+            assets.inUseRoot = root
+            server.useWebRoot(root)
+            opened = true
+        }
     }
     func disconnect() {
         legacyURL = nil
+        automaticLAN?.cancel(); lanProbeTask?.cancel()
         discovery.stop()
         wantsConnection = false; opened = false
         bluetooth.disconnect(reason: "User selected Disconnect"); lan.invalidate(reason: "User selected Disconnect")
@@ -246,6 +328,8 @@ final class AppModel: ObservableObject {
                 connectionMessage = "Connection changed. Select the comma again."
                 return
             }
+            lan.bind(to: candidate.verifiedDeviceID)
+            UserDefaults.standard.set(candidate.verifiedDeviceID, forKey: "galaxy.comma.identity")
             address = device.address
             connect()
             connectionLog.record("User selected a discovered comma; LAN verification passed")
@@ -294,25 +378,31 @@ final class AppModel: ObservableObject {
         guard bluetooth.connected, Date().timeIntervalSince(lastAddressCheck) >= 20 || addressCheckSession != bluetooth.sessionIdentifier else { return }
         lastAddressCheck = Date()
         let session = bluetooth.sessionIdentifier
+        let networkPath = lastNetworkPath
         addressCheckSession = session
         do {
-            do {
+            if identitySession != session {
                 let identity = try await bluetooth.request(path: "/data/runtime.json", method: "GET", headers: [:], body: Data())
-                guard wantsConnection, mode != .bluetooth, bluetooth.sessionIdentifier == session else { return }
+                guard !Task.isCancelled, wantsConnection, mode != .bluetooth, bluetooth.sessionIdentifier == session else { return }
                 // Only the authenticated BLE peer may establish the automatic LAN identity.
                 guard identity.status == 200, let value = LANTransport.deviceID(identity.bodyData) else {
                     networkDetails = "Automatic local discovery needs a registered device identifier. Bluetooth still works; enter comma’s IP manually for Wi-Fi."
                     return
                 }
                 lan.bind(to: value)
+                UserDefaults.standard.set(value, forKey: "galaxy.comma.identity")
 
                 identitySession = session
             }
-            guard findAddressAutomatically, !lan.connected else { return }
+            let network = session + "|" + networkPath
+            guard findAddressAutomatically, !lan.connected, localAddressNetwork != network else { return }
+            let generation = lan.generation
             let response = try await bluetooth.request(path: "/api/local-access", method: "GET", headers: [:], body: Data())
-            guard wantsConnection, mode != .bluetooth, bluetooth.sessionIdentifier == session, response.status == 200,
+            guard !Task.isCancelled, wantsConnection, mode != .bluetooth, bluetooth.sessionIdentifier == session, response.status == 200,
+                  lastNetworkPath == networkPath, lan.generation == generation, !lan.connected,
                   !response.bodyData.isEmpty else { return }
             if let ip = LANTransport.reportedAddress(response.bodyData) {
+                localAddressNetwork = network
                 try lan.configure(address: ip)
                 address = ip
                 UserDefaults.standard.set(ip, forKey: "galaxy.lan.address")
@@ -323,31 +413,91 @@ final class AppModel: ObservableObject {
             // Galaxy's online:true means the server responds, not that comma can reach the internet.
         } catch { /* Discovery is optional; it must not disrupt working BLE. */ }
     }
+    private func discoverAutomaticLAN() {
+        guard phoneActive, wantsConnection, mode == .automatic,
+              !pairingInProgress, !selectingDiscoveredComma, !lan.connected,
+              let identity = lan.expectedDeviceID else { return }
+        if !discovery.searching, Date().timeIntervalSince(lastLANDiscovery) >= 20 {
+            lastLANDiscovery = Date()
+            triedLANAddresses.removeAll()
+            discovery.start()
+        }
+        guard automaticLAN == nil else { return }
+        let addresses = discovery.devices.map(\.address).filter { !triedLANAddresses.contains($0) }
+        guard !addresses.isEmpty else { return }
+        triedLANAddresses.formUnion(addresses)
+        let generation = lan.generation
+        automaticLAN = Task { @MainActor in
+            defer { self.automaticLAN = nil }
+            let stillCurrent = {
+                self.phoneActive && self.wantsConnection && self.mode == .automatic
+                    && !self.pairingInProgress && !self.selectingDiscoveredComma && !self.lan.connected
+                    && self.lan.generation == generation && self.lan.expectedDeviceID == identity
+            }
+            let address = await LANDiscoveryMatch.first(addresses: addresses, expectedDeviceID: identity, stillCurrent: stillCurrent) { address, identity in
+                let candidate = LANTransport()
+                candidate.bind(to: identity)
+                guard (try? candidate.configure(address: address)) != nil else { return false }
+                return await candidate.probe()
+            }
+            guard let address, !Task.isCancelled, stillCurrent() else { return }
+            do { try self.lan.configure(address: address) } catch { return }
+            self.address = address
+            UserDefaults.standard.set(address, forKey: "galaxy.lan.address")
+            if await self.lan.probe() {
+                self.discovery.stop()
+                self.connectionLog.record("Automatic Wi-Fi discovery verified the paired comma")
+            }
+        }
+    }
+
+    private func probeLocalConnection() {
+        guard lanProbeTask == nil else { return }
+        lanProbeTask = Task { @MainActor in
+            defer { self.lanProbeTask = nil }
+            await self.learnAddress()
+            guard !Task.isCancelled, self.wantsConnection, self.mode != .bluetooth else { return }
+            if self.lan.endpoint == nil, !self.address.isEmpty {
+                do { try self.lan.configure(address: self.address) }
+                catch { self.connectionMessage = error.localizedDescription }
+            }
+            _ = await self.lan.probe()
+            if !Task.isCancelled, self.lan.connected { self.discovery.stop() }
+        }
+    }
+
     func monitor() async {
         while !Task.isCancelled {
-            if wantsConnection {
+            if wantsConnection && !pairingInProgress {
                 if mode != .lan, !bluetooth.connected, !bluetooth.connecting, !bluetooth.isScanning,
                    !pairingKey.isEmpty, Date().timeIntervalSince(lastReconnect) >= 25 {
                     lastReconnect = Date()
                     bluetooth.reconnectSaved(pairingKey: pairingKey)
                 }
                 if mode != .bluetooth {
-                    await learnAddress()
-                    if lan.endpoint == nil, !address.isEmpty {
-                        do { try lan.configure(address: address) }
-                        catch { connectionMessage = error.localizedDescription }
-                    }
-                    _ = await lan.probe()
+                    discoverAutomaticLAN()
+                    probeLocalConnection()
                 }
+                guard !pairingInProgress else { continue }
                 if transport.label != lastRoute { logConnection("Connection availability changed") }
-                if transport.connected { openIfReady(); connectionMessage = "Connected over \(transport.label)." }
-                if transport.connected, offerAudioPairing { offerAudioPairing = false; startAudioPairing() }
-                else { connectionMessage = "Wi-Fi unavailable. Pair over Bluetooth below, or check your comma’s IP address." }
+                if transport.connected {
+                    openIfReady()
+                    if Date().timeIntervalSince(lastGalaxyMatch) > 60 && !openingGalaxy {
+                        Task { await self.checkGalaxyUpdates() }
+                    }
+                    connectionMessage = "Connected over \(transport.label)."
+                    if offerAudioPairing { offerAudioPairing = false; startAudioPairing() }
+                } else if mode == .bluetooth {
+                    connectionMessage = "Reconnecting over Bluetooth. If you forgot this phone on comma, open Pair phone on comma and Pair with comma here."
+                } else {
+                    connectionMessage = "Wi-Fi unavailable. Pair over Bluetooth below, or check your comma’s IP address."
+                }
             }
             do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
         }
     }
 }
+
 
 struct GalaxyRootView: View {
     @ObservedObject var model: AppModel
@@ -357,6 +507,11 @@ struct GalaxyRootView: View {
     @ObservedObject var server: LoopbackServer
     @ObservedObject var discovery: LANDiscovery
     @ObservedObject var galaxyPage: GalaxyPageDiagnostics
+    @State private var hasVisitedGalaxy = false
+    private var galaxyColorScheme: ColorScheme? {
+        guard model.tab == .galaxy, let dark = galaxyPage.darkAppearance else { return nil }
+        return dark ? .dark : .light
+    }
     private var editorFocused: Bool { model.tab == .galaxy && galaxyPage.landscapeEditor }
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -365,7 +520,7 @@ struct GalaxyRootView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            if !editorFocused {
+            if !editorFocused && model.tab != .connections {
             VStack(spacing: 14) {
                 HStack {
                     if !model.developerMode && model.tab == .connections {
@@ -377,7 +532,7 @@ struct GalaxyRootView: View {
                         }
                         Text("Settings").font(.title3.bold())
                     } else {
-                        Text("StarPilot").font(.title3.bold())
+                        Text("StarPilot BT").font(.title3.bold())
                     }
                     Spacer()
                     HStack(spacing: 5) {
@@ -440,11 +595,13 @@ struct GalaxyRootView: View {
                 } else if model.developerMode && (model.tab == .live || model.tab == .diagnostics) {
                     CompanionView(diagnostics: model.diagnostics)
                 } else if model.tab == .connections || !model.opened {
-                    connectionView
+                    ConnectionSettingsView(model: model, returningFromGalaxy: hasVisitedGalaxy, select: select)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(model.tab == .galaxy && galaxyPage.darkAppearance == true
+            ? Color(red: 0.06, green: 0.05, blue: 0.09) : Color(uiColor: .systemBackground))
+        .preferredColorScheme(galaxyColorScheme)
         .ignoresSafeArea(.container, edges: editorFocused ? .all : [])
         .statusBarHidden(editorFocused)
         .onChange(of: model.showConnections) { _, show in
@@ -459,156 +616,19 @@ struct GalaxyRootView: View {
         }
         .task(id: scenePhase) {
             model.setPhoneActive(scenePhase == .active)
-            if scenePhase == .active { model.recoverGalaxy(reload: false); await model.assets.check() }
+            if scenePhase == .active { model.recoverGalaxy(reload: false); await model.checkGalaxyUpdates() }
         }
     }
     private func select(_ requestedTab: CompanionTab) {
         let tab = requestedTab.isDeveloperPage && !model.developerMode ? (model.opened ? CompanionTab.galaxy : .connections) : requestedTab
         if tab != .connections { discovery.stop() }
         model.tab = tab
+        if tab == .galaxy { hasVisitedGalaxy = true; model.applyMatchedGalaxy() }
         model.diagnostics.live = tab == .live
     }
-    private let brandPurple = Color(red: 0.55, green: 0.36, blue: 0.96)
+    private let brandPurple = Color(red: 139.0 / 255, green: 92.0 / 255, blue: 246.0 / 255)
 
-    private var connectionView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(spacing: 8) {
-                    Image("StarPilotHero")
-                        .resizable().scaledToFit()
-                        .frame(maxWidth: 480)
-                        .accessibilityLabel("StarPilot")
-                    Text("Galaxy companion")
-                        .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity).padding(.top, 8)
-                Text("Connect your comma").font(.title2.bold())
-                Picker("Connection", selection: $model.mode) {
-                    ForEach(ConnectionMode.allCases) { Text($0.title).tag($0) }
-                }.pickerStyle(.segmented)
-                Text("Automatic prefers local Wi-Fi and falls back to your paired comma over Bluetooth. Internet isn’t needed for local settings.")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                Text(model.networkDetails).font(.caption).foregroundStyle(.secondary)
-                if model.mode != .bluetooth {
-                    HStack {
-                        Button(discovery.searching ? "Searching Wi-Fi…" : "Find comma on Wi-Fi") { discovery.start() }
-                            .buttonStyle(.bordered).disabled(discovery.searching || model.selectingDiscoveredComma)
-                        if discovery.searching { Button("Stop") { discovery.stop() }.font(.caption) }
-                    }
-                    Text(discovery.status).font(.caption).foregroundStyle(.secondary)
-                    ForEach(discovery.devices) { device in
-                        Button { Task { await model.selectDiscoveredComma(device) } } label: {
-                            HStack {
-                                Image(systemName: "wifi")
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(device.name).font(.headline)
-                                    Text(device.address).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer(); Image(systemName: "chevron.right")
-                            }.padding(14).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                        }.buttonStyle(.plain).disabled(model.selectingDiscoveredComma)
-                    }
-                    Toggle("Find comma’s address over Bluetooth", isOn: $model.findAddressAutomatically)
-                    Text("Comma IP address").font(.headline)
-                    TextField("192.168.10.85", text: $model.address)
-                        .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .padding(14).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                    Text(lan.status).font(.caption).foregroundStyle(.secondary)
-                }
-                Button { model.connect(); if model.opened { select(.galaxy) } } label: {
-                    Text("Connect").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 8)
-                }.buttonStyle(.borderedProminent).tint(brandPurple)
-                Text(model.connectionMessage).font(.subheadline).foregroundStyle(.secondary)
-                if model.mode != .lan {
-                    Divider()
-                    Text("Bluetooth pairing").font(.headline)
-                    Text("On comma, open Settings → Pair phone. Scan its code here, then select your comma below. After pairing once, the app reconnects automatically.")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    Button("Set up phone music") { model.startAudioPairing() }
-                        .buttonStyle(.bordered).disabled(!model.transport.connected)
-                    Text("Lets this iPhone play music through comma. Comma opens pairing for two minutes, then you tap comma in Settings → Bluetooth.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("Scan pairing code") { model.showPairingScanner = true }
-                        .buttonStyle(.borderedProminent).tint(brandPurple)
-                        .sheet(isPresented: $model.showPairingScanner) {
-                            PairingScannerSheet { model.importPairingKey($0) }
-                        }
-                    SecureField("64-character pairing key", text: $model.pairingKey)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .font(.system(.body, design: .monospaced))
-                        .padding(14).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                    Button(bluetooth.isScanning ? "Scanning…" : "Scan for comma") { model.wantsConnection = true; bluetooth.scan() }
-                        .buttonStyle(.bordered).disabled(bluetooth.isScanning || bluetooth.connecting)
-                    Text(bluetooth.status).font(.subheadline).foregroundStyle(.secondary)
-                    ForEach(bluetooth.devices) { device in
-                        Button {
-                            model.opened = false
-                            model.wantsConnection = true
-                            model.lan.clearEndpoint()
-                            model.lan.bind(to: nil)
-                            model.address = ""
-                            UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
-                            UserDefaults.standard.removeObject(forKey: "galaxy.lan.address")
-                            bluetooth.connect(device, pairingKey: model.pairingKey)
-                        } label: {
-                            HStack {
-                                Image(systemName: "car.side.fill"); Text(device.name).font(.headline)
-                                Spacer(); Image(systemName: "chevron.right")
-                            }.padding(16).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                        }.buttonStyle(.plain).disabled(bluetooth.connecting)
-                    }
-                    if bluetooth.connecting { Button("Cancel Bluetooth connection") { bluetooth.disconnect() } }
-                    Button("Forget Bluetooth pairing") {
-                        bluetooth.forgetSavedDevice(); PairingKeyStore.remove(); model.pairingKey = ""
-                        model.lan.bind(to: nil); UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
-                    }.font(.caption).foregroundStyle(.secondary)
-                }
-                Divider()
-                Text(assets.status).font(.caption).foregroundStyle(.secondary)
-                Toggle("Developer Mode", isOn: $model.developerMode)
-                Text("Show Live View, Diagnostics, and Dev / Logs on this iPhone.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if model.developerMode {
-                    Toggle("Fast Bluetooth reads", isOn: $bluetooth.fastReads)
-                    if bluetooth.fastReadFallback {
-                        Label("Fast reads paused after an error. Reliable reads are active after reconnecting. Switch fast reads off and on to try again.", systemImage: "arrow.triangle.2.circlepath")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text("Experimental notification streaming for maximum transfer speed. Turn off to return to reliable reads. Changes apply to the next request.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("Open Dev / Logs") { select(.logs) }
-                }
-                Button("Check Galaxy updates") { Task { await assets.check() } }.disabled(assets.checking)
-                Text("Screens are saved on your iPhone. GitHub updates apply next time you open Galaxy, without interrupting your current screen.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if model.opened {
-                    Button("Back to Galaxy") { select(.galaxy) }
-                    Button("Disconnect") { model.disconnect(); select(.connections) }
-                }
-                Divider()
-                Text("Legacy connection").font(.headline)
-                Button {
-                    Task {
-                        if let url = await model.fetchLegacyURL() {
-                            openURL(url) { accepted in
-                                if !accepted { model.legacyMessage = "Couldn’t open your browser. Try again." }
-                            }
-                        }
-                    }
-                } label: {
-                    Label(model.loadingLegacyURL ? "Getting Galaxy link…" : "Open legacy Galaxy", systemImage: "safari")
-                }.buttonStyle(.bordered).disabled(model.loadingLegacyURL)
-                if let url = model.legacyURL {
-                    Text(url.absoluteString).font(.caption).textSelection(.enabled)
-                }
-                Text("Gets this comma’s unique Galaxy link and opens it in your default browser.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if !model.legacyMessage.isEmpty {
-                    Text(model.legacyMessage).font(.caption).foregroundStyle(.secondary)
-                }
-                if !server.error.isEmpty { Text(server.error).foregroundStyle(.red) }
-            }.padding(24).frame(maxWidth: 560).frame(maxWidth: .infinity)
-        }.background(Color(uiColor: .systemBackground)).tint(brandPurple)
-    }
+
 }
 
 @MainActor
@@ -628,7 +648,7 @@ final class ConnectionEventLog: ObservableObject {
     func report(model: AppModel) -> String {
         let info = Bundle.main.infoDictionary ?? [:]
         return """
-        StarPilot connection diagnostics
+        StarPilot BT connection diagnostics
         \(ISO8601DateFormatter().string(from: Date()))
         App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))
         iOS: \(UIDevice.current.systemVersion)

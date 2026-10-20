@@ -96,6 +96,13 @@ func prompt(kind: String = "confirmation", displayOnly: Bool = false) -> [String
         await settle(hangingModel) { if case .waiting = $0 { return true }; return false }
         hangingModel.dismiss()
         await settle(hangingModel) { $0 == .idle && hanging.posts.contains { $0["operation"] as? String == "cancel_pair" } }
+        let connectedComma = ScriptedComma([snapshot()])
+        let connectedModel = AudioPairing(transport: { connectedComma }, audioOutput: { $0 == "comma" }, pause: { await Task.yield() })
+        connectedModel.start()
+        await settle(connectedModel) { $0 == .connected }
+        precondition(connectedComma.posts.isEmpty, "An existing audio route must not reopen pairing")
+        connectedModel.dismiss()
+        precondition(connectedModel.phase == .idle)
         print("audio pairing ok")
     }
 }

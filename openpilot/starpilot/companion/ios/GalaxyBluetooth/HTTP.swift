@@ -6,6 +6,17 @@ struct LocalRequest {
     let headers: [String: String]
     let body: Data
 
+    // Package uploads stay on LAN; ordinary requests retain the Bluetooth-sized limit.
+    static let maxPackageBody = 256 * 1024 * 1024
+
+    static func isPackageUpload(method: String, target: String) -> Bool {
+        method == "POST" && ["/api/android-auto/upload", "/api/spotify/upload"].contains(target)
+    }
+
+    static func bodyLimit(method: String, target: String) -> Int {
+        isPackageUpload(method: method, target: target) ? maxPackageBody : Wire.maxBody
+    }
+
     static func parse(_ data: Data) throws -> LocalRequest? {
         guard let separator = data.range(of: Data("\r\n\r\n".utf8)) else {
             if data.count > 16_384 { throw BridgeError.message("HTTP headers are too large.") }
@@ -31,7 +42,7 @@ struct LocalRequest {
         guard headers["transfer-encoding"] == nil else { throw BridgeError.message("Chunked uploads are not supported.") }
         let length: Int
         if let raw = headers["content-length"] {
-            guard let parsed = Int(raw), parsed >= 0, parsed <= Wire.maxBody else { throw BridgeError.message("Invalid upload size.") }
+            guard let parsed = Int(raw), parsed >= 0, parsed <= bodyLimit(method: String(first[0]), target: String(first[1])) else { throw BridgeError.message("Invalid upload size.") }
             length = parsed
         } else { length = 0 }
         let available = data.count - separator.upperBound

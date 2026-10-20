@@ -11,13 +11,12 @@ to build it yourself, open `openpilot/starpilot/companion/ios/GalaxyBluetooth.xc
 ## pair
 
 1. Leave the comma powered and Offroad for setup. it needs internet for the first bridge installation.
-2. enable Bluetooth in comma Settings and open the StarPilot iPhone app pairing code.
-3. on the iPhone, open the Settings gear and choose **Scan pairing code**.
-4. scan the code and select your comma to finish connecting.
-5. allow Bluetooth, Local Network and camera access when asked. the camera scans the pairing code.
-6. open Galaxy and check that settings load.
+2. on comma open Settings → Bluetooth → **Pair phone**. the window stays open for two minutes.
+3. on the iPhone, open the app and tap **Pair with comma**. allow Bluetooth and Local Network access when asked.
+4. when the app says so, open iPhone Settings → Bluetooth and tap your comma once. that pairs phone music; iOS does not let an app do it.
+5. open Galaxy and check that settings load.
 
-keep the pairing code private. **Forget all app links** on comma replaces the app key; it does not remove the car's Bluetooth pairing. scan the new code to reconnect afterwards.
+the app and phone music pair in the same window. **Forget** on a Bluetooth device in comma Settings also removes its app key; it does not remove the car's Bluetooth pairing. tap **Pair with comma** again to reconnect afterwards.
 
 ## choose a connection
 

@@ -77,7 +77,7 @@ final class CompanionDiagnostics: ObservableObject {
     }
     func diagnosticLog() -> String {
         let info = Bundle.main.infoDictionary ?? [:]
-        var lines = ["StarPilot Live diagnostics", ISO8601DateFormatter().string(from: Date()),
+        var lines = ["StarPilot BT Live diagnostics", ISO8601DateFormatter().string(from: Date()),
                      "App: \(info["CFBundleShortVersionString"] ?? "unknown") (\(info["CFBundleVersion"] ?? "unknown"))",
                      "iOS: \(UIDevice.current.systemVersion)",
                      "Connection: \(transport?.label ?? "Disconnected")",

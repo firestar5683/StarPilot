@@ -4,17 +4,13 @@ import CryptoKit
 @main struct PairingPhoneRegression {
     static func main() throws {
         let key = String(repeating: "A1", count: 32)
-        func code(_ id: String? = nil) throws -> PairingCode {
-            var object: [String: Any] = ["type": "galaxy-bluetooth", "version": 1, "key": key]
-            if let id { object["id"] = id }
-            return try PairingCode.parse(String(decoding: JSONSerialization.data(withJSONObject: object), as: UTF8.self))
-        }
-        let legacy = try code()
+        func code(_ id: String? = nil) -> PairingCode { PairingCode(key: key.lowercased(), id: PairingCode.validID(id)) }
+        let legacy = code()
         precondition(legacy.id == nil && legacy.key == key.lowercased())
-        let first = try code("ABCDEF12")
+        let first = code("ABCDEF12")
         precondition(first.id == "abcdef12")
         for bad in ["123", "123456789", "zzzzzzzz", "é1234567"] {
-            let parsed = try code(bad)
+            let parsed = code(bad)
             precondition(parsed.id == nil && parsed.key == legacy.key)
         }
         let old = PairingCredential.decode(Data(key.utf8))!
@@ -22,7 +18,7 @@ import CryptoKit
         let saved = PairingCredential.replacing(nil, with: first)
         let same = PairingCredential.replacing(saved, with: first)
         precondition(same.id == saved.id && same.previousId == nil)
-        let second = try code("12345678")
+        let second = code("12345678")
         let replacement = PairingCredential.replacing(saved, with: second)
         precondition(replacement.id == "12345678" && replacement.previousId == "abcdef12")
         precondition(PairingCredential.replacing(replacement, with: second).previousId == "abcdef12")
@@ -49,6 +45,6 @@ import CryptoKit
         precondition(opened.phone?.name == "iPhone" && opened.phone?.replaces == "abcdef12")
         let final = try json(request)["phone"] as! [String: Any]
         precondition(Set(final.keys) == ["name", "replaces"])
-        print("Phone pairing: old QR/key migration, ID validation, re-scan/replacement and encrypted optional metadata passed")
+        print("Phone pairing: old key migration, ID validation, re-scan/replacement and encrypted optional metadata passed")
     }
 }

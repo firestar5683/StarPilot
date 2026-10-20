@@ -7,16 +7,16 @@ struct AudioPairingSheet: View {
     var body: some View {
         VStack(spacing: 18) {
             Image(systemName: "music.note").font(.system(size: 40))
-            Text("Music through comma").font(.title3.weight(.semibold))
+            Text("Bluetooth music").font(.title3.weight(.semibold))
             switch pairing.phase {
             case .idle, .opening:
                 ProgressView("Asking comma to open pairing…")
             case .waiting(let name):
-                Text("Open Settings → Bluetooth on this iPhone and tap **\(name)**. This stays open for two minutes.")
+                Text("On your iPhone, open **Settings → Bluetooth** and select **\(name)** to pair music.")
                     .multilineTextAlignment(.center)
                 ProgressView()
-                Button("Open Settings") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
-                    .buttonStyle(.bordered)
+                Text("Already says Connected? In Control Center, check whether comma is available as an audio output.")
+                    .font(.callout).multilineTextAlignment(.center)
             case .confirm(let code, _, _):
                 Text("Check that comma and this iPhone both show").multilineTextAlignment(.center)
                 Text(code).font(.system(size: 34, weight: .semibold, design: .monospaced))
@@ -25,11 +25,13 @@ struct AudioPairingSheet: View {
                     Button("Pair") { pairing.respond(accepted: true) }.buttonStyle(.borderedProminent)
                 }
             case .done:
-                Text("Music is ready. In Control Center, choose comma as the audio output.").multilineTextAlignment(.center)
+                Text("Bluetooth music paired. In Control Center, choose comma as the audio output.").multilineTextAlignment(.center)
+            case .connected:
+                Text("Music connected. This iPhone is already using comma as its Bluetooth audio output.").multilineTextAlignment(.center)
             case .message(let text):
                 Text(text).multilineTextAlignment(.center)
             }
-            Button(pairing.phase == .done ? "Done" : "Close") { close() }.padding(.top, 6)
-        }.padding(24).presentationDetents([.medium])
+            Button((pairing.phase == .done || pairing.phase == .connected) ? "Done" : "Close") { close() }.padding(.top, 6)
+        }.padding(24).presentationDetents([.medium, .large])
     }
 }

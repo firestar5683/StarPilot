@@ -1,6 +1,6 @@
 # connection testing
 
-start with a powered, Offroad comma and the matching SecretGood phone build. pair once using the comma's private QR code.
+start with a powered, Offroad comma and the matching SecretGood phone build. pair once with Settings → Bluetooth → Pair phone on comma, then Pair with comma in the app.
 
 ## wi-fi and Bluetooth
 

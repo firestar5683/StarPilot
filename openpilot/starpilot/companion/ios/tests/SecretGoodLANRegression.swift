@@ -72,6 +72,53 @@ import Foundation
         async let second = shared.probe()
         _ = await (first, second)
         precondition(concurrent.sessions == 1, "Share concurrent session handshakes")
+        let uploadServer = Server()
+        let uploader = LANTransport(load: uploadServer.load)
+        try uploader.configure(address: "192.168.1.89")
+        _ = await uploader.probe()
+        let package = Data(repeating: 0x5a, count: 48 * 1024 * 1024)
+        let header = Data("POST /api/android-auto/upload HTTP/1.1\r\nContent-Length: \(package.count)\r\nContent-Type: application/octet-stream\r\n\r\n".utf8)
+        let partial = try LocalRequest.parse(header)
+        precondition(partial == nil)
+        let parsed = try LocalRequest.parse(header + package)
+        precondition(parsed?.body == package)
+        _ = try await uploader.request(path: "/api/android-auto/upload", method: "POST", headers: ["content-type": "application/octet-stream"], body: package)
+        let uploaded = uploadServer.calls.last!
+        precondition(uploaded.httpBody == package)
+        precondition(uploaded.value(forHTTPHeaderField: "Content-Type") == "application/octet-stream")
+        precondition(uploaded.value(forHTTPHeaderField: "Origin") == "http://192.168.1.89:8082")
+        precondition(uploaded.timeoutInterval == 120)
+        for target in ["/api/settings/confirm", "/api/android-auto/upload/extra", "/api/android-auto/upload?x=1"] {
+            let oversized = Data("POST \(target) HTTP/1.1\r\nContent-Length: 50331648\r\n\r\n".utf8)
+            do { _ = try LocalRequest.parse(oversized); preconditionFailure("Ordinary requests must remain bounded") } catch {}
+        }
+        let tooLarge = Data("POST /api/android-auto/upload HTTP/1.1\r\nContent-Length: 268435457\r\n\r\n".utf8)
+        do { _ = try LocalRequest.parse(tooLarge); preconditionFailure("Package limit must hold") } catch {}
+        let discoveryServer = Server()
+        var probed: [String] = []
+        let discovered = await LANDiscoveryMatch.first(addresses: ["192.168.1.90", "192.168.1.90", "192.168.1.91"],
+                                                       expectedDeviceID: "0123456789abcdef", stillCurrent: { true }) { address, identity in
+            probed.append(address)
+            discoveryServer.corruptIdentity = address.hasSuffix("90")
+            let candidate = LANTransport(load: discoveryServer.load)
+            candidate.bind(to: identity)
+            try! candidate.configure(address: address)
+            let verified = await candidate.probe()
+            precondition(candidate.verifiedDeviceID == (verified ? identity : nil))
+            return verified
+        }
+        precondition(discovered == "192.168.1.91" && probed == ["192.168.1.90", "192.168.1.91"], "Try alternate interfaces, never select a different comma")
+        let unknown = await LANDiscoveryMatch.first(addresses: ["192.168.1.91"], expectedDeviceID: nil, stillCurrent: { true }) { _, _ in
+            preconditionFailure("First-time discovery requires an explicit choice")
+        }
+        precondition(unknown == nil)
+        var sameNetwork = true
+        let stale = await LANDiscoveryMatch.first(addresses: ["192.168.1.91"], expectedDeviceID: "0123456789abcdef", stillCurrent: { sameNetwork }) { _, _ in
+            await Task.yield()
+            sameNetwork = false
+            return true
+        }
+        precondition(stale == nil, "Reject verification completed after the network or selected comma changes")
         print("SecretGood LAN: cookies, refresh, mutation safety, identity and isolation passed")
     }
 }

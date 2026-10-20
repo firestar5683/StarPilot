@@ -384,7 +384,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard peripheral == self.peripheral else { return }
         guard error == nil, let service = peripheral.services?.first(where: { $0.uuid == CBUUID(string: Wire.service) }) else {
-            failConnection("Galaxy Bluetooth service was not found."); return
+            failConnection("StarPilot BT service was not found."); return
         }
         onEvent?("Bluetooth Galaxy service found; discovering characteristics")
         peripheral.discoverCharacteristics([CBUUID(string: Wire.rx), CBUUID(string: Wire.tx), CBUUID(string: Wire.info), CBUUID(string: Wire.notify)], for: service)
