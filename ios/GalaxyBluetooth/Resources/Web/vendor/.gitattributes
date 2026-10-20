@@ -1,0 +1,2 @@
+# Preserve the exact upstream Vue bundle, including its existing whitespace.
+vue/vue.esm-browser.js -text whitespace=-blank-at-eol
