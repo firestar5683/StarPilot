@@ -176,6 +176,23 @@ def test_navigation_status_reports_the_source_it_follows(mode, longitude, name):
   with patch('openpilot.starpilot.navigation.status.gps_mode', return_value=mode):
     position = status.map_position()
   assert position is not None and position['longitude'] == longitude and position['source'] == name
+  assert 0 < position['validForMs'] <= 2500
+
+
+def test_phone_map_lease_is_capped_without_shortening_source_timeout():
+  sm = Messages()
+  with patch('openpilot.cereal.messaging.SubMaster', return_value=sm):
+    status = NavigationStatusSource(mono_clock=lambda: NOW - 1_000_000_000, boot_clock=lambda: NOW)
+  clock = [NOW]
+  status.mono_clock = lambda: clock[0]
+  status.boot_clock = lambda: clock[0] + 1_000_000_000
+  publish(sm)
+  with patch('openpilot.starpilot.navigation.status.gps_mode', return_value='backup'):
+    assert status.map_position()['validForMs'] == 2500
+    clock[0] += 8_000_000_000
+    assert status.map_position()['validForMs'] == 1700
+    clock[0] += 2_000_000_000
+    assert status.map_position() is None
 
 
 def test_car_gps_ranks_against_the_phone_in_every_mode():

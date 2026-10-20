@@ -20,7 +20,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from openpilot.starpilot.soloist import backend, credentials, package, preferences, phone_audio
+from openpilot.starpilot.soloist import backend, bugsink_report, credentials, package, preferences, phone_audio
 from openpilot.starpilot.soloist import now_playing as now_playing_module
 from openpilot.starpilot.soloist.client import PlayerClient
 from openpilot.starpilot.soloist.paths import CONTROL_SOCKET, Layout, private_dir
@@ -438,6 +438,14 @@ def serve(supervisor: Supervisor, path: str = CONTROL_SOCKET, stop: threading.Ev
         pass
 
 
+def parked() -> bool:
+  try:
+    from openpilot.common.params import Params
+    return Params().get_bool('IsOffroad')
+  except Exception:
+    return False
+
+
 def main() -> None:
   os.nice(10)  # music yields to everything driving-related; children inherit this
   supervisor = Supervisor()
@@ -451,6 +459,7 @@ def main() -> None:
   signal.signal(signal.SIGTERM, shutdown)
   signal.signal(signal.SIGINT, shutdown)
   threading.Thread(target=serve, args=(supervisor, CONTROL_SOCKET, stop), name='spotify_control', daemon=True).start()
+  reporter = bugsink_report.Reporter(parked=parked, output=lambda: preferences.load(supervisor.layout).output).start()
   try:
     while not stop.is_set():
       with supervisor.lock:
@@ -461,6 +470,7 @@ def main() -> None:
       supervisor.publish()
       stop.wait(1.0)
   finally:
+    reporter.close()
     try:
       supervisor.pairing_profile_until = 0.0
       supervisor.stop_children()

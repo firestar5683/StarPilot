@@ -12,7 +12,10 @@ import subprocess
 import sys
 
 DROP_IN = Path('/run/systemd/system/bluealsa.service.d/90-starpilot-phone.conf')
-CONTENTS = '[Service]\nExecStart=\nExecStart=/usr/bin/bluealsa -p a2dp-source -p a2dp-sink\n'
+# BlueALSA is tiny but must drain the Bluetooth socket on time; at nice 0 it competes with driving
+# processes on busy cores and the music chain (nice 10) cannot make up for lost incoming packets.
+LEGACY_CONTENTS = '[Service]\nExecStart=\nExecStart=/usr/bin/bluealsa -p a2dp-source -p a2dp-sink\n'
+CONTENTS = LEGACY_CONTENTS + 'Nice=-5\n'
 
 
 def systemctl(*args):
@@ -22,13 +25,18 @@ def systemctl(*args):
 def configure(action: str, path: Path = DROP_IN, run=systemctl) -> None:
   if action not in ('acquire', 'release'):
     raise ValueError('Unknown profile action')
-  if path.exists() and path.read_text() != CONTENTS:
+  if path.exists() and path.read_text() not in (CONTENTS, LEGACY_CONTENTS):
     raise RuntimeError('Phone audio profile override was changed externally')
   if action == 'release':
     if path.exists():
       path.unlink()
       run('daemon-reload')
       run('try-restart', 'bluealsa.service')
+    return
+  if path.exists() and path.read_text() == LEGACY_CONTENTS:
+    path.write_text(CONTENTS)
+    run('daemon-reload')
+    run('restart', 'bluealsa.service')
     return
   command = run('show', '--property=ExecStart', '--value', 'bluealsa.service')
   if 'argv[]=/usr/bin/bluealsa -p a2dp-source -p a2dp-sink ;' in command:

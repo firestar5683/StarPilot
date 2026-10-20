@@ -296,7 +296,7 @@ export const NavigationPage = {
   components: { GxNotice, BluetoothNotice, MapOperationsPanel, NavigationMap, OfflineRoadMapsPanel, FavoriteChoices, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, default: null }, initialTab: { type: String, default: "route" } },
-  data() { return { bluetooth: bluetoothConnection(), data: null, results: [], busy: false, error: "", stale: false, tab: this.initialTab, gpsGuide: "comma", query: "", token: "", searched: false,
+  data() { return { bluetooth: bluetoothConnection(), data: null, results: [], busy: false, error: "", stale: false, tab: this.initialTab, gpsGuide: "android", query: "", token: "", searched: false,
     suggestions: [], suggestOpen: false, savedSuggestionPlaces: {}, favoritePicker: null, searchPending: false } },
   watch: { initialTab(value) { this.tab = value } },
   computed: {
@@ -498,14 +498,11 @@ export const NavigationPage = {
           </div>
           <h4>Set up GPS sharing</h4>
           <div class="gx-actions" role="group" aria-label="GPS setup guides">
-            <button v-for="source in [{id:'comma',label:'Comma'},{id:'android',label:'Android App'},{id:'iphone',label:'iPhone'}]" :key="source.id"
+            <button v-for="source in [{id:'android',label:'Android App'},{id:'iphone',label:'iPhone'}]" :key="source.id"
               type="button" class="gx-btn" :class="gpsGuide === source.id ? '' : 'gx-btn--tonal'" :aria-pressed="gpsGuide === source.id"
               @click="gpsGuide = source.id">{{ source.label }}</button>
           </div>
-          <div v-if="gpsGuide === 'comma'">
-            <p>No phone setup is needed. Give your comma a clear view of the sky and wait for a GPS fix.</p>
-          </div>
-          <div v-else-if="gpsGuide === 'android'">
+          <div v-if="gpsGuide === 'android'">
             <ol><li>Open the StarPilot companion app and connect to your comma over Bluetooth or Galaxy Wi-Fi.</li>
               <li>Open Connections → Phone GPS → <strong>Share phone GPS with comma</strong>.</li>
               <li>Allow precise location. Keep the app’s GPS-sharing notification active while driving.</li></ol>
@@ -513,9 +510,9 @@ export const NavigationPage = {
           </div>
           <div v-else>
             <ol><li>Open the StarPilot iPhone companion app and connect to your comma over Bluetooth or Wi-Fi.</li>
-              <li>In Connections, find Bluetooth pairing and turn on <strong>Share phone GPS with comma</strong>. If that section is hidden, choose Automatic or Bluetooth connection mode.</li>
-              <li>Allow location access and enable Precise Location in iPhone Settings. The app continues sharing in the background while the switch is on.</li></ol>
-            <p>Turn off <strong>Share phone GPS with comma</strong> in the app to stop sharing.</p>
+              <li>On the app’s main Settings page, turn on <strong>Share Phone Location</strong>.</li>
+              <li>Set location access to <strong>Always</strong> and enable Precise Location in iPhone Settings. The app continues sharing in the background while the switch is on.</li></ol>
+            <p>Turn off <strong>Share Phone Location</strong> on the app’s main Settings page to stop sharing.</p>
           </div>
           <details><summary>About phone GPS and switching phones</summary>
             <p>The GPS source you choose is used for navigation and for map-based speed limits and curves. The phone must reach the comma over Bluetooth or local Wi-Fi; the remote tunnel doesn't carry GPS.</p>

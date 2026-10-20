@@ -88,7 +88,9 @@ class NavigationStatusSource:
           candidates.append((priority, stamp,
                              {'longitude': float(gps.longitude), 'latitude': float(gps.latitude), 'source': SOURCE_NAMES[service],
                               **({'bearing': direction} if direction is not None else {}),
-                              'validForMs': min(stamp + ttl - after, receipt + ttl - after) / 1e6}))
+                              # Galaxy leases map markers for at most 2.5 seconds, even when
+                              # a background phone fix has a longer source timeout.
+                              'validForMs': min(2500., (stamp + ttl - after) / 1e6, (receipt + ttl - after) / 1e6)}))
       except (AttributeError, KeyError, TypeError, ValueError, OverflowError, RuntimeError):
         continue
     return max(candidates, default=(-1, 0, None), key=lambda row: row[:2])[2]

@@ -318,7 +318,7 @@ class BluetoothCompact(NavScroller):
         button.set_enabled(self._ready)
         cards.append(button)
     if self._app_only():
-      cleanup = BigButton("remove app-only pairings", "phones paired for StarPilot without music")
+      cleanup = BigButton("forget app keys", "app-only phones")
       cleanup.set_enabled(lambda: self.phone_pairing_allowed())
       cleanup.set_click_callback(lambda: gui_app.push_widget(BigConfirmationDialog(
         "Remove phones paired for the StarPilot app only?", self.icon,

@@ -24,7 +24,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Sender:
-  def __init__(self, dsn: str, *, metadata=None, allow_http=False, opener=None, active=lambda: True):
+  def __init__(self, dsn: str, *, metadata=None, allow_http=False, opener=None, active=lambda: True,
+               logger="android_auto", client="starpilot-aa/1", schema_tags=None):
     url = urllib.parse.urlsplit(dsn)
     path, _, project = url.path.rstrip("/").rpartition("/")
     if url.scheme not in ("https", "http") or not url.hostname or not url.username or not project.isdecimal() or url.query or url.fragment:
@@ -36,6 +37,8 @@ class Sender:
     self.metadata = metadata or {}
     self.opener = opener or urllib.request.build_opener(NoRedirect())
     self.active = active
+    self.logger, self.client = logger, client
+    self.schema_tags = {"aa.schema": "2"} if schema_tags is None else schema_tags
 
   def __call__(self, **event) -> bool:
     if not self.active():
@@ -44,17 +47,17 @@ class Sender:
     stable = json.dumps([self.metadata.get("device_id", "unknown"), event], sort_keys=True, separators=(",", ":"))
     event_id = hashlib.sha256(stable.encode()).hexdigest()[:32]
     payload = {**event, "event_id": event_id, "timestamp": datetime.now(UTC).timestamp(), "platform": "python",
-               "logger": "android_auto", "release": event.get("tags", {}).get("commit", "unknown"),
+               "logger": self.logger, "release": event.get("tags", {}).get("commit", "unknown"),
                "environment": self.metadata.get("environment", "device"),
                "user": {"id": self.metadata.get("device_id", "unknown")},
                "tags": {**self.metadata, **event.get("tags", {}), "reporter.commit": self.metadata.get("commit", "unknown"),
-                        "reporter.branch": self.metadata.get("branch", "unknown"), "aa.schema": "2"}}
+                        "reporter.branch": self.metadata.get("branch", "unknown"), **self.schema_tags}}
     data = json.dumps(payload, allow_nan=False).encode()
     if len(data) > MAX_EVENT_BYTES:
       print(json.dumps({"event": "bugsink_delivery_failed", "reason": "event_too_large"}), flush=True)
       return False
-    request = urllib.request.Request(self.endpoint, data=data, headers={"Content-Type": "application/json", "User-Agent": "starpilot-aa/1",
-      "X-Sentry-Auth": f"Sentry sentry_version=7,sentry_client=starpilot-aa/1,sentry_key={self.key}"})
+    request = urllib.request.Request(self.endpoint, data=data, headers={"Content-Type": "application/json", "User-Agent": self.client,
+      "X-Sentry-Auth": f"Sentry sentry_version=7,sentry_client={self.client},sentry_key={self.key}"})
     try:
       with self.opener.open(request, timeout=HTTP_TIMEOUT_S) as response:
         accepted = json.loads(response.read(4096))
@@ -79,11 +82,11 @@ def device_metadata():
   return {key: str(value) for key, value in values.items()}
 
 
-def configured_sender(path: Path = CONFIG_PATH, *, active=lambda: True):
+def configured_sender(path: Path = CONFIG_PATH, *, active=lambda: True, **sender_options):
   try:
     config = json.loads(path.read_text())
   except FileNotFoundError:
     config = {}
   if not isinstance(config, dict) or config.get("enabled") is False:
     return None
-  return Sender(config.get("dsn") or DEFAULT_DSN, metadata=device_metadata(), allow_http=config.get("allow_http") is True, active=active)
+  return Sender(config.get("dsn") or DEFAULT_DSN, metadata=device_metadata(), allow_http=config.get("allow_http") is True, active=active, **sender_options)

@@ -82,3 +82,22 @@ def test_session_release_is_not_overwritten_by_uploading_build(endpoint):
   assert event["tags"]["branch"] == "session-branch"
   assert sender(message="Legacy failure", tags={"commit": "unknown"})
   assert received[-1][2]["release"] == "unknown"
+
+
+def test_sender_logger_and_tags_can_be_overridden_for_other_reporters():
+  from openpilot.starpilot.system.android_auto.bugsink_transport import Sender, DEFAULT_DSN
+  seen = []
+  class Response:
+    status = 200
+    def __enter__(self): return self
+    def __exit__(self, *_): return False
+    def read(self, _): return json.dumps({"id": seen[0]["id"]}).encode()
+  class Opener:
+    def open(self, request, timeout):
+      seen.append({"body": json.loads(request.data), "ua": request.headers["User-agent"]})
+      seen[0]["id"] = seen[0]["body"]["event_id"]
+      return Response()
+  assert Sender(DEFAULT_DSN, opener=Opener(), logger="phone_audio", client="starpilot-pa/1", schema_tags={"pa.schema": "1"})(message="x")
+  body = seen[0]["body"]
+  assert body["logger"] == "phone_audio" and seen[0]["ua"] == "starpilot-pa/1"
+  assert body["tags"]["pa.schema"] == "1" and "aa.schema" not in body["tags"]

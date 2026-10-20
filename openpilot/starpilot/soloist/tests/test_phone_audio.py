@@ -235,6 +235,17 @@ def test_relay_closes_capture_and_output_on_disconnect_or_bad_audio(tmp_path, mo
   assert calls[0][1]['env']['ALSA_CONFIG_PATH'] == str(tmp_path / 'alsa.conf')
 
 
+def test_profile_upgrades_a_legacy_override_to_raise_bluealsa_priority(tmp_path):
+  path = tmp_path / 'bluealsa.service.d' / '90-starpilot-phone.conf'
+  path.parent.mkdir()
+  path.write_text(phone_profile.LEGACY_CONTENTS)
+  calls = []
+  phone_profile.configure('acquire', path, lambda *args: calls.append(args) or '')
+  assert 'Nice=-5' in path.read_text() and ('restart', 'bluealsa.service') in calls
+  phone_profile.configure('release', path, lambda *args: '')
+  assert not path.exists()
+
+
 def test_profile_changes_touch_only_bluealsa_never_bluetooth_or_the_phone_bridge(tmp_path):
   path = tmp_path / 'bluealsa.service.d' / '90-starpilot-phone.conf'
   calls = []
