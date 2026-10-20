@@ -170,6 +170,7 @@ def message_lines(view, bridge=READY):
 def PairPhone(allowed):
   import pyray as rl
   from openpilot.common.hardware import HARDWARE
+  from openpilot.selfdrive.ui.ui_state import device
   from openpilot.system.ui.lib.text_measure import measure_text_cached
   from openpilot.system.ui.lib.application import gui_app, FontWeight
   from openpilot.system.ui.widgets import Widget
@@ -213,6 +214,8 @@ def PairPhone(allowed):
       compact = rect.height < 600
       with self.lock:
         view = dict(self.view)
+      if view['state'] in ('opening', 'waiting'):
+        device._reset_interactive_timeout()  # keep the screen on while the window is open
       if self.c4:
         margin = 16
         width = rect.width - margin * 2
