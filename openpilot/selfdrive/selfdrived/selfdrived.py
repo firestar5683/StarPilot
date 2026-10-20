@@ -227,7 +227,6 @@ class SelfdriveD:
     self.last_functional_fan_frame = 0
     self.events_prev = []
     self.logged_comm_issue = None
-    self.logged_aol_comm_issue = (None, 0)
     self.not_running_prev = None
     self.experimental_mode = False
     self.requested_experimental_mode = False
@@ -1167,20 +1166,6 @@ class SelfdriveD:
       self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
     return True
 
-  def log_aol_comm_issue(self, source, now_ns, source_ns):
-    # The AOL paths raise commIssue without the generic catch-all log; record which one fired and how stale card was.
-    last_source, last_ns = getattr(self, 'logged_aol_comm_issue', (None, 0))
-    if last_source == source and now_ns - last_ns < 1_000_000_000:
-      return
-    self.logged_aol_comm_issue = (source, now_ns)
-    def age_ms(ns):
-      return round((now_ns - ns) / 1e6, 1) if ns > 0 else None
-    cloudlog.event("commIssue", error=True, source=source, source_age_ms=age_ms(source_ns),
-                   carState_age_ms=age_ms(self.sm.logMonoTime.get('carState', 0)),
-                   aolIntentWire_age_ms=age_ms(self.sm.logMonoTime.get('aolIntentWire', 0)),
-                   aolSafetyWire_age_ms=age_ms(self.sm.logMonoTime.get('aolSafetyWire', 0)),
-                   fault_reason=str(getattr(self, 'aol_fault_reason', 'none')))
-
   def _expire_axis_source(self, CS, now_ns):
     if REPLAY or not self.aol_replay or not self.axis_transport_required:
       return
@@ -1225,7 +1210,6 @@ class SelfdriveD:
         (not self.events.contains(ET.SOFT_DISABLE) or availability_only(self.events.to_msg())) and
         not self.events.contains(ET.USER_DISABLE)):
       self.events.add(EventName.commIssue)
-      self.log_aol_comm_issue('aol_source_expired', now_ns, source_ns)
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
       from openpilot.starpilot.aol.transport_pause import _healthy_transport_native
       healthy = _healthy_transport_native(self.sm, self.CP, CS, self.aol_session_id, now_ns, native)
@@ -1324,7 +1308,6 @@ class SelfdriveD:
         getattr(self, 'aol_fault_reason', 'none') == 'none' and
         not any(self.events.contains(kind) for kind in (ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE))):
       self.events.add(EventName.commIssue)
-      self.log_aol_comm_issue('aol_continuity_expired', now_ns, int(intent.carStateLogMonoTime))
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
       from openpilot.starpilot.aol.transport_pause import _healthy_transport_native
       healthy = _healthy_transport_native(self.sm, self.CP, CS, self.aol_session_id, now_ns, native)
@@ -1833,7 +1816,6 @@ class SelfdriveD:
         availability = False
       if publication_expiry and (availability or not pause) and EventName.commIssue not in self.events.names:
         self.events.add(EventName.commIssue)
-        self.log_aol_comm_issue('aol_publication_expired', now_ns, int(retained_intent.carStateLogMonoTime))
       if availability:
         if publication_expiry:
           self.aol_publication_retained_intent = retained_intent
