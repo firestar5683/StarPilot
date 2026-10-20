@@ -41,6 +41,7 @@ MAX_CANVAS = 2560
 TILE_CACHE = 48
 MISSING_RETRY_S = 3.0
 DEAD_RECKON_S = 1.0
+PHONE_DEAD_RECKON_S = GPS_MAX_AGE_NS / 1e9  # cover phone measurement/transport gaps, independently of the 10 s hold
 ROUTE_STALE_OVERLAY_SECONDS = 10.0   # a route lost mid-guidance only brings back "Starting navigation" after this long
 STARTING_OVERLAY_MIN_SECONDS = 5.0   # "Starting navigation" stays up at least this long, even when the route loads sooner
 DESTINATION_MAX_CHARS = 32
@@ -452,7 +453,7 @@ class MapOverlay:
     if fix is None:
       return
     target_world = world_xy(fix.latitude, fix.longitude)
-    age = min(DEAD_RECKON_S, max(0.0, now - fix.monotonic))
+    age = min(PHONE_DEAD_RECKON_S if data.source == "phone" else DEAD_RECKON_S, max(0.0, now - fix.monotonic))
     if fix.bearing is not None and fix.speed > MIN_HEADING_SPEED:
       units = fix.speed * age / meters_per_tile(fix.latitude)
       heading = math.radians(fix.bearing)

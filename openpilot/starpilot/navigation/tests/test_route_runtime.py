@@ -1,12 +1,73 @@
 from concurrent.futures import Future
+import sys
 import time
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 from openpilot.starpilot.navigation.owner import NavigationOwner
 from openpilot.starpilot.navigation.route_engine import NavigationRoute, project, distance
 from openpilot.starpilot.navigation.runtime import RouteRuntime, location, publish_status
+
+
+@pytest.mark.parametrize('changes, expected', [
+  ({0: 1}, [0, 5, 10]),  # sparse/background measurements keep the normal heartbeat
+  ({index: index + 1 for index in range(11)}, list(range(11))),
+  ({0: 1, 2: 2, 3: 0}, [0, 2, 3, 8]),  # replacement and expiry are forwarded immediately
+])
+def test_navigation_forwards_new_phone_fixes_without_waiting_for_heartbeat(monkeypatch, changes, expected):
+  from openpilot.cereal import messaging
+  from openpilot.starpilot.navigation import runtime as module
+
+  frame = [0]
+  stamp = [0]
+  phone = SimpleNamespace(speed=0.)
+  def now():
+    return 100_000_000_000 + frame[0] * 200_000_000
+
+  def read_phone(_now):
+    stamp[0] = changes.get(frame[0], stamp[0])
+    return (99_000_000_000 + stamp[0], phone) if stamp[0] else None
+
+  class Finished(Exception):
+    pass
+
+  class Rate:
+    def __init__(self, hz):
+      assert hz == 5.
+
+    def keep_time(self):
+      frame[0] += 1
+      if frame[0] > 10:
+        raise Finished
+
+  owner, runtime = Mock(), Mock()
+  # Only device-state validity is relevant to this loop; source selection is tested separately.
+  class Master:
+    valid, logMonoTime = {'deviceState': False}, {'deviceState': 0}
+    def update(self, _timeout):
+      pass
+    def __getitem__(self, _service):
+      return SimpleNamespace(startedMonoTime=0)
+
+  published = []
+  monkeypatch.setitem(sys.modules, 'openpilot.common.realtime', SimpleNamespace(Ratekeeper=Rate))
+  monkeypatch.setattr(module, 'NavigationOwner', lambda: owner)
+  monkeypatch.setattr(module, 'RouteRuntime', lambda _owner: runtime)
+  monkeypatch.setattr(module.time, 'monotonic_ns', now)
+  monkeypatch.setattr(module, 'read_phone_gps', read_phone)
+  monkeypatch.setattr(module, 'location', lambda _sm, _now, fix: fix)
+  monkeypatch.setattr(module, 'publish_status', lambda _pm, _value, fix: published.append((frame[0], fix)))
+  monkeypatch.setattr(messaging, 'SubMaster', lambda _services: Master())
+  monkeypatch.setattr(messaging, 'PubMaster', lambda _services: None)
+  with pytest.raises(Finished):
+    module.main()
+  assert [index for index, _fix in published] == expected
+  assert runtime.update.call_count == len(expected)
+  if changes == {0: 1}:
+    assert {fix[0] for _index, fix in published} == {99_000_000_001}, 'held fixes keep their measurement time'
+  owner.position_store.flush.assert_called_once_with(force=True)
 
 
 @pytest.fixture

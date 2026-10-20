@@ -173,7 +173,10 @@ def main():
   runtime = RouteRuntime(owner)
   sm = messaging.SubMaster(['deviceState', *(service for service in GPS_SERVICES if service != 'starpilotNavigation')])
   pm = messaging.PubMaster(['starpilotNavigation'])
-  rate = Ratekeeper(1.)
+  # Forward new phone measurements promptly; held fixes still need only a 1 Hz heartbeat.
+  rate = Ratekeeper(5.)
+  next_update_ns = 0
+  last_phone_stamp = 0
   try:
     while True:
       sm.update(0)
@@ -184,8 +187,12 @@ def main():
                   0 < device.startedMonoTime <= device_stamp <= now <= device_stamp + 2_000_000_000 else 0)
       try:
         phone_fix = read_phone_gps(now)
-        value = runtime.update(now, location(sm, now, phone_fix), drive_id)
-        publish_status(pm, value, phone_fix)
+        phone_stamp = phone_fix[0] if phone_fix is not None else 0
+        if now >= next_update_ns or phone_stamp != last_phone_stamp:
+          next_update_ns = now + 1_000_000_000
+          last_phone_stamp = phone_stamp
+          value = runtime.update(now, location(sm, now, phone_fix), drive_id)
+          publish_status(pm, value, phone_fix)
       except (ValidationError, OSError, ValueError):
         cloudlog.warning('navigation settings or route unavailable')
       rate.keep_time()

@@ -170,6 +170,49 @@ def test_lost_gps_marks_previous_position_stale(tmp_path):
     overlay.close()
 
 
+def test_phone_map_keeps_moving_between_delayed_fixes(tmp_path):
+  overlay = MapOverlay(tmp_path)
+  try:
+    data = MapInput(MapFix(*CENTER, 90., 20., 100.), source='phone')
+    positions = []
+    for frame in range(101):
+      overlay._advance(data, 100. + frame / 50)
+      positions.append(overlay._world[0])
+    assert all(b > a for a, b in zip(positions, positions[1:])), 'no one-second freeze between phone fixes'
+    assert overlay.status == 'live'
+  finally:
+    overlay.close()
+
+
+@pytest.mark.parametrize('speed, bearing', [(0., 90.), (20., None)])
+def test_phone_map_hold_does_not_invent_stationary_or_unknown_heading_movement(tmp_path, speed, bearing):
+  overlay = MapOverlay(tmp_path)
+  try:
+    data = MapInput(MapFix(*CENTER, bearing, speed, 100.), source='phone')
+    overlay._advance(data, 100.)
+    initial = overlay._world
+    for frame in range(1, 501):
+      overlay._advance(data, 100. + frame / 50)
+      assert overlay._world == initial
+      assert overlay.status == 'live'
+    overlay._advance(data, 110.001)
+    assert overlay.status == 'waiting'
+  finally:
+    overlay.close()
+
+
+@pytest.mark.parametrize('source, limit', [('phone', 2.5), ('comma', 1.), ('car', 1.)])
+def test_map_prediction_is_bounded_separately_from_fix_hold(tmp_path, source, limit):
+  from openpilot.starpilot.navigation.road_tiles import meters_per_tile
+  overlay = MapOverlay(tmp_path)
+  try:
+    overlay._advance(MapInput(MapFix(*CENTER, 90., 20., 100.), source=source), 109.)
+    x, y = world_xy(*CENTER)
+    assert overlay._world == pytest.approx((x + 20. * limit / meters_per_tile(CENTER[0]), y))
+  finally:
+    overlay.close()
+
+
 # ---------------------------------------------------------------- GL
 
 def render_overlay(rl, tmp_path, bearing, width=560, height=420, opacity=1.0, route=True, steps=40):

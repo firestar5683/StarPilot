@@ -40,6 +40,13 @@ Galaxy Wi-Fi. Comma carries it inside the navigation message as `phoneGps`, keep
 10 seconds, and navigation uses it only when comma's own GPS and the car's GPS have no fix. Galaxy → Navigation → GPS Source can
 instead ignore the phone or prefer it; mapd follows the same choice.
 
+The 10-second hold is an expiry allowance, not an update interval. Navigation
+checks for new phone fixes five times a second and forwards each new measurement
+at the next check; without new fixes it publishes its usual once-a-second heartbeat.
+The car map smooths movement between fixes using speed and heading for at most
+2.5 seconds, then holds the position until another fix arrives or the hold expires.
+Stationary phones retain the full 10-second allowance without predicted movement.
+
 - Android: Connections → **Share phone GPS with comma**. Runs as a foreground
   service with a notification.
 
