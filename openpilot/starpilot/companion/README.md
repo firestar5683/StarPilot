@@ -24,6 +24,10 @@ replay, cameras and map tiles are blocked; they need Wi-Fi.
 One step pairs the app and phone music. On comma open Settings → Bluetooth →
 **Pair phone**; comma opens a two-minute window that takes one phone.
 
+If the app already reaches comma over Wi-Fi/LAN, **Pair with comma** opens that window itself (the call
+Galaxy's Bluetooth page makes), so nothing needs touching on comma. Without a Wi-Fi/LAN session it waits for
+the window as above.
+
 - Android: tap **Pair with comma** in the app. It gets its key, then bonds for music
   and shows one system prompt to approve.
 - iPhone: tap **Pair with comma** in the app, then tap comma once in

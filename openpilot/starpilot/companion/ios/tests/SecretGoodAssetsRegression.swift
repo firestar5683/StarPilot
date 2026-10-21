@@ -13,7 +13,9 @@ import CryptoKit
         final class Comma: @unchecked Sendable {
             var files = ["index.html": Data("<html>Galaxy</html>".utf8), "js/boot.js": Data("import './app.js'".utf8), "js/app.js": Data("const galaxy = true".utf8), "data/catalog.json": Data("{}".utf8), "sentry-push-worker.js": Data("self.addEventListener('push', () => {})".utf8)]
             var commit: String? = String(repeating: "a", count: 40)
-            var fileCalls = 0
+            private let lock = NSLock()
+            private var calls = 0
+            var fileCalls: Int { lock.withLock { calls } }
             var corrupt = false
             var manifestStatus = 200
             var networkFailure = false
@@ -24,7 +26,7 @@ import CryptoKit
             func fetch(_ path: String, _ limit: Int) async throws -> (status: Int, data: Data) {
                 if networkFailure { throw URLError(.notConnectedToInternet) }
                 if path == "/api/companion/web-manifest" { return (manifestStatus, manifestStatus == 200 ? try listing() : Data()) }
-                fileCalls += 1
+                lock.withLock { calls += 1 }
                 return (200, corrupt ? Data("wrong".utf8) : files[String(path.dropFirst())]!)
             }
         }

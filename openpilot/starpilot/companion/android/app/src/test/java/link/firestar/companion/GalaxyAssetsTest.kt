@@ -30,7 +30,7 @@ class GalaxyAssetsTest {
             if (tooOld) throw GalaxyTooOldException()
             return GalaxySource.Listing(commit, files.map { (path, data) -> GalaxyAssetFile(path, GalaxyAssetManifest.sha256(data), data.size) })
         }
-        override fun file(path: String, limit: Int): ByteArray { fileCalls++; return if (corrupt) "wrong".toByteArray() else files.getValue(path) }
+        override fun file(path: String, limit: Int): ByteArray { synchronized(this) { fileCalls++ }; return if (corrupt) "wrong".toByteArray() else files.getValue(path) }
     }
 
     private fun store() = GalaxyAssetStore(cache, prefs)

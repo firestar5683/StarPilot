@@ -17,6 +17,14 @@ object Networks {
                 ?.let { network to it }
         }
     }
+    /** The Wi-Fi network that reaches comma and its origin: the hotspot, else the LAN host the app saved when it found comma. */
+    fun commaLan(context: Context): Pair<Network, String>? {
+        val hotspot = wifi(context)
+        val network = hotspot ?: wifi(context, false) ?: return null
+        val saved = context.getSharedPreferences("companion", Context.MODE_PRIVATE).getString("host", "") ?: ""
+        val origin = if (hotspot != null) ORIGIN else localOrigin(saved)?.takeIf { it != ORIGIN } ?: return null
+        return network.first to origin
+    }
     /** Accept what people type: "192.168.1.10", "192.168.1.10:8082" or a full URL. localOrigin still validates it. */
     fun typedAddress(value: String): String {
         val trimmed = value.trim().trimEnd('/')

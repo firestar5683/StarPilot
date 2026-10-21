@@ -453,6 +453,12 @@ class MainActivity : Activity() {
             detail("On comma open Settings > Bluetooth > Pair phone, or tap Pair phone on the Galaxy Bluetooth page. Keep Bluetooth on for comma and this phone.")
         }
         Thread {
+            // Already on comma's Wi-Fi/LAN: open its pairing window ourselves so nobody has to touch comma.
+            Networks.commaLan(this)?.let { (network, origin) ->
+                if (LanPairing.openWindow(network, origin)) runOnUiThread {
+                    if (generation == connectionGeneration.get()) screen?.detail("Opened comma's pairing window over Wi-Fi. Keep Bluetooth on for comma and this phone.")
+                }
+            }
             val transport = BleTransport(this, null)
             ble = transport
             try {

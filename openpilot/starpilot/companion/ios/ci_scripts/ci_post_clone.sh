@@ -31,6 +31,8 @@ swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-li
 "$test_dir/audio-pairing-tests"
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/GalaxyRequestTransport.swift GalaxyBluetooth/PhoneLocation.swift tests/PhoneLocationRegression.swift -o "$test_dir/phone-location-tests"
 "$test_dir/phone-location-tests"
+swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/Wire.swift GalaxyBluetooth/GalaxyRequestTransport.swift tests/LANPairingRegression.swift -o "$test_dir/lan-pairing-tests"
+"$test_dir/lan-pairing-tests"
 
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/Wire.swift GalaxyBluetooth/HTTP.swift GalaxyBluetooth/GalaxyRequestTransport.swift GalaxyBluetooth/NetworkTransport.swift GalaxyBluetooth/PrivateLANHTTP.swift tests/SecretGoodLANRegression.swift -o "$test_dir/secretgood-lan-tests"
 "$test_dir/secretgood-lan-tests"

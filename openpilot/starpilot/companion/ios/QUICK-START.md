@@ -12,7 +12,7 @@ to build it yourself, open `openpilot/starpilot/companion/ios/GalaxyBluetooth.xc
 
 1. Leave the comma powered and Offroad for setup. it needs internet for the first bridge installation.
 2. on comma open Settings → Bluetooth → **Pair phone**. the window stays open for two minutes.
-3. on the iPhone, open the app and tap **Pair with comma**. allow Bluetooth and Local Network access when asked.
+3. on the iPhone, open the app and tap **Pair with comma** (if the phone already reaches comma over Wi-Fi, the app opens comma's pairing window itself and you can skip opening it on comma). allow Bluetooth and Local Network access when asked.
 4. when the app says so, open iPhone Settings → Bluetooth and tap your comma once. that pairs phone music; iOS does not let an app do it.
 5. open Galaxy and check that settings load.
 

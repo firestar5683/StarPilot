@@ -192,16 +192,6 @@ object GalaxyUpdates {
     fun olderThanComma(context: Context, status: JSONObject) =
         store(context).olderThan(status.optJSONObject("installed")?.optString("commit")?.ifEmpty { null })
 
-    /** Wi-Fi/LAN network and comma origin, chosen like the app update check does. */
-    private fun lan(context: Context): Pair<Network, String>? {
-        val prefs = context.getSharedPreferences("companion", Context.MODE_PRIVATE)
-        val hotspot = Networks.wifi(context)
-        val wifi = hotspot ?: Networks.wifi(context, false) ?: return null
-        val origin = if (hotspot != null) Networks.ORIGIN else
-            Networks.localOrigin(prefs.getString("host", "") ?: "")?.takeIf { it != Networks.ORIGIN } ?: return null
-        return wifi.first to origin
-    }
-
     /** Download comma's screens from [network]/[origin] in the background. */
     fun refreshAsync(context: Context, network: Network, origin: String, done: ((String) -> Unit)? = null) {
         val app = context.applicationContext
@@ -217,7 +207,7 @@ object GalaxyUpdates {
 
     /** For the menu: refresh when the phone can reach comma over Wi-Fi/LAN, otherwise explain. */
     fun checkAsync(context: Context, done: (String) -> Unit) {
-        val reach = lan(context)
+        val reach = Networks.commaLan(context)
         if (reach == null) done("Join comma’s Wi-Fi or home network to refresh Galaxy screens.")
         else refreshAsync(context, reach.first, reach.second, done)
     }

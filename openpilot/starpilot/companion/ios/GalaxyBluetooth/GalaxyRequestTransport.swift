@@ -16,6 +16,18 @@ extension GalaxyRequestTransport {
     }
 }
 
+/// When the phone already reaches comma over Wi-Fi/LAN it opens comma's two-minute pairing window itself, the same call
+/// as Pair phone on Galaxy's Bluetooth page, so nobody has to touch comma before the Bluetooth key claim.
+enum LANPairing {
+    static let windowPath = "/api/bluetooth/action"
+    static let windowBody = Data("{\"operation\":\"accept_pair\"}".utf8)
+    @MainActor static func openWindow(over lan: any GalaxyRequestTransport) async -> Bool {
+        guard lan.connected,
+              let response = try? await lan.request(path: windowPath, method: "POST", headers: [:], body: windowBody) else { return false }
+        return response.status == 200
+    }
+}
+
 enum SecretGoodGalaxy {
     static func validTarget(_ path: String) -> Bool {
         guard path.hasPrefix("/"), !path.hasPrefix("//"),

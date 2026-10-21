@@ -152,6 +152,9 @@ final class AppModel: ObservableObject {
         connectionMessage = "Open Settings → Bluetooth → Pair phone on comma (or Pair phone in Galaxy). Looking for comma…"
         Task { @MainActor in
             defer { pairingInProgress = false }
+            if await LANPairing.openWindow(over: lan) {
+                connectionMessage = "Opened comma’s pairing window over Wi-Fi. Looking for comma…"
+            }
             do { importClaim(try await claimer.claim(name: UIDevice.current.name)) }
             catch is CancellationError { connectionMessage = "Pairing cancelled." }
             catch { connectionMessage = error.localizedDescription }
