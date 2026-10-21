@@ -544,6 +544,7 @@ class MainActivity : Activity() {
     }
     /** Runs one classic Bluetooth scan until [address] shows up or [millis] passes. Blocks; call from a worker thread. */
     private fun discoverComma(adapter: android.bluetooth.BluetoothAdapter, address: String, millis: Long = 10000) {
+        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) return
         val seen = java.util.concurrent.CountDownLatch(1)
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context, intent: Intent) {
