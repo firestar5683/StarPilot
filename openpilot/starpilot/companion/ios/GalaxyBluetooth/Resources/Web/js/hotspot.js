@@ -3,6 +3,8 @@ import { GxNotice } from "./notice.js"
 import { GxState } from "./state.js"
 import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
+const validPassword = password => typeof password === 'string' && (password === '' || /^[\x21-\x7e]{12,63}$/.test(password))
+
 export function validHotspot(value) {
   return value?.version === 1 && /^[a-f0-9]{64}$/.test(value.revision) &&
     typeof value.editable === 'boolean' && typeof value.active === 'boolean' &&
@@ -10,7 +12,7 @@ export function validHotspot(value) {
     typeof value.reason === 'string' && value.reason.length <= 256 &&
     value.url === 'http://172.31.254.1:8082/' && typeof value.config?.enabled === 'boolean' &&
     /^TheGalaxy-[a-f0-9]{4}$/.test(value.config.ssid) &&
-    typeof value.config.password === 'string' && (value.config.password === '' || /^[\x21-\x7e]{12,63}$/.test(value.config.password))
+    validPassword(value.config.password)
 }
 
 export const GalaxyHotspot = {
@@ -20,7 +22,7 @@ export const GalaxyHotspot = {
     showPassword: false, timer: null, controller: null, generation: 0, active: false }),
   computed: {
     dirty() { return JSON.stringify(this.draft) !== JSON.stringify(this.snapshot?.config) },
-    passwordValid() { return !this.draft?.password || /^[\x21-\x7e]{12,63}$/.test(this.draft.password) },
+    passwordValid() { return validPassword(this.draft?.password) },
   },
   mounted() { this.start() },
   beforeUnmount() { this.stop() },
@@ -30,7 +32,7 @@ export const GalaxyHotspot = {
     start() { if (this.mode === 'local') { this.active = true; this.refresh() } },
     stop() {
       this.active = false; this.generation++; clearTimeout(this.timer); this.controller?.abort()
-      this.snapshot = this.draft = null; this.revision = ''; this.showPassword = false; this.busy = false
+      this.snapshot = this.draft = null; this.revision = ''; this.showPassword = false; this.busy = false; this.saveError = ''
     },
     adopt(value, reset = false) {
       if (!validHotspot(value)) throw new Error('Invalid hotspot status')
@@ -56,7 +58,7 @@ export const GalaxyHotspot = {
       }
     },
     async save() {
-      if (!this.active || this.busy || !this.snapshot?.editable) return
+      if (!this.active || this.busy || !this.snapshot?.editable || !this.passwordValid) return
       clearTimeout(this.timer); this.controller?.abort()
       const generation = ++this.generation
       this.controller = new AbortController(); this.busy = true; this.error = ''; this.saveError = ''; this.notice = ''
@@ -71,7 +73,6 @@ export const GalaxyHotspot = {
       } catch (error) {
         if (!this.active || generation !== this.generation) return
         if (error.status === 401) { this.stop(); this.unauthorized(); return }
-        // Kept until the next edit or save; the follow-up poll must not erase it.
         this.saveError = `${error.message} If Wi-Fi disconnected, reconnect and reload to check whether settings saved.`
       } finally {
         if (this.active && generation === this.generation) { this.busy = false; this.timer = setTimeout(() => this.refresh(), 1000) }

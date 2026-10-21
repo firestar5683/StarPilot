@@ -12,7 +12,7 @@ export function validLocalHistory(value, complete = false) {
   const routes = new Set()
   return value.routes.every((route) => {
     if (typeof route?.routeId !== "string" || !LOCAL.test(route.routeId) || routes.has(route.routeId) ||
-        !Array.isArray(route.segments) || route.segments.length > (complete ? 512 : 64) ||
+        !Array.isArray(route.segments) || route.segments.length > 512 ||
         !Number.isSafeInteger(route.segmentCount) || route.segmentCount !== route.segments.length) return false
     routes.add(route.routeId)
     const numbers = new Set()

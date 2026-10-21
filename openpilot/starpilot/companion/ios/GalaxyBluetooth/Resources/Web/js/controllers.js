@@ -156,8 +156,10 @@ export const ControllersPage = {
     reload() { return this.feed.refresh(true) },
     async save() {
       if (!this.canEdit || !this.dirty) return
-      return this.feed.action({ operation: "save", revision: this.state.draft.revision,
+      const saved = await this.feed.action({ operation: "save", revision: this.state.draft.revision,
         enabled: this.state.draft.enabled, slots: this.state.draft.slots.map((value) => value || null) })
+      if (!saved && this.state.status) this.state.draft = draftFrom(this.state.status)
+      return saved
     },
     learn(slot) {
       if (this.canEdit && !this.dirty && integer(slot, 12)) return this.feed.action({ operation: "learn", revision: this.state.status.revision, slot })
@@ -172,7 +174,7 @@ export const ControllersPage = {
   template: `
     <section class="gx-card gx-panel gx-stack gx-controllers" aria-label="Controller Buttons" :inert="state.busy" :aria-busy="state.busy || undefined">
       <h3>Controller Buttons</h3>
-      <p>Assign physical USB or Bluetooth buttons to Quick Select and available driving screen actions. Turn off the vehicle to edit.</p>
+      <p>Assign USB or Bluetooth controller buttons to Quick Select and driving screen actions. This does not control steering, gas, or brakes. Turn off the vehicle to edit.</p>
       <p v-if="mode !== 'local'" class="gx-note">Connect to local Galaxy to manage controller buttons.</p>
       <template v-else>
         <GxNotice :tone="state.error ? 'danger' : 'info'" v-if="state.error || !state.status || !state.status.available">
@@ -181,11 +183,9 @@ export const ControllersPage = {
         <template v-if="state.status?.available">
           <GxNotice v-if="!state.status.editable" tone="warn">Turn off the vehicle to change controller buttons.</GxNotice>
           <GxNotice v-if="changed" tone="warn">Controller settings changed. Reload before saving.</GxNotice>
-          <p v-else-if="dirty" class="gx-note">Save these changes before learning or removing buttons.</p>
-          <div class="gx-driving__actions gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="reload">Reload</button>
-            <button class="gx-btn" type="button" :disabled="!editable || !dirty" @click="save">Save Controller Settings</button></div>
-          <div class="gx-controllers__switch-row"><span class="gx-row__label">Enable controller buttons</span>
-            <label class="gx-switch"><input type="checkbox" aria-label="Enable controller buttons" v-model="state.draft.enabled" :disabled="!editable"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label></div>
+          <div class="gx-driving__actions gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="reload">Reload</button></div>
+          <div class="gx-controllers__switch-row"><span class="gx-row__label">Enable assigned controller buttons</span>
+            <label class="gx-switch"><input type="checkbox" role="switch" aria-label="Enable assigned controller buttons" v-model="state.draft.enabled" :disabled="!canEdit" @change="save"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label></div>
           <h4>Attached Controllers</h4>
           <p v-if="!state.status.devices.length" class="gx-note">No controller is attached.</p>
           <div v-for="device in state.status.devices" :key="device.id" class="gx-row gx-controllers__row"><div class="gx-row__info"><span class="gx-row__label">{{ device.name }}</span><span class="gx-row__desc">{{ device.bus === 3 ? 'USB' : 'Bluetooth' }}</span></div></div>
@@ -195,7 +195,7 @@ export const ControllersPage = {
             <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || dirty || !!state.status.learning" @click="learn(slot.index)">Learn Button</button></div>
           <h4>Action Buttons</h4>
           <div v-for="slot in actions" :key="slot.index" class="gx-row gx-controllers__row"><label class="gx-row__info gx-controllers__selector"><span class="gx-row__label">{{ slot.label }}</span>
-              <select class="gx-field" :aria-label="slot.label + ' action'" v-model="state.draft.slots[slot.index - 3]" :disabled="!editable">
+              <select class="gx-field" :aria-label="slot.label + ' action'" v-model="state.draft.slots[slot.index - 3]" :disabled="!canEdit" @change="save">
                 <option :value="null">No action</option><option v-for="option in state.status.options" :key="option.key" :value="option.key">{{ option.section }} · {{ option.label }}</option>
               </select></label>
             <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || dirty || !!state.status.learning" @click="learn(slot.index)">Learn Button</button></div>

@@ -1757,7 +1757,6 @@ progress { max-width: 100%; accent-color: var(--primary); }
   .gx-replay__player:fullscreen .gx-replay__video { min-height: 0; flex: 1; }
 }
 
-/* Spotify */
 .gx-spotify-now { display: grid; gap: var(--sp-3); }
 .gx-spotify-now__main { display: flex; gap: var(--sp-3); align-items: center; min-width: 0; }
 .gx-spotify-now__text { min-width: 0; }

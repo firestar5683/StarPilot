@@ -963,7 +963,20 @@ export const AndroidAutoPage = {
           <p>Pair each car in step 2 with <strong>Pair another</strong>. All your paired cars appear in the list. Tap <strong>Use</strong> next to the one you’re driving. Disconnect first if Android Auto is running.</p>
         </details>
         <details class="gx-aa-wiki"><summary>Is my information private?</summary>
-          <p>Yes. Your extracted Android Auto identity stays on your comma. The app downloads straight to your phone or computer, and the copy you upload is deleted after import. Connection logs also stay on the comma until you download them yourself. They leave out Wi‑Fi passwords, Bluetooth addresses, and your vehicle ID.</p>
+          <p>Your extracted Android Auto identity stays on your comma. The app downloads straight to your phone or computer, and the copy you upload is deleted after import. Full connection logs stay on the comma until you download them. When parked and Android Auto is stopped, StarPilot may send connection errors.</p>
+        </details>
+
+        <h4>Wireless Dongle Woes</h4>
+        <details class="gx-aa-wiki"><summary>My AAWireless (or other wireless adapter) won’t connect</summary>
+          <p><strong>The comma needs to be paired to two things:</strong> the adapter <em>and</em> the car. The adapter shows Android Auto on the car’s screen. The car’s own Bluetooth connection is how StarPilot remembers which car you’re in.</p>
+          <p><strong>Do this while parked:</strong></p>
+          <ol>
+            <li><strong>Pair AAWireless</strong> and select it as the Android Auto receiver in Galaxy. Keep it selected.</li>
+            <li>Open <a href="#/bluetooth">Bluetooth</a> in Galaxy and <strong>pair the comma with the car’s actual Bluetooth entry</strong>, then tap <strong>Connect</strong>. If it’s already paired, just tap Connect.</li>
+            <li><strong>Retry Android Auto.</strong></li>
+          </ol>
+          <p><strong>Why connect the car in Galaxy?</strong> Connecting from Galaxy’s Bluetooth page saves the car as your companion car. Connecting from the car’s own menu doesn’t.</p>
+          <p><strong>Don’t switch the receiver to the car.</strong> AAWireless stays selected as the Android Auto receiver. The car is a separate hands-free connection.</p>
         </details>
 
         <h4>Still stuck?</h4>
