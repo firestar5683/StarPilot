@@ -40,6 +40,7 @@ from openpilot.starpilot.galaxy.map_status import MapStatus, MapUnavailable
 from openpilot.starpilot.galaxy.map_operations import MapOperationError, MapOperations, validate_action
 from openpilot.starpilot.galaxy.plots import Plots
 from openpilot.starpilot.galaxy.software_status import SoftwareStatus, SoftwareUnavailable
+from openpilot.starpilot.galaxy.web_manifest import web_manifest
 from openpilot.starpilot.galaxy.software_operations import SoftwareOperations, SoftwareOperationError
 from openpilot.starpilot.galaxy.settings import PAGES, SettingsGateway, SettingsChanged, SettingsUnavailable
 from openpilot.starpilot.galaxy.onroad_layout import LayoutChanged, OnroadLayoutOwner
@@ -794,6 +795,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         self.respond(200, svg.encode(), 'image/svg+xml')
       elif path in ('/data/runtime.json', '/api/companion/runtime'):
         self.json(200, {'schemaVersion': 1, 'monitor': 'local', 'instance': INSTANCE})
+      elif path == '/api/companion/web-manifest':
+        self.json(200, web_manifest(WEB))
       elif path in ('/api/local-access', '/api/tmux/live', '/api/troubleshoot'):
         if not self.require_session():
           return

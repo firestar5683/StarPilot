@@ -7,8 +7,8 @@ android {
         applicationId = "link.firestar.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "1.1.20"
+        versionCode = 23
+        versionName = "1.1.21"
     }
     signingConfigs {
         create("companion") {
@@ -25,10 +25,3 @@ android {
 
 dependencies { testImplementation("junit:junit:4.13.2") }
 
-// Bundle this branch's screens for BLE. Wi-Fi/LAN continue to load live screens from comma.
-val bundleGalaxy = tasks.register<Sync>("bundleGalaxy") {
-    from("../../../galaxy/web")
-    into(layout.buildDirectory.dir("generated/galaxyAssets/galaxy"))
-}
-android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/galaxyAssets").get().asFile)
-tasks.named("preBuild").configure { dependsOn(bundleGalaxy) }

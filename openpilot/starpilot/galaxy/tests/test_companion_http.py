@@ -131,6 +131,33 @@ def test_bluetooth_runtime_tracks_upstream_restart_and_blocks_replay(companion_h
     assert proxy.handle({'id': 'replay', 'method': 'POST', 'path': path})['status'] == 501
 
 
+def test_web_manifest_lists_verifiable_files_the_apps_accept(companion_http):
+  import hashlib
+  from openpilot.starpilot.galaxy.server import WEB
+  request, _, _ = companion_http
+  status, body, _ = request('/api/companion/web-manifest')
+  assert status == 200
+  manifest = json.loads(body)
+  assert manifest['schema'] == 1
+  files = manifest['files']
+  paths = [entry['path'] for entry in files]
+  assert paths == sorted(paths) and len(set(paths)) == len(paths)
+  assert 'data/runtime.json' not in paths and not any(p.endswith('.sample.json') for p in paths)
+  for entry in files:
+    data = (WEB / entry['path']).read_bytes()
+    assert entry['size'] == len(data) and entry['sha256'] == hashlib.sha256(data).hexdigest()
+    assert request('/' + entry['path'])[1] == data
+  # The companion apps reject a download that breaks these rules, so catch a new root file or odd name here.
+  root_files = {'index.html', 'manifest.webmanifest', 'sentry-push-worker.js'}
+  root_dirs = ('assets/', 'css/', 'js/', 'vendor/', 'data/')
+  allowed = set('0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-./_')
+  assert 1 <= len(files) <= 512 and sum(entry['size'] for entry in files) <= 32 * 1024 * 1024
+  for entry in files:
+    assert set(entry['path']) <= allowed and entry['size'] <= 4 * 1024 * 1024
+    assert entry['path'] in root_files or entry['path'].startswith(root_dirs), entry['path']
+  assert {'index.html', 'js/boot.js', 'js/app.js', 'data/catalog.json'} <= set(paths)
+
+
 def test_phone_location_needs_local_session(tmp_path):
   access = GalaxyAccessOwner(tmp_path / 'access')
   access.configure('password123', lambda: True)

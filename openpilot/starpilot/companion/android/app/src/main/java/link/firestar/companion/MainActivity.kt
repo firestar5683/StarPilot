@@ -255,7 +255,9 @@ class MainActivity : Activity() {
             saved != null -> "Last found at ${address(saved)}"
             else -> "Tap to search"
         })
-        s.route(Route.BLUETOOTH, if (paired) RouteState.IDLE else RouteState.UNAVAILABLE, if (paired) "Paired, controls only" else "Not paired")
+        val cached = GalaxyUpdates.store(this).readyRoot != null
+        s.route(Route.BLUETOOTH, if (paired) RouteState.IDLE else RouteState.UNAVAILABLE,
+            if (!paired) "Not paired" else if (cached) "Paired, controls only" else "Paired, needs one Wi-Fi visit first")
     }
     private fun tryRoute(route: Route) {
         when (route) {
@@ -324,7 +326,7 @@ class MainActivity : Activity() {
             }
             .group("This app") {
                 action("Notification settings") { appNotificationSettings() }
-                action("Check Galaxy updates", GalaxyUpdates.store(this@MainActivity).status) {
+                action("Refresh Galaxy screens", GalaxyUpdates.store(this@MainActivity).status) {
                     GalaxyUpdates.checkAsync(this@MainActivity) { status -> runOnUiThread { message(status) } }
                 }
             }
@@ -508,6 +510,14 @@ class MainActivity : Activity() {
             }
             return
         }
+        if (GalaxyUpdates.store(this).readyRoot == null) {
+            // Bluetooth Galaxy serves pages saved from comma; the first download needs Wi-Fi/LAN.
+            disconnected().apply {
+                route(Route.BLUETOOTH, RouteState.FAILED, "Needs one Wi-Fi visit first")
+                detail(GalaxyAssetStore.NOT_DOWNLOADED + " After that, Bluetooth Galaxy works anywhere.")
+            }
+            return
+        }
         val permissions = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
             else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         if (permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) { requestPermissions(permissions, 2); return }
@@ -563,7 +573,7 @@ class MainActivity : Activity() {
         bluetoothMode = true
         origin = cachedOrigin
         val galaxy = GalaxyUpdates.store(this)
-        val galaxyRoot = galaxy.readyRoot.also { galaxy.inUseRoot = it }
+        val galaxyRoot = galaxy.readyRoot.also { galaxy.inUseRoot = it } ?: return
         val view = WebView(this); web = view
         view.setBackgroundColor(Color.rgb(7, 7, 18))
         view.settings.javaScriptEnabled = true; view.settings.domStorageEnabled = true
@@ -604,7 +614,7 @@ class MainActivity : Activity() {
                         "/data/runtime.json" -> "{\"schemaVersion\":1,\"monitor\":\"local\"}".toByteArray()
                         "/bluetooth-fetch.js" -> assets.open("bluetooth-fetch.js").use { it.readBytes() }
                         else -> (if (path == "/") "index.html" else path.removePrefix("/")).let { file ->
-                            if (galaxyRoot != null) File(galaxyRoot, file).readBytes() else assets.open("galaxy/$file").use { it.readBytes() }
+                            File(galaxyRoot, file).readBytes()
                         }
                     }
                     if (path == "/" || path == "/index.html") data = String(data).replace("<head>", "<head><script src=\"/bluetooth-fetch.js\"></script>").toByteArray()
@@ -624,7 +634,9 @@ class MainActivity : Activity() {
         showWeb(view, Route.BLUETOOTH, "Bluetooth, controls only", waitForPage = false)
         try { worker.execute { runCatching {
             val reply = transport.request(JSONObject().put("method", "GET").put("path", "/api/software/status?history=0").put("headers", JSONObject()).put("body", ""))
-            if (reply.optInt("status") == 200) GalaxyUpdates.remember(this, JSONObject(String(Base64.getDecoder().decode(reply.optString("body")))))
+            if (reply.optInt("status") == 200 && GalaxyUpdates.olderThanComma(this, JSONObject(String(Base64.getDecoder().decode(reply.optString("body")))))) {
+                runOnUiThread { if (web === view) Toast.makeText(this, "Galaxy screens are from an older comma build. Connect over Wi-Fi to refresh.", Toast.LENGTH_LONG).show() }
+            }
         } } } catch (_: RejectedExecutionException) {}
         view.loadUrl(if (share != null) "$origin/?share=${Uri.encode(share)}#/navigation" else "$origin/#/galaxy")
     }
@@ -645,7 +657,7 @@ class MainActivity : Activity() {
     }
     @Deprecated("Legacy back handling") override fun onBackPressed() { if (web?.canGoBack() == true) web?.goBack() else super.onBackPressed() }
     override fun onResume() {
-        super.onResume(); resumed = true; recovery.resumed(); AppUpdates.checkAsync(this); GalaxyUpdates.checkAsync(this)
+        super.onResume(); resumed = true; recovery.resumed(); AppUpdates.checkAsync(this)
         pendingInstallOrigin?.let { if (packageManager.canRequestPackageInstalls()) requestAppUpdate(it) }
     }
     override fun onPause() { resumed = false; super.onPause() }

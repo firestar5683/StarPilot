@@ -65,10 +65,11 @@ object AppUpdates {
         val wifi = Networks.wifi(context) ?: Networks.wifi(context, false) ?: return
         val origin = if (Networks.wifi(context) != null) Networks.ORIGIN else
             Networks.localOrigin(prefs.getString("host", "") ?: "")?.takeIf { it != Networks.ORIGIN } ?: return
+        // Screens are static files on comma, so refresh them even before the session check.
+        GalaxyUpdates.refreshAsync(context, wifi.first, origin)
         val session = request(wifi.first, origin, "/api/auth/session")
         if (!session.first.optBoolean("authenticated") || !session.first.optBoolean("localAccess")) return
         val status = request(wifi.first, origin, "/api/companion/status", session.second).first
-        runCatching { GalaxyUpdates.remember(context, request(wifi.first, origin, "/api/software/status?history=0", session.second).first) }
         if (Thread.currentThread().isInterrupted) return
         val available = status.optString("shippedVersion")
         val manager = context.getSystemService(NotificationManager::class.java)

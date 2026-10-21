@@ -2,7 +2,6 @@ package link.firestar.companion
 
 import android.content.Context
 import android.net.Network
-import android.net.NetworkCapabilities
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
@@ -47,9 +46,7 @@ data class GalaxyAssetManifest(val files: List<GalaxyAssetFile>) {
         private val REQUIRED = setOf("index.html", "js/boot.js", "js/app.js", "data/catalog.json")
 
         fun isHash(value: String) = value.length == 64 && value.all { it in '0'..'9' || it in 'a'..'f' }
-        fun sha256(data: ByteArray) = hex(MessageDigest.getInstance("SHA-256").digest(data))
-        fun gitBlobSha(data: ByteArray) = hex(MessageDigest.getInstance("SHA-1").apply { update("blob ${data.size}\u0000".toByteArray()); update(data) }.digest())
-        private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
+        fun sha256(data: ByteArray) = MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
 
         fun decode(text: String): GalaxyAssetManifest? {
             val lines = text.split('\n').dropLastWhile { it.isEmpty() }
@@ -63,34 +60,14 @@ data class GalaxyAssetManifest(val files: List<GalaxyAssetFile>) {
     }
 }
 
-/** The GitHub repository and commit comma is running. */
-data class GalaxyTarget(val repository: String, val commit: String) {
-    fun key() = "$repository@$commit"
+/** Comma has no page inventory endpoint: an older build that cannot share its Galaxy screens. */
+class GalaxyTooOldException : Exception()
 
-    companion object {
-        private val NAME = Regex("[A-Za-z0-9._-]{1,100}")
-
-        fun parse(remote: String?, commit: String?): GalaxyTarget? {
-            if (remote == null || commit == null || commit.length != 40 || !commit.all { it in '0'..'9' || it in 'a'..'f' }) return null
-            val path = listOf("https://github.com/", "git@github.com:", "ssh://git@github.com/")
-                .firstOrNull { remote.startsWith(it) }?.let { remote.removePrefix(it) } ?: return null
-            val parts = path.removeSuffix("/").removeSuffix(".git").split('/')
-            if (parts.size != 2 || parts.any { !NAME.matches(it) || it == "." || it == ".." }) return null
-            return GalaxyTarget("${parts[0]}/${parts[1]}", commit)
-        }
-
-        fun decode(key: String?): GalaxyTarget? = key?.split('@')?.takeIf { it.size == 2 }?.let { parse("https://github.com/${it[0]}", it[1]) }
-    }
-}
-
-class GalaxyMissingException : Exception()
-
-/** Where updates come from; Android implements it over HTTPS, tests implement it in memory. */
+/** What comma serves: its page inventory and the pages themselves. Android implements it over LAN HTTP, tests in memory. */
 interface GalaxySource {
-    class Entry(val path: String, val sha: String, val size: Int)
-    /** Throws GalaxyMissingException when the commit is not on GitHub. */
-    fun tree(target: GalaxyTarget): Pair<List<Entry>, Boolean>
-    fun raw(target: GalaxyTarget, path: String, limit: Int): ByteArray
+    class Listing(val commit: String?, val files: List<GalaxyAssetFile>)
+    fun manifest(): Listing
+    fun file(path: String, limit: Int): ByteArray
 }
 
 interface GalaxyPrefs {
@@ -98,9 +75,9 @@ interface GalaxyPrefs {
     fun set(key: String, value: String)
 }
 
-/** Keeps the Bluetooth copy of Galaxy matched to the build comma runs, like the iPhone app's GalaxyAssetStore. */
-class GalaxyAssetStore(private val cacheRoot: File, private val prefs: GalaxyPrefs, private val bundled: (String) -> ByteArray?) {
-    @Volatile var status = "Galaxy is available offline."; private set
+/** Keeps the Bluetooth copy of Galaxy matched to the pages comma serves, downloaded over Wi-Fi/LAN. */
+class GalaxyAssetStore(private val cacheRoot: File, private val prefs: GalaxyPrefs) {
+    @Volatile var status = NOT_DOWNLOADED; private set
     @Volatile var readyRoot: File? = null; private set
     @Volatile var inUseRoot: File? = null
 
@@ -108,52 +85,47 @@ class GalaxyAssetStore(private val cacheRoot: File, private val prefs: GalaxyPre
         // Validate saved assets before trusting a previous completed update.
         prefs.get(MANIFEST_KEY)?.takeIf { GalaxyAssetManifest.isHash(it) }?.let { hash ->
             val root = File(cacheRoot, hash)
-            if (verify(root)) { readyRoot = root; status = "Using saved Galaxy from GitHub." }
+            if (verify(root)) { readyRoot = root; status = "Using Galaxy screens saved from comma." }
         }
     }
 
-    fun check(source: GalaxySource, target: GalaxyTarget) {
-        if (readyRoot != null && prefs.get(COMMIT_KEY) == target.key()) { status = "Galaxy matches comma."; return }
-        status = "Checking GitHub for comma's Galaxy version…"
+    /** True when comma now runs a different build than the one these screens came from. */
+    fun olderThan(commaCommit: String?): Boolean {
+        val saved = prefs.get(COMMIT_KEY)?.takeIf { it.isNotEmpty() }
+        return readyRoot != null && saved != null && !commaCommit.isNullOrEmpty() && saved != commaCommit
+    }
+
+    /** Compares comma's inventory with the saved copy and downloads only what changed. Never skips on an unchanged commit. */
+    fun check(source: GalaxySource) {
+        status = "Checking comma for Galaxy updates…"
         var stage: File? = null
         val pool = Executors.newFixedThreadPool(4)
         try {
-            val commit = target.key()
-            val (entries, truncated) = source.tree(target)
-            if (truncated) throw GalaxyUpdateException("Galaxy update inventory is incomplete.")
-            val prefix = "$RESOURCE_PATH/"
-            val inventory = entries.filter { it.path.startsWith(prefix) && !it.path.endsWith("/runtime.json") && !it.path.endsWith(".sample.json") }
-                .sortedBy { it.path }
-            GalaxyAssetManifest(inventory.map { GalaxyAssetFile(it.path.removePrefix(prefix), "0".repeat(64), it.size) }).validate()
+            val listing = source.manifest()
+            val manifest = GalaxyAssetManifest(listing.files.sortedBy { it.path }).apply { validate() }
+            val data = manifest.encode().toByteArray()
+            val hash = GalaxyAssetManifest.sha256(data)
+            val saved = readyRoot
+            prefs.set(COMMIT_KEY, listing.commit ?: "")
+            if (saved?.name == hash) { status = "Galaxy matches comma."; return }
             cacheRoot.mkdirs()
             val staging = File(cacheRoot, "staging-" + UUID.randomUUID()).also { stage = it; it.mkdirs() }
-            val saved = readyRoot
-            val verified = mutableListOf<GalaxyAssetFile>()
-            for (batch in inventory.chunked(4)) {
+            var done = 0
+            for (batch in manifest.files.chunked(4)) {
                 if (Thread.currentThread().isInterrupted) throw InterruptedException()
                 val results = pool.invokeAll(batch.map { entry -> Callable {
-                    val path = entry.path.removePrefix(prefix)
-                    fun matches(bytes: ByteArray?) = bytes != null && bytes.size == entry.size && GalaxyAssetManifest.gitBlobSha(bytes) == entry.sha
-                    val local = saved?.let { File(it, path).takeIf(File::isFile)?.readBytes() }?.takeIf(::matches)
-                        ?: runCatching { bundled(path) }.getOrNull()?.takeIf(::matches)
-                    path to (local ?: source.raw(target, path, maxOf(entry.size, 1)).also {
+                    fun matches(bytes: ByteArray?) = bytes != null && bytes.size == entry.size && GalaxyAssetManifest.sha256(bytes) == entry.sha256
+                    val local = saved?.let { File(it, entry.path).takeIf(File::isFile)?.readBytes() }?.takeIf(::matches)
+                    entry.path to (local ?: source.file(entry.path, maxOf(entry.size, 1)).also {
                         if (!matches(it)) throw GalaxyUpdateException("Galaxy update verification failed.")
                     })
                 } })
                 for (result in results) {
                     val (path, bytes) = try { result.get() } catch (e: ExecutionException) { throw e.cause ?: e }
                     File(staging, path).apply { parentFile?.mkdirs(); writeBytes(bytes) }
-                    verified += GalaxyAssetFile(path, GalaxyAssetManifest.sha256(bytes), bytes.size)
                 }
-                status = "Preparing Galaxy update (${verified.size}/${inventory.size})…"
-            }
-            val manifest = GalaxyAssetManifest(verified.sortedBy { it.path }).apply { validate() }
-            val data = manifest.encode().toByteArray()
-            val hash = GalaxyAssetManifest.sha256(data)
-            if (saved?.name == hash) {
-                staging.deleteRecursively(); stage = null
-                prefs.set(COMMIT_KEY, commit)
-                status = "Galaxy matches comma."; return
+                done += batch.size
+                status = "Preparing Galaxy update ($done/${manifest.files.size})…"
             }
             File(staging, MANIFEST_FILE).writeBytes(data)
             val destination = File(cacheRoot, hash)
@@ -162,29 +134,28 @@ class GalaxyAssetStore(private val cacheRoot: File, private val prefs: GalaxyPre
             stage = null
             readyRoot = destination
             prefs.set(MANIFEST_KEY, hash)
-            prefs.set(COMMIT_KEY, commit)
             // Keep one previous version while an open WebView is still using it.
             val keep = setOfNotNull(destination.canonicalPath, saved?.canonicalPath, inUseRoot?.canonicalPath)
             cacheRoot.listFiles()?.filter { it.canonicalPath !in keep }?.forEach { it.deleteRecursively() }
             status = "Galaxy update ready. It applies when you next open Galaxy over Bluetooth."
         } catch (error: Exception) {
             stage?.deleteRecursively()
-            val using = if (readyRoot == null) "the Galaxy version included with this app" else "your saved Galaxy version"
+            val using = if (readyRoot == null) "No Galaxy screens are saved yet." else "Using your saved Galaxy screens."
             status = when (error) {
-                is GalaxyMissingException -> "Comma's build isn't on GitHub. Using $using."
-                is GalaxyUpdateException -> "${error.message} Using $using."
-                is InterruptedException -> "Galaxy update cancelled. Using $using."
-                is java.io.IOException -> "Couldn’t check Galaxy updates (network error). Using $using."
-                else -> "Galaxy update could not be read or saved. Using $using."
+                is GalaxyTooOldException -> "Comma’s software is too old to share Galaxy screens; update comma. $using"
+                is GalaxyUpdateException -> "${error.message} $using"
+                is InterruptedException -> "Galaxy update cancelled. $using"
+                is java.io.IOException -> "Couldn’t reach comma to check Galaxy updates. $using"
+                else -> "Galaxy update could not be read or saved. $using"
             }
         } finally { pool.shutdownNow() }
     }
 
     companion object {
-        const val RESOURCE_PATH = "openpilot/starpilot/galaxy/web"
+        const val NOT_DOWNLOADED = "Galaxy screens aren’t downloaded yet. Connect to comma over Wi-Fi once."
         const val MANIFEST_FILE = "manifest.txt"
         private const val MANIFEST_KEY = "galaxy.assets.manifest"
-        private const val COMMIT_KEY = "galaxy.target.commit"
+        private const val COMMIT_KEY = "galaxy.comma.commit"
 
         fun verify(root: File): Boolean {
             val data = File(root, MANIFEST_FILE).takeIf(File::isFile)?.readBytes() ?: return false
@@ -199,11 +170,11 @@ class GalaxyAssetStore(private val cacheRoot: File, private val prefs: GalaxyPre
     }
 }
 
-/** Android wiring: one store per process, checks over a network with validated internet. */
+/** Android wiring: one store per process; downloads run over the Wi-Fi/LAN network that reaches comma. */
 object GalaxyUpdates {
     private val executor = Executors.newSingleThreadExecutor()
     private val checking = AtomicBoolean()
-    private val rerun = AtomicBoolean()
+
     @Volatile private var store: GalaxyAssetStore? = null
 
     fun store(context: Context): GalaxyAssetStore = store ?: synchronized(this) {
@@ -213,71 +184,66 @@ object GalaxyUpdates {
             GalaxyAssetStore(File(app.filesDir, "galaxy-updates"), object : GalaxyPrefs {
                 override fun get(key: String) = prefs.getString(key, null)
                 override fun set(key: String, value: String) { prefs.edit().putString(key, value).apply() }
-            }) { path -> app.assets.open("galaxy/$path").use { it.readBytes() } }.also { store = it }
+            }).also { store = it }
         }
     }
 
-    private const val TARGET_KEY = "galaxy.target"
+    /** Whether comma's build, from a Bluetooth /api/software/status read, differs from the saved screens. */
+    fun olderThanComma(context: Context, status: JSONObject) =
+        store(context).olderThan(status.optJSONObject("installed")?.optString("commit")?.ifEmpty { null })
 
-    /** Record what comma runs, from /api/software/status, and check for its pages. */
-    fun remember(context: Context, status: JSONObject) {
-        val repository = status.optJSONObject("operations")?.optString("repository")?.ifEmpty { null } ?: return
-        val target = GalaxyTarget.parse("https://github.com/$repository", status.optJSONObject("installed")?.optString("commit")) ?: return
-        context.getSharedPreferences("companion", Context.MODE_PRIVATE).edit().putString(TARGET_KEY, target.key()).apply()
-        checkAsync(context)
+    /** Wi-Fi/LAN network and comma origin, chosen like the app update check does. */
+    private fun lan(context: Context): Pair<Network, String>? {
+        val prefs = context.getSharedPreferences("companion", Context.MODE_PRIVATE)
+        val hotspot = Networks.wifi(context)
+        val wifi = hotspot ?: Networks.wifi(context, false) ?: return null
+        val origin = if (hotspot != null) Networks.ORIGIN else
+            Networks.localOrigin(prefs.getString("host", "") ?: "")?.takeIf { it != Networks.ORIGIN } ?: return null
+        return wifi.first to origin
     }
 
-    fun checkAsync(context: Context, done: ((String) -> Unit)? = null) {
+    /** Download comma's screens from [network]/[origin] in the background. */
+    fun refreshAsync(context: Context, network: Network, origin: String, done: ((String) -> Unit)? = null) {
         val app = context.applicationContext
-        if (!checking.compareAndSet(false, true)) { rerun.set(true); done?.invoke(store(app).status); return }
+        if (!checking.compareAndSet(false, true)) { done?.invoke(store(app).status); return }
         executor.execute {
             try {
                 val store = store(app)
-                val target = GalaxyTarget.decode(app.getSharedPreferences("companion", Context.MODE_PRIVATE).getString(TARGET_KEY, null))
-                val network = internet(app)
-                when {
-                    target == null -> done?.invoke("Connect to comma once so the app can match its Galaxy version.")
-                    network == null -> done?.invoke("Couldn’t check Galaxy updates without internet on this phone.")
-                    else -> { store.check(GitHubSource(network), target); done?.invoke(store.status) }
-                }
-            } finally {
-                checking.set(false)
-                // A newer target may have arrived while this check ran.
-                if (rerun.getAndSet(false)) checkAsync(app)
-            }
+                store.check(CommaSource(network, origin))
+                done?.invoke(store.status)
+            } finally { checking.set(false) }
         }
     }
 
-    private fun internet(context: Context): Network? {
-        val cm = Networks.manager(context)
-        return cm.allNetworks.firstOrNull { network ->
-            cm.getNetworkCapabilities(network)?.let {
-                it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-            } == true
-        }
+    /** For the menu: refresh when the phone can reach comma over Wi-Fi/LAN, otherwise explain. */
+    fun checkAsync(context: Context, done: (String) -> Unit) {
+        val reach = lan(context)
+        if (reach == null) done("Join comma’s Wi-Fi or home network to refresh Galaxy screens.")
+        else refreshAsync(context, reach.first, reach.second, done)
     }
 
-    private class GitHubSource(private val network: Network) : GalaxySource {
-        override fun tree(target: GalaxyTarget): Pair<List<GalaxySource.Entry>, Boolean> {
-            val json = JSONObject(String(get("https://api.github.com/repos/${target.repository}/git/trees/${target.commit}?recursive=1", 8 * 1024 * 1024, 8000, missing = true)))
-            val tree = json.getJSONArray("tree")
-            val entries = (0 until tree.length()).map { tree.getJSONObject(it) }.filter { it.optString("type") == "blob" }
-                .map { GalaxySource.Entry(it.getString("path"), it.getString("sha"), it.optInt("size", -1)) }
-            return entries to json.optBoolean("truncated", true)
+    private class CommaSource(private val network: Network, private val origin: String) : GalaxySource {
+        override fun manifest(): GalaxySource.Listing {
+            val json = JSONObject(String(get("/api/companion/web-manifest", 1024 * 1024, 5000, inventory = true)))
+            if (json.optInt("schema") != 1) throw GalaxyTooOldException()
+            val array = json.getJSONArray("files")
+            val files = (0 until array.length()).map { array.getJSONObject(it) }
+                .map { GalaxyAssetFile(it.getString("path"), it.getString("sha256"), it.getInt("size")) }
+            return GalaxySource.Listing(json.optString("commit").ifEmpty { null }, files)
         }
 
-        override fun raw(target: GalaxyTarget, path: String, limit: Int) =
-            get("https://raw.githubusercontent.com/${target.repository}/${target.commit}/${GalaxyAssetStore.RESOURCE_PATH}/$path", limit, 15000)
+        override fun file(path: String, limit: Int) = get("/$path", limit, 15000)
 
-        private fun get(url: String, limit: Int, timeout: Int, missing: Boolean = false): ByteArray {
-            val connection = network.openConnection(URL(url)) as HttpURLConnection
+        private fun get(path: String, limit: Int, timeout: Int, inventory: Boolean = false): ByteArray {
+            val connection = network.openConnection(URL(origin + path)) as HttpURLConnection
             try {
                 connection.connectTimeout = timeout; connection.readTimeout = timeout
                 connection.instanceFollowRedirects = false
-                connection.setRequestProperty("Accept", "application/vnd.github+json")
-                connection.setRequestProperty("User-Agent", "Galaxy-Android")
-                if (missing && connection.responseCode in setOf(404, 422)) throw GalaxyMissingException()
-                if (connection.responseCode != 200) throw GalaxyUpdateException("GitHub update check returned HTTP ${connection.responseCode}.")
+                // Hashes cover the file bytes as stored, so ask for them unencoded.
+                connection.setRequestProperty("Accept-Encoding", "identity")
+                // Older comma builds answer 401 (no session) or 404 for the inventory path.
+                if (inventory && connection.responseCode in setOf(401, 404)) throw GalaxyTooOldException()
+                if (connection.responseCode != 200) throw GalaxyUpdateException("Comma returned HTTP ${connection.responseCode} for Galaxy screens.")
                 return connection.inputStream.use { read(it, limit) }
             } finally { connection.disconnect() }
         }

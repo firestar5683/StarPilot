@@ -75,18 +75,29 @@ StarPilot normally; the app confirms the completed update on launch.
 | Kotlin/Java code, native bridge, updater, phone GPS, Bluetooth or services | Yes |
 | Android manifest, permissions, resources, icons, Gradle config or dependencies | Yes |
 | Files in `android/app/src/main/assets/`, including `bluetooth-fetch.js` | Yes |
-| Galaxy HTML/CSS/JS used over Bluetooth | No, if comma's commit is on GitHub: the app downloads Galaxy from that exact commit (see below) |
+| Galaxy HTML/CSS/JS used over Bluetooth | No: the app downloads these pages from comma over Wi-Fi/LAN (see below) |
 | Galaxy HTML/CSS/JS used over Wi-Fi/LAN | No: screens load from comma |
-| Comma-side Python/services/API changes only | No, unless the phone protocol or bundled UI also needs a change |
+| Comma-side Python/services/API changes only | No, unless the phone protocol also needs a change |
 
-### Galaxy updates over Bluetooth
+### Galaxy screens over Bluetooth
 
-The app downloads Galaxy from the repository and commit comma is running, so custom branches and their own pages
-work too. It learns them from `/api/software/status` (`operations.repository` and `installed.commit`), the same source the iPhone app uses, each time it connects,
-and checks when it opens or you choose **Check Galaxy updates** in the menu. Files come from GitHub over the phone's own
-internet, are verified against the commit's tree, and apply the next time Bluetooth Galaxy opens. If comma's remote
-isn't GitHub or the commit isn't pushed, or an update fails, the app keeps its current copy. A fresh install uses the
-copy bundled in the APK.
+Neither app bundles Galaxy's pages. Bluetooth Galaxy shows a copy the app saved from comma, so **connect to comma over
+Wi-Fi/LAN once** before using Bluetooth. Until then the Bluetooth route says it needs one Wi-Fi visit.
+
+- Whenever the phone reaches comma over Wi-Fi/LAN (and from **Refresh Galaxy screens** in the menu), the app reads
+  `GET /api/companion/web-manifest`, which lists every file in `galaxy/web` with its SHA-256 and comma's commit. It downloads
+  only the files that changed, verifies each hash, and keeps the old copy if anything fails.
+- The pages come from comma itself, so custom and unpushed branches work and nothing depends on GitHub.
+- If comma updated since the last Wi-Fi visit, Bluetooth still opens the saved copy and says it is from an older comma build.
+  Join comma's Wi-Fi to refresh.
+- A comma without the manifest route is too old to share its screens; update comma.
+
+### Handing the signing key to another developer
+
+Updates install over an existing app only when signed with the same `companion.jks`; a different key forces every user to
+uninstall first. To pass signing on, copy `~/.starpilot/companion.jks` and `~/.starpilot/companion-signing-password` to the
+new developer over a private channel (a password manager share, not git or chat), or have them point `COMPANION_KEYSTORE`
+and `COMPANION_PASSWORD_FILE` at wherever the files live. Keep a backup: losing the key means a forced reinstall.
 
 ## Tests
 
