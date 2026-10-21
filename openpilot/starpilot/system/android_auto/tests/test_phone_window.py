@@ -36,9 +36,20 @@ class PhoneWindowTest(unittest.TestCase):
                                  process_lock=Mock(), receiver=CAR)
     self.owner.phone_lease = self.lease  # ty: ignore[invalid-assignment]  # test double
 
+  def window_call(self, operation):
+    # A closed window's watcher briefly holds the owner lock while it lets go of the adapter.
+    for _ in range(300):
+      try:
+        return self.owner.phone_window(operation, SESSION)
+      except BluetoothRejected as error:
+        if str(error) != 'Bluetooth is busy':
+          raise
+        time.sleep(0.01)
+    self.fail('owner stayed busy')
+
   def claimed(self):
     for _ in range(300):
-      result = self.owner.phone_window('status', SESSION)
+      result = self.window_call('status')
       if result and result['pairing'] and result['pairing']['prompt']:
         return result['pairing']
       time.sleep(0.01)
@@ -60,6 +71,20 @@ class PhoneWindowTest(unittest.TestCase):
     self.assertIs(self.owner.phone_lease, self.lease)
     self.assertFalse(self.lease.released)
     self.assertEqual(self.owner.journal_path.read_text(), '{"lease": "original visibility"}')
+
+  def test_unclaimed_window_gives_way_to_a_new_one_but_a_claimed_window_blocks(self):
+    self.assertIsNotNone(self.window_call('accept_pair'))
+    first = self.owner.pairing
+    assert first is not None
+    self.claimed()
+    first.path = ''  # nobody has claimed it
+    self.assertIsNotNone(self.window_call('accept_pair'))
+    self.assertTrue(first.done.is_set())
+    self.assertIsNot(self.owner.pairing, first)
+    self.claimed()
+    with self.assertRaises(BluetoothRejected) as error:
+      self.window_call('accept_pair')
+    self.assertEqual((error.exception.code, str(error.exception)), ('busy', 'Pairing is in progress'))
 
   def test_no_projection_means_not_handled(self):
     self.owner.phone_lease = None

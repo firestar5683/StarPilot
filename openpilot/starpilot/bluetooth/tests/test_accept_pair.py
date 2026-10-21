@@ -259,6 +259,20 @@ class AcceptPairOwnerTest(unittest.TestCase):
       self.assertEqual(self.paired, [])
       self.request_when_free('stop_scan', session=self.identity)
 
+  def test_unclaimed_window_gives_way_to_a_new_window(self):
+    self.request_when_free('accept_pair', session=self.identity)
+    self.wait_for_claim()
+    first = self.owner.pairing
+    assert first is not None
+    first.path = ''  # no phone has claimed it
+    self.request_when_free('accept_pair', session=self.identity)
+    self.assertTrue(first.done.is_set())
+    self.assertIsNot(self.owner.pairing, first)
+    assert self.owner.pairing is not None
+    self.assertEqual(self.owner.pairing.state, 'pairing')
+    self.request_when_free('cancel_pair', session=self.identity)
+    self.assertTrue(self.owner.pairing.done.wait(2))
+
   def test_declined_or_canceled_window_does_not_report_a_phone(self):
     self.owner.request('accept_pair', session=self.identity)
     self.wait_for_claim()

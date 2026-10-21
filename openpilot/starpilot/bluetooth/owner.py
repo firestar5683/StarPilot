@@ -870,7 +870,9 @@ class BluetoothOwner:
           raise BluetoothRejected('Pairing changed')
         self.pairing.cancel()
         return self.snapshot(session=session)
-      if operation not in ('stop_scan', 'accept_pair'):
+      if operation != 'stop_scan':
+        # An unclaimed window gives way to everything, including a new window, so reopening Pair phone never
+        # waits out the old one. A window a phone has already claimed still blocks (below).
         self._end_idle_window()
       if self.pairing is not None and self.pairing.state == 'pairing' and operation != 'stop_scan':
         raise BluetoothRejected('Pairing is in progress', code='busy')

@@ -700,6 +700,8 @@ class SharedBluetoothOwner(BluetoothOwner):
       if operation == 'accept_pair':
         if not self.parked():
           raise BluetoothRejected('Park before pairing a phone', code='park_required')
+        # A window nobody has claimed yet gives way to a new one; a claimed one still blocks.
+        self._end_idle_window()
         if self.pairing is not None and not self.pairing.done.is_set():
           raise BluetoothRejected('Pairing is in progress', code='busy')
         window = OpenPairingSession(session, lambda: self.session_valid(session) and self.parked(), self.clock)
