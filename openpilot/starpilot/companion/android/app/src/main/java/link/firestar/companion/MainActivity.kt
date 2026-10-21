@@ -457,8 +457,10 @@ class MainActivity : Activity() {
             // Already on comma's Wi-Fi/LAN: open its pairing window ourselves so nobody has to touch comma.
             var windowNote = ""
             Networks.commaLan(this)?.let { (network, origin) ->
-                windowNote = if (LanPairing.openWindow(network, origin)) "Opened comma's pairing window over Wi-Fi.\n"
-                    else "Couldn't open comma's window over Wi-Fi. On comma tap Settings > Bluetooth > Pair phone.\n"
+                val why = LanPairing.openWindow(network, origin)
+                if (why != null) android.util.Log.w("GalaxyPair", "Could not open comma's window over Wi-Fi: $why")
+                windowNote = if (why == null) "Opened comma's pairing window over Wi-Fi.\n"
+                    else "Couldn't open comma's window over Wi-Fi ($why). On comma tap Settings > Bluetooth > Pair phone.\n"
                 runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail(windowNote.trim()) }
             }
             val transport = BleTransport(this, null)
@@ -506,7 +508,7 @@ class MainActivity : Activity() {
         Thread {
             try {
                 // Quietly give up when comma cannot open a window (older comma, driving): Pair with comma stays in the menu.
-                if (!LanPairing.openWindow(lan.first, lan.second)) return@Thread
+                LanPairing.openWindow(lan.first, lan.second)?.let { why -> android.util.Log.w("GalaxyPair", "Auto-pair skipped: $why"); return@Thread }
                 runOnUiThread { Toast.makeText(this, "Pairing this phone with comma for Bluetooth and music…", Toast.LENGTH_LONG).show() }
                 val transport = BleTransport(this, null)
                 try {

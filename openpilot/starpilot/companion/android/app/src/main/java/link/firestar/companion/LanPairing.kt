@@ -9,8 +9,8 @@ import java.net.URL
 interface LanPairingApi {
     /** Session cookie when comma accepts this phone's local Galaxy session, otherwise null. */
     fun session(): String?
-    /** POST [body] to [path] with that session; returns the HTTP status. */
-    fun post(path: String, body: String, cookie: String): Int
+    /** POST [body] to [path] with that session; returns the HTTP status and response body. */
+    fun post(path: String, body: String, cookie: String): Pair<Int, String>
 }
 
 /**
@@ -21,12 +21,17 @@ object LanPairing {
     const val WINDOW_PATH = "/api/bluetooth/action"
     const val WINDOW_BODY = "{\"operation\":\"accept_pair\"}"
 
-    fun openWindow(api: LanPairingApi): Boolean = runCatching {
-        val cookie = api.session() ?: return false
-        api.post(WINDOW_PATH, WINDOW_BODY, cookie) == 200
-    }.getOrDefault(false)
+    /** Null when the window opened, otherwise why not, in words fit for the pairing screen. */
+    fun openWindow(api: LanPairingApi): String? = try {
+        val cookie = api.session()
+        if (cookie == null) "comma gave this phone no local Galaxy session"
+        else {
+            val (status, body) = api.post(WINDOW_PATH, WINDOW_BODY, cookie)
+            if (status == 200) null else "comma answered HTTP $status${Regex("\"code\":\"([a-z_]+)\"").find(body)?.let { " (${it.groupValues[1]})" }.orEmpty()}"
+        }
+    } catch (e: Exception) { e.message ?: e.javaClass.simpleName }
 
-    fun openWindow(network: Network, origin: String): Boolean = openWindow(object : LanPairingApi {
+    fun openWindow(network: Network, origin: String): String? = openWindow(object : LanPairingApi {
         override fun session(): String? {
             val connection = open(network, origin, "/api/auth/session", "")
             try {
@@ -37,13 +42,15 @@ object LanPairing {
             } finally { connection.disconnect() }
         }
 
-        override fun post(path: String, body: String, cookie: String): Int {
+        override fun post(path: String, body: String, cookie: String): Pair<Int, String> {
             val connection = open(network, origin, path, cookie)
             try {
                 connection.requestMethod = "POST"; connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json")
                 connection.outputStream.use { it.write(body.toByteArray()) }
-                return connection.responseCode
+                val status = connection.responseCode
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                return status to (stream?.bufferedReader()?.use { it.readText() } ?: "")
             } finally { connection.disconnect() }
         }
     })
