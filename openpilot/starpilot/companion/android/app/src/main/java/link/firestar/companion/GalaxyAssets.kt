@@ -106,8 +106,7 @@ class GalaxyAssetStore(private val cacheRoot: File, private val prefs: GalaxyPre
             val data = manifest.encode().toByteArray()
             val hash = GalaxyAssetManifest.sha256(data)
             val saved = readyRoot
-            prefs.set(COMMIT_KEY, listing.commit ?: "")
-            if (saved?.name == hash) { status = "Galaxy matches comma."; return }
+            if (saved?.name == hash) { prefs.set(COMMIT_KEY, listing.commit ?: ""); status = "Galaxy matches comma."; return }
             cacheRoot.mkdirs()
             val staging = File(cacheRoot, "staging-" + UUID.randomUUID()).also { stage = it; it.mkdirs() }
             var done = 0
@@ -134,6 +133,7 @@ class GalaxyAssetStore(private val cacheRoot: File, private val prefs: GalaxyPre
             stage = null
             readyRoot = destination
             prefs.set(MANIFEST_KEY, hash)
+            prefs.set(COMMIT_KEY, listing.commit ?: "")
             // Keep one previous version while an open WebView is still using it.
             val keep = setOfNotNull(destination.canonicalPath, saved?.canonicalPath, inUseRoot?.canonicalPath)
             cacheRoot.listFiles()?.filter { it.canonicalPath !in keep }?.forEach { it.deleteRecursively() }

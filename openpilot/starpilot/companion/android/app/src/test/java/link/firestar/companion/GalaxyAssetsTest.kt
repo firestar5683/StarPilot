@@ -105,6 +105,16 @@ class GalaxyAssetsTest {
         assertTrue(store.olderThan("b".repeat(40)))
     }
 
+    @Test fun aFailedDownloadStillLeavesTheSavedScreensOlderThanComma() {
+        val store = store()
+        store.check(Source(commit = "a".repeat(40)))
+        files["js/app.js"] = "changed".toByteArray()
+        store.check(Source(commit = "b".repeat(40)).apply { corrupt = true })
+        assertTrue(store.olderThan("b".repeat(40)))
+        store.check(Source(commit = "b".repeat(40)))
+        assertFalse(store.olderThan("b".repeat(40)))
+    }
+
     @Test fun tamperedSavedCopyIsNotTrusted() {
         store().check(Source())
         File(store().readyRoot!!, "js/app.js").writeText("tampered")
