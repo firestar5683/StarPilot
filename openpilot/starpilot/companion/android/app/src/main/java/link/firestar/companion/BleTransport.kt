@@ -18,6 +18,8 @@ import java.util.concurrent.TimeUnit
 @SuppressLint("MissingPermission")
 /** [hello] ({"name", "replaces"}) is sent once with the first request so comma can label this phone and drop its old key. */
 class BleTransport(context: Context, private val key: ByteArray?, private val hello: JSONObject? = null) : Closeable {
+    /** Reports what the connection is doing, so a slow pairing shows where it waits. */
+    @Volatile var onPhase: (String) -> Unit = {}
     private val context: Context = context.applicationContext
     companion object {
         fun uuid(part: String): UUID = UUID.fromString("bd49000$part-6dc1-4de7-a7d0-6cdb441f7650")
@@ -92,6 +94,7 @@ class BleTransport(context: Context, private val key: ByteArray?, private val he
         if (!adapter.isEnabled) throw IOException("Enable Bluetooth on your phone and comma")
         val remembered = preferredAddress?.let { runCatching { adapter.getRemoteDevice(it) }.getOrNull() }
         val device = remembered ?: run {
+            onPhase("Looking for comma over Bluetooth…")
             val scanner = adapter.bluetoothLeScanner ?: throw IOException("Bluetooth scanner unavailable")
             val found = LinkedBlockingQueue<BluetoothDevice>()
             val scan = object : ScanCallback() {
@@ -105,6 +108,7 @@ class BleTransport(context: Context, private val key: ByteArray?, private val he
         }
         if (closed) throw IOException("Connection canceled")
         events.clear()
+        onPhase("Found comma. Connecting…")
         gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
         try {
             await("connect", if (remembered != null) 4 else 12)
@@ -124,6 +128,7 @@ class BleTransport(context: Context, private val key: ByteArray?, private val he
         connecting.incrementAndGet()
         try {
             linkUp(null)
+            onPhase("Connected. Waiting for comma's pairing window…")
             val frame = ByteBuffer.allocate(4 + body.size).putInt(body.size).put(body).array()
             for (packet in BleWire.packets(frame, packetSize)) write(packet)
             val assembler = BleWire.Assembler()

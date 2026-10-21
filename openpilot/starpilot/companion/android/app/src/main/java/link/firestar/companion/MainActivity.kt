@@ -461,6 +461,7 @@ class MainActivity : Activity() {
                 }
             }
             val transport = BleTransport(this, null)
+            transport.onPhase = { text -> runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail(text) } }
             ble = transport
             try {
                 val claim = ClaimPairing.claim(transport, phoneName())
@@ -477,7 +478,13 @@ class MainActivity : Activity() {
                 }
             } catch (e: Exception) {
                 transport.close()
-                runOnUiThread { if (generation == connectionGeneration.get()) pairingNotice("Couldn't pair: ${e.message ?: "comma didn't answer"}", pairing.load() != null) }
+                android.util.Log.w("GalaxyPair", "Pairing failed", e)
+                runOnUiThread {
+                    if (generation == connectionGeneration.get()) {
+                        screen?.headline("Pairing didn't finish")
+                        pairingNotice("Couldn't pair: ${e.message ?: "comma didn't answer"}", pairing.load() != null)
+                    } else android.util.Log.w("GalaxyPair", "Pairing result dropped: a newer connection attempt replaced it")
+                }
             }
         }.start()
     }
