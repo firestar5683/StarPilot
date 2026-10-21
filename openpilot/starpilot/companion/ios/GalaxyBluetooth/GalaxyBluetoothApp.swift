@@ -191,7 +191,7 @@ final class AppModel: ObservableObject {
         let cache = GalaxyReadCache(transport: transport, sessionID: {
             transport.usesLAN ? "lan-" + lan.generation : "ble-" + bluetooth.sessionIdentifier
         })
-        server = LoopbackServer(transport: cache, webRoot: assets.readyRoot ?? assets.bundledRoot)
+        server = LoopbackServer(transport: cache, webRoot: assets.readyRoot)
         transport.mode = mode
         diagnostics.transport = transport; diagnostics.lan = lan
         galaxyPage.recover = { [weak self] automatic in self?.recoverGalaxy(automatic: automatic) }
@@ -274,16 +274,21 @@ final class AppModel: ObservableObject {
         defer { matchingGalaxy = false }
         let bleSession = bluetooth.sessionIdentifier
         let lanSession = lan.generation
-        do {
-            let response = try await transport.request(path: "/api/software/status?history=0", method: "GET", headers: [:], body: Data())
-            guard wantsConnection, transport.connected, bluetooth.sessionIdentifier == bleSession, lan.generation == lanSession else { return }
-            guard response.status == 200 else { throw BridgeError.message("Comma’s Galaxy version could not be read.") }
-            let source = try GalaxySource.parse(response.bodyData)
-            await assets.check(source: source, stillCurrent: { self.wantsConnection && self.transport.connected && self.bluetooth.sessionIdentifier == bleSession && self.lan.generation == lanSession })
-        } catch {
-            if bluetooth.sessionIdentifier == bleSession && lan.generation == lanSession {
-                assets.unavailable("Couldn’t match Galaxy to comma.")
-            }
+        let stillCurrent = { self.wantsConnection && self.transport.connected && self.bluetooth.sessionIdentifier == bleSession && self.lan.generation == lanSession }
+        if transport.usesLAN {
+            // Pages come straight from comma, never through the Bluetooth bridge or the read cache.
+            let lan = self.lan
+            await assets.check(fetch: { path, _ in
+                let response = try await lan.request(path: path, method: "GET", headers: [:], body: Data())
+                return (response.status, response.bodyData)
+            }, stillCurrent: stillCurrent)
+        } else if assets.readyRoot != nil {
+            // Over Bluetooth nothing can be downloaded; just say when the saved screens are behind comma.
+            guard let response = try? await transport.request(path: "/api/software/status?history=0", method: "GET", headers: [:], body: Data()),
+                  response.status == 200, stillCurrent(),
+                  let status = try? JSONSerialization.jsonObject(with: response.bodyData) as? [String: Any],
+                  let installed = status["installed"] as? [String: Any] else { return }
+            assets.noteCommaBuild(commit: installed["commit"] as? String)
         }
     }
     func openIfReady() {
@@ -291,9 +296,12 @@ final class AppModel: ObservableObject {
         openingGalaxy = true
         Task { @MainActor in
             defer { openingGalaxy = false }
-            await checkGalaxyUpdates()
+            if transport.usesLAN ? Date().timeIntervalSince(lastGalaxyMatch) > 15 : assets.readyRoot != nil && !matchingGalaxy {
+                await checkGalaxyUpdates()
+            }
             guard wantsConnection, transport.connected, !opened else { return }
-            let root = assets.readyRoot ?? assets.bundledRoot
+            // Bluetooth Galaxy runs from screens saved from comma; the first download needs Wi-Fi/LAN.
+            guard let root = assets.readyRoot else { return }
             assets.inUseRoot = root
             server.useWebRoot(root)
             opened = true
@@ -485,7 +493,7 @@ final class AppModel: ObservableObject {
                     if Date().timeIntervalSince(lastGalaxyMatch) > 60 && !openingGalaxy {
                         Task { await self.checkGalaxyUpdates() }
                     }
-                    connectionMessage = "Connected over \(transport.label)."
+                    connectionMessage = "Connected over \(transport.label)." + (opened || assets.readyRoot != nil ? "" : " " + assets.status)
                     if offerAudioPairing { offerAudioPairing = false; startAudioPairing() }
                 } else if mode == .bluetooth {
                     connectionMessage = "Reconnecting over Bluetooth. If you forgot this phone on comma, open Pair phone on comma and Pair with comma here."

@@ -13,9 +13,9 @@ final class LoopbackServer: ObservableObject {
     private var availabilityTask: Task<Bool, Never>?
     private(set) var recentRequests: [String] = []
     var diagnosticSummary: String {
-        let mobile = FileManager.default.fileExists(atPath: webRoot.appendingPathComponent("index.html").path)
-        let script = FileManager.default.fileExists(atPath: webRoot.appendingPathComponent("js/app.js").path)
-        return "Local server ready: \(url != nil)\nLocal listener state: \(listenerState)\nRecent local server events:\n\(lifecycleEvents.joined(separator: "\n"))\nAsset source: \(webRoot.lastPathComponent == "Web" ? "bundled" : "saved update")\nMobile HTML exists: \(mobile)\nGalaxy script exists: \(script)\nLocal server error present: \(!error.isEmpty)"
+        let mobile = webRoot.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("index.html").path) } ?? false
+        let script = webRoot.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("js/app.js").path) } ?? false
+        return "Local server ready: \(url != nil)\nLocal listener state: \(listenerState)\nRecent local server events:\n\(lifecycleEvents.joined(separator: "\n"))\nAsset source: \(webRoot == nil ? "not downloaded" : "saved from comma")\nMobile HTML exists: \(mobile)\nGalaxy script exists: \(script)\nLocal server error present: \(!error.isEmpty)"
     }
     static func reportPath(_ target: String) -> String {
         let path = String(target.prefix(512)).split(separator: "?", maxSplits: 1).first.map(String.init) ?? ""
@@ -26,7 +26,7 @@ final class LoopbackServer: ObservableObject {
     let localSecret = UUID().uuidString + UUID().uuidString
     private var listener: NWListener?
     private var connections: [UUID: LocalConnection] = [:]
-    private var webRoot: URL
+    private var webRoot: URL?
     private let transport: any GalaxyRequestTransport
     private let probe: (URL) async -> Bool
     private var catalog: Data?
@@ -41,8 +41,7 @@ final class LoopbackServer: ObservableObject {
          }) {
         self.transport = transport
         self.probe = probe
-        let root = webRoot ?? Bundle.main.resourceURL!.appendingPathComponent("Web", isDirectory: true)
-        self.webRoot = root
+        self.webRoot = webRoot
 
     }
 
@@ -266,11 +265,12 @@ final class LoopbackServer: ObservableObject {
                 return LocalResponse(status: response.status, headers: response.headers, body: response.bodyData)
             } catch { return .error(502, error.localizedDescription) }
         }
-        guard ["GET", "HEAD"].contains(request.method) else { return .error(405, "Method is not supported for bundled files.") }
+        guard ["GET", "HEAD"].contains(request.method) else { return .error(405, "Method is not supported for Galaxy files.") }
+        guard let webRoot else { return .error(503, "Galaxy screens aren’t downloaded yet. Connect to comma over Wi-Fi once.") }
         let assetPath = path == "/" ? "index.html" : String(path.dropFirst())
         let file = webRoot.appendingPathComponent(assetPath).standardizedFileURL
         guard file.path.hasPrefix(webRoot.standardizedFileURL.path + "/"), var data = try? Data(contentsOf: file) else {
-            return .error(404, "Bundled Galaxy asset was not found.")
+            return .error(404, "Galaxy asset was not found.")
         }
         if assetPath == "js/toggle-search.js", let source = String(data: data, encoding: .utf8),
            source.contains("export class SettingsSearchIndex"), source.contains("export const ToggleSearch") {

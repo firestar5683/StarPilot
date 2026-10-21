@@ -16,7 +16,7 @@ import Foundation
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try Data("Galaxy test page".utf8).write(to: root.appendingPathComponent("index.html"))
-        let source = try Data(contentsOf: URL(fileURLWithPath: "GalaxyBluetooth/Resources/Web/js/toggle-search.js"))
+        let source = try Data(contentsOf: URL(fileURLWithPath: "../../galaxy/web/js/toggle-search.js"))
         try FileManager.default.createDirectory(at: root.appendingPathComponent("js"), withIntermediateDirectories: true)
         let searchFile = root.appendingPathComponent("js/toggle-search.js")
         try source.write(to: searchFile)

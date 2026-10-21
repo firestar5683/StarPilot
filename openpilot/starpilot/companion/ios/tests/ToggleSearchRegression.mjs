@@ -1,8 +1,8 @@
 import fs from 'node:fs'
 import vm from 'node:vm'
 import assert from 'node:assert/strict'
-const source = fs.readFileSync('GalaxyBluetooth/Resources/Web/js/toggle-search.js', 'utf8').replace(/^import .*\n/gm, '').replaceAll('export ', '')
-const settings = fs.readFileSync('GalaxyBluetooth/Resources/Web/js/settings.js', 'utf8')
+const source = fs.readFileSync('../../galaxy/web/js/toggle-search.js', 'utf8').replace(/^import .*\n/gm, '').replaceAll('export ', '')
+const settings = fs.readFileSync('../../galaxy/web/js/settings.js', 'utf8')
 const sections = settings.slice(settings.indexOf('export const SETTINGS_SECTIONS'), settings.indexOf('\n\n// Crop')).replace('export ', '')
 const adapter = fs.readFileSync('GalaxyBluetooth/LoopbackServer.swift', 'utf8').match(/static let nativeSearchScript = #"""\n([\s\S]*?)    """#/)[1]
 function probe(timeout = 20000) {

@@ -10,7 +10,6 @@ LARGE_TEXT_FILES = frozenset((
   'openpilot/selfdrive/selfdrived/selfdrived.py',
   'openpilot/starpilot/galaxy/server.py',
   'openpilot/starpilot/galaxy/web/js/onroad-layout.js',
-  'openpilot/starpilot/companion/ios/GalaxyBluetooth/Resources/Web/js/onroad-layout.js',
   'openpilot/cereal/gen/cpp/car.capnp.c++',
   'openpilot/cereal/gen/cpp/car.capnp.h',
   'openpilot/cereal/gen/cpp/custom.capnp.c++',

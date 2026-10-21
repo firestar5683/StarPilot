@@ -18,7 +18,7 @@ The native app does not request access to the iPhone's contacts, microphone or p
 
 ## Network services
 
-Version 1.0.1 checks the StarPilot developer integration repository `dirwin31/openpilot`, branch `companion-ios-phone-music`, on GitHub for Galaxy interface updates and downloads those files. GitHub receives the network information needed to serve these requests, including the connecting IP address and requested resource. Its [privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement) describes its handling of service information.
+The app downloads Galaxy's interface files from your own comma over your local network (or its Wi-Fi hotspot) and saves them on the iPhone so Bluetooth can show them. It does not contact GitHub or any other server for these files.
 
 The native companion does not include advertising or an advertising-tracking SDK. Its diagnostics screen does not automatically upload reports to the publisher.
 

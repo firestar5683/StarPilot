@@ -31,53 +31,34 @@ struct GalaxyAssetManifest: Codable {
     static func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 }
 
-struct GalaxySource: Equatable {
-    let repository: String
-    let commit: String
-    let branch: String
-    var key: String { repository + "@" + commit }
-
-    init(repository: String, commit: String, branch: String) throws {
-        let parts = repository.split(separator: "/", omittingEmptySubsequences: false)
-        guard parts.count == 2, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && $0.utf8.allSatisfy { (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45,46,95].contains($0) } }),
-              commit.count == 40, commit.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
-            throw BridgeError.message("Comma did not provide a supported public GitHub revision.")
-        }
-        self.repository = repository; self.commit = commit; self.branch = branch
-    }
-    static func parse(_ data: Data) throws -> GalaxySource {
-        struct Status: Decodable {
-            struct Installed: Decodable { let commit: String; let branch: String }
-            struct Operations: Decodable { let repository: String? }
-            let installed: Installed
-            let operations: Operations
-        }
-        let status = try JSONDecoder().decode(Status.self, from: data)
-        return try GalaxySource(repository: status.operations.repository ?? "", commit: status.installed.commit, branch: status.installed.branch)
-    }
+/// Comma's inventory of its Galaxy pages, from `GET /api/companion/web-manifest`.
+struct GalaxyListing: Decodable {
+    let schema: Int
+    let commit: String?
+    let files: [GalaxyAssetManifest.File]
 }
 
+/// One GET to comma over Wi-Fi/LAN: the HTTP status and body.
+typealias GalaxyPageFetch = @Sendable (_ path: String, _ limit: Int) async throws -> (status: Int, data: Data)
+
+/// Keeps the Bluetooth copy of Galaxy matched to the pages comma serves, downloaded over Wi-Fi/LAN.
 @MainActor
 final class GalaxyAssetStore: ObservableObject {
-    static let resourcePath = "openpilot/starpilot/galaxy/web"
-    @Published private(set) var status = "Galaxy is available offline."
+    static let notDownloaded = "Galaxy screens aren’t downloaded yet. Connect to comma over Wi-Fi once."
+    static let tooOld = "Comma’s software is too old to share Galaxy screens; update comma."
+    @Published private(set) var status = GalaxyAssetStore.notDownloaded
     @Published private(set) var checking = false
     @Published private(set) var readyRoot: URL?
     var inUseRoot: URL?
-    let bundledRoot: URL
     private let cacheRoot: URL
     private let defaults: UserDefaults
-    private let fetch: (URLRequest, Int) async throws -> (Data, HTTPURLResponse)
-    init(bundledRoot: URL? = nil, cacheRoot: URL? = nil, defaults: UserDefaults = .standard,
-         fetch: @escaping (URLRequest, Int) async throws -> (Data, HTTPURLResponse) = { try await BoundedHTTP.load($0, limit: $1) }) {
-        self.bundledRoot = bundledRoot ?? Bundle.main.resourceURL!.appendingPathComponent("Web", isDirectory: true)
+    init(cacheRoot: URL? = nil, defaults: UserDefaults = .standard) {
         self.cacheRoot = cacheRoot ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("DeviceGalaxyUpdates", isDirectory: true)
         self.defaults = defaults
-        self.fetch = fetch
         // Validate saved assets before trusting a previous completed update.
         if let hash = defaults.string(forKey: "galaxy.device.assets.manifest"), GalaxyAssetManifest.isHash(hash) {
             let root = self.cacheRoot.appendingPathComponent(hash, isDirectory: true)
-            if Self.verify(root) { status = "Saved Galaxy available; waiting to match your comma." }
+            if Self.verify(root) { readyRoot = root; status = "Using Galaxy screens saved from comma." }
         }
     }
     private static func verify(_ root: URL) -> Bool {
@@ -90,132 +71,92 @@ final class GalaxyAssetStore: ObservableObject {
             return data.count == file.size && GalaxyAssetManifest.digest(data) == file.sha256
         }
     }
-    func unavailable(_ message: String) {
-        status = message + " Using the bundled Galaxy screens; version match is unverified."
-        readyRoot = nil
+    /// True when comma now runs a different build than the one the saved screens came from.
+    func olderThan(commit: String?) -> Bool {
+        guard readyRoot != nil, let saved = defaults.string(forKey: "galaxy.device.commit"), !saved.isEmpty,
+              let commit, !commit.isEmpty else { return false }
+        return saved != commit
     }
-    func check(source: GalaxySource, stillCurrent: () -> Bool = { true }) async {
+    /// Over Bluetooth nothing can be downloaded; tell the user when the saved screens are behind comma.
+    func noteCommaBuild(commit: String?) {
+        if olderThan(commit: commit) { status = "Galaxy screens are from an older comma build. Connect over Wi-Fi to refresh." }
+    }
+    /// Compares comma's inventory with the saved copy and downloads only what changed. Never skips on an unchanged commit.
+    func check(fetch: @escaping GalaxyPageFetch, stillCurrent: () -> Bool = { true }) async {
         guard !checking else { return }
         checking = true
-        status = "Checking GitHub for Galaxy updates…"
+        status = "Checking comma for Galaxy updates…"
         defer { checking = false }
         var stage: URL?
         do {
-            let commit = source.commit
-            if defaults.string(forKey: "galaxy.device.source") == source.key,
-               let hash = defaults.string(forKey: "galaxy.device.assets.manifest") {
-                let saved = cacheRoot.appendingPathComponent(hash, isDirectory: true)
-                if Self.verify(saved) { readyRoot = saved }
-            }
-            if defaults.string(forKey: "galaxy.device.source") != source.key { readyRoot = nil }
-            let base = URL(string: "https://raw.githubusercontent.com/\(source.repository)/\(commit)/\(Self.resourcePath)/")!
-            if readyRoot != nil, defaults.string(forKey: "galaxy.device.source") == source.key {
-                status = "Galaxy matches comma (\(source.branch), \(commit.prefix(7)))."; return
-            }
-            struct Tree: Decodable {
-                struct Entry: Decodable { let path: String; let type: String; let sha: String; let size: Int? }
-                let tree: [Entry]
-                let truncated: Bool
-            }
-            let (treeData, _) = try await download(URL(string: "https://api.github.com/repos/\(source.repository)/git/trees/\(commit)?recursive=1")!, limit: 8 * 1_048_576)
-            let tree = try JSONDecoder().decode(Tree.self, from: treeData)
-            guard !tree.truncated else { throw BridgeError.message("Galaxy update inventory is incomplete.") }
-            let prefix = Self.resourcePath + "/"
-            let inventory = tree.tree.filter { $0.type == "blob" && $0.path.hasPrefix(prefix) }
-                .filter { !$0.path.hasSuffix("/runtime.json") && !$0.path.hasSuffix(".sample.json") }
-                .sorted { $0.path < $1.path }
-            let provisional = GalaxyAssetManifest(schema: 1, nativeBridge: 1, files: inventory.map {
-                GalaxyAssetManifest.File(path: String($0.path.dropFirst(prefix.count)), sha256: String(repeating: "0", count: 64), size: $0.size ?? -1)
-            })
-            try provisional.validate()
+            let (code, listingData) = try await fetch("/api/companion/web-manifest", 1_048_576)
+            // Older comma builds answer 401 (no session) or 404 for the inventory path.
+            if code == 401 || code == 404 { throw BridgeError.message(Self.tooOld) }
+            guard code == 200 else { throw BridgeError.message("Comma returned HTTP \(code) for the Galaxy inventory.") }
+            let listing = try JSONDecoder().decode(GalaxyListing.self, from: listingData)
+            guard listing.schema == 1 else { throw BridgeError.message(Self.tooOld) }
+            let manifest = GalaxyAssetManifest(schema: 1, nativeBridge: 1, files: listing.files.sorted { $0.path < $1.path })
+            try manifest.validate()
+            let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+            let data = try encoder.encode(manifest)
+            let hash = GalaxyAssetManifest.digest(data)
+            guard stillCurrent() else { throw CancellationError() }
+            defaults.set(listing.commit ?? "", forKey: "galaxy.device.commit")
+            if readyRoot?.lastPathComponent == hash { status = "Galaxy matches comma."; return }
             let manager = FileManager.default
             try manager.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
             let staging = cacheRoot.appendingPathComponent("staging-" + UUID().uuidString, isDirectory: true)
             stage = staging
             try manager.createDirectory(at: staging, withIntermediateDirectories: true)
-            var verified: [GalaxyAssetManifest.File] = []
-            for offset in stride(from: 0, to: inventory.count, by: 4) {
+            let saved = readyRoot
+            var done = 0
+            for offset in stride(from: 0, to: manifest.files.count, by: 4) {
                 try Task.checkCancellation()
-                let batch = Array(inventory[offset..<min(offset + 4, inventory.count)])
-                let roots = [readyRoot, bundledRoot].compactMap { $0 }
-                let fetch = self.fetch
+                let batch = Array(manifest.files[offset..<min(offset + 4, manifest.files.count)])
                 try await withThrowingTaskGroup(of: (String, Data).self) { group in
                     for file in batch {
                         group.addTask {
-                            let path = String(file.path.dropFirst(prefix.count))
-                            func matches(_ bytes: Data) -> Bool {
-                                guard bytes.count == file.size else { return false }
-                                let object = Data("blob \(bytes.count)\0".utf8) + bytes
-                                return Insecure.SHA1.hash(data: object).map { String(format: "%02x", $0) }.joined() == file.sha
-                            }
-                            for root in roots {
-                                if let bytes = try? Data(contentsOf: root.appendingPathComponent(path)), matches(bytes) { return (path, bytes) }
-                            }
-                            var request = URLRequest(url: base.appendingPathComponent(path))
-                            request.timeoutInterval = 15
-                            let (bytes, response) = try await fetch(request, max(file.size ?? 0, 1))
-                            guard response.statusCode == 200, matches(bytes) else { throw BridgeError.message("Galaxy update verification failed.") }
-                            return (path, bytes)
+                            func matches(_ bytes: Data) -> Bool { bytes.count == file.size && GalaxyAssetManifest.digest(bytes) == file.sha256 }
+                            if let saved, let bytes = try? Data(contentsOf: saved.appendingPathComponent(file.path)), matches(bytes) { return (file.path, bytes) }
+                            let (code, bytes) = try await fetch("/" + file.path, max(file.size, 1))
+                            guard code == 200, matches(bytes) else { throw BridgeError.message("Galaxy update verification failed.") }
+                            return (file.path, bytes)
                         }
                     }
                     for try await (path, bytes) in group {
                         let destination = staging.appendingPathComponent(path)
                         try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
                         try bytes.write(to: destination, options: .atomic)
-                        verified.append(.init(path: path, sha256: GalaxyAssetManifest.digest(bytes), size: bytes.count))
                     }
                 }
-                status = "Preparing Galaxy update (\(verified.count)/\(inventory.count))…"
+                done += batch.count
+                status = "Preparing Galaxy update (\(done)/\(manifest.files.count))…"
             }
-            let manifest = GalaxyAssetManifest(schema: 1, nativeBridge: 1, files: verified.sorted { $0.path < $1.path })
-            try manifest.validate()
-            let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
-            let data = try encoder.encode(manifest)
-            let hash = GalaxyAssetManifest.digest(data)
             guard stillCurrent() else { throw CancellationError() }
-            if readyRoot?.lastPathComponent == hash {
-                try manager.removeItem(at: staging); stage = nil
-                defaults.set(commit, forKey: "galaxy.device.commit")
-                defaults.set(source.key, forKey: "galaxy.device.source")
-                status = "Galaxy matches comma (\(source.branch), \(commit.prefix(7)))."; return
-            }
             try data.write(to: staging.appendingPathComponent("manifest.json"), options: .atomic)
-            try Task.checkCancellation()
             let destination = cacheRoot.appendingPathComponent(hash, isDirectory: true)
             if manager.fileExists(atPath: destination.path) { try manager.removeItem(at: destination) }
             try manager.moveItem(at: staging, to: destination)
             stage = nil
             // Keep one previous version while an open WebView is still using it.
-            let previous = readyRoot
             readyRoot = destination
             defaults.set(hash, forKey: "galaxy.device.assets.manifest")
-            defaults.set(commit, forKey: "galaxy.device.commit")
-            defaults.set(source.key, forKey: "galaxy.device.source")
             if let contents = try? manager.contentsOfDirectory(at: cacheRoot, includingPropertiesForKeys: nil) {
-                for root in contents where root.standardizedFileURL.path != destination.standardizedFileURL.path && root.standardizedFileURL.path != previous?.standardizedFileURL.path && root.standardizedFileURL.path != inUseRoot?.standardizedFileURL.path { try? manager.removeItem(at: root) }
+                for root in contents where root.standardizedFileURL.path != destination.standardizedFileURL.path && root.standardizedFileURL.path != saved?.standardizedFileURL.path && root.standardizedFileURL.path != inUseRoot?.standardizedFileURL.path { try? manager.removeItem(at: root) }
             }
-            status = "Galaxy matched to comma (\(source.branch), \(commit.prefix(7))). Open Galaxy to use it."
+            status = "Galaxy screens updated from comma. Open Galaxy to use them."
         } catch {
             if let stage { try? FileManager.default.removeItem(at: stage) }
-            let source = readyRoot == nil ? "the Galaxy version included with this app" : "your saved Galaxy version"
+            let using = readyRoot == nil ? "No Galaxy screens are saved yet." : "Using your saved Galaxy screens."
             if let failure = error as? URLError {
-                status = "Couldn’t check Galaxy updates (network error \(failure.code.rawValue)). Using \(source)."
+                status = "Couldn’t reach comma to check Galaxy updates (network error \(failure.code.rawValue)). \(using)"
             } else if let failure = error as? BridgeError {
-                status = "\(failure.localizedDescription) Using \(source)."
+                status = "\(failure.localizedDescription) \(using)"
             } else if error is CancellationError {
-                status = "Galaxy update cancelled. Using \(source)."
+                status = "Galaxy update cancelled. \(using)"
             } else {
-                status = "Galaxy update could not be read or saved. Using \(source)."
+                status = "Galaxy update could not be read or saved. \(using)"
             }
         }
-    }
-    private func download(_ url: URL, limit: Int) async throws -> (Data, HTTPURLResponse) {
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 8
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Galaxy-iPhone-Pilot", forHTTPHeaderField: "User-Agent")
-        let result = try await fetch(request, limit)
-        guard result.1.statusCode == 200 else { throw BridgeError.message("GitHub update check returned HTTP \(result.1.statusCode).") }
-        return result
     }
 }

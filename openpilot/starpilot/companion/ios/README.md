@@ -15,10 +15,10 @@ github Actions runs the app tests, simulator build and bridge tests. bluetooth a
 
 see [Quick start](QUICK-START.md) for pairing and [Tester guide](TESTER-GUIDE.md) for connection checks.
 
-app source: `natehuby76/ios-clone`, branch `codex/secretgood-galaxy`, commit `081aa0e`. the bundled Galaxy UI keeps its upstream license in `UPSTREAM-GALAXY-LICENSE`. app store ownership and signing are separate from this repo.
+app source: `natehuby76/ios-clone`, branch `codex/secretgood-galaxy`, commit `081aa0e`. the Galaxy UI the app runs keeps its upstream license in `UPSTREAM-GALAXY-LICENSE`. app store ownership and signing are separate from this repo.
 
-## Bundled web UI
+## Galaxy screens
 
-`GalaxyBluetooth/Resources/Web` is a copy of `galaxy/web`. After changing anything under `galaxy/web`, run
-`python3 openpilot/starpilot/companion/ios/tools/sync_web_bundle.py` to update the copy and its manifest.
-`galaxy/tests/test_ios_bundle_sync.py` fails when the bundle has drifted.
+The app does not bundle Galaxy's web pages. It downloads them from your comma over Wi-Fi/LAN (`GET /api/companion/web-manifest`
+lists the files and their SHA-256), verifies them and saves a copy that Bluetooth uses. Connect over Wi-Fi once before using
+Bluetooth Galaxy. Custom and unpushed branches work because nothing comes from GitHub. The comma needs a build that has that route.

@@ -28,7 +28,7 @@ bluetooth cannot carry every Galaxy feature. Recordings, replay, cameras, map ti
 
 ## updates and reports
 
-install native app updates through TestFlight. Galaxy's web UI updates separately from official `SecretGoodStarPilot`; failed downloads keep the saved UI.
+install native app updates through TestFlight. Galaxy's web UI is downloaded from your comma over Wi-Fi/LAN (connect once before using Bluetooth) and refreshed whenever you reconnect; failed downloads keep the saved UI.
 
 for a problem, enable **Developer Mode** in app Settings, reproduce it, then use **Dev / Logs → Copy all reports**. send the report with your phone model, comma version and what you tried. do not share pairing codes or credentials.
 

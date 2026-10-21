@@ -26,11 +26,11 @@ turn comma Bluetooth off and confirm the bridge leaves it off. turn it back on u
 
 ## galaxy UI updates
 
-the app checks `firestar5683/StarPilot:SecretGoodStarPilot` when it opens or you choose **Check Galaxy updates**. it downloads the web UI from one commit and verifies the files before saving them.
+the app has no bundled Galaxy pages. whenever it connects to comma over Wi-Fi/LAN (or you choose **Check** on the Galaxy screens row) it downloads comma's own web UI, verifies every file against comma's manifest and saves it. a comma without that manifest is too old to share its screens.
 
-an update does not replace an open page. it takes effect when Galaxy next opens. failed or incomplete updates keep the previous copy; a fresh install includes a bundled copy.
+an update does not replace an open page. it takes effect when Galaxy next opens. failed or incomplete updates keep the previous copy. a fresh install cannot open Galaxy over Bluetooth until it has downloaded the screens once over Wi-Fi. if comma updated since, Bluetooth still opens the saved copy and says it is from an older comma build.
 
-check an update while online, then reopen with phone Wi-Fi and cellular off and Bluetooth on. Galaxy should still load its saved screens. swift changes require a new app build.
+download the screens over comma's Wi-Fi first, then reopen with phone Wi-Fi and cellular off and Bluetooth on. Galaxy should still load its saved screens. swift changes require a new app build.
 
 ## feedback
 

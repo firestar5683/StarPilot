@@ -34,7 +34,7 @@ swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-li
 
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/Wire.swift GalaxyBluetooth/HTTP.swift GalaxyBluetooth/GalaxyRequestTransport.swift GalaxyBluetooth/NetworkTransport.swift GalaxyBluetooth/PrivateLANHTTP.swift tests/SecretGoodLANRegression.swift -o "$test_dir/secretgood-lan-tests"
 "$test_dir/secretgood-lan-tests"
-python3 tests/check_secretgood_bundle.py
+python3 tests/check_lan_contract.py
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/Wire.swift GalaxyBluetooth/HTTP.swift GalaxyBluetooth/GalaxyRequestTransport.swift GalaxyBluetooth/NetworkTransport.swift GalaxyBluetooth/PrivateLANHTTP.swift GalaxyBluetooth/GalaxyAssetStore.swift tests/SecretGoodAssetsRegression.swift -o "$test_dir/secretgood-assets-tests"
 "$test_dir/secretgood-assets-tests"
 
