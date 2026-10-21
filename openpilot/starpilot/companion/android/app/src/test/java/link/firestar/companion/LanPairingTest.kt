@@ -16,6 +16,29 @@ class LanPairingTest {
         assertEquals(listOf(Triple("/api/bluetooth/action", "{\"operation\":\"accept_pair\"}", "galaxy_session=abc")), api.posts)
     }
 
+    @Test fun retriesWhileCommaIsBusyThenSucceeds() {
+        var busyAnswers = 2
+        val pauses = mutableListOf<Long>()
+        val api = object : LanPairingApi {
+            override fun session(): String? = "c"
+            override fun post(path: String, body: String, cookie: String): Pair<Int, String> =
+                if (busyAnswers-- > 0) 409 to "{\"code\":\"busy\"}" else 200 to "{}"
+        }
+        assertNull(LanPairing.openWindow(api, pause = { pauses += it }))
+        assertEquals(2, pauses.size)
+    }
+
+    @Test fun givesUpAfterTheLastBusyAnswerAndNeverRetriesOtherRefusals() {
+        val pauses = mutableListOf<Long>()
+        assertEquals("comma answered HTTP 409 (busy)", LanPairing.openWindow(Api("c", 409, "{\"code\":\"busy\"}"), pause = { pauses += it }))
+        assertEquals(3, pauses.size)
+        pauses.clear()
+        assertEquals("comma answered HTTP 503 (radio_unavailable)", LanPairing.openWindow(Api("c", 503, "{\"code\":\"radio_unavailable\"}"), pause = { pauses += it }))
+        assertTrue(pauses.isEmpty())
+        assertEquals("comma gave this phone no local Galaxy session", LanPairing.openWindow(Api(null), pause = { pauses += it }))
+        assertTrue(pauses.isEmpty())
+    }
+
     @Test fun saysWhyTheWindowCouldNotBeOpened() {
         val none = Api(null)
         assertEquals("comma gave this phone no local Galaxy session", LanPairing.openWindow(none)); assertTrue(none.posts.isEmpty())

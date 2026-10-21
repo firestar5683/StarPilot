@@ -21,15 +21,31 @@ object LanPairing {
     const val WINDOW_PATH = "/api/bluetooth/action"
     const val WINDOW_BODY = "{\"operation\":\"accept_pair\"}"
 
-    /** Null when the window opened, otherwise why not, in words fit for the pairing screen. */
-    fun openWindow(api: LanPairingApi): String? = try {
+    /**
+     * Null when the window opened, otherwise why not, in words fit for the pairing screen. comma answers 409 busy while
+     * Android Auto or Bluetooth is still settling (for example just after a reboot), so that one answer is retried a few times.
+     */
+    fun openWindow(api: LanPairingApi, attempts: Int = 4, pause: (Long) -> Unit = { Thread.sleep(it) }): String? {
+        var reason: String? = null
+        for (attempt in 1..attempts) {
+            val (why, busy) = once(api)
+            reason = why
+            if (why == null || !busy || attempt == attempts) break
+            pause(2500)
+        }
+        return reason
+    }
+
+    private fun once(api: LanPairingApi): Pair<String?, Boolean> = try {
         val cookie = api.session()
-        if (cookie == null) "comma gave this phone no local Galaxy session"
+        if (cookie == null) "comma gave this phone no local Galaxy session" to false
         else {
             val (status, body) = api.post(WINDOW_PATH, WINDOW_BODY, cookie)
-            if (status == 200) null else "comma answered HTTP $status${Regex("\"code\":\"([a-z_]+)\"").find(body)?.let { " (${it.groupValues[1]})" }.orEmpty()}"
+            val code = Regex("\"code\":\"([a-z_]+)\"").find(body)?.groupValues?.get(1)
+            if (status == 200) null to false
+            else "comma answered HTTP $status${code?.let { " ($it)" }.orEmpty()}" to (status == 409 && code == "busy")
         }
-    } catch (e: Exception) { e.message ?: e.javaClass.simpleName }
+    } catch (e: Exception) { (e.message ?: e.javaClass.simpleName) to false }
 
     fun openWindow(network: Network, origin: String): String? = openWindow(object : LanPairingApi {
         override fun session(): String? {
