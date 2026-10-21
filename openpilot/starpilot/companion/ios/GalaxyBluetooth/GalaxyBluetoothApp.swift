@@ -279,7 +279,7 @@ final class AppModel: ObservableObject {
             // Pages come straight from comma, never through the Bluetooth bridge or the read cache.
             let lan = self.lan
             await assets.check(fetch: { path, _ in
-                let response = try await lan.request(path: path, method: "GET", headers: [:], body: Data())
+                let response = path.hasPrefix("/api/") ? try await lan.request(path: path, method: "GET", headers: [:], body: Data()) : try await lan.page(path: path)
                 return (response.status, response.bodyData)
             }, stillCurrent: stillCurrent)
         } else if assets.readyRoot != nil {
@@ -301,7 +301,13 @@ final class AppModel: ObservableObject {
             }
             guard wantsConnection, transport.connected, !opened else { return }
             // Bluetooth Galaxy runs from screens saved from comma; the first download needs Wi-Fi/LAN.
-            guard let root = assets.readyRoot else { return }
+            // Over Wi-Fi/LAN an older comma that cannot share its screens still opens, read live.
+            guard let root = assets.readyRoot else {
+                guard transport.usesLAN else { return }
+                assets.inUseRoot = nil
+                opened = true
+                return
+            }
             assets.inUseRoot = root
             server.useWebRoot(root)
             opened = true

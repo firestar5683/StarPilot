@@ -21,4 +21,4 @@ app source: `natehuby76/ios-clone`, branch `codex/secretgood-galaxy`, commit `08
 
 The app does not bundle Galaxy's web pages. It downloads them from your comma over Wi-Fi/LAN (`GET /api/companion/web-manifest`
 lists the files and their SHA-256), verifies them and saves a copy that Bluetooth uses. Connect over Wi-Fi once before using
-Bluetooth Galaxy. Custom and unpushed branches work because nothing comes from GitHub. The comma needs a build that has that route.
+Bluetooth Galaxy. Custom and unpushed branches work because nothing comes from GitHub. A comma build without that route cannot share its screens: over Wi-Fi the app then reads the pages live from comma, and Bluetooth stays unavailable until the screens have been downloaded.

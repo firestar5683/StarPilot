@@ -230,6 +230,13 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
         throw BridgeError.message("Galaxy session expired. Reconnect to comma.")
     }
 
+    func page(path: String) async throws -> BridgeResponse {
+        guard connected else { throw URLError(.notConnectedToInternet) }
+        guard SecretGoodGalaxy.validPage(path) else { throw BridgeError.message("Invalid Galaxy page request.") }
+        let (data, response) = try await authenticated(path: path, method: "GET", headers: [:], body: Data(), limit: 8 * Wire.maxBody)
+        return bridgeResponse(data, response)
+    }
+
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
         guard connected else { throw URLError(.notConnectedToInternet) }
         guard SecretGoodGalaxy.validTarget(path),
@@ -237,6 +244,10 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
             throw BridgeError.message("Invalid Galaxy request.")
         }
         let (data, response) = try await authenticated(path: path, method: method, headers: headers, body: body, limit: 8 * Wire.maxBody)
+        return bridgeResponse(data, response)
+    }
+
+    private func bridgeResponse(_ data: Data, _ response: HTTPURLResponse) -> BridgeResponse {
         var responseHeaders: [String: String] = [:]
         for (key, value) in response.allHeaderFields {
             if let name = key as? String, ["content-type", "content-range", "accept-ranges", "content-disposition"].contains(name.lowercased()) {
@@ -267,6 +278,11 @@ final class PreferredTransport: ObservableObject, GalaxyRequestTransport {
     init(lan: any GalaxyRequestTransport, bluetooth: any GalaxyRequestTransport, invalidateLAN: @escaping (String) -> Void) {
         self.lan = lan; self.bluetooth = bluetooth; self.invalidateLAN = invalidateLAN
     }
+    func page(path: String) async throws -> BridgeResponse {
+        guard usesLAN else { throw BridgeError.message("Galaxy screens can only be downloaded from comma over Wi-Fi.") }
+        return try await lan.page(path: path)
+    }
+
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
         try Task.checkCancellation()
         if usesLAN {

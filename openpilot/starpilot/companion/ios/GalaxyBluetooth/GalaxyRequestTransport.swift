@@ -5,10 +5,15 @@ protocol GalaxyRequestTransport: AnyObject {
     var connected: Bool { get }
     var catalogSHA256: String? { get }
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse
+    /// GET one Galaxy page file (not an API call). Only the Wi-Fi/LAN transport can do this.
+    func page(path: String) async throws -> BridgeResponse
 }
 
 extension GalaxyRequestTransport {
     var catalogSHA256: String? { nil }
+    func page(path: String) async throws -> BridgeResponse {
+        throw BridgeError.message("Galaxy screens can only be downloaded from comma over Wi-Fi.")
+    }
 }
 
 enum SecretGoodGalaxy {
@@ -20,6 +25,15 @@ enum SecretGoodGalaxy {
               !decoded.unicodeScalars.contains(where: { $0.value < 32 }),
               !decoded.split(separator: "/").contains(where: { $0 == "." || $0 == ".." }) else { return false }
         return decoded.hasPrefix("/api/") || decoded == "/data/runtime.json"
+    }
+    /// A Galaxy page file under the same roots the app accepts when it saves comma's screens.
+    static func validPage(_ path: String) -> Bool {
+        guard path.hasPrefix("/"), path.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 47, 95].contains($0) }) else { return false }
+        let file = String(path.dropFirst())
+        let parts = file.split(separator: "/", omittingEmptySubsequences: false)
+        guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }), file != "data/runtime.json" else { return false }
+        return ["index.html", "manifest.webmanifest", "sentry-push-worker.js"].contains(file)
+            || ["assets/", "css/", "js/", "vendor/", "data/"].contains(where: { file.hasPrefix($0) })
     }
     static func needsWiFi(_ path: String) -> Bool {
         let path = URLComponents(string: path)?.path ?? path
@@ -51,6 +65,8 @@ final class GalaxyReadCache: GalaxyRequestTransport {
         // Already-sent reads still drain, but new reads cannot join an old one.
         pending.removeAll()
     }
+
+    func page(path: String) async throws -> BridgeResponse { try await transport.page(path: path) }
 
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
         try Task.checkCancellation()

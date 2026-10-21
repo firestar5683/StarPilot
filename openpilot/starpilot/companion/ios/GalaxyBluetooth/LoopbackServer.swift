@@ -266,25 +266,36 @@ final class LoopbackServer: ObservableObject {
             } catch { return .error(502, error.localizedDescription) }
         }
         guard ["GET", "HEAD"].contains(request.method) else { return .error(405, "Method is not supported for Galaxy files.") }
-        guard let webRoot else { return .error(503, "Galaxy screens aren’t downloaded yet. Connect to comma over Wi-Fi once.") }
         let assetPath = path == "/" ? "index.html" : String(path.dropFirst())
-        let file = webRoot.appendingPathComponent(assetPath).standardizedFileURL
-        guard file.path.hasPrefix(webRoot.standardizedFileURL.path + "/"), var data = try? Data(contentsOf: file) else {
-            return .error(404, "Galaxy asset was not found.")
+        var data: Data
+        if let webRoot {
+            let file = webRoot.appendingPathComponent(assetPath).standardizedFileURL
+            guard file.path.hasPrefix(webRoot.standardizedFileURL.path + "/"), let saved = try? Data(contentsOf: file) else {
+                return .error(404, "Galaxy asset was not found.")
+            }
+            data = saved
+        } else {
+            // No saved copy yet (an older comma that cannot share its screens): over Wi-Fi/LAN read the pages live from comma.
+            let notYet = "Galaxy screens aren’t downloaded yet. Connect to comma over Wi-Fi once."
+            guard transport.connected, SecretGoodGalaxy.validPage("/" + assetPath) else { return .error(503, notYet) }
+            guard let live = try? await transport.page(path: "/" + assetPath) else { return .error(503, notYet) }
+            guard live.status == 200 else { return .error(live.status, "Comma could not serve this Galaxy asset.") }
+            data = live.bodyData
         }
+        let pathExtension = (assetPath as NSString).pathExtension
         if assetPath == "js/toggle-search.js", let source = String(data: data, encoding: .utf8),
            source.contains("export class SettingsSearchIndex"), source.contains("export const ToggleSearch") {
             data.append(Data(("\n" + Self.nativeSearchScript).utf8))
             record("Native incremental toggle search enabled")
         }
         let mime: String
-        switch file.pathExtension {
+        switch pathExtension {
         case "js", "mjs": mime = "text/javascript"
         case "css": mime = "text/css"
         case "html": mime = "text/html; charset=utf-8"
         case "json", "webmanifest": mime = "application/json"
         case "svg": mime = "image/svg+xml"
-        default: mime = UTType(filenameExtension: file.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+        default: mime = UTType(filenameExtension: pathExtension)?.preferredMIMEType ?? "application/octet-stream"
         }
         return LocalResponse(status: 200, headers: ["content-type": mime], body: data)
     }

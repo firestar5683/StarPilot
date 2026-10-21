@@ -63,6 +63,19 @@ import Foundation
         }
         precondition(SecretGoodGalaxy.validTarget("/api/settings/pages/hub"))
         precondition(SecretGoodGalaxy.validTarget("/data/runtime.json"))
+        for invalid in ["/api/params", "/js/../x.js", "/js/a b.js", "/js/app.js?x=1", "/data/runtime.json", "/other/x.js", "//evil/js/a.js", "/js//a.js", "js/app.js", "/js/%2e%2e/a.js"] {
+            precondition(!SecretGoodGalaxy.validPage(invalid), invalid)
+        }
+        for valid in ["/index.html", "/js/app.js", "/vendor/vue/vue.esm-browser.js", "/data/catalog.json", "/manifest.webmanifest"] {
+            precondition(SecretGoodGalaxy.validPage(valid), valid)
+        }
+        server.corruptIdentity = false
+        _ = await lan.probe()
+        let pageCalls = server.calls.count
+        let page = try await lan.page(path: "/js/app.js")
+        precondition(page.status == 200 && server.calls.count == pageCalls + 1)
+        precondition(server.calls.last!.httpMethod == "GET" && server.calls.last!.url!.path == "/js/app.js")
+        do { _ = try await lan.page(path: "/api/params"); preconditionFailure("Pages are not API calls") } catch is BridgeError {}
         precondition(SecretGoodGalaxy.needsWiFi("/api/cameras/snapshot"))
         precondition(!SecretGoodGalaxy.needsWiFi("/api/settings/pages/hub"))
         let concurrent = Server()
