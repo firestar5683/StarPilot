@@ -101,8 +101,7 @@ final class GalaxyAssetStore: ObservableObject {
             let data = try encoder.encode(manifest)
             let hash = GalaxyAssetManifest.digest(data)
             guard stillCurrent() else { throw CancellationError() }
-            defaults.set(listing.commit ?? "", forKey: "galaxy.device.commit")
-            if readyRoot?.lastPathComponent == hash { status = "Galaxy matches comma."; return }
+            if readyRoot?.lastPathComponent == hash { defaults.set(listing.commit ?? "", forKey: "galaxy.device.commit"); status = "Galaxy matches comma."; return }
             let manager = FileManager.default
             try manager.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
             let staging = cacheRoot.appendingPathComponent("staging-" + UUID().uuidString, isDirectory: true)
@@ -141,6 +140,7 @@ final class GalaxyAssetStore: ObservableObject {
             // Keep one previous version while an open WebView is still using it.
             readyRoot = destination
             defaults.set(hash, forKey: "galaxy.device.assets.manifest")
+            defaults.set(listing.commit ?? "", forKey: "galaxy.device.commit")
             if let contents = try? manager.contentsOfDirectory(at: cacheRoot, includingPropertiesForKeys: nil) {
                 for root in contents where root.standardizedFileURL.path != destination.standardizedFileURL.path && root.standardizedFileURL.path != saved?.standardizedFileURL.path && root.standardizedFileURL.path != inUseRoot?.standardizedFileURL.path { try? manager.removeItem(at: root) }
             }

@@ -55,6 +55,9 @@ import CryptoKit
         await store.check(fetch: fetch)
         precondition(store.readyRoot == current, "A failed update keeps the saved pages")
         precondition(store.status.contains("verification failed"), "Do not hide verification failures as network failures")
+        comma.commit = String(repeating: "c", count: 40)
+        await store.check(fetch: fetch)
+        precondition(store.olderThan(commit: String(repeating: "c", count: 40)), "A failed download must not hide that comma moved on")
         comma.corrupt = false; comma.networkFailure = true
         await store.check(fetch: fetch)
         precondition(store.status.contains("network error -1009") && store.readyRoot == current)
