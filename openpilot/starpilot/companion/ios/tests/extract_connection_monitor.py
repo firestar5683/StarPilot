@@ -38,8 +38,11 @@ enum ConnectionMode { case automatic, bluetooth, lan }
     let connected = false
 }
 @MainActor final class Discovery { func stop() {} }
+@MainActor final class Assets { var readyRoot: URL?; var status = "" }
 @MainActor final class MonitorProbe {
     let bluetooth = Bluetooth(), lan = LAN(), transport = Transport(), discovery = Discovery()
+    let assets = Assets()
+    var opened = false
     var wantsConnection = true, pairingInProgress = false, openingGalaxy = false, offerAudioPairing = false
     var mode = ConnectionMode.automatic
     var pairingKey = "saved", address = "", connectionMessage = "", lastRoute = ""
