@@ -167,5 +167,26 @@ class PermissionTest(unittest.TestCase):
       self.assertEqual(list(pairing.load_keys(path)), [linked])
 
 
+  def test_app_pairing_tiles_show_the_name_and_last_use_not_the_added_date(self):
+    one = {'label': 'iPhone', 'added': '2026-10-16T14:02:00', 'last_used': '2026-10-20'}
+    two = {'label': 'Pixel', 'added': '2026-10-01T09:00:00', 'last_used': ''}
+    self.assertEqual(phone_ui.app_pairing_title(one, [one, two]), 'iPhone')
+    self.assertEqual(phone_ui.app_pairing_subtitle(one), 'last used Oct 20')
+    self.assertEqual(phone_ui.app_pairing_subtitle(two), 'not used yet')
+    twin = {'label': 'iPhone', 'added': '2026-10-05T08:00:00', 'last_used': ''}
+    self.assertEqual(phone_ui.app_pairing_title(twin, [one, twin]), 'iPhone (Oct 5)')
+
+  def test_one_app_pairing_can_be_forgotten_on_its_own(self):
+    with tempfile.TemporaryDirectory() as directory:
+      path = Path(directory) / 'pairing.json'
+      first, _ = pairing.add_phone('iPhone', path)
+      second, _ = pairing.add_phone('Pixel', path)
+      with patch.object(phone_ui, 'remove_phone', side_effect=lambda phone_id: pairing.remove_phone(phone_id, path)):
+        phone_ui.forget_app_phone(lambda: False, first)
+        self.assertEqual(len(pairing.load_keys(path)), 2)
+        phone_ui.forget_app_phone(lambda: True, first)
+      self.assertEqual(list(pairing.load_keys(path)), [second])
+
+
 if __name__ == '__main__':
   unittest.main()

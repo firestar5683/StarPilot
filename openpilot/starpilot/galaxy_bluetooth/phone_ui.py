@@ -1,5 +1,6 @@
 """One Pair phone button beside the Bluetooth controls: the StarPilot app and phone music pair in one window."""
 import base64
+import datetime
 import json
 import threading
 import time
@@ -39,6 +40,35 @@ def forget_phone_keys(allowed, address):
       remove_by_address(address)
     except (OSError, ValueError):
       pass
+
+
+def app_pairing_title(phone, phones):
+  """The phone's name; the added date only tells apart phones that share a name."""
+  label = phone['label']
+  if sum(1 for other in phones if other['label'] == label) > 1:
+    try:
+      added = datetime.datetime.fromisoformat(phone['added'])
+      return f'{label} ({added:%b} {added.day})'
+    except (KeyError, ValueError):
+      pass
+  return label
+
+
+def app_pairing_subtitle(phone):
+  try:
+    used = datetime.date.fromisoformat(phone['last_used'])
+  except (KeyError, ValueError):
+    return 'not used yet'
+  return f'last used {used:%b} {used.day}'
+
+
+def forget_app_phone(allowed, phone_id):
+  if not permitted(allowed):
+    return
+  try:
+    remove_phone(phone_id)
+  except (OSError, ValueError):
+    pass
 
 
 def is_app_link(device):
@@ -290,10 +320,10 @@ def large_phone_rows(allowed):
   rows = [button_item('Pair phone', 'Pair', description='Pairs the StarPilot app and phone music in one step',
                       callback=lambda: open_pairing(allowed), enabled=lambda: permitted(allowed))]
   if app_only_count():
-    rows.append(button_item('Forget app-only phones', 'Forget',
-                            description=f'{app_only_count()} phones have an app key but no Bluetooth device',
+    rows.append(button_item('Forget app pairings', 'Forget',
+                            description=f'{app_only_count()} saved for the StarPilot app only (no Bluetooth music pairing)',
                             callback=lambda: gui_app.push_widget(ConfirmDialog(
-                              'Forget phones that only have the StarPilot app? They must pair again.', 'Forget',
+                              'Forget phones saved for the StarPilot app only? They must pair again.', 'Forget',
                               callback=lambda result: forget_app_only(allowed) if result == DialogResult.CONFIRM else None)),
                             enabled=lambda: permitted(allowed)))
   return rows

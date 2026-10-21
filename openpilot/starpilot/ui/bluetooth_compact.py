@@ -278,7 +278,7 @@ class BluetoothCompact(NavScroller):
           cards.append(button)
         if not devices:
           cards.append(GreyBigButton("saved devices", "no saved pairings"))
-        from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import describe
+        from openpilot.starpilot.galaxy_bluetooth.phone_ui import app_pairing_subtitle, app_pairing_title
         phones = self._app_only()
         if links or phones:
           cards.append(GreyBigButton("app pairings", "phones using the StarPilot app"))
@@ -288,13 +288,11 @@ class BluetoothCompact(NavScroller):
             button.set_enabled(self._ready)
             cards.append(button)
           for phone in phones:
-            cards.append(GreyBigButton(describe(phone).replace("·", "-"), "app key, music not linked"))
-          if phones:
-            forget = BigButton("forget app pairings", "remove app-only phones")
-            forget.set_enabled(lambda: self.phone_pairing_allowed())
-            forget.set_click_callback(lambda: gui_app.push_widget(BigConfirmationDialog(
-              "forget phones paired for the app only", self.icon, lambda: self._forget_app_only(), red=True)))
-            cards.append(forget)
+            tile = BigButton(app_pairing_title(phone, phones).replace("·", "-"), app_pairing_subtitle(phone), scroll=True)
+            tile.set_enabled(lambda: self.phone_pairing_allowed())
+            tile.set_click_callback(lambda phone_id=phone["id"]: gui_app.push_widget(BigConfirmationDialog(
+              "forget this app pairing", self.icon, lambda: self._forget_app_phone(phone_id), red=True)))
+            cards.append(tile)
     if self.pairing_page is not None and gui_app.widget_in_stack(self.pairing_page):
       self._rebuild_pairing()
     self._scroller.items.clear()
@@ -338,7 +336,7 @@ class BluetoothCompact(NavScroller):
         button.set_enabled(self._ready)
         cards.append(button)
     if self._app_only():
-      cleanup = BigButton("forget app keys", "app-only phones")
+      cleanup = BigButton("forget all app pairings", "app-only phones")
       cleanup.set_enabled(lambda: self.phone_pairing_allowed())
       cleanup.set_click_callback(lambda: gui_app.push_widget(BigConfirmationDialog(
         "Remove phones paired for the StarPilot app only?", self.icon,
@@ -346,6 +344,11 @@ class BluetoothCompact(NavScroller):
       cards.append(cleanup)
     self.pairing_page._scroller.items.clear()
     self.pairing_page._scroller.add_widgets(cards)
+
+  def _forget_app_phone(self, phone_id: str):
+    from openpilot.starpilot.galaxy_bluetooth.phone_ui import forget_app_phone
+    forget_app_phone(self.phone_pairing_allowed, phone_id)
+    self._rebuild()
 
   def _forget_app_only(self):
     from openpilot.starpilot.galaxy_bluetooth.phone_ui import forget_app_only
