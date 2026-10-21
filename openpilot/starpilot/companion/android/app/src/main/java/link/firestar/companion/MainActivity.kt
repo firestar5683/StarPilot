@@ -73,6 +73,9 @@ class MainActivity : Activity() {
         // Galaxy Wi-Fi may have no internet, so do not require that capability.
         runCatching { cm.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), wifiWatcher, handler) }
+        val bondFilter = android.content.IntentFilter(android.bluetooth.BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(bondWatcher, bondFilter, RECEIVER_EXPORTED) else registerReceiver(bondWatcher, bondFilter)
+        checkMusicBond()
         connect(Networks.localOrigin(intent.getStringExtra(AppUpdates.ORIGIN_EXTRA) ?: ""))
         if (PhoneGpsService.enabled(prefs) && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             startForegroundService(Intent(this, PhoneGpsService::class.java))
@@ -257,8 +260,8 @@ class MainActivity : Activity() {
             else -> "Tap to search"
         })
         val cached = GalaxyUpdates.store(this).readyRoot != null
-        s.route(Route.BLUETOOTH, if (paired) RouteState.IDLE else RouteState.UNAVAILABLE,
-            if (!paired) "Not paired" else if (cached) "Paired, controls only" else "Paired, needs one Wi-Fi visit first")
+        s.route(Route.BLUETOOTH, if (paired && !pairing.stale()) RouteState.IDLE else RouteState.UNAVAILABLE,
+            if (!paired) "Not paired" else if (pairing.stale()) "Pairing expired, pair again" else if (cached) "Paired, controls only" else "Paired, needs one Wi-Fi visit first")
     }
     private fun tryRoute(route: Route) {
         when (route) {
@@ -269,7 +272,7 @@ class MainActivity : Activity() {
                 supersedeConnection(); refreshRoutes(connectScreen())
                 if (Networks.wifi(this, false) != null) discoverLan() else joinWifi("Join the same Wi-Fi as comma, then come back")
             }
-            Route.BLUETOOTH -> if (pairing.load() != null) connectBluetooth() else {
+            Route.BLUETOOTH -> if (pairing.load() != null && !pairing.stale()) connectBluetooth() else {
                 supersedeConnection(); refreshRoutes(connectScreen()); pairPhone()
             }
         }
@@ -369,7 +372,7 @@ class MainActivity : Activity() {
         lanPicker?.dismiss(); lanPicker = null
     }
     private fun bluetoothFallback(): Boolean {
-        if (prefs.getString("transport", "auto") != "auto" || pairing.load() == null) return false
+        if (prefs.getString("transport", "auto") != "auto" || pairing.load() == null || pairing.stale()) return false
         connectBluetooth(automatic = true); return true
     }
     /** [fromMenu] keeps the old menu behavior: always confirm the address, then stay on Wi-Fi/LAN. */
@@ -483,6 +486,7 @@ class MainActivity : Activity() {
                 transport.close()
                 runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail("Paired. Setting up music: tap Pair if your phone asks.") }
                 val outcome = bondMusic(claim.adapterAddress)
+                if (outcome == MusicBond.Outcome.PAIRED || outcome == MusicBond.Outcome.ALREADY_PAIRED) pairing.rememberMusic(claim.adapterAddress)
                 if (generation != connectionGeneration.get()) return@Thread
                 runOnUiThread {
                     if (generation != connectionGeneration.get()) return@runOnUiThread
@@ -501,20 +505,46 @@ class MainActivity : Activity() {
             }
         }.start()
     }
+    /** Forgetting comma in the phone's Bluetooth settings also ends the app pairing, like forgetting a phone on comma does. */
+    private val bondWatcher = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: Intent) {
+            val device = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(android.bluetooth.BluetoothDevice.EXTRA_DEVICE, android.bluetooth.BluetoothDevice::class.java)
+                else @Suppress("DEPRECATION") intent.getParcelableExtra(android.bluetooth.BluetoothDevice.EXTRA_DEVICE)
+            val state = intent.getIntExtra(android.bluetooth.BluetoothDevice.EXTRA_BOND_STATE, -1)
+            if (CommaBond.forgotten(pairing.musicAddress(), device?.address, state)) commaBondEnded("You forgot comma in this phone's Bluetooth settings")
+        }
+    }
+    private fun commaBondEnded(why: String) {
+        if (pairing.load() == null) return
+        android.util.Log.i("GalaxyPair", "Dropping the app pairing: $why")
+        pairing.forget(); ble?.close()
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            message("$why, so the app pairing was removed too. $PAIR_STEPS Then tap Pair with comma to set it up again.")
+            if (bluetoothMode) disconnected()
+        }
+    }
+    /** Catches a forget done while the app was closed. */
+    private fun checkMusicBond() {
+        val address = pairing.musicAddress() ?: return
+        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return
+        val bonded = runCatching { getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.bondedDevices?.map { it.address }?.toSet() }.getOrNull() ?: return
+        if (CommaBond.missing(address, bonded)) commaBondEnded("Comma is no longer in this phone's Bluetooth devices")
+    }
     private val autoPairing = java.util.concurrent.atomic.AtomicBoolean()
     private var autoPairAsked = false
     private fun bluetoothPermissions() = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     /** Galaxy is open over Wi-Fi/LAN and this phone has no comma key yet: pair in the background, once per launch. */
     private fun autoPairIfNeeded() {
-        if (bluetoothMode || pairing.load() != null || autoPairAsked || !prefs.getBoolean("autoPair", true)) return
+        if (bluetoothMode || (pairing.load() != null && !pairing.stale()) || autoPairAsked || !prefs.getBoolean("autoPair", true)) return
         autoPairAsked = true
         val permissions = bluetoothPermissions()
         if (permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) requestPermissions(permissions, 6) else runAutoPair()
     }
     private fun runAutoPair() {
         val lan = Networks.commaLan(this) ?: return
-        if (pairing.load() != null || !autoPairing.compareAndSet(false, true)) return
+        if ((pairing.load() != null && !pairing.stale()) || !autoPairing.compareAndSet(false, true)) return
         Thread {
             try {
                 // Quietly give up when comma cannot open a window (older comma, driving): Pair with comma stays in the menu.
@@ -526,6 +556,7 @@ class MainActivity : Activity() {
                     pairing.save(claim.key, claim.id.ifEmpty { null })
                     transport.close()
                     val outcome = bondMusic(claim.adapterAddress)
+                    if (outcome == MusicBond.Outcome.PAIRED || outcome == MusicBond.Outcome.ALREADY_PAIRED) pairing.rememberMusic(claim.adapterAddress)
                     runOnUiThread {
                         if (isFinishing || isDestroyed) return@runOnUiThread
                         val note = MusicBond.message(outcome)
@@ -602,6 +633,14 @@ class MainActivity : Activity() {
             }
             return
         }
+        if (pairing.stale()) {
+            // Comma stopped recognizing this phone; retrying cannot fix that, so wait for a new pairing instead.
+            disconnected().apply {
+                route(Route.BLUETOOTH, RouteState.FAILED, "Pairing expired")
+                detail("Comma no longer recognizes this phone (it was forgotten there). $PAIR_STEPS Then tap Pair with comma here.")
+            }
+            return
+        }
         if (GalaxyUpdates.store(this).readyRoot == null) {
             // Bluetooth Galaxy serves pages saved from comma; the first download needs Wi-Fi/LAN.
             disconnected().apply {
@@ -636,8 +675,12 @@ class MainActivity : Activity() {
                 runOnUiThread { if (!isFinishing && generation == connectionGeneration.get()) showBluetooth(transport) else transport.close() }
             } catch (e: Exception) {
                 transport.close()
+                if (e is PairingNotRecognized) { pairing.markStale(); android.util.Log.w("GalaxyPair", "Pairing not recognized by comma: ${e.message}") }
                 runOnUiThread {
-                    if (!isFinishing && generation == connectionGeneration.get()) disconnected().apply {
+                    if (e is PairingNotRecognized && !isFinishing && generation == connectionGeneration.get()) disconnected().apply {
+                        route(Route.BLUETOOTH, RouteState.FAILED, "Pairing expired")
+                        detail("Comma no longer recognizes this phone (${e.message}). $PAIR_STEPS Then tap Pair with comma here.")
+                    } else if (!isFinishing && generation == connectionGeneration.get()) disconnected().apply {
                         route(Route.BLUETOOTH, RouteState.FAILED, "Didn't connect")
                         detail("Bluetooth didn't connect: ${e.message ?: "comma didn't answer"}. Check that Bluetooth is on in comma settings and comma is nearby.")
                     }
@@ -750,7 +793,7 @@ class MainActivity : Activity() {
     }
     @Deprecated("Legacy back handling") override fun onBackPressed() { if (web?.canGoBack() == true) web?.goBack() else super.onBackPressed() }
     override fun onResume() {
-        super.onResume(); resumed = true; recovery.resumed(); AppUpdates.checkAsync(this)
+        super.onResume(); resumed = true; recovery.resumed(); AppUpdates.checkAsync(this); checkMusicBond()
         pendingInstallOrigin?.let { if (packageManager.canRequestPackageInstalls()) requestAppUpdate(it) }
     }
     override fun onPause() { resumed = false; super.onPause() }
@@ -761,6 +804,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         stopDiscovery(); clearWatchdog(); handler.removeCallbacksAndMessages(null)
         runCatching { Networks.manager(this).unregisterNetworkCallback(wifiWatcher) }
+        runCatching { unregisterReceiver(bondWatcher) }
         connectionGeneration.incrementAndGet(); ble?.close(); worker.shutdownNow()
         web?.destroy(); Networks.manager(this).bindProcessToNetwork(null); super.onDestroy()
     }

@@ -37,7 +37,9 @@ the window as above.
   Settings → Bluetooth (iOS cannot start a Bluetooth bond from an app).
 - No app: tap comma in the phone's Bluetooth settings to pair music only.
 
-Forgetting a Bluetooth device in comma Settings also removes its app key. Installing
+Forgetting a Bluetooth device in comma Settings also removes its app key. On Android, forgetting comma in the phone's
+Bluetooth settings removes the app pairing too, and if comma no longer recognizes the phone's key the app stops retrying
+and says the pairing expired until you pair again. Installing
 Spotify (`/api/spotify/upload`) is blocked over Bluetooth like the other large uploads.
 
 ## Phone GPS
