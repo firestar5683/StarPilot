@@ -535,36 +535,63 @@ class MainActivity : Activity() {
     private var autoPairAsked = false
     private fun bluetoothPermissions() = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-    /** Galaxy is open over Wi-Fi/LAN and this phone has no comma key yet: pair in the background, once per launch. */
+    private var pairProgress: AlertDialog? = null
+    private fun showPairProgress(text: String) = runOnUiThread {
+        if (isFinishing || isDestroyed) return@runOnUiThread
+        val dialog = pairProgress ?: AlertDialog.Builder(this).setTitle("Pairing with comma").setCancelable(false).create()
+            .also { pairProgress = it; it.show() }
+        dialog.setMessage(text)
+    }
+    private fun hidePairProgress() = runOnUiThread { pairProgress?.dismiss(); pairProgress = null }
+
+    /** Galaxy just opened over Wi-Fi/LAN and this phone has no working comma pairing: offer to pair right away, once per launch. */
     private fun autoPairIfNeeded() {
         if (bluetoothMode || (pairing.load() != null && !pairing.stale()) || autoPairAsked || !prefs.getBoolean("autoPair", true)) return
         autoPairAsked = true
+        if (isFinishing || isDestroyed) return
+        val again = pairing.load() != null
+        AlertDialog.Builder(this)
+            .setTitle(if (again) "Pair this phone with comma again?" else "Pair this phone with comma?")
+            .setMessage(if (again) "Comma no longer recognizes this phone's pairing. Pairing again takes a few seconds and needs one approval on this phone."
+                else "You're connected to comma over Wi-Fi.\n\nPairing lets this phone open Galaxy over Bluetooth when there's no Wi-Fi, and sets up Bluetooth music. " +
+                    "Comma's pairing window opens by itself, and you approve one prompt on this phone.")
+            .setPositiveButton("Pair now") { _, _ -> startAutoPair() }
+            .setNegativeButton("Not now", null)
+            .setNeutralButton("Don't ask again") { _, _ -> prefs.edit().putBoolean("autoPair", false).apply() }
+            .show()
+    }
+    private fun startAutoPair() {
         val permissions = bluetoothPermissions()
         if (permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) requestPermissions(permissions, 6) else runAutoPair()
     }
     private fun runAutoPair() {
-        val lan = Networks.commaLan(this) ?: return
-        if ((pairing.load() != null && !pairing.stale()) || !autoPairing.compareAndSet(false, true)) return
+        val lan = Networks.commaLan(this) ?: return message("This phone isn't connected to comma over Wi-Fi right now. Join comma's Wi-Fi, then tap Pair with comma in the menu.")
+        if (!autoPairing.compareAndSet(false, true)) return
+        showPairProgress("Opening comma's pairing window over Wi-Fi…")
         Thread {
             try {
-                // Quietly give up when comma cannot open a window (older comma, driving): Pair with comma stays in the menu.
-                LanPairing.openWindow(lan.first, lan.second)?.let { why -> android.util.Log.w("GalaxyPair", "Auto-pair skipped: $why"); return@Thread }
-                runOnUiThread { Toast.makeText(this, "Pairing this phone with comma for Bluetooth and music…", Toast.LENGTH_LONG).show() }
+                LanPairing.openWindow(lan.first, lan.second)?.let { why ->
+                    android.util.Log.w("GalaxyPair", "Could not open comma's window over Wi-Fi: $why")
+                    hidePairProgress()
+                    runOnUiThread { message("Couldn't open comma's pairing window over Wi-Fi ($why).\n\n$PAIR_STEPS Then tap Pair with comma in the menu.") }
+                    return@Thread
+                }
                 val transport = BleTransport(this, null)
+                transport.onPhase = { text -> showPairProgress("Opened comma's pairing window over Wi-Fi.\n$text") }
                 try {
                     val claim = ClaimPairing.claim(transport, phoneName())
                     pairing.save(claim.key, claim.id.ifEmpty { null })
                     transport.close()
+                    showPairProgress("Paired with comma. Setting up Bluetooth music: approve the prompt on this phone if it asks.")
                     val outcome = bondMusic(claim.adapterAddress)
                     if (outcome == MusicBond.Outcome.PAIRED || outcome == MusicBond.Outcome.ALREADY_PAIRED) pairing.rememberMusic(claim.adapterAddress)
-                    runOnUiThread {
-                        if (isFinishing || isDestroyed) return@runOnUiThread
-                        val note = MusicBond.message(outcome)
-                        if (note != null) message(note) else Toast.makeText(this, "Paired with comma. Bluetooth Galaxy is ready.", Toast.LENGTH_LONG).show()
-                    }
+                    hidePairProgress()
+                    runOnUiThread { message(MusicBond.message(outcome) ?: "Paired with comma. Bluetooth Galaxy is ready.") }
                 } catch (e: Exception) {
                     transport.close()
-                    runOnUiThread { Toast.makeText(this, "Couldn't pair automatically (${e.message ?: "comma didn't answer"}). Use Pair with comma in the menu.", Toast.LENGTH_LONG).show() }
+                    android.util.Log.w("GalaxyPair", "Pairing failed", e)
+                    hidePairProgress()
+                    runOnUiThread { message("Couldn't pair: ${e.message ?: "comma didn't answer"}\n\n$PAIR_STEPS Then tap Pair with comma in the menu.") }
                 }
             } finally { autoPairing.set(false) }
         }.start()
@@ -692,7 +719,10 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(code, permissions, results)
         if (code == 1 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) AppUpdates.checkAsync(this)
         if (code == 5 && results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) pairPhone()
-        if (code == 6 && results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) runAutoPair()
+        if (code == 6) {
+            if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) runAutoPair()
+            else message("Pairing needs the Nearby devices permission. Allow it, then tap Pair with comma in the menu.")
+        }
         if (code == 4) {
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                 prefs.edit().putBoolean("phoneGps", true).apply()
