@@ -41,6 +41,11 @@ def forget_phone_keys(allowed, address):
       pass
 
 
+def is_app_link(device):
+  """A phone that is connected to comma's Bluetooth bridge for the StarPilot app but never bonded for music or audio."""
+  return bool(device.get('connected')) and not device.get('paired') and not device.get('trusted')
+
+
 def forget_app_only(allowed):
   if not permitted(allowed):
     return

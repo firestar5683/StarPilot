@@ -23,6 +23,19 @@ class TestBluetoothCompact(unittest.TestCase):
       page._open_device("AA:BB:CC:DD:EE:FF")
     request.assert_called_once_with("pair", address="AA:BB:CC:DD:EE:FF")
 
+  def test_connected_unpaired_phone_app_is_forgotten_not_paired(self):
+    page = BluetoothCompact.__new__(BluetoothCompact)
+    page.icon = object()
+    page.status = {"devices": [{"address": "AA:BB:CC:DD:EE:FF", "name": "iPhone", "paired": False, "connected": True}]}
+    with patch.object(page, "_request") as request, \
+         patch("openpilot.starpilot.ui.bluetooth_compact.gui_app.push_widget") as push, \
+         patch("openpilot.starpilot.ui.bluetooth_compact.BigConfirmationDialog") as dialog:
+      page._open_device("AA:BB:CC:DD:EE:FF")
+      request.assert_not_called()
+      push.assert_called_once()
+      dialog.call_args.args[2]()
+    request.assert_called_once_with("forget", address="AA:BB:CC:DD:EE:FF", return_to_root=True)
+
   def test_forget_falls_back_to_galaxy_when_android_auto_holds_the_adapter(self):
     from openpilot.starpilot.bluetooth.owner import BluetoothRejected
     page = BluetoothCompact.__new__(BluetoothCompact)

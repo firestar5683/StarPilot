@@ -182,7 +182,9 @@ export const BluetoothPage = {
     'status.claim'() { this.claimAt = Date.now(); this.now = this.claimAt },
   },
   computed: {
-    saved() { return this.status?.devices?.filter((device) => device.paired || device.trusted || device.connected) || [] },
+    saved() { return this.status?.devices?.filter((device) => device.paired || device.trusted) || [] },
+    // A phone running the StarPilot app is connected to comma's Bluetooth bridge but not bonded: list it apart from real pairings.
+    appLinks() { return this.status?.devices?.filter((device) => device.connected && !device.paired && !device.trusted) || [] },
     nearby() { return this.status?.devices?.filter((device) => !device.paired && !device.trusted && !device.connected) || [] },
     claimLeft() { return Math.max(0, (this.status?.claim?.left ?? 0) - Math.floor((this.now - this.claimAt) / 1000)) },
     canAllowPair() { return validPairInput(this.status?.pairing?.prompt, this.pairValue) },
@@ -247,6 +249,11 @@ export const BluetoothPage = {
             <div v-for="device in saved" :key="device.address" class="gx-row"><div class="gx-row__info"><span class="gx-row__label"><i class="bi bi-bluetooth gx-bluetooth__device-icon" aria-hidden="true"></i>{{ device.name || device.address }}</span><span class="gx-row__desc">{{ device.connected ? 'Connected' : 'Disconnected' }} · {{ device.address }}</span></div>
               <div class="gx-actions"><button class="gx-btn gx-btn--tonal" :disabled="!status.powered" @click="action(device.connected ? 'disconnect' : 'connect', {address:device.address})">{{ device.connected ? 'Disconnect' : 'Connect' }}</button>
                 <button class="gx-btn gx-btn--tonal" @click="forgetting = { address: device.address, name: device.name, state: 'confirm' }">Forget</button></div></div></section>
+          <section v-if="appLinks.length" class="gx-card"><div class="gx-section__header"><i class="bi bi-phone" aria-hidden="true"></i><span class="gx-section__title">App Pairings</span></div>
+            <p class="gx-note gx-inset">Phones connected through the StarPilot app. These are not Bluetooth pairings.</p>
+            <div v-for="device in appLinks" :key="device.address" class="gx-row"><div class="gx-row__info"><span class="gx-row__label">{{ device.name }}</span>
+                <span class="gx-row__desc">Connected through the app</span></div>
+              <div class="gx-actions"><button class="gx-btn gx-btn--tonal" @click="forgetting = { address: device.address, name: device.name, state: 'confirm' }">Forget</button></div></div></section>
           <section class="gx-card"><div class="gx-section__header"><i class="bi bi-broadcast" aria-hidden="true"></i><span class="gx-section__title">Nearby Devices</span>
             <button class="gx-btn gx-btn--tonal" :disabled="!status.powered" @click="action(status.discovering ? 'stop_scan' : 'scan')"><i class="bi" :class="status.discovering ? 'bi-x-circle' : 'bi-search'" aria-hidden="true"></i>{{ status.discovering ? 'Stop Search' : 'Search' }}</button></div>
             <p v-if="!nearby.length" class="gx-note gx-inset">{{ status.discovering ? 'Searching…' : 'No nearby devices found.' }}</p>

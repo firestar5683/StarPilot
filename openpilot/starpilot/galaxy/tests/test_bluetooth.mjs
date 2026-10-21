@@ -18,6 +18,13 @@ assert.equal(validPairInput({ kind: "passkey" }, "123456"), true)
 assert.equal(validPairInput({ kind: "passkey" }, "1234567"), false)
 assert.equal(validPairInput({ kind: "confirmation" }, ""), true)
 assert.match(BluetoothPage.template, /!canAllowPair/)
+// A phone running the StarPilot app is connected but not bonded: it lists under App Pairings, not Saved or Nearby devices.
+const appPhone = { address: "11:22:33:44:55:66", name: "iPhone", paired: false, connected: true, trusted: false }
+const listed = { status: { ...status, devices: [...status.devices, appPhone] } }
+assert.deepEqual(BluetoothPage.computed.saved.call(listed).map((device) => device.name), ["Speaker"])
+assert.deepEqual(BluetoothPage.computed.appLinks.call(listed).map((device) => device.name), ["iPhone"])
+assert.deepEqual(BluetoothPage.computed.nearby.call(listed), [])
+assert.match(BluetoothPage.template, /App Pairings/)
 
 const calls = [], states = [], timers = []
 const feed = new BluetoothFeed({ publish: (state) => states.push(state),

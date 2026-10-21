@@ -110,7 +110,8 @@ class TestBluetoothLarge(unittest.TestCase):
                  'text_item': lambda *a, **kw: Row((a, kw)), 'ConfirmDialog': Dialog, 'alert_dialog': Dialog,
                  'DialogResult': type('Result', (), {'CONFIRM': 1}), 'Keyboard': Dialog,
                  'setup_status': lambda: 'Ready to pair', 'large_phone_rows': lambda allowed: [],
-                 'forget_phone_keys': lambda allowed, address: self.forgotten.append(address)}
+                 'forget_phone_keys': lambda allowed, address: self.forgotten.append(address),
+                 'is_app_link': lambda device: bool(device.get('connected')) and not device.get('paired') and not device.get('trusted')}
     tree.body.insert(0, ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0))
     exec(compile(ast.fix_missing_locations(tree), str(path), 'exec'), scope)
     self.panel_type = scope['BluetoothLarge']
@@ -181,6 +182,19 @@ class TestBluetoothLarge(unittest.TestCase):
     rows = self.panel._scroller.rows
     self.assertIn(('Headphones', 'Disconnect'), [row[0] for row in rows])
     self.assertIn(('Forget Headphones', 'Forget'), [row[0] for row in rows])
+
+  def test_app_connections_are_grouped_apart_from_bluetooth_devices(self):
+    self.panel.status = {'available': True, 'powered': True, 'parked': True, 'devices': [
+      {'address': 'AA:BB', 'name': 'Headphones', 'paired': True, 'connected': True},
+      {'address': 'CC:DD', 'name': 'iPhone', 'paired': False, 'trusted': False, 'connected': True}]}
+    self.panel._scroller = None
+    self.panel._rebuild()
+    names = [row[0] for row in self.panel._scroller.rows]
+    self.assertIn(('Headphones', 'Disconnect'), names)
+    self.assertNotIn(('iPhone', 'Pair'), names)
+    self.assertNotIn(('iPhone', 'Disconnect'), names)
+    self.assertIn('App pairings', [name[0] for name in names])
+    self.assertIn(('iPhone', 'Forget'), names)
 
   def test_forgetting_a_device_also_forgets_its_app_key(self):
     self.panel.show_event()
