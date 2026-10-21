@@ -297,7 +297,8 @@ class BluetoothLarge(Widget):
       if links:
         rows.append(text_item("App pairings", "Phones connected through the StarPilot app. These are not Bluetooth pairings."))
         for device in links:
-          rows.append(button_item(device_label(device), "Forget", description=device.get("address"), callback=lambda a=device.get("address"):
+          link_address = device.get("address")
+          rows.append(button_item(device_label(device), "Forget", description=link_address, callback=lambda a=link_address:
             self._confirm("Forget this app connection?", lambda: self._forget(a)), enabled=lambda: self.active and self._ready()))
     rows.extend(large_phone_rows(self.phone_pairing_allowed))
     previous = getattr(self, "_scroller", None)
