@@ -530,8 +530,35 @@ class MainActivity : Activity() {
         if (adapter == null || !adapter.isEnabled) return MusicBond.Outcome.FAILED
         if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return MusicBond.Outcome.FAILED
         return try {
-            MusicBond({ adapter.bondedDevices.map { it.address.uppercase() }.toSet() }, { adapter.getRemoteDevice(it).createBond() }).run(address)
-        } catch (_: Exception) { MusicBond.Outcome.FAILED }
+            // Comma presents as a speaker while its window is open. Seeing it in a normal Bluetooth scan first makes
+            // Android bond over classic audio Bluetooth, the way tapping comma in Bluetooth settings does.
+            runCatching { discoverComma(adapter, address) }.onFailure { android.util.Log.w("GalaxyPair", "Bluetooth scan before music bond failed", it) }
+            MusicBond({ adapter.bondedDevices.map { it.address.uppercase() }.toSet() }, {
+                adapter.getRemoteDevice(it).createBond().also { started -> android.util.Log.i("GalaxyPair", "createBond($it) started=$started") }
+            }).run(address)
+        } catch (e: Exception) {
+            android.util.Log.w("GalaxyPair", "Music bond failed", e)
+            MusicBond.Outcome.FAILED
+        }
+    }
+    /** Runs one classic Bluetooth scan until [address] shows up or [millis] passes. Blocks; call from a worker thread. */
+    private fun discoverComma(adapter: android.bluetooth.BluetoothAdapter, address: String, millis: Long = 10000) {
+        val seen = java.util.concurrent.CountDownLatch(1)
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: Intent) {
+                val device = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(android.bluetooth.BluetoothDevice.EXTRA_DEVICE, android.bluetooth.BluetoothDevice::class.java)
+                    else @Suppress("DEPRECATION") intent.getParcelableExtra(android.bluetooth.BluetoothDevice.EXTRA_DEVICE)
+                if (device?.address.equals(address, ignoreCase = true)) seen.countDown()
+            }
+        }
+        val filter = android.content.IntentFilter(android.bluetooth.BluetoothDevice.ACTION_FOUND)
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, RECEIVER_EXPORTED) else registerReceiver(receiver, filter)
+        try {
+            if (adapter.startDiscovery()) seen.await(millis, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } finally {
+            runCatching { adapter.cancelDiscovery() }
+            runCatching { unregisterReceiver(receiver) }
+        }
     }
     /** Pairing results appear on the connect screen when it is showing, otherwise in a dialog over Galaxy. */
     private fun phoneGpsPermissions(): Array<String> = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION) +
