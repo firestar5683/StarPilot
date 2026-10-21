@@ -30,6 +30,9 @@ the window as above.
 
 - Android: tap **Pair with comma** in the app. It gets its key, then bonds for music
   and shows one system prompt to approve.
+  Opening Galaxy over Wi-Fi/LAN on a phone with no comma key starts this by itself, once per launch
+  (it asks for the Nearby devices permission first); if comma cannot open a window it stays quiet and
+  **Pair with comma** remains in the menu.
 - iPhone: tap **Pair with comma** in the app, then tap comma once in
   Settings → Bluetooth (iOS cannot start a Bluetooth bond from an app).
 - No app: tap comma in the phone's Bluetooth settings to pair music only.

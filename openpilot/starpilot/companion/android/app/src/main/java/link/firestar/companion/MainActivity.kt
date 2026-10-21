@@ -159,6 +159,7 @@ class MainActivity : Activity() {
                 if (web === v && Networks.localOrigin(url) == origin) {
                     prefs.edit().putString("host", origin).apply(); share = null; revealWeb()
                     AppUpdates.checkAsync(this@MainActivity)
+                    autoPairIfNeeded()
                 }
             }
         }
@@ -480,6 +481,43 @@ class MainActivity : Activity() {
             }
         }.start()
     }
+    private val autoPairing = java.util.concurrent.atomic.AtomicBoolean()
+    private var autoPairAsked = false
+    private fun bluetoothPermissions() = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    /** Galaxy is open over Wi-Fi/LAN and this phone has no comma key yet: pair in the background, once per launch. */
+    private fun autoPairIfNeeded() {
+        if (bluetoothMode || pairing.load() != null || autoPairAsked || !prefs.getBoolean("autoPair", true)) return
+        autoPairAsked = true
+        val permissions = bluetoothPermissions()
+        if (permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) requestPermissions(permissions, 6) else runAutoPair()
+    }
+    private fun runAutoPair() {
+        val lan = Networks.commaLan(this) ?: return
+        if (pairing.load() != null || !autoPairing.compareAndSet(false, true)) return
+        Thread {
+            try {
+                // Quietly give up when comma cannot open a window (older comma, driving): Pair with comma stays in the menu.
+                if (!LanPairing.openWindow(lan.first, lan.second)) return@Thread
+                runOnUiThread { Toast.makeText(this, "Pairing this phone with comma for Bluetooth and music…", Toast.LENGTH_LONG).show() }
+                val transport = BleTransport(this, null)
+                try {
+                    val claim = ClaimPairing.claim(transport, phoneName())
+                    pairing.save(claim.key, claim.id.ifEmpty { null })
+                    transport.close()
+                    val outcome = bondMusic(claim.adapterAddress)
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        val note = MusicBond.message(outcome)
+                        if (note != null) message(note) else Toast.makeText(this, "Paired with comma. Bluetooth Galaxy is ready.", Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: Exception) {
+                    transport.close()
+                    runOnUiThread { Toast.makeText(this, "Couldn't pair automatically (${e.message ?: "comma didn't answer"}). Use Pair with comma in the menu.", Toast.LENGTH_LONG).show() }
+                }
+            } finally { autoPairing.set(false) }
+        }.start()
+    }
     private fun bondMusic(address: String): MusicBond.Outcome {
         val adapter = getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter
         if (adapter == null || !adapter.isEnabled) return MusicBond.Outcome.FAILED
@@ -563,6 +601,7 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(code, permissions, results)
         if (code == 1 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) AppUpdates.checkAsync(this)
         if (code == 5 && results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) pairPhone()
+        if (code == 6 && results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) runAutoPair()
         if (code == 4) {
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                 prefs.edit().putBoolean("phoneGps", true).apply()
