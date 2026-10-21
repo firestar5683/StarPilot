@@ -72,7 +72,7 @@ def handle(supervisor: Supervisor, request: dict[str, Any], verifier: GalaxySour
     try:
       result = supervisor.companion_bluetooth_action(request['operation'], request['address'], ('galaxy', request['source']))
     except (BluetoothRejected, BluetoothUnavailable) as error:
-      return {'handled': True, 'error_code': error.code}
+      return {'handled': True, 'error_code': error.code, 'message': str(error)[:160]}
     except (OSError, RuntimeError):
       return {'handled': True, 'error_code': 'service_unavailable'}
     return {'handled': result is not None, **({'bluetooth': result} if result is not None else {})}
@@ -88,7 +88,7 @@ def handle(supervisor: Supervisor, request: dict[str, Any], verifier: GalaxySour
     try:
       result = supervisor.phone_window(operation, ('galaxy', request['source']), **answer)
     except (BluetoothRejected, BluetoothUnavailable) as error:
-      return {'handled': True, 'error_code': error.code}
+      return {'handled': True, 'error_code': error.code, 'message': str(error)[:160]}
     except (OSError, RuntimeError):
       return {'handled': True, 'error_code': 'service_unavailable'}
     return {'handled': result is not None, **({'bluetooth': result} if result is not None else {})}

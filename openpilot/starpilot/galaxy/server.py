@@ -15,6 +15,7 @@ import threading
 import time
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from openpilot.common.swaglog import cloudlog
 from openpilot.starpilot.galaxy.batch_routes import change_drive_state, delete_records, non_default_settings, preview_layout, preview_settings_recovery
 from openpilot.starpilot.galaxy.access import AccessStatus, default_owner
 from openpilot.starpilot.galaxy.auth import LocalSessions
@@ -2514,7 +2515,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               if 'error_code' in delegated:
                 code = delegated['error_code']
                 if type(code) is str and code in ('busy', 'park_required', 'changed', 'session_expired'):
-                  raise BluetoothRejected('Android Auto could not complete the Bluetooth change', code=code)
+                  why = delegated.get('message')
+                  raise BluetoothRejected(f'Android Auto: {why}' if type(why) is str and why else
+                                          'Android Auto could not complete the Bluetooth change', code=code)
                 raise BluetoothUnavailable('Android Auto Bluetooth service is unavailable')
             if delegated['handled']:
               result = delegated.get('bluetooth')
@@ -2532,9 +2535,11 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           if self.settings_session() == identity:
             self.json(400, {'error': 'Invalid Bluetooth request'})
         except BluetoothRejected as error:
+          cloudlog.warning(f'bluetooth {payload.get("operation")} refused ({error.code}): {error}')
           if self.settings_session() == identity:
             self.json(409, {'error': 'Bluetooth change was not accepted', 'code': error.code})
         except BluetoothUnavailable as error:
+          cloudlog.warning(f'bluetooth {payload.get("operation")} unavailable ({error.code}): {error}')
           if self.settings_session() == identity:
             self.json(503, {'error': 'Bluetooth service could not complete the request', 'code': error.code})
         except (OSError, RuntimeError):
