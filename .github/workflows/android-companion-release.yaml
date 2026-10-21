@@ -1,0 +1,68 @@
+name: Android companion release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-companion-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test, build and sign the companion APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: android-release
+    defaults:
+      run:
+        working-directory: openpilot/starpilot/companion/android
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+          lfs: false
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK platform and build tools
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;37.0.0"
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest
+      - name: Restore signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.COMPANION_KEYSTORE_BASE64 }}
+        run: |
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/companion.jks"
+      - name: Build and sign the APK
+        env:
+          COMPANION_KEYSTORE: ${{ runner.temp }}/companion.jks
+          COMPANION_KEY_PASSWORD: ${{ secrets.COMPANION_KEY_PASSWORD }}
+        run: ./build_apk.sh
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/companion.jks"
+      - name: Check the APK
+        working-directory: openpilot/starpilot/galaxy/bin
+        run: |
+          if unzip -l starpilot-companion.apk | grep -q 'assets/galaxy/'; then
+            echo 'APK still bundles Galaxy' >&2
+            exit 1
+          fi
+          BT="$ANDROID_HOME/build-tools/37.0.0"
+          "$BT/aapt2" dump badging starpilot-companion.apk | head -1
+          "$BT/apksigner" verify --print-certs starpilot-companion.apk | grep -E 'certificate (DN|SHA-256)'
+          cat starpilot-companion.apk.version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: starpilot-companion-apk
+          path: |
+            openpilot/starpilot/galaxy/bin/starpilot-companion.apk
+            openpilot/starpilot/galaxy/bin/starpilot-companion.apk.version
+          if-no-files-found: error
+          retention-days: 30
