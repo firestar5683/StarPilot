@@ -321,7 +321,7 @@ class MainActivity : Activity() {
                 }
             }
             .group("Bluetooth pairing") {
-                action("Pair with comma", "First open Pair phone on comma (Settings > Bluetooth), then tap here") { pairPhone() }
+                action("Add Bluetooth Phone Pairing", "First open Pair phone on comma (Settings > Bluetooth), then tap here") { pairPhone() }
                 action("Forget pairing on this phone") { pairing.forget(); ble?.close(); disconnected() }
             }
             .group("Phone GPS") {
@@ -520,7 +520,7 @@ class MainActivity : Activity() {
         pairing.forget(); ble?.close()
         runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread
-            message("$why, so the app pairing was removed too. $PAIR_STEPS Then tap Pair with comma to set it up again.")
+            message("$why, so the app pairing was removed too. $PAIR_STEPS Then tap Add Bluetooth Phone Pairing to set it up again.")
             if (bluetoothMode) disconnected()
         }
     }
@@ -551,11 +551,11 @@ class MainActivity : Activity() {
         if (isFinishing || isDestroyed) return
         val again = pairing.load() != null
         AlertDialog.Builder(this)
-            .setTitle(if (again) "Pair this phone with comma again?" else "Pair this phone with comma?")
+            .setTitle(if (again) "Add Bluetooth phone pairing again?" else "Add Bluetooth phone pairing?")
             .setMessage(if (again) "Comma no longer recognizes this phone's pairing. Pairing again takes a few seconds and needs one approval on this phone."
                 else "You're connected to comma over Wi-Fi.\n\nPairing lets this phone open Galaxy over Bluetooth when there's no Wi-Fi, and sets up Bluetooth music. " +
                     "Comma's pairing window opens by itself, and you approve one prompt on this phone.")
-            .setPositiveButton("Pair now") { _, _ -> startAutoPair() }
+            .setPositiveButton("Add pairing") { _, _ -> startAutoPair() }
             .setNegativeButton("Not now", null)
             .setNeutralButton("Don't ask again") { _, _ -> prefs.edit().putBoolean("autoPair", false).apply() }
             .show()
@@ -565,7 +565,7 @@ class MainActivity : Activity() {
         if (permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) requestPermissions(permissions, 6) else runAutoPair()
     }
     private fun runAutoPair() {
-        val lan = Networks.commaLan(this) ?: return message("This phone isn't connected to comma over Wi-Fi right now. Join comma's Wi-Fi, then tap Pair with comma in the menu.")
+        val lan = Networks.commaLan(this) ?: return message("This phone isn't connected to comma over Wi-Fi right now. Join comma's Wi-Fi, then tap Add Bluetooth Phone Pairing in the menu.")
         if (!autoPairing.compareAndSet(false, true)) return
         showPairProgress("Opening comma's pairing window over Wi-Fi…")
         Thread {
@@ -573,7 +573,7 @@ class MainActivity : Activity() {
                 LanPairing.openWindow(lan.first, lan.second)?.let { why ->
                     android.util.Log.w("GalaxyPair", "Could not open comma's window over Wi-Fi: $why")
                     hidePairProgress()
-                    runOnUiThread { message("Couldn't open comma's pairing window over Wi-Fi ($why).\n\n$PAIR_STEPS Then tap Pair with comma in the menu.") }
+                    runOnUiThread { message("Couldn't open comma's pairing window over Wi-Fi ($why).\n\n$PAIR_STEPS Then tap Add Bluetooth Phone Pairing in the menu.") }
                     return@Thread
                 }
                 val transport = BleTransport(this, null)
@@ -591,7 +591,7 @@ class MainActivity : Activity() {
                     transport.close()
                     android.util.Log.w("GalaxyPair", "Pairing failed", e)
                     hidePairProgress()
-                    runOnUiThread { message("Couldn't pair: ${e.message ?: "comma didn't answer"}\n\n$PAIR_STEPS Then tap Pair with comma in the menu.") }
+                    runOnUiThread { message("Couldn't pair: ${e.message ?: "comma didn't answer"}\n\n$PAIR_STEPS Then tap Add Bluetooth Phone Pairing in the menu.") }
                 }
             } finally { autoPairing.set(false) }
         }.start()
@@ -656,7 +656,7 @@ class MainActivity : Activity() {
         if (key == null) {
             disconnected().apply {
                 route(Route.BLUETOOTH, RouteState.UNAVAILABLE, "Not paired")
-                detail("Pair first. $PAIR_STEPS Then tap Pair with comma here.")
+                detail("Pair first. $PAIR_STEPS Then tap Add Bluetooth Phone Pairing here.")
             }
             return
         }
@@ -664,7 +664,7 @@ class MainActivity : Activity() {
             // Comma stopped recognizing this phone; retrying cannot fix that, so wait for a new pairing instead.
             disconnected().apply {
                 route(Route.BLUETOOTH, RouteState.FAILED, "Pairing expired")
-                detail("Comma no longer recognizes this phone (it was forgotten there). $PAIR_STEPS Then tap Pair with comma here.")
+                detail("Comma no longer recognizes this phone (it was forgotten there). $PAIR_STEPS Then tap Add Bluetooth Phone Pairing here.")
             }
             return
         }
@@ -706,7 +706,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (e is PairingNotRecognized && !isFinishing && generation == connectionGeneration.get()) disconnected().apply {
                         route(Route.BLUETOOTH, RouteState.FAILED, "Pairing expired")
-                        detail("Comma no longer recognizes this phone (${e.message}). $PAIR_STEPS Then tap Pair with comma here.")
+                        detail("Comma no longer recognizes this phone (${e.message}). $PAIR_STEPS Then tap Add Bluetooth Phone Pairing here.")
                     } else if (!isFinishing && generation == connectionGeneration.get()) disconnected().apply {
                         route(Route.BLUETOOTH, RouteState.FAILED, "Didn't connect")
                         detail("Bluetooth didn't connect: ${e.message ?: "comma didn't answer"}. Check that Bluetooth is on in comma settings and comma is nearby.")
@@ -721,7 +721,7 @@ class MainActivity : Activity() {
         if (code == 5 && results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) pairPhone()
         if (code == 6) {
             if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) runAutoPair()
-            else message("Pairing needs the Nearby devices permission. Allow it, then tap Pair with comma in the menu.")
+            else message("Pairing needs the Nearby devices permission. Allow it, then tap Add Bluetooth Phone Pairing in the menu.")
         }
         if (code == 4) {
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {

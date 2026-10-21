@@ -29,7 +29,7 @@ class MusicBond(
             Outcome.PAIRED -> "Paired with comma. For music, choose comma as this phone's media audio output."
             Outcome.ALREADY_PAIRED -> "Paired with comma. Music was already set up on this phone."
             Outcome.UNSUPPORTED -> null
-            Outcome.FAILED -> "The app is paired, but music wasn't set up. Open Pair phone on comma again (Settings > Bluetooth), then tap Pair with comma here."
+            Outcome.FAILED -> "The app is paired, but music wasn't set up. Open Pair phone on comma again (Settings > Bluetooth), then tap Add Bluetooth Phone Pairing here."
         }
     }
 }

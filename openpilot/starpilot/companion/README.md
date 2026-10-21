@@ -24,15 +24,15 @@ replay, cameras and map tiles are blocked; they need Wi-Fi.
 One step pairs the app and phone music. On comma open Settings → Bluetooth →
 **Pair phone**; comma opens a two-minute window that takes one phone.
 
-If the app already reaches comma over Wi-Fi/LAN, **Pair with comma** opens that window itself (the call
+If the app already reaches comma over Wi-Fi/LAN, **Add Bluetooth Phone Pairing** (Android) or **Pair with comma** (iPhone) opens that window itself (the call
 Galaxy's Bluetooth page makes), so nothing needs touching on comma. Without a Wi-Fi/LAN session it waits for
 the window as above.
 
-- Android: tap **Pair with comma** in the app. If the app can't reach comma over Wi-Fi it first asks you to open
+- Android: tap **Add Bluetooth Phone Pairing** in the app. If the app can't reach comma over Wi-Fi it first asks you to open
   **Pair phone** on comma and keep it open. It then gets its key, bonds for music and shows one system prompt to approve.
   The first time Galaxy opens over Wi-Fi/LAN on a phone with no comma key (or an expired one), the app offers
-  **Pair now**. It opens comma's pairing window itself, shows each step, and asks for the Nearby devices permission if
-  needed. **Not now** asks again next launch; **Don't ask again** leaves it to **Pair with comma** in the menu.
+  **Add pairing**. It opens comma's pairing window itself, shows each step, and asks for the Nearby devices permission if
+  needed. **Not now** asks again next launch; **Don't ask again** leaves it to **Add Bluetooth Phone Pairing** in the menu.
 - iPhone: tap **Pair with comma** in the app, then tap comma once in
   Settings → Bluetooth (iOS cannot start a Bluetooth bond from an app).
 - No app: tap comma in the phone's Bluetooth settings to pair music only.

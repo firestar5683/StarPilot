@@ -156,7 +156,7 @@ class BleTransport(context: Context, private val key: ByteArray?, private val he
                     return challenge to result
                 }
             }
-            throw IOException("comma didn't answer. Open Pair phone on comma first (Settings > Bluetooth > Pair phone) and keep it open, then tap Pair with comma again.")
+            throw IOException("comma didn't answer. Open Pair phone on comma first (Settings > Bluetooth > Pair phone) and keep it open, then tap Add Bluetooth Phone Pairing again.")
         } catch (e: Exception) { close(); throw e } finally { connecting.decrementAndGet() }
     }
     @Synchronized fun request(value: JSONObject, deadlineSeconds: Long = 90): JSONObject {
