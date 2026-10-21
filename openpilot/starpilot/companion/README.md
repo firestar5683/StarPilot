@@ -28,8 +28,8 @@ If the app already reaches comma over Wi-Fi/LAN, **Pair with comma** opens that 
 Galaxy's Bluetooth page makes), so nothing needs touching on comma. Without a Wi-Fi/LAN session it waits for
 the window as above.
 
-- Android: tap **Pair with comma** in the app. It gets its key, then bonds for music
-  and shows one system prompt to approve.
+- Android: tap **Pair with comma** in the app. If the app can't reach comma over Wi-Fi it first asks you to open
+  **Pair phone** on comma and keep it open. It then gets its key, bonds for music and shows one system prompt to approve.
   Opening Galaxy over Wi-Fi/LAN on a phone with no comma key starts this by itself, once per launch
   (it asks for the Nearby devices permission first); if comma cannot open a window it stays quiet and
   **Pair with comma** remains in the menu.

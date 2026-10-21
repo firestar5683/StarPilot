@@ -318,7 +318,7 @@ class MainActivity : Activity() {
                 }
             }
             .group("Bluetooth pairing") {
-                action("Pair with comma", "On comma (Settings > Bluetooth > Pair phone) or Galaxy (Bluetooth page), then tap here") { pairPhone() }
+                action("Pair with comma", "First open Pair phone on comma (Settings > Bluetooth), then tap here") { pairPhone() }
                 action("Forget pairing on this phone") { pairing.forget(); ble?.close(); disconnected() }
             }
             .group("Phone GPS") {
@@ -442,16 +442,26 @@ class MainActivity : Activity() {
             ?: "${Build.MANUFACTURER} ${Build.MODEL}").take(40)
     private fun phoneHello(): JSONObject = JSONObject().put("name", phoneName()).apply { pairing.previousId()?.let { put("replaces", it) } }
     /** One step for the app and music: comma's open pairing window gives this phone its key, then bonds it for music. */
-    private fun pairPhone() {
+    private val PAIR_STEPS = "On comma open Settings > Bluetooth > Pair phone (or Galaxy > Bluetooth > Pair phone) and keep that screen open."
+    /** Without a Wi-Fi/LAN route the app cannot open comma's window itself, so say so before waiting for it. */
+    private fun askToOpenWindow() {
+        if (isFinishing || isDestroyed) return
+        AlertDialog.Builder(this).setTitle("Open Pair phone on comma first")
+            .setMessage("$PAIR_STEPS\n\nComma's window stays open for 2 minutes. Tap Continue once it shows.")
+            .setPositiveButton("Continue") { _, _ -> pairPhone(confirmed = true) }
+            .setNegativeButton("Cancel", null).show()
+    }
+    private fun pairPhone(confirmed: Boolean = false) {
         val permissions = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
             else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         if (permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) { requestPermissions(permissions, 5); return }
+        if (!confirmed && Networks.commaLan(this) == null) { askToOpenWindow(); return }
         val generation = supersedeConnection()
         connectScreen().apply {
             refreshRoutes(this)
             headline("Pairing with comma")
             route(Route.BLUETOOTH, RouteState.TRYING, "Pairing…")
-            detail("On comma open Settings > Bluetooth > Pair phone, or tap Pair phone on the Galaxy Bluetooth page. Keep Bluetooth on for comma and this phone.")
+            detail("$PAIR_STEPS\nKeep Bluetooth on for comma and this phone.")
         }
         Thread {
             // Already on comma's Wi-Fi/LAN: open its pairing window ourselves so nobody has to touch comma.
@@ -460,7 +470,7 @@ class MainActivity : Activity() {
                 val why = LanPairing.openWindow(network, origin)
                 if (why != null) android.util.Log.w("GalaxyPair", "Could not open comma's window over Wi-Fi: $why")
                 windowNote = if (why == null) "Opened comma's pairing window over Wi-Fi.\n"
-                    else "Couldn't open comma's window over Wi-Fi ($why). On comma tap Settings > Bluetooth > Pair phone.\n"
+                    else "Couldn't open comma's window over Wi-Fi ($why).\nPlease open it on comma: Settings > Bluetooth > Pair phone.\n"
                 runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail(windowNote.trim()) }
             }
             val transport = BleTransport(this, null)
@@ -588,7 +598,7 @@ class MainActivity : Activity() {
         if (key == null) {
             disconnected().apply {
                 route(Route.BLUETOOTH, RouteState.UNAVAILABLE, "Not paired")
-                detail("Pair first: tap Pair phone on comma (Settings > Bluetooth) or on the Galaxy Bluetooth page, then tap Pair with comma here.")
+                detail("Pair first. $PAIR_STEPS Then tap Pair with comma here.")
             }
             return
         }

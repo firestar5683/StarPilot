@@ -142,7 +142,7 @@ class BleTransport(context: Context, private val key: ByteArray?, private val he
                     return challenge to result
                 }
             }
-            throw IOException("comma didn't answer. Tap Pair phone on comma (Settings > Bluetooth) or on the Galaxy Bluetooth page, then try again.")
+            throw IOException("comma didn't answer. Open Pair phone on comma first (Settings > Bluetooth > Pair phone) and keep it open, then tap Pair with comma again.")
         } catch (e: Exception) { close(); throw e } finally { connecting.decrementAndGet() }
     }
     @Synchronized fun request(value: JSONObject): JSONObject {
