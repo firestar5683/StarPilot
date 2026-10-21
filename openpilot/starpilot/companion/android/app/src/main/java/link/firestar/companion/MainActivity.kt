@@ -455,13 +455,14 @@ class MainActivity : Activity() {
         }
         Thread {
             // Already on comma's Wi-Fi/LAN: open its pairing window ourselves so nobody has to touch comma.
+            var windowNote = ""
             Networks.commaLan(this)?.let { (network, origin) ->
-                if (LanPairing.openWindow(network, origin)) runOnUiThread {
-                    if (generation == connectionGeneration.get()) screen?.detail("Opened comma's pairing window over Wi-Fi. Keep Bluetooth on for comma and this phone.")
-                }
+                windowNote = if (LanPairing.openWindow(network, origin)) "Opened comma's pairing window over Wi-Fi.\n"
+                    else "Couldn't open comma's window over Wi-Fi. On comma tap Settings > Bluetooth > Pair phone.\n"
+                runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail(windowNote.trim()) }
             }
             val transport = BleTransport(this, null)
-            transport.onPhase = { text -> runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail(text) } }
+            transport.onPhase = { text -> runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail(windowNote + text) } }
             ble = transport
             try {
                 val claim = ClaimPairing.claim(transport, phoneName())
