@@ -536,10 +536,13 @@ class MainActivity : Activity() {
     private fun bluetoothPermissions() = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     private var pairProgress: AlertDialog? = null
+    @Volatile private var pairCancelled = false
+    @Volatile private var pairTransport: BleTransport? = null
     private fun showPairProgress(text: String) = runOnUiThread {
         if (isFinishing || isDestroyed) return@runOnUiThread
-        val dialog = pairProgress ?: AlertDialog.Builder(this).setTitle("Pairing with comma").setCancelable(false).create()
-            .also { pairProgress = it; it.show() }
+        val dialog = pairProgress ?: AlertDialog.Builder(this).setTitle("Pairing with comma").setCancelable(false)
+            .setNegativeButton("Cancel") { _, _ -> pairCancelled = true; pairTransport?.close(); pairProgress = null }
+            .create().also { pairProgress = it; it.show() }
         dialog.setMessage(text)
     }
     private fun hidePairProgress() = runOnUiThread { pairProgress?.dismiss(); pairProgress = null }
@@ -567,16 +570,19 @@ class MainActivity : Activity() {
     private fun runAutoPair() {
         val lan = Networks.commaLan(this) ?: return message("This phone isn't connected to comma over Wi-Fi right now. Join comma's Wi-Fi, then tap Add Bluetooth Phone Pairing in the menu.")
         if (!autoPairing.compareAndSet(false, true)) return
+        pairCancelled = false
         showPairProgress("Opening comma's pairing window over Wi-Fi…")
         Thread {
             try {
                 LanPairing.openWindow(lan.first, lan.second)?.let { why ->
                     android.util.Log.w("GalaxyPair", "Could not open comma's window over Wi-Fi: $why")
                     hidePairProgress()
-                    runOnUiThread { message("Couldn't open comma's pairing window over Wi-Fi ($why).\n\n$PAIR_STEPS Then tap Add Bluetooth Phone Pairing in the menu.") }
+                    if (!pairCancelled) runOnUiThread { message("Couldn't open comma's pairing window over Wi-Fi ($why).\n\n$PAIR_STEPS Then tap Add Bluetooth Phone Pairing in the menu.") }
                     return@Thread
                 }
+                if (pairCancelled) return@Thread
                 val transport = BleTransport(this, null)
+                pairTransport = transport
                 transport.onPhase = { text -> showPairProgress("Opened comma's pairing window over Wi-Fi.\n$text") }
                 try {
                     val claim = ClaimPairing.claim(transport, phoneName())
@@ -585,15 +591,17 @@ class MainActivity : Activity() {
                     showPairProgress("Paired with comma. Setting up Bluetooth music: approve the prompt on this phone if it asks.")
                     val outcome = bondMusic(claim.adapterAddress)
                     if (outcome == MusicBond.Outcome.PAIRED || outcome == MusicBond.Outcome.ALREADY_PAIRED) pairing.rememberMusic(claim.adapterAddress)
-                    hidePairProgress()
-                    runOnUiThread { message(MusicBond.message(outcome) ?: "Paired with comma. Bluetooth Galaxy is ready.") }
+                    if (!pairCancelled) runOnUiThread { message(MusicBond.message(outcome) ?: "Paired with comma. Bluetooth Galaxy is ready.") }
                 } catch (e: Exception) {
                     transport.close()
+                    if (pairCancelled) return@Thread
                     android.util.Log.w("GalaxyPair", "Pairing failed", e)
-                    hidePairProgress()
                     runOnUiThread { message("Couldn't pair: ${e.message ?: "comma didn't answer"}\n\n$PAIR_STEPS Then tap Add Bluetooth Phone Pairing in the menu.") }
                 }
-            } finally { autoPairing.set(false) }
+            } finally {
+                // Whatever happened, never leave the progress dialog up.
+                autoPairing.set(false); pairTransport = null; hidePairProgress()
+            }
         }.start()
     }
     private fun bondMusic(address: String): MusicBond.Outcome {
