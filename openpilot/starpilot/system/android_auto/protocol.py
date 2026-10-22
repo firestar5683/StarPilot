@@ -8,7 +8,7 @@ import socket
 from typing import Any
 
 ANDROID_AUTO_SOCKET_PATH = "/tmp/starpilot-android-auto.sock"
-COMMAND_TIMEOUTS = {"stop": 12.0, "prepare_pairing": 20.0, "devices": 10.0, "select_receiver": 10.0, "bluetooth_action": 25.0,
+COMMAND_TIMEOUTS = {"stop": 12.0, "prepare_pairing": 20.0, "devices": 10.0, "select_receiver": 10.0, "bluetooth_action": 25.0, "bluetooth_power": 25.0,
                     "forget_receiver": 15.0}
 
 

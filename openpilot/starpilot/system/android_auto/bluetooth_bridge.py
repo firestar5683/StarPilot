@@ -679,6 +679,23 @@ class SharedBluetoothOwner(BluetoothOwner):
     finally:
       self.lock.release()
 
+  def companion_power(self, enabled: bool, session: tuple) -> dict | None:
+    """Turn the radio off (or confirm it is on) from Galaxy while Android Auto holds the adapter.
+
+    None means no lease holds it, so the caller's own owner handles the request. Turning it off releases the
+    projection lease first (see request), so Android Auto lets go of the adapter before the radio stops.
+    """
+    lease = self.phone_lease
+    if lease is None or lease.released:
+      return None
+    if not self.session_valid(session):
+      raise BluetoothRejected('Galaxy session expired', code='session_expired')
+    if lease.session is not None:
+      raise BluetoothRejected('Finish Android Auto pairing first', code='busy')
+    if enabled:
+      return self.snapshot(session=session)
+    return self.request('power', enabled=False, session=session)
+
   def phone_window(self, operation: str, session: tuple, *, prompt_id: str | None = None,
                    accepted: bool | None = None, value: str = '') -> dict | None:
     """Open, answer or read a phone pairing window inside the projection lease; None means no projection holds the adapter."""

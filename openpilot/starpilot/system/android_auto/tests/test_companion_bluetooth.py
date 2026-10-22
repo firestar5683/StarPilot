@@ -275,14 +275,60 @@ class CompanionTests(unittest.TestCase):
     self.assertEqual(self.daemon_call(), {'handled': False})
 
   def test_daemon_denials_and_timeouts_never_produce_normal_owner_fallback(self):
-    self.assertEqual(self.daemon_call(address=ADAPTER), {'handled': True, 'error_code': 'projection_active'})
+    self.assertEqual(self.daemon_call(address=ADAPTER), {'handled': True, 'error_code': 'projection_active',
+                                                         'message': 'Stop projection before changing its adapter'})
     self.lease.session = SESSION
-    self.assertEqual(self.daemon_call(), {'handled': True, 'error_code': 'busy'})
+    self.assertEqual(self.daemon_call(), {'handled': True, 'error_code': 'busy', 'message': 'Finish Android Auto pairing first'})
     self.lease.session = None
     def timeout(): raise TimeoutError('No profile reply')
     self.hook = timeout
     self.assertEqual(self.daemon_call(), {'handled': True, 'error_code': 'service_unavailable'})
     self.assertFalse(self.lease.released)
+
+  def test_power_off_goes_through_the_owner_and_power_on_is_a_no_op(self):
+    self.owner.request = Mock(return_value={'powered': False})  # ty: ignore[invalid-assignment]  # test double
+    self.assertEqual(self.owner.companion_power(False, SESSION), {'powered': False})
+    self.owner.request.assert_called_once_with('power', enabled=False, session=SESSION)
+    self.owner.request.reset_mock()
+    result = self.owner.companion_power(True, SESSION)
+    assert result is not None
+    self.assertTrue(result['powered'])
+    self.owner.request.assert_not_called()
+
+  def test_power_refusals_and_no_lease(self):
+    self.state['valid'] = False
+    with self.assertRaises(Rejected) as error:
+      self.owner.companion_power(False, SESSION)
+    self.assertEqual(error.exception.code, 'session_expired')
+    self.state['valid'] = True
+    self.lease.session = SESSION
+    with self.assertRaises(Rejected) as error:
+      self.owner.companion_power(False, SESSION)
+    self.assertEqual(error.exception.code, 'busy')
+    self.lease.session = None
+    self.owner.phone_lease = None
+    self.assertIsNone(self.owner.companion_power(False, SESSION))
+
+  def power_call(self, enabled=False, valid=True, parked=True):
+    supervisor = SimpleNamespace(companion_power=self.owner.companion_power,
+      bind_source_session=lambda session: self.fail('Companion command must not rebind projection source'))
+    request = {'command': 'bluetooth_power', 'source': SESSION[1], 'enabled': enabled}
+    with patch('openpilot.common.params.Params') as params:
+      params.return_value.get_bool.return_value = True
+      return daemon.handle(Mock(wraps=supervisor), request, Mock(wraps=SimpleNamespace(valid=lambda source: valid)), parked=lambda: parked)
+
+  def test_daemon_power_command_requires_proof_park_and_a_boolean(self):
+    self.owner.request = Mock(return_value={'powered': False})  # ty: ignore[invalid-assignment]  # test double
+    self.assertEqual(self.power_call(), {'handled': True, 'bluetooth': {'powered': False}})
+    self.assertEqual(self.power_call(parked=False), {'handled': True, 'error_code': 'park_required'})
+    with self.assertRaises(RuntimeError):
+      self.power_call(valid=False)
+    with self.assertRaises(ValueError):
+      self.power_call(enabled='off')  # ty: ignore[invalid-argument-type]  # wrong type on purpose
+    self.lease.session = SESSION
+    self.assertEqual(self.power_call(), {'handled': True, 'error_code': 'busy', 'message': 'Finish Android Auto pairing first'})
+    self.owner.phone_lease = None
+    self.assertEqual(self.power_call(), {'handled': False})
 
   def test_daemon_requires_live_source_and_park_before_touching_owner(self):
     with self.assertRaises(RuntimeError):

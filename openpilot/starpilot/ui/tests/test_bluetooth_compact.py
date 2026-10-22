@@ -36,6 +36,19 @@ class TestBluetoothCompact(unittest.TestCase):
       dialog.call_args.args[2]()
     request.assert_called_once_with("forget", address="AA:BB:CC:DD:EE:FF", return_to_root=True)
 
+  def test_power_off_falls_back_to_galaxy_when_android_auto_holds_the_adapter(self):
+    from openpilot.starpilot.bluetooth.owner import BluetoothRejected
+    page = BluetoothCompact.__new__(BluetoothCompact)
+    page.owner = NS(request=Mock(side_effect=BluetoothRejected("busy elsewhere", code="busy")))  # ty: ignore[invalid-assignment]  # test double
+    call = Mock(return_value=(200, {"devices": [], "powered": False}))
+    with patch("openpilot.starpilot.galaxy_bluetooth.phone_ui.galaxy_call", return_value=call):
+      self.assertEqual(page._power_request(False), {"devices": [], "powered": False})
+    call.assert_called_once_with("POST", "/api/bluetooth/action", {"operation": "power", "enabled": False})
+    page.owner.request.side_effect = BluetoothRejected("park first", code="park_required")
+    with patch("openpilot.starpilot.galaxy_bluetooth.phone_ui.galaxy_call") as galaxy, self.assertRaises(BluetoothRejected):
+      page._power_request(False)
+    galaxy.assert_not_called()
+
   def test_forget_falls_back_to_galaxy_when_android_auto_holds_the_adapter(self):
     from openpilot.starpilot.bluetooth.owner import BluetoothRejected
     page = BluetoothCompact.__new__(BluetoothCompact)
@@ -178,7 +191,7 @@ class TestBluetoothCompact(unittest.TestCase):
     page.return_to_root = False
     with patch.object(BluetoothCompact, "_rebuild") as rebuild:
       page._request("power", enabled=True)
-      page.executor.submit.assert_called_once_with(owner.request, "power", address=None, enabled=True)
+      page.executor.submit.assert_called_once_with(page._power_request, True)
       owner.request.assert_not_called()
       self.assertIs(page.pending, future)
       result = {"available": True, "parked": True, "powered": True, "devices": []}

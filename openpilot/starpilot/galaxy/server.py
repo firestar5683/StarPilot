@@ -2510,6 +2510,21 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 unavailable = ('service_unavailable', 'adapter_unavailable', 'radio_unavailable', 'radio_preference_unavailable')
                 raise BluetoothUnavailable('Android Auto Bluetooth service is unavailable',
                                            code=code if type(code) is str and code in unavailable else 'service_unavailable')
+            elif payload['operation'] == 'power' and aa_setup_owner().enabled():
+              # Android Auto may hold the adapter in its own process; it releases that hold before the radio stops.
+              try:
+                delegated = self.aa_command(identity, 'bluetooth_power', enabled=payload['enabled'])
+              except (OSError, RuntimeError):
+                delegated = {'handled': False}
+              if type(delegated) is not dict or type(delegated.get('handled')) is not bool:
+                delegated = {'handled': False}
+              if 'error_code' in delegated:
+                code = delegated['error_code']
+                if type(code) is str and code in ('busy', 'park_required', 'changed', 'session_expired', 'projection_active'):
+                  why = delegated.get('message')
+                  raise BluetoothRejected(f'Android Auto: {why}' if type(why) is str and why else
+                                          'Android Auto could not complete the Bluetooth change', code=code)
+                raise BluetoothUnavailable('Android Auto Bluetooth service is unavailable')
             elif payload['operation'] in ('accept_pair', 'pairing_response', 'cancel_pair') and aa_setup_owner().enabled():
               delegated = self.aa_phone_window(identity, payload['operation'], payload)
               if 'error_code' in delegated:

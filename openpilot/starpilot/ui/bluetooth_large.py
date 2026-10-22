@@ -132,6 +132,8 @@ class BluetoothLarge(Widget):
     if operation in ("pair", "pairing_response", "cancel_pair"):
       self.pending = self.executor.submit(self.owner.request, operation, address=address, session=session,
                                           prompt_id=prompt_id, accepted=accepted, value=value)
+    elif operation == "power":
+      self.pending = self.executor.submit(self._power_request, bool(enabled))
     else:
       self.pending = self.executor.submit(self.owner.request, operation, address=address, enabled=enabled)
     self.operation = operation
@@ -139,6 +141,19 @@ class BluetoothLarge(Widget):
     self.pending_session = getattr(self, "session", None)
     self.return_to_root = return_to_root
     self._rebuild()
+
+  def _power_request(self, enabled: bool) -> dict:
+    try:
+      return self.owner.request("power", address=None, enabled=enabled)
+    except BluetoothRejected as error:
+      if getattr(error, "code", None) != "busy":
+        raise
+    # Android Auto holds the adapter in its own process; Galaxy hands the change to it.
+    from openpilot.starpilot.galaxy_bluetooth.phone_ui import ACTION, galaxy_call
+    status, result = galaxy_call()("POST", ACTION, {"operation": "power", "enabled": enabled})
+    if status != 200 or not isinstance(result.get("devices"), list):
+      raise BluetoothRejected("Android Auto could not complete the Bluetooth change")
+    return result
 
   def _forget(self, address: str) -> None:
     self._request("forget", address=address)
