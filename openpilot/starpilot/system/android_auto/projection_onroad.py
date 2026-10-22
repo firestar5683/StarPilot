@@ -54,6 +54,17 @@ def certificate_notice(days_left: int | None) -> str:
   return f"Heads Up: AA Certificate Expires {when}"
 
 
+def apply_plain_camera_look(camera, rl):
+  """The car screen keeps the plain camera look: the shader's non-road path, not the comma UI's engagement grading.
+
+  The comma UI fades the road camera when disengaged (color_strength) and a car screen reads that as washed out.
+  """
+  camera._color_strength_val[0] = 1.0
+  camera._road_camera_val[0] = 0
+  rl.set_shader_value(camera.shader, camera._color_strength_loc, camera._color_strength_val, rl.ShaderUniformDataType.SHADER_UNIFORM_FLOAT)
+  rl.set_shader_value(camera.shader, camera._road_camera_loc, camera._road_camera_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
+
+
 def native_dependencies():
   import pyray as rl
   from openpilot.cereal.visionipc import VisionStreamType
@@ -105,12 +116,7 @@ def native_dependencies():
     def _update_texture_color_filtering(self):
       if getattr(self, 'large_ui_gamma_trial', False):
         return super()._update_texture_color_filtering()
-      # The comma UI fades the engaged road camera to 20% color (30477f3cef). On the car
-      # screen that reads as black and white, so keep the plain look: non-road shader path.
-      self._engaged_val[0] = 0
-      self._road_camera_val[0] = 0
-      rl.set_shader_value(self.shader, self._engaged_loc, self._engaged_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
-      rl.set_shader_value(self.shader, self._road_camera_loc, self._road_camera_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
+      apply_plain_camera_look(self, rl)
 
   def standby_logo(height):
     """The StarPilot crescent, shrunk once on the CPU to its standby size; None if it cannot be loaded."""
