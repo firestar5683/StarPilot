@@ -322,7 +322,10 @@ class MainActivity : Activity() {
             }
             .group("Bluetooth pairing") {
                 action("Add Bluetooth Phone Pairing", "First open Pair phone on comma (Settings > Bluetooth), then tap here") { pairPhone() }
-                action("Forget pairing on this phone") { pairing.forget(); ble?.close(); disconnected() }
+                action("Forget pairing on this phone") {
+                    pairing.forget(); ble?.close(); disconnected()
+                    message("Pairing removed from this phone.\n\n$ALSO_FORGET_ON_COMMA")
+                }
             }
             .group("Phone GPS") {
                 if (PhoneGpsService.enabled(prefs)) action("Stop sharing phone GPS") { setPhoneGps(false) }
@@ -445,6 +448,8 @@ class MainActivity : Activity() {
             ?: "${Build.MANUFACTURER} ${Build.MODEL}").take(40)
     private fun phoneHello(): JSONObject = JSONObject().put("name", phoneName()).apply { pairing.previousId()?.let { put("replaces", it) } }
     /** One step for the app and music: comma's open pairing window gives this phone its key, then bonds it for music. */
+    private val ALSO_FORGET_ON_COMMA = "Also forget this phone on comma (Settings > Bluetooth, or Galaxy > Bluetooth), or comma keeps the old pairing and may fail to pair this phone again."
+    private val ALSO_FORGET_ON_PHONE = "Also forget comma in this phone's Bluetooth settings before pairing again, so the old Bluetooth bond doesn't get in the way."
     private val PAIR_STEPS = "On comma open Settings > Bluetooth > Pair phone (or Galaxy > Bluetooth > Pair phone) and keep that screen open."
     /** Without a Wi-Fi/LAN route the app cannot open comma's window itself, so say so before waiting for it. */
     private fun askToOpenWindow() {
@@ -520,7 +525,7 @@ class MainActivity : Activity() {
         pairing.forget(); ble?.close()
         runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread
-            message("$why, so the app pairing was removed too. $PAIR_STEPS Then tap Add Bluetooth Phone Pairing to set it up again.")
+            message("$why, so the app pairing was removed too.\n\n$ALSO_FORGET_ON_COMMA\n\nTo set it up again: $PAIR_STEPS Then tap Add Bluetooth Phone Pairing.")
             if (bluetoothMode) disconnected()
         }
     }
@@ -672,7 +677,7 @@ class MainActivity : Activity() {
             // Comma stopped recognizing this phone; retrying cannot fix that, so wait for a new pairing instead.
             disconnected().apply {
                 route(Route.BLUETOOTH, RouteState.FAILED, "Pairing expired")
-                detail("Comma no longer recognizes this phone (it was forgotten there). $PAIR_STEPS Then tap Add Bluetooth Phone Pairing here.")
+                detail("Comma no longer recognizes this phone (it was forgotten there). $ALSO_FORGET_ON_PHONE $PAIR_STEPS Then tap Add Bluetooth Phone Pairing here.")
             }
             return
         }
@@ -714,7 +719,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (e is PairingNotRecognized && !isFinishing && generation == connectionGeneration.get()) disconnected().apply {
                         route(Route.BLUETOOTH, RouteState.FAILED, "Pairing expired")
-                        detail("Comma no longer recognizes this phone (${e.message}). $PAIR_STEPS Then tap Add Bluetooth Phone Pairing here.")
+                        detail("Comma no longer recognizes this phone (${e.message}). $ALSO_FORGET_ON_PHONE $PAIR_STEPS Then tap Add Bluetooth Phone Pairing here.")
                     } else if (!isFinishing && generation == connectionGeneration.get()) disconnected().apply {
                         route(Route.BLUETOOTH, RouteState.FAILED, "Didn't connect")
                         detail("Bluetooth didn't connect: ${e.message ?: "comma didn't answer"}. Check that Bluetooth is on in comma settings and comma is nearby.")
