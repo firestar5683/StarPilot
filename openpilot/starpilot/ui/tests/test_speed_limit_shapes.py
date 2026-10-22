@@ -83,3 +83,12 @@ def test_texture_setup_failure_releases_both_resources(gpu):
     shapes.SpeedLimitShapes().circle(0, 0, shapes.rl.RED)
   gpu['unload_texture'].assert_called_once()
   gpu['unload_image'].assert_called_once()
+
+
+def test_headless_context_loads_atlas_without_a_window(gpu, monkeypatch):
+  monkeypatch.setattr(shapes.rl, 'is_window_ready', lambda: False)
+  with pytest.raises(RuntimeError, match='graphics context'):
+    shapes.SpeedLimitShapes().circle(0, 0, shapes.rl.RED)
+  owner = shapes.SpeedLimitShapes(headless_context=True)
+  owner.circle(0, 0, shapes.rl.RED)
+  gpu['load_texture_from_image'].assert_called_once()

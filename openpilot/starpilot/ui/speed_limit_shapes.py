@@ -14,8 +14,9 @@ SPRITES = {
 
 
 class SpeedLimitShapes:
-  def __init__(self, scale=1):
+  def __init__(self, scale=1, *, headless_context=False):
     self.scale = scale
+    self._headless_context = headless_context
     self.texture = None
     self.sources = {name: rl.Rectangle(*rect) for name, rect in SPRITES.items()}
     self.origins = {name: rl.Vector2(rect[2] * scale / 2, rect[3] * scale / 2) for name, rect in SPRITES.items()}
@@ -23,7 +24,7 @@ class SpeedLimitShapes:
   def _load(self):
     if self.texture is not None:
       return
-    if not rl.is_window_ready():
+    if not (rl.is_window_ready() or self._headless_context):
       raise RuntimeError('Speed-limit shapes require a graphics context')
     image = rl.load_image(str(ATLAS_PATH))
     try:
@@ -56,6 +57,6 @@ class SpeedLimitShapes:
     self._draw('arrow_large' if size == 'large' else 'arrow_compact', x, y, color, 180 if direction < 0 else 0)
 
   def close(self):
-    if self.texture is not None and rl.is_window_ready():
+    if self.texture is not None and (rl.is_window_ready() or self._headless_context):
       rl.unload_texture(self.texture)
     self.texture = None

@@ -62,7 +62,7 @@ class SpeedLimitWidget:
     self.scale = LARGE_SIGN_SCALE if profile == Profile.LARGE else 1
     self.text_scale = self.scale * Profile.COMPACT.font_scale / profile.font_scale
     self.pulse = SpeedLimitPulse()
-    self.shapes = SpeedLimitShapes(self.scale)
+    self.shapes = SpeedLimitShapes(self.scale, headless_context=getattr(fonts, '_headless_context', False))
 
   def close(self):
     self.shapes.close()
