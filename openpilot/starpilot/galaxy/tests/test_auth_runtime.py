@@ -272,7 +272,8 @@ class AuthRuntimeTest(unittest.TestCase):
 
     held = []
     with mock.patch.object(self.server.RequestHandlerClass, 'setup', observed_setup), \
-         mock.patch.object(self.server.RequestHandlerClass, 'finish', observed_finish):
+         mock.patch.object(self.server.RequestHandlerClass, 'finish', observed_finish), \
+         mock.patch.object(self.server, 'loopback', return_value=False):
       try:
         for _ in range(self.server.MAX_CONNECTIONS):
           held.append(socket.create_connection(('127.0.0.1', self.server.server_port), timeout=2))

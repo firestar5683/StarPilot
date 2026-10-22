@@ -68,7 +68,7 @@ object LanPairing {
         if (cookie == null) "comma gave this phone no local Galaxy session" to false
         else {
             val (status, body) = api.post(WINDOW_PATH, WINDOW_BODY, cookie)
-            val code = Regex("\"code\":\"([a-z_]+)\"").find(body)?.groupValues?.get(1)
+            val code = Regex("\"code\"\\s*:\\s*\"([a-z_]+)\"").find(body)?.groupValues?.get(1)
             if (status == 200) null to false
             else "comma answered HTTP $status${code?.let { " ($it)" }.orEmpty()}" to (status == 409 && code == "busy")
         }

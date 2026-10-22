@@ -16,10 +16,14 @@ class _LocalHTTPServer(ThreadingHTTPServer):
   """Bound idle browser connections without blocking other local requests."""
 
   MAX_CONNECTIONS = 8
+  # comma's own services call back over loopback while a browser request waits on them.
+  LOOPBACK_CONNECTIONS = 4
   REQUEST_TIMEOUT = 4.0
 
   def __init__(self, *args, **kwargs):
     self._slots = threading.BoundedSemaphore(self.MAX_CONNECTIONS)
+    self._loopback_slots = threading.BoundedSemaphore(self.LOOPBACK_CONNECTIONS)
+    self._draining = False
     super().__init__(*args, **kwargs)
 
   def get_request(self):
@@ -27,35 +31,53 @@ class _LocalHTTPServer(ThreadingHTTPServer):
     request.settimeout(self.REQUEST_TIMEOUT)
     return request, address
 
-  def process_request(self, request, client_address):
-    if not self._slots.acquire(timeout=self.REQUEST_TIMEOUT):
+  def loopback(self, request) -> bool:
+    if getattr(self, 'remote_transport', False):
+      return False
+    try:
+      return request.getpeername()[0] == request.getsockname()[0] == '127.0.0.1'
+    except (OSError, IndexError, TypeError):
+      return False
+
+  def _admit(self, request) -> threading.BoundedSemaphore | None:
+    """The pool this request got a slot from; loopback overflows into its reserve instead of waiting."""
+    if self._draining:
+      return None
+    if self.loopback(request):
+      if self._slots.acquire(blocking=False):
+        return self._slots
+      return self._loopback_slots if self._loopback_slots.acquire(timeout=self.REQUEST_TIMEOUT) else None
+    return self._slots if self._slots.acquire(timeout=self.REQUEST_TIMEOUT) else None
+
+  def process_request_thread(self, request, client_address):
+    # Wait on the request's own thread so a full browser pool never blocks accepting.
+    slots = self._admit(request)
+    if slots is None:
       self.shutdown_request(request)
       return
     try:
-      super().process_request(request, client_address)
-    except Exception:
-      self._slots.release()
-      raise
-
-  def process_request_thread(self, request, client_address):
-    try:
-      super().process_request_thread(request, client_address)
+      if self._draining:
+        self.shutdown_request(request)
+      else:
+        super().process_request_thread(request, client_address)
     finally:
-      self._slots.release()
+      slots.release()
 
   def drain_requests(self, timeout: float) -> bool:
     """Wait for accepted requests before closing their shared data sources."""
+    self._draining = True
     deadline = time.monotonic() + timeout
-    acquired = 0
+    acquired: list[threading.BoundedSemaphore] = []
     try:
-      for _ in range(self.MAX_CONNECTIONS):
-        if not self._slots.acquire(timeout=max(0.0, deadline - time.monotonic())):
-          return False
-        acquired += 1
+      for slots, count in ((self._slots, self.MAX_CONNECTIONS), (self._loopback_slots, self.LOOPBACK_CONNECTIONS)):
+        for _ in range(count):
+          if not slots.acquire(timeout=max(0.0, deadline - time.monotonic())):
+            return False
+          acquired.append(slots)
       return True
     finally:
-      for _ in range(acquired):
-        self._slots.release()
+      for slots in acquired:
+        slots.release()
 
   def service_actions(self):
     super().service_actions()

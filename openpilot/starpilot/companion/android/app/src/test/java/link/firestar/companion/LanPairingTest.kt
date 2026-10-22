@@ -28,6 +28,12 @@ class LanPairingTest {
         assertEquals(2, pauses.size)
     }
 
+    @Test fun readsTheCodeFromCommasSpacedJson() {
+        val pauses = mutableListOf<Long>()
+        assertEquals("comma answered HTTP 409 (busy)", LanPairing.openWindow(Api("c", 409, "{\"error\": \"x\", \"code\": \"busy\"}"), pause = { pauses += it }))
+        assertEquals(3, pauses.size)
+    }
+
     @Test fun givesUpAfterTheLastBusyAnswerAndNeverRetriesOtherRefusals() {
         val pauses = mutableListOf<Long>()
         assertEquals("comma answered HTTP 409 (busy)", LanPairing.openWindow(Api("c", 409, "{\"code\":\"busy\"}"), pause = { pauses += it }))

@@ -73,6 +73,9 @@ def server(tmp_path, monkeypatch):
       self.json(413, {'error': 'Rejected before reading the body'})
 
   with _LocalHTTPServer(('127.0.0.1', 0), Handler) as http:
+    services: set[int] = set()
+    http.loopback = lambda request: request.getpeername()[1] in services
+    http.services = services
     thread = threading.Thread(target=http.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
     thread.start()
     try:
@@ -155,6 +158,49 @@ def test_idle_persistent_connections_release_capacity(server):
     with closing(http.client.HTTPConnection('127.0.0.1', running.server_port, timeout=2)) as waiting:
       waiting.request('GET', '/after-idle')
       assert waiting.getresponse().read() == b'ok'
+  finally:
+    for connection in held:
+      connection.close()
+
+
+def test_full_browser_pool_still_serves_comma_services(server):
+  running, _, _ = server
+  held = []
+  try:
+    for _ in range(running.MAX_CONNECTIONS + 2):
+      held.append(socket.create_connection(('127.0.0.1', running.server_port), timeout=2))
+    service = socket.socket()
+    service.bind(('127.0.0.1', 0))
+    running.services.add(service.getsockname()[1])
+    service.settimeout(1)
+    service.connect(('127.0.0.1', running.server_port))
+    with closing(service):
+      service.sendall(b'GET /service HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n')
+      assert service.recv(64).startswith(b'HTTP/1.1 200')
+  finally:
+    for connection in held:
+      connection.close()
+
+
+def test_drain_turns_away_requests_still_waiting_for_capacity(server):
+  running, state, _ = server
+  held = [socket.create_connection(('127.0.0.1', running.server_port), timeout=2) for _ in range(running.MAX_CONNECTIONS)]
+  try:
+    with closing(socket.create_connection(('127.0.0.1', running.server_port), timeout=2)) as waiting:
+      waiting.sendall(b'GET /late HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n')
+      drained: list[bool] = []
+      drain = threading.Thread(target=lambda: drained.append(running.drain_requests(2)))
+      drain.start()
+      for connection in held:
+        connection.close()
+      held.clear()
+      drain.join(3)
+      assert drained == [True]
+      try:
+        assert waiting.recv(64) == b''
+      except ConnectionResetError:
+        pass
+    assert '/late' not in state['requests']
   finally:
     for connection in held:
       connection.close()
