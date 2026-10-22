@@ -1073,6 +1073,9 @@ class SafetyTest(SafetyTestBase):
               continue
             if attr.startswith('TestToyota') and current_test.startswith('TestToyota'):
               continue
+            # Mazda generations share one safety mode, selected by param flags
+            if attr.startswith('TestMazda') and current_test.startswith('TestMazda'):
+              continue
             if attr.startswith('TestSubaruGen') and current_test.startswith('TestSubaruGen'):
               continue
             if attr.startswith('TestSubaruDPlatform') and current_test.startswith('TestSubaruDPlatform'):
