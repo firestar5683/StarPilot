@@ -24,6 +24,8 @@ replay, cameras and map tiles are blocked; they need Wi-Fi.
 One step pairs the app and phone music. On comma open Settings → Bluetooth →
 **Pair phone**; comma opens a two-minute window that takes one phone.
 
+Before pairing over Wi-Fi/LAN the app asks comma `GET /api/companion/bluetooth-ready` and waits out a boot or a
+Bluetooth bridge restart; it stops with the reason (not parked, Bluetooth off or unavailable) instead of scanning.
 If the app already reaches comma over Wi-Fi/LAN, **Add Bluetooth Phone Pairing** (Android) or **Pair with comma** (iPhone) opens that window itself (the call
 Galaxy's Bluetooth page makes), so nothing needs touching on comma. Without a Wi-Fi/LAN session it waits for
 the window as above.

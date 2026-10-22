@@ -39,6 +39,36 @@ class LanPairingTest {
         assertTrue(pauses.isEmpty())
     }
 
+    private class ReadyApi(val answers: MutableList<CommaReadiness?>, val cookie: String? = "c") : LanPairingApi {
+        var asked = 0
+        override fun session(): String? = cookie
+        override fun post(path: String, body: String, cookie: String): Pair<Int, String> = 200 to "{}"
+        override fun readiness(cookie: String): CommaReadiness? = answers[minOf(asked++, answers.size - 1)]
+    }
+    private fun answer(ready: Boolean, code: String) = CommaReadiness(ready, code, "msg $code")
+
+    @Test fun waitsOutBootAndBridgeStartThenProceeds() {
+        val api = ReadyApi(mutableListOf(answer(false, "starting"), answer(false, "bridge_starting"), answer(true, "ready")))
+        val waited = mutableListOf<String>()
+        assertNull(LanPairing.waitUntilReady(api, onWait = { waited += it }, pause = {}))
+        assertEquals(listOf("msg starting", "msg bridge_starting"), waited)
+    }
+
+    @Test fun stopsAtOnceForBlockersSomeoneMustFixAndGivesUpAfterTheWaitLimit() {
+        val parked = ReadyApi(mutableListOf(answer(false, "park_required")))
+        assertEquals("park_required", LanPairing.waitUntilReady(parked, pause = { fail("must not wait") })!!.code)
+        assertEquals("bluetooth_off", LanPairing.waitUntilReady(ReadyApi(mutableListOf(answer(false, "bluetooth_off"))), pause = { fail("must not wait") })!!.code)
+        val stuck = ReadyApi(mutableListOf(answer(false, "bridge_starting")))
+        val pauses = mutableListOf<Long>()
+        assertEquals("bridge_starting", LanPairing.waitUntilReady(stuck, maxWaitMs = 9000, stepMs = 3000, pause = { pauses += it })!!.code)
+        assertEquals(3, pauses.size)
+    }
+
+    @Test fun anOlderCommaOrNoSessionNeverBlocksPairing() {
+        assertNull(LanPairing.waitUntilReady(ReadyApi(mutableListOf(null)), pause = {}))
+        assertNull(LanPairing.waitUntilReady(ReadyApi(mutableListOf(answer(false, "park_required")), cookie = null), pause = {}))
+    }
+
     @Test fun saysWhyTheWindowCouldNotBeOpened() {
         val none = Api(null)
         assertEquals("comma gave this phone no local Galaxy session", LanPairing.openWindow(none)); assertTrue(none.posts.isEmpty())

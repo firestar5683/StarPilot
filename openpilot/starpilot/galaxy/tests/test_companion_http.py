@@ -197,3 +197,16 @@ def test_phone_location_needs_local_session(tmp_path):
     server.shutdown()
     worker.join(timeout=2)
     server.server_close()
+
+
+def test_bluetooth_ready_needs_a_session_and_reports_what_blocks_pairing(companion_http):
+  request, _, _ = companion_http
+  assert request('/api/companion/bluetooth-ready')[0] == 401
+  with patch('openpilot.starpilot.galaxy.server.direct_local_connection', return_value=True):
+    cookie = request('/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
+    status, body, _ = request('/api/companion/bluetooth-ready', cookie=cookie)
+  assert status == 200
+  answer = json.loads(body)
+  assert answer['schema'] == 1 and isinstance(answer['ready'], bool)
+  assert answer['code'] in {'ready', 'starting', 'park_required', 'bluetooth_off', 'bluetooth_unavailable', 'bridge_starting'}
+  assert answer['message']

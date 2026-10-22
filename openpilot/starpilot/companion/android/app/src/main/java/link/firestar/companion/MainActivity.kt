@@ -474,12 +474,27 @@ class MainActivity : Activity() {
         Thread {
             // Already on comma's Wi-Fi/LAN: open its pairing window ourselves so nobody has to touch comma.
             var windowNote = ""
+            var notReady: CommaReadiness? = null
             Networks.commaLan(this)?.let { (network, origin) ->
+                // Don't start a Bluetooth pairing comma can't take yet; wait out a boot or bridge restart, or say what to fix.
+                notReady = LanPairing.waitUntilReady(network, origin) { text ->
+                    runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail("Waiting for comma's Bluetooth to be ready…\n$text") }
+                }
+                if (notReady != null) return@let
                 val why = LanPairing.openWindow(network, origin)
                 if (why != null) android.util.Log.w("GalaxyPair", "Could not open comma's window over Wi-Fi: $why")
                 windowNote = if (why == null) "Opened comma's pairing window over Wi-Fi.\n"
                     else "Couldn't open comma's window over Wi-Fi ($why).\nPlease open it on comma: Settings > Bluetooth > Pair phone.\n"
                 runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail(windowNote.trim()) }
+            }
+            notReady?.let { blocked ->
+                runOnUiThread {
+                    if (generation == connectionGeneration.get()) {
+                        screen?.headline("Comma isn't ready to pair")
+                        pairingNotice("Comma isn't ready to pair yet: ${blocked.message}\nTry Add Bluetooth Phone Pairing again in a moment.", pairing.load() != null)
+                    }
+                }
+                return@Thread
             }
             val transport = BleTransport(this, null)
             transport.onPhase = { text -> runOnUiThread { if (generation == connectionGeneration.get()) screen?.detail(windowNote + text) } }
@@ -576,9 +591,17 @@ class MainActivity : Activity() {
         val lan = Networks.commaLan(this) ?: return message("This phone isn't connected to comma over Wi-Fi right now. Join comma's Wi-Fi, then tap Add Bluetooth Phone Pairing in the menu.")
         if (!autoPairing.compareAndSet(false, true)) return
         pairCancelled = false
-        showPairProgress("Opening comma's pairing window over Wi-Fi…")
+        showPairProgress("Checking that comma is ready to pair…")
         Thread {
             try {
+                LanPairing.waitUntilReady(lan.first, lan.second) { text -> showPairProgress("Waiting for comma's Bluetooth to be ready…\n$text") }?.let { blocked ->
+                    android.util.Log.w("GalaxyPair", "Comma not ready to pair: ${blocked.code}")
+                    hidePairProgress()
+                    if (!pairCancelled) runOnUiThread { message("Comma isn't ready to pair yet: ${blocked.message}\n\nTry Add Bluetooth Phone Pairing in the menu in a moment.") }
+                    return@Thread
+                }
+                if (pairCancelled) return@Thread
+                showPairProgress("Opening comma's pairing window over Wi-Fi…")
                 LanPairing.openWindow(lan.first, lan.second)?.let { why ->
                     android.util.Log.w("GalaxyPair", "Could not open comma's window over Wi-Fi: $why")
                     hidePairProgress()

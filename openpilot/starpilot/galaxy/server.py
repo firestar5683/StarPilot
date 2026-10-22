@@ -798,6 +798,12 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         self.json(200, {'schemaVersion': 1, 'monitor': 'local', 'instance': INSTANCE})
       elif path == '/api/companion/web-manifest':
         self.json(200, web_manifest(WEB))
+      elif path == '/api/companion/bluetooth-ready':
+        if not self.require_session():
+          return
+        from openpilot.starpilot.galaxy.pairing_ready import pairing_readiness
+        from openpilot.starpilot.galaxy_bluetooth.bootstrap import setup_state
+        self.json(200, pairing_readiness(parked=configuration_allowed, snapshot=lambda: bluetooth_owner().snapshot(), bridge=setup_state))
       elif path in ('/api/local-access', '/api/tmux/live', '/api/troubleshoot'):
         if not self.require_session():
           return
