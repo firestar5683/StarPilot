@@ -212,3 +212,53 @@ def test_corrupt_saved_generation_and_timestamp_never_repaired_or_sent(tmp_path,
     assert calls == [] and path.read_bytes() == original
   finally:
     owner.close()
+
+
+def test_motion_alerts_attach_saved_camera_images(tmp_path):
+  received = []
+  class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+      received.append((self.path, self.headers, self.rfile.read(int(self.headers['Content-Length']))))
+      self.send_response(204)
+      self.end_headers()
+    def log_message(self, *args, **kwargs):
+      pass
+  server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+  threading.Thread(target=server.serve_forever, daemon=True).start()
+  jpgs = {'wide': b'\xff\xd8wide\xff\xd9', 'cabin': b'\xff\xd8cabin\xff\xd9'}
+  clock = [1000.0]
+  event = {'eventId': 'a' * 32, 'kind': 'warning', 'wallTimeNs': int((clock[0] + 1) * 1e9)}  # after configure
+  events = SimpleNamespace(snapshot=lambda: {'events': [event]}, images=lambda event_id: list(jpgs),
+                           image=lambda event_id, camera: jpgs[camera])
+  owner = NotificationOwner(tmp_path / 'notifications', events, clock=lambda: clock[0], allow_http=True)
+  try:
+    for name in ('discord', 'webhook'):
+      configure(owner, name, f'http://127.0.0.1:{server.server_port}/{name}')
+    clock[0] += 2
+    for _ in range(4):
+      owner.tick()
+    paths = {path: (headers, body) for path, headers, body in received}
+    assert set(paths) == {'/discord', '/webhook'}
+    for path, (headers, body) in paths.items():
+      assert headers['Content-Type'].startswith('multipart/form-data')
+      assert b'name="files[0]"; filename="wide.jpg"' in body and jpgs['wide'] in body
+      assert b'name="files[1]"; filename="cabin.jpg"' in body and jpgs['cabin'] in body
+      assert b'Parked motion detected (warning).' in body
+    assert b'name="payload_json"' in paths['/discord'][1]
+    assert b'name="event"' in paths['/webhook'][1]
+  finally:
+    owner.close()
+    server.shutdown()
+
+
+def test_unreadable_image_still_sends_text(tmp_path):
+  calls = []
+  def image(event_id, camera):
+    raise OSError('gone')
+  events = SimpleNamespace(snapshot=lambda: {'events': []}, images=lambda event_id: ['wide'], image=image)
+  owner = NotificationOwner(tmp_path / 'notifications', events)
+  try:
+    assert owner._attachments({'eventId': 'a' * 32, 'kind': 'warning'}) == []
+    assert owner._attachments({'eventId': 'a' * 32, 'kind': 'test'}) == []
+  finally:
+    owner.close()
