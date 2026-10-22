@@ -129,5 +129,13 @@ class PhoneWindowTest(unittest.TestCase):
     self.assertFalse(self.owner.journal_path.exists())
 
 
+class TimeoutTest(unittest.TestCase):
+  def test_opening_a_window_and_proving_the_source_get_time_after_boot(self):
+    from openpilot.starpilot.system.android_auto.protocol import COMMAND_TIMEOUTS
+    from openpilot.starpilot.system.android_auto.source_verifier import GalaxySourceVerifier
+    self.assertGreaterEqual(COMMAND_TIMEOUTS['phone_window'], 20.0)
+    self.assertGreaterEqual(GalaxySourceVerifier().timeout, 3.0)
+
+
 if __name__ == '__main__':
   unittest.main()

@@ -8,7 +8,7 @@ SOURCE_ID = re.compile(r'[0-9a-f]{64}\Z')
 
 
 class GalaxySourceVerifier:
-  def __init__(self, host: str = '127.0.0.1', port: int = 8082, timeout: float = 1.0):
+  def __init__(self, host: str = '127.0.0.1', port: int = 8082, timeout: float = 3.0):
     self.host, self.port, self.timeout = host, port, timeout
 
   def valid(self, source: str) -> bool:

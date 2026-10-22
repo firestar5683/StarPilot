@@ -647,7 +647,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         if self.settings_session() != identity:
           raise ValueError('Galaxy session changed')
         delegated = aa_client().call('phone_window', source=source, operation=operation, **arguments)
-      except (OSError, RuntimeError):
+      except (OSError, RuntimeError) as error:
+        # Falling back to this process cannot work while Android Auto holds the adapter, so say why it was skipped.
+        cloudlog.warning(f'android auto phone window {operation} not delegated: {error!r}')
         delegated = {'handled': False}
       if type(delegated) is not dict or type(delegated.get('handled')) is not bool:
         delegated = {'handled': False}
@@ -801,9 +803,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       elif path == '/api/companion/bluetooth-ready':
         if not self.require_session():
           return
-        from openpilot.starpilot.galaxy.pairing_ready import pairing_readiness
-        from openpilot.starpilot.galaxy_bluetooth.bootstrap import setup_state
-        self.json(200, pairing_readiness(parked=configuration_allowed, snapshot=lambda: bluetooth_owner().snapshot(), bridge=setup_state))
+        from openpilot.starpilot.galaxy.pairing_ready import bridge_state, pairing_readiness
+        self.json(200, pairing_readiness(parked=configuration_allowed, snapshot=lambda: bluetooth_owner().snapshot(), bridge=bridge_state))
       elif path in ('/api/local-access', '/api/tmux/live', '/api/troubleshoot'):
         if not self.require_session():
           return
