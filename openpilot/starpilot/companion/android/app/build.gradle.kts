@@ -7,8 +7,8 @@ android {
         applicationId = "link.firestar.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 25
-        versionName = "1.1.23"
+        versionCode = 26
+        versionName = "1.1.24"
     }
     signingConfigs {
         create("companion") {
