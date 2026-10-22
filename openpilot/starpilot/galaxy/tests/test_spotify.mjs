@@ -27,8 +27,12 @@ assert.deepEqual(installChecks({ state: "failed", stage: "verifying", code: "NOT
 assert.ok(installChecks({ state: "done" }).every((c) => c.status === "done"))
 
 assert.equal(releaseInfo({ installed: false }).level, "none")
-assert.equal(releaseInfo({ ...setup.release, level: "soon", daysLeft: 1 }, "en-US").label, "Version 1.3.9.32 · expires in 1 day")
+assert.equal(releaseInfo({ ...setup.release, level: "soon", daysLeft: 1 }, "en-US").label, `Version 1.3.9.32 · expires in 1 day (${new Date(setup.release.expires).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`)
 assert.equal(releaseInfo({ ...setup.release, expired: true }, "en-US").level, "expired")
+assert.match(releaseInfo(setup.release, "en-US").label, /expires on .*2027/)
+assert.match(releaseInfo({ ...setup.release, level: "soon", daysLeft: 0 }).label, /expires within a day/)
+assert.match(releaseInfo({ ...setup.release, expired: true }).label, /expired on/)
+assert.match(releaseInfo({ installed: true }).label, /expiry date unavailable/)
 
 assert.equal(serviceLabel({ enabled: false }), "Off")
 assert.equal(serviceLabel({ enabled: true, service: { state: "waiting_output", message: "Waiting for Car to connect over Bluetooth." } }),

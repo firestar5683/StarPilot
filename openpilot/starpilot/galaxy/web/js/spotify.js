@@ -68,11 +68,14 @@ export function installChecks(job) {
 export function releaseInfo(release, locale = undefined) {
   if (!release?.installed) return { level: "none", label: "Not installed" }
   const date = release.expires ? new Date(release.expires) : null
-  const on = date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString(locale, { month: "short", day: "numeric" }) : ""
+  const on = date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" }) : ""
   const version = release.version ? `Version ${release.version}` : "Installed"
   if (release.expired) return { level: "expired", label: `${version} · expired${on ? ` on ${on}` : ""}` }
-  if (release.level === "soon") return { level: "soon", label: `${version} · expires in ${release.daysLeft} day${release.daysLeft === 1 ? "" : "s"}` }
-  return { level: "ok", label: `${version}${on ? ` · works until ${on}` : ""}` }
+  if (release.level === "soon") {
+    const left = release.daysLeft === 0 ? "expires within a day" : `expires in ${release.daysLeft} day${release.daysLeft === 1 ? "" : "s"}`
+    return { level: "soon", label: `${version} · ${left}${on ? ` (${on})` : ""}` }
+  }
+  return { level: "ok", label: `${version} · ${on ? `expires on ${on}` : "expiry date unavailable"}` }
 }
 
 const STATE_TEXT = {
@@ -410,6 +413,15 @@ export const SpotifyPage = {
       <GxNotice tone="danger" v-if="error && setup">{{ error }}</GxNotice>
       <GxNotice v-if="!setup" :busy="!error" :tone="error ? 'danger' : 'info'">{{ error || "Checking Spotify setup… Reconnecting automatically…" }}</GxNotice>
 
+      <GxNotice v-if="setup?.release.installed && !phoneSource" :tone="release.level === 'expired' ? 'danger' : release.level === 'soon' ? 'warn' : 'info'"
+        :title="release.label">
+        <p>Soloist expires 90 days after Spotify builds it, regardless of when you install it.</p>
+        <template v-if="release.level === 'soon' || release.level === 'expired'">
+          <p>{{ release.level === 'expired' ? 'Install a newer build to resume Spotify playback.' : 'Install a newer build before this one expires to keep Spotify playing.' }}</p>
+          <button type="button" class="gx-btn" :disabled="busy || installBlocked" @click="openInstall">Update Soloist</button>
+        </template>
+      </GxNotice>
+
       <section v-if="setup" class="gx-card gx-aa-step" aria-labelledby="gx-music-source-title">
         <h3 id="gx-music-source-title">Music Source</h3>
         <label class="gx-stack"><span>Play music from</span>
@@ -494,7 +506,7 @@ export const SpotifyPage = {
             </div>
             <p v-if="installBlocked" class="gx-note" role="status">Installing Spotify needs your local network or the Galaxy tunnel. Phone audio works over Bluetooth.</p>
             <p v-if="setup.import?.state === 'running' && !installOpen" class="gx-note" role="status">Installing…</p>
-            <p class="gx-note">Each Soloist build works for 90 days. Before it runs out, this step shows <strong>Update</strong>; download again the same way.</p>
+            <p class="gx-note">Each Soloist build works for 90 days from its build date, not its install date. Before it runs out, this step shows <strong>Update</strong>; download again the same way.</p>
           </div>
         </li>
 
