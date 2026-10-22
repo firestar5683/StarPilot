@@ -268,6 +268,12 @@ void ignition_can_hook(CANPacket_t *msg) {
       ignition_can_cnt = 0U;
     }
 
+    // Mazda 2019+ exception
+    if ((msg->addr == 0x274U) && (len == 8)) {
+      ignition_can = (msg->data[5] & 0x4U) != 0U;
+      ignition_can_cnt = 0U;
+    }
+
     // Volkswagen MEB exception
     if ((msg->addr == 0x3C0U) && (len == 4)) {
       int counter = msg->data[1] & 0xFU;

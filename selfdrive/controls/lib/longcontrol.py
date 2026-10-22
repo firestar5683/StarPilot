@@ -6,6 +6,7 @@ from openpilot.common.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.controls.lib.longcontrol_vehicle_tunes import LongControlVehicleTuning
+from openpilot.common.params import Params
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 clip = np.clip
@@ -117,6 +118,9 @@ class LongControl:
     self.CP = CP
     self.long_control_state = LongCtrlState.off
     self.experimental_mode = False
+    self.experimental_mode_last = False
+    self.mazda_blended_acc = CP.brand == "mazda" and Params().get_bool("BlendedACC")
+    self.params_memory = Params(memory=True)
     self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              rate=1 / DT_CTRL)
@@ -258,6 +262,12 @@ class LongControl:
                                                        should_stop, CS.brakePressed,
                                                        CS.cruiseState.standstill, starpilot_toggles,
                                                        allow_stopping_release=allow_stopping_release)
+
+    if self.mazda_blended_acc:
+      experimental_mode = self.params_memory.get_int("CEStatus")  # 0 means experimental mode is off
+      if experimental_mode and not self.experimental_mode_last:
+        self.reset()
+      self.experimental_mode_last = experimental_mode
     if self.long_control_state == LongCtrlState.off:
       self.reset()
       output_accel = 0.

@@ -21,6 +21,13 @@ from opendbc.car.psa.values import CAR as PSA
 # FIXME: add routes for these cars
 non_tested_cars = [
   MOCK.MOCK,
+  # Mazda Gen2/Gen3 and CX-8 (MoreTorque Torque Interceptor ports) have no public CI routes
+  MAZDA.MAZDA_CX8,
+  MAZDA.MAZDA_3_2019,
+  MAZDA.MAZDA_CX_30,
+  MAZDA.MAZDA_CX_50,
+  MAZDA.MAZDA_3_2023,
+  MAZDA.MAZDA_CX_30_2023,
   GM.CADILLAC_ATS,
   GM.CADILLAC_ESCALADE_ASCM,
   GM.CADILLAC_ESCALADE_ESV_2019_ASCM,
