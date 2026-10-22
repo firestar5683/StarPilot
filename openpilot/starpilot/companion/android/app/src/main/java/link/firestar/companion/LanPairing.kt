@@ -100,6 +100,7 @@ object LanPairing {
         override fun post(path: String, body: String, cookie: String): Pair<Int, String> {
             val connection = open(network, origin, path, cookie)
             try {
+                connection.readTimeout = 35000
                 connection.requestMethod = "POST"; connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json")
                 connection.outputStream.use { it.write(body.toByteArray()) }

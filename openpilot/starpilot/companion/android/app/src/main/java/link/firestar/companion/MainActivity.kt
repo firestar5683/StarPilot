@@ -76,7 +76,7 @@ class MainActivity : Activity() {
         val bondFilter = android.content.IntentFilter(android.bluetooth.BluetoothDevice.ACTION_BOND_STATE_CHANGED)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(bondWatcher, bondFilter, RECEIVER_EXPORTED) else registerReceiver(bondWatcher, bondFilter)
         checkMusicBond()
-        connect(Networks.localOrigin(intent.getStringExtra(AppUpdates.ORIGIN_EXTRA) ?: ""))
+        if (!requestNotificationPermission(7)) connect(Networks.localOrigin(intent.getStringExtra(AppUpdates.ORIGIN_EXTRA) ?: ""))
         if (PhoneGpsService.enabled(prefs) && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             startForegroundService(Intent(this, PhoneGpsService::class.java))
         }
@@ -340,11 +340,16 @@ class MainActivity : Activity() {
             .show()
     }
     private fun appNotificationSettings() {
+        if (!requestNotificationPermission(1)) startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+    }
+    private fun requestNotificationPermission(code: Int): Boolean {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
             !prefs.getBoolean("notificationPermissionRequested", false)) {
             prefs.edit().putBoolean("notificationPermissionRequested", true).apply()
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        } else startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), code)
+            return true
+        }
+        return false
     }
     private fun requestAppUpdate(requestedOrigin: String = origin) {
         val localOrigin = Networks.localOrigin(requestedOrigin)
@@ -753,7 +758,8 @@ class MainActivity : Activity() {
     }
     override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, permissions, results)
-        if (code == 1 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) AppUpdates.checkAsync(this)
+        if ((code == 1 || code == 7) && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) AppUpdates.checkAsync(this)
+        if (code == 7) connect(Networks.localOrigin(intent.getStringExtra(AppUpdates.ORIGIN_EXTRA) ?: ""))
         if (code == 5 && results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) pairPhone()
         if (code == 6) {
             if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) runAutoPair()
