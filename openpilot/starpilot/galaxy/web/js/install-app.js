@@ -68,13 +68,14 @@ export const InstallApp = {
   template: `<div class="gx-install-app">
     <p v-if="installed" class="gx-note" role="status">Galaxy is installed.</p>
     <template v-else-if="onPublicGalaxy">
-      <button v-if="prompt" type="button" class="gx-btn" @click="installWeb"><i class="bi bi-download" aria-hidden="true"></i> Install Galaxy</button>
+      <button v-if="prompt" type="button" class="gx-btn" @click="installWeb"><i class="bi bi-download" aria-hidden="true"></i> Install web app</button>
       <p v-else class="gx-note">{{ installHelp() }}</p>
       <p v-if="message" class="gx-note">{{ message }}</p>
     </template>
-    <a v-else-if="url" class="gx-btn" :href="url" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Open Galaxy to install</a>
+    <a v-else-if="url" class="gx-btn" :href="url" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Install web app</a>
     <p v-else class="gx-note">Pair in step 1 to get your install link.</p>
-    <button v-if="android && !ios && (!installed || updateAvailable)" type="button" class="gx-btn" @click="installAndroid"><i class="bi bi-download" aria-hidden="true"></i><span>{{ updateAvailable ? 'Update offline app (Android)' : 'Install as offline app (Android)' }}</span></button>
+    <a v-if="ios" class="gx-btn" href="https://apps.apple.com/ca/app/starpilot-bt/id6821039119" target="_blank" rel="noopener"><i class="bi bi-apple" aria-hidden="true"></i> Download StarPilot BT on the App Store</a>
+    <button v-if="android && !ios && (!installed || updateAvailable)" type="button" class="gx-btn" @click="installAndroid"><i class="bi bi-download" aria-hidden="true"></i><span>{{ updateAvailable ? 'Update offline app (Android)' : 'Download Android APK' }}</span></button>
     <p v-if="help" class="gx-note gx-install-help">{{ message }}</p>
   </div>`,
 }
