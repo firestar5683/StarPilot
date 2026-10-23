@@ -437,7 +437,12 @@ class CarInterface(CarInterfaceBase):
       if candidate == CAR.CHEVROLET_MALIBU_HYBRID_CC and ret.enableGasInterceptorDEPRECATED:
         ret.flags |= GMFlags.PEDAL_LONG.value
 
-    elif candidate in (CAR.GMC_ACADIA, CAR.BUICK_ENVISION_SDGM):
+    elif candidate == CAR.GMC_ACADIA:
+      ret.minEnableSpeed = -1.  # engage speed is decided by pcm
+      ret.steerActuatorDelay = 0.2
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
+    elif candidate == CAR.BUICK_ENVISION_SDGM:
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
