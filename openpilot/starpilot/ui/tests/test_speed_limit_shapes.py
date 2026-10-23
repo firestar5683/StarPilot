@@ -92,3 +92,6 @@ def test_headless_context_loads_atlas_without_a_window(gpu, monkeypatch):
   owner = shapes.SpeedLimitShapes(headless_context=True)
   owner.circle(0, 0, shapes.rl.RED)
   gpu['load_texture_from_image'].assert_called_once()
+  owner.close()
+  owner.close()
+  gpu['unload_texture'].assert_called_once()

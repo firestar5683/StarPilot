@@ -46,6 +46,19 @@ def fonts(profile=Profile.LARGE):
                          measure=lambda text, role, size: SimpleNamespace(width=len(text) * size * .5, height=size))
 
 
+@pytest.mark.parametrize('headless', [False, True])
+def test_speed_limit_widget_forwards_fonts_context(monkeypatch, headless):
+  font = fonts()
+  if headless:
+    font._headless_context = True
+  shapes = Mock()
+  monkeypatch.setattr('openpilot.starpilot.ui.speed_limit_widget.SpeedLimitShapes', shapes)
+  widget = SpeedLimitWidget(font, Profile.LARGE)
+  shapes.assert_called_once_with(widget.scale, headless_context=headless)
+  widget.close()
+  shapes.return_value.close.assert_called_once_with()
+
+
 def foreground_calls(draw):
   return [call for call in draw.call_args_list if (call.args[-1].r, call.args[-1].g, call.args[-1].b) not in ((6, 14, 10), (7, 16, 12))]
 

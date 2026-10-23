@@ -55,10 +55,7 @@ def certificate_notice(days_left: int | None) -> str:
 
 
 def apply_plain_camera_look(camera, rl):
-  """The car screen keeps the plain camera look: the shader's non-road path, not the comma UI's engagement grading.
-
-  The comma UI fades the road camera when disengaged (color_strength) and a car screen reads that as washed out.
-  """
+  """Keep the car screen on the shader's plain, non-road camera path."""
   camera._color_strength_val[0] = 1.0
   camera._road_camera_val[0] = 0
   rl.set_shader_value(camera.shader, camera._color_strength_loc, camera._color_strength_val, rl.ShaderUniformDataType.SHADER_UNIFORM_FLOAT)
