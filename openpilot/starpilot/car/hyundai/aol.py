@@ -110,10 +110,12 @@ def _policy_for(CP) -> AolVehiclePolicy:
     return AolVehiclePolicy(intent_supported=True, settings_supported=True, runtime_supported=True,
                             normal_runtime_supported=True, ordinary_axis_ack_required=qualified_blended_alpha(CP, marked_only=True),
                             full_axis_runtime_required=qualified_blended_alpha(CP, marked_only=True),
-                            explicit_latch=True, alternative_experience_addition=32)
+                            explicit_latch=True, alternative_experience_addition=32,
+                            cruise_main_required=CP.safetyConfigs[0].safetyParam != 0x2014)
   if qualified_blended_stock(CP):
     return AolVehiclePolicy(intent_supported=True, settings_supported=True, runtime_supported=True,
-                            normal_runtime_supported=True, explicit_latch=True, alternative_experience_addition=32)
+                            normal_runtime_supported=True, explicit_latch=True, alternative_experience_addition=32,
+                            cruise_main_required=CP.safetyConfigs[0].safetyParam != 0x2010)
   if qualified_angle_aol(CP):
     return AolVehiclePolicy(
       intent_supported=True,
@@ -288,7 +290,10 @@ def create_intent(CP, settings):
   if qualified_blended_alpha(CP) or qualified_classic_long(CP):
     from openpilot.starpilot.car.hyundai.classic_long_intent import ClassicLongCardIntent
 
-    return ClassicLongCardIntent(CP, settings)
+    owner = ClassicLongCardIntent(CP, settings)
+    if qualified_blended_alpha(CP):
+      owner.independent_cruise_buttons = independent_cruise_buttons_supported(CP)
+    return owner
   if qualified_classic_scc(CP):
     from openpilot.starpilot.car.hyundai.classic_scc_intent import ClassicSccCardIntent
 
@@ -360,7 +365,12 @@ def independent_cruise_buttons_supported(CP, *, marked_only=False) -> bool:
   # Dedicated EV6 LONG raw-button/optional-release behavior stays unchanged.
   if CP.carFingerprint == HyundaiCAR.KIA_EV6 and CP.openpilotLongitudinalControl:
     return False
-  return bool(qualified_ccnc_long_aol(CP, marked_only=marked_only) or qualified_sonata_independent(CP) or
+  # Exact mixed-CAN Palisade HDA2 profiles use mapped LKAS/Main intent.
+  # Native axis acknowledgement and all output admission remain separate.
+  return bool(((qualified_blended_stock(CP, marked_only=marked_only) or
+                qualified_blended_alpha(CP, marked_only=marked_only)) and
+               CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG) or
+              qualified_ccnc_long_aol(CP, marked_only=marked_only) or qualified_sonata_independent(CP) or
               qualified_angle_aol(CP, marked_only=marked_only) or
               qualified_canfd_stock(CP, marked_only=marked_only) or
               qualified_canfd_long(CP, marked_only=marked_only) or
@@ -526,3 +536,4 @@ def pending_stock_angle_arm(CP, CS, sm, owner, *, now_ns, producer, acknowledged
                 not native.requestedLongitudinal and not native.longitudinalAllowed)
   except (AttributeError, KeyError, IndexError, TypeError, ValueError, OverflowError):
     return False
+
