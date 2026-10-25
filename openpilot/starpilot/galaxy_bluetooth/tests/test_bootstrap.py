@@ -1,4 +1,5 @@
 """Setup never downloads packages and never turns on the shared Bluetooth radio."""
+import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -88,6 +89,23 @@ class BootstrapTest(unittest.TestCase):
     self.assertFalse(any('start' in call and UNIT in call for call in self.calls))
     self.assertFalse(any('bluetooth.service' in call for call in self.calls))
     self.assertTrue(any('stop' in call and UNIT in call for call in self.calls))
+
+  def test_host_bridge_runs_in_the_isolated_runtime_without_systemd_units(self):
+    from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import ensure_store
+    ensure_store(self.data / 'pairing.json')
+    child = Mock(pid=1234)
+    child.poll.return_value = None
+    with patch.dict('os.environ', SP_HOST_RUNTIME='1', SP_HOST_BLUETOOTH_PREFERENCE=str(self.root / 'bluetooth' / 'BluetoothEnabled'),
+                    SP_HOST_GALAXY_BLE_DATA=str(self.data)), \
+         patch('openpilot.starpilot.bluetooth.radio_preference.RadioPreference.enabled', return_value=True), \
+         patch('openpilot.starpilot.galaxy_bluetooth.bridge.pairing.ensure_store'), \
+         patch('openpilot.starpilot.galaxy_bluetooth.bootstrap.subprocess.Popen', return_value=child) as spawn:
+      self.worker.step()
+    self.assertEqual([call.args[0][1].split('/')[-1] for call in spawn.call_args_list], ['lan_discovery.py', 'server.py'])
+    self.assertTrue(all(call.kwargs['cwd'] == self.bridge for call in spawn.call_args_list))
+    self.assertTrue(all('vendor' in call.kwargs['env']['PYTHONPATH'] for call in spawn.call_args_list))
+    self.assertFalse(self.calls)
+    self.assertEqual(json.loads((self.data / 'setup-status.json').read_text())['state'], 'waiting')
 
   def test_only_bridge_and_discovery_start_when_radio_enabled(self):
     self.installed()

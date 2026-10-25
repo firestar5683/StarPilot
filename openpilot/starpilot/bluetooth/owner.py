@@ -22,8 +22,10 @@ from jeepney.wrappers import Properties
 from openpilot.starpilot.bluetooth.radio_preference import RadioPreference
 
 
-RADIO_HELPER = Path('/usr/comma/bluetooth-radio')
-RADIO_UNIT = 'starpilot-bluetooth-radio.service'
+HOST_RUNTIME = os.getenv('SP_HOST_RUNTIME') == '1'
+HOST_BLE_DATA = Path(os.getenv('SP_HOST_GALAXY_BLE_DATA', '/tmp/starpilot-host-galaxy-ble'))
+RADIO_HELPER = Path('/usr/bin/bluetoothctl') if HOST_RUNTIME else Path('/usr/comma/bluetooth-radio')
+RADIO_UNIT = 'bluetooth.service' if HOST_RUNTIME else 'starpilot-bluetooth-radio.service'
 ADDRESS = re.compile(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}\Z')
 # iPhones only list nearby devices that look like audio gear, so the window presents as a loudspeaker.
 SPEAKER_CLASS = (4, 5)
@@ -46,7 +48,7 @@ ADAPTER = 'org.bluez.Adapter1'
 DEVICE = 'org.bluez.Device1'
 AGENT = 'org.bluez.Agent1'
 AGENT_PATH = '/org/starpilot/bluetooth/pairing'
-ADMISSION_LOCK = Path('/data/starpilot/bluetooth-owner.lock')
+ADMISSION_LOCK = HOST_BLE_DATA / 'bluetooth-owner.lock' if HOST_RUNTIME else Path('/data/starpilot/bluetooth-owner.lock')
 
 
 class PairingSession:

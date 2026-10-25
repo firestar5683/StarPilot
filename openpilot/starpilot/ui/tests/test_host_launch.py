@@ -70,6 +70,8 @@ class TestHostLaunch(unittest.TestCase):
       self.assertIs(params.get("OpenpilotEnabledToggle"), True)
       self.assertEqual(params.get("LanguageSetting"), "en")
       self.assertIs(params.get("IsDriverViewEnabled"), False)
+      from openpilot.common.version import training_version
+      self.assertEqual(params.get("CompletedTrainingVersion"), training_version)
       params.put_bool("OpenpilotEnabledToggle", False, block=True)
       params.put("LanguageSetting", "es-ES", block=True)
       host_launch.seed_developer_defaults()

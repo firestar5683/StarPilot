@@ -4,11 +4,13 @@ import json
 import logging
 import os
 from pathlib import Path
+import signal
 import subprocess
+import sys
 import tempfile
 import time
 
-DATA = Path('/data/galaxy-ble')
+DATA = Path(os.getenv('SP_HOST_GALAXY_BLE_DATA', '/data/galaxy-ble'))
 BRIDGE = Path(__file__).resolve().parent / 'bridge'
 UNIT = 'galaxy-ble-fork.service'
 LAN_UNIT = 'galaxy-lan-discovery.service'
@@ -60,6 +62,8 @@ class Bootstrap:
     self.ready = False
     self.last_status = None
     self.last_write = 0.
+    self.host_bridge = None
+    self.host_discovery = None
 
   def status(self, state, message):
     self.ready = state == 'ready'
@@ -75,7 +79,50 @@ class Bootstrap:
   def systemctl(self, *args, **kwargs):
     return self.command(['sudo', '-n', 'systemctl', *args], **kwargs)
 
+  def stop_host_process(self, name):
+    child = getattr(self, name)
+    setattr(self, name, None)
+    if child is not None and child.poll() is None:
+      child.terminate()
+      try:
+        child.wait(timeout=5)
+      except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait()
+
+  def start_host_process(self, name, script, *args):
+    child = getattr(self, name)
+    if child is None or child.poll() is not None:
+      env = os.environ.copy()
+      env['PYTHONPATH'] = str(self.bridge.parent / 'vendor') + os.pathsep + env.get('PYTHONPATH', '')
+      child = subprocess.Popen([sys.executable, str(self.bridge / script), *args], cwd=self.bridge, env=env)
+      setattr(self, name, child)
+    return child
+
+  def host_step(self):
+    from openpilot.starpilot.bluetooth.radio_preference import RadioPreference
+    from openpilot.starpilot.galaxy_bluetooth.bridge.pairing import ensure_store
+    if os.getenv('SP_HOST_NETWORK_MODE') in (None, 'mirrored'):
+      self.start_host_process('host_discovery', 'lan_discovery.py')
+    else:
+      self.stop_host_process('host_discovery')
+    ensure_store(self.data / 'pairing.json')
+    if not RadioPreference().enabled():
+      self.stop_host_process('host_bridge')
+      self.status('waiting', 'Turn Bluetooth on in comma Settings to pair your phone')
+      return
+    self.start_host_process('host_bridge', 'server.py', '--key-file', str(self.data / 'pairing.json'))
+    try:
+      ready_pid = json.loads((self.data / 'bridge-ready.json').read_text()).get('pid')
+    except (OSError, ValueError, AttributeError):
+      ready_pid = None
+    ready = ready_pid == self.host_bridge.pid and self.host_bridge.poll() is None
+    self.status('ready' if ready else 'waiting', 'Ready to pair' if ready else 'Waiting for Bluetooth adapter')
+
   def step(self):
+    if os.getenv('SP_HOST_RUNTIME') == '1':
+      self.host_step()
+      return
     wake = self.data / 'wake-setup.json'
     if wake.exists():
       wake.unlink(missing_ok=True)
@@ -147,13 +194,20 @@ def main():
     except BlockingIOError:
       return
     worker = Bootstrap(Params())
-    while True:
-      worker.step()
-      # Once the bridge is up, systemd keeps it running; check back slowly unless the user acts.
-      for _ in range(60 if worker.ready else 10):
-        time.sleep(1)
-        if any((DATA / name).exists() for name in ('retry-setup.json', 'wake-setup.json')):
-          break
+    def stop(_signum, _frame):
+      raise SystemExit
+    signal.signal(signal.SIGTERM, stop)
+    try:
+      while True:
+        worker.step()
+        # Once the bridge is up, systemd keeps it running; check back slowly unless the user acts.
+        for _ in range(60 if worker.ready else 10):
+          time.sleep(1)
+          if any((DATA / name).exists() for name in ('retry-setup.json', 'wake-setup.json')):
+            break
+    finally:
+      worker.stop_host_process('host_bridge')
+      worker.stop_host_process('host_discovery')
 
 
 if __name__ == '__main__':

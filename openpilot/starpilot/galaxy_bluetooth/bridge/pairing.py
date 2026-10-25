@@ -16,7 +16,7 @@ import stat
 import tempfile
 from contextlib import contextmanager
 
-DEFAULT_KEY_PATH = Path("/data/galaxy-ble/pairing.json")
+DEFAULT_KEY_PATH = Path(os.getenv('SP_HOST_GALAXY_BLE_DATA', '/data/galaxy-ble')) / 'pairing.json'
 MAX_PHONES = 16
 MAX_FILE_BYTES = 16384
 LEGACY_ID = "legacy"

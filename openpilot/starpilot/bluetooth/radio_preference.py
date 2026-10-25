@@ -15,8 +15,10 @@ RADIO_PREFERENCE = Path('/data/params/d/BluetoothEnabled')
 
 
 class RadioPreference:
-  def __init__(self, path: Path = RADIO_PREFERENCE):
-    self.path = path
+  def __init__(self, path: Path | None = None):
+    if path is None and os.getenv('SP_HOST_RUNTIME') == '1':
+      path = Path(os.environ['SP_HOST_BLUETOOTH_PREFERENCE'])
+    self.path = path or RADIO_PREFERENCE
 
   @staticmethod
   def _read(path: Path) -> tuple[bytes | None, tuple | None]:

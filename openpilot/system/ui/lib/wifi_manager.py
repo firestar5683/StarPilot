@@ -1,8 +1,10 @@
 import atexit
+import os
 import threading
 import time
 import uuid
 import subprocess
+from urllib.parse import urlsplit
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import IntEnum
@@ -180,6 +182,10 @@ class WifiManager:
     self._wifi_state: WifiState = WifiState()
     self._user_epoch: int = 0
     self._ipv4_address: str = ""
+    self._host_local_access = None
+    if os.getenv('SP_HOST_RUNTIME') == '1':
+      from openpilot.starpilot.galaxy.local_access import LocalAccess
+      self._host_local_access = LocalAccess()
     self._current_network_metered: MeteredType = MeteredType.UNKNOWN
     self._tethering_password: str = ""
     self._ipv4_forward = False
@@ -286,6 +292,10 @@ class WifiManager:
 
   @property
   def ipv4_address(self) -> str:
+    host_access = getattr(self, '_host_local_access', None)
+    if host_access is not None:
+      addresses = host_access.snapshot()['addresses']
+      return (urlsplit(addresses[0]['url']).hostname or '') if addresses else ''
     return self._ipv4_address
 
   @property

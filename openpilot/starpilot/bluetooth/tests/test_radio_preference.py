@@ -22,6 +22,11 @@ class RadioPreferenceTest(unittest.TestCase):
       self.assertEqual(RadioPreference().path, Path('/data/params/d/BluetoothEnabled'))
       self.assertEqual(RADIO_PREFERENCE, RadioPreference().path)
 
+  def test_host_runtime_uses_its_private_radio_preference(self):
+    path = self.root / 'runtime' / 'BluetoothEnabled'
+    with patch.dict(os.environ, SP_HOST_RUNTIME='1', SP_HOST_BLUETOOTH_PREFERENCE=str(path)):
+      self.assertEqual(RadioPreference().path, path)
+
   def test_read_does_not_create_or_enable_and_matches_service_newline_semantics(self):
     self.assertFalse(self.preference.enabled())
     self.assertFalse(self.preference.path.exists())

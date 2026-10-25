@@ -63,7 +63,8 @@ def seed_developer_defaults() -> None:
   defaults = (("HasAcceptedTerms", terms_version), ("CompletedTrainingVersion", training_version),
               ("LanguageSetting", "en"), ("OpenpilotEnabledToggle", True), ("IsDriverViewEnabled", False))
   for key, value in defaults:
-    if params.get(key) is None:
+    current = params.get(key)
+    if current is None or key == "CompletedTrainingVersion" and current in (b"0", "0"):
       params.put(key, value, block=True)
 
 

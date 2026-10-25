@@ -25,6 +25,7 @@ HELP = """Usage: ./dev <command> [args...]
        ./tool <command> [args...]       ./tools/host <command> [args...]
 
   c3 / c4       Build and launch the large / compact StarPilot Raylib UI.
+  device        Run the full local manager with its UI and Galaxy services (Linux).
   onroad        Build replay and launch route UI(s); see ./onroad --help.
   replay        Build and run upstream replay.
   cabana        Build and run Cabana in its own concurrent cache.
@@ -46,14 +47,14 @@ Native build artifacts, editable installs and Params stay in that cache.
 Shared commands wait while another shared command is running; Cabana is separate.
 ./build remains the Linux ARM64 device build, including ./build --panda.
 """
-COMMANDS = {'c3', 'c4', 'onroad', 'replay', 'cabana', 'plotjuggler', 'galaxy', 'python', 'pytest', 'shell', 'sync'}
+COMMANDS = {'c3', 'c4', 'device', 'onroad', 'replay', 'cabana', 'plotjuggler', 'galaxy', 'python', 'pytest', 'shell', 'sync'}
 BUCKET_ALIASES = dict.fromkeys(('shared', 'default', 'ui', 'c3', 'c4', 'onroad', 'replay', 'shell', 'plotjuggler', 'juggle'), 'shared')
 BUCKET_ALIASES['cabana'] = 'cabana'
 VENDORS = ('msgq_repo', 'opendbc_repo', 'rednose_repo', 'teleoprtc_repo', 'tinygrad_repo', 'jetlink_repo')
 # Never inherit a device/cross compiler or another project's editable imports.
 REMOVE_ENV = ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'LDFLAGS',
               'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'PKG_CONFIG_PATH', 'CPATH', 'LIBRARY_PATH',
-              'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'SP_HOST_PARKED')
+              'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'SP_HOST_PARKED', 'SP_HOST_NETWORK_MODE')
 EXCLUDE_DIRS = {'.git', '.venv', '.venv-linux-arm64', '.host_runtime', '.comma_sysroot', '.cache', '__pycache__'}
 NATIVE_SUFFIXES = {'.a', '.so', '.dylib', '.o', '.os'}
 GALAXY = Path('openpilot/starpilot/galaxy')
@@ -295,6 +296,8 @@ class HostRuntime:
                BASEDIR=str(self.work), PWD=str(self.work), PARAMS_ROOT=str(inside(self.cache / 'params', self.cache)),
                OPENPILOT_PREFIX=self.prefix, SP_HOST_PREFIX=self.prefix,
                SP_HOST_PARAMS_ROOT=str(self.cache / 'params'), SP_HOST_RUNTIME='1',
+               SP_HOST_GALAXY_BLE_DATA=str(self.cache / 'galaxy-ble'),
+               SP_HOST_BLUETOOTH_PREFERENCE=str(self.cache / 'bluetooth' / 'BluetoothEnabled'),
                ANDROID_AUTO_DIR=str(inside(self.cache / 'android_auto', self.cache)),
                SP_SCONS_CACHE_DIR=str(self.cache / 'scons-cache'),
                SCONS_CACHE=str(self.cache / 'scons-cache'),
@@ -328,7 +331,7 @@ class HostRuntime:
   def build(self, command, jobs):
     params = 'openpilot/common/libparams_c' + ('.dylib' if self.system == 'Darwin' else '.so')
     targets = [params, 'msgq_repo/msgq/ipc_pyx.so', 'msgq_repo/msgq/visionipc/visionipc_pyx.so']
-    if command in ('c3', 'c4', 'onroad', 'galaxy', 'python', 'pytest', 'shell'):
+    if command in ('c3', 'c4', 'device', 'onroad', 'galaxy', 'python', 'pytest', 'shell'):
       targets += ['rednose_repo/rednose/helpers/ekf_sym_pyx.so', 'openpilot/selfdrive/locationd',
                   'openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so']
     if command in ('onroad', 'replay', 'cabana'):
@@ -343,7 +346,7 @@ class HostRuntime:
 
   def launch(self, command, jobs, arguments):
     env = self.environment()
-    if command in ('c3', 'c4', 'galaxy'):
+    if command in ('c3', 'c4', 'galaxy', 'device'):
       env['SP_HOST_PARKED'] = '1'  # No car or drive-state publishers: parked-only setup stays usable.
     python = self.venv / 'bin/python'
     if command in ('c3', 'c4', 'onroad'):
@@ -355,6 +358,8 @@ class HostRuntime:
       argv = [python, '-m', 'openpilot.tools.plotjuggler.juggle', *arguments]
     elif command == 'galaxy':
       argv = [python, '-m', 'openpilot.starpilot.galaxy.server', *arguments]
+    elif command == 'device':
+      argv = [python, '-m', 'openpilot.system.manager.host_device', *arguments]
     elif command == 'pytest':
       argv = [python, '-m', 'pytest', *arguments]
       env.setdefault('SCALE', '1')  # UI imports must not probe a monitor in test workers.
@@ -545,6 +550,8 @@ def main(arguments=None):
   if command == 'help':
     print(HELP)
     return 0
+  if command == 'device' and platform.system() != 'Linux':
+    raise RuntimeError('The full desktop device requires Linux; use ./c3 or ./c4 for the macOS UI.')
   if command in ('c3', 'c4', 'onroad') and args in (['--help'], ['-h']):
     helper = ROOT / ('openpilot/tools/replay/onroad.py' if command == 'onroad' else 'openpilot/starpilot/ui/host_launch.py')
     profile = [] if command == 'onroad' else ['large' if command == 'c3' else 'compact']

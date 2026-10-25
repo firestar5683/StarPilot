@@ -183,6 +183,11 @@ def manager_thread() -> None:
     managed_processes['modeld'].observe(sm, started)
     ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
 
+    if os.getenv("SP_HOST_RUNTIME") == "1" and managed_processes['ui'].proc is not None and \
+        managed_processes['ui'].proc.exitcode is not None:
+      cloudlog.info("Host UI exited; stopping desktop device")
+      break
+
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)
     print(running)
@@ -213,11 +218,13 @@ def manager_thread() -> None:
       break
 
 
-def main() -> None:
+def main(*, after_init=None) -> None:
   sentry.init()
   sentry.set_tag("daemon", "manager")
   try:
     manager_init()
+    if after_init is not None:
+      after_init()
   except Exception:
     sentry.capture_exception()
     sentry.flush()

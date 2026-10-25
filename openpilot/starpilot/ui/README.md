@@ -40,6 +40,87 @@ an isolated host runtime. Each accepts an optional leading build-job count.
 `SP_C3_COMPILE_ONLY=1` or `SP_C4_COMPILE_ONLY=1` prepares that runtime without
 opening a window. Host settings are kept in its private Params store.
 
+To run the manager-supervised desktop device, use `./device c3` or
+`./device c4` (defaults to C4). This starts the real manager, which owns the
+native UI and local/LAN Galaxy service in the same isolated host runtime. Cloud
+registration is disabled; it needs no separate Galaxy process. The host
+launcher completes the camera-dependent first-run tutorial so the off-road UI
+opens directly. The full device command requires Linux; Bluetooth needs BlueZ.
+It is verified on Ubuntu under WSL2; native Linux also needs systemd and a
+working display. The separate `./c3` and `./c4` UI launchers also support macOS.
+Stop it with Ctrl+C. Galaxy listens on port 8082.
+
+For phone access from the LAN, put the following in `%UserProfile%\.wslconfig`
+on Windows, then run `wsl --shutdown` in PowerShell to apply it:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+For Bluetooth, also set `[boot]` and `systemd=true` in Ubuntu's `/etc/wsl.conf`
+before shutting down WSL.
+
+Run these rules once in **Administrator PowerShell**. TCP 8082 serves Galaxy;
+UDP 5353 lets the phone app discover it:
+
+```powershell
+New-NetFirewallHyperVRule -Name "OpenpilotGalaxy" -DisplayName "Openpilot Galaxy" `
+  -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' `
+  -Protocol TCP -LocalPorts 8082
+New-NetFirewallHyperVRule -Name "OpenpilotGalaxyDiscovery" -DisplayName "Openpilot Galaxy discovery" `
+  -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' `
+  -Protocol UDP -LocalPorts 5353
+```
+
+After restarting WSL, `./device c4` shows the laptop's LAN IP in Network
+settings. Open `http://<laptop-LAN-IP>:8082` on the phone. On the Windows laptop,
+use `http://127.0.0.1:8082`. Mirrored networking provides LAN access without a
+port proxy. [Microsoft's WSL networking guide](https://learn.microsoft.com/windows/wsl/networking)
+documents the mode and firewall rules.
+
+For Bluetooth on Ubuntu 24.04 WSL with this laptop's Intel `8087:0033` adapter:
+
+1. In **Administrator PowerShell**, run `usbipd list`, then
+   `usbipd bind --force --busid 1-10`. `1-10` was this laptop's Intel adapter;
+   use its current bus ID if the list changes. A Windows restart may be needed
+   to release the built-in adapter.
+2. From the repository root in Ubuntu, run
+   `sudo ./tools/setup_wsl_intel_bluetooth.sh` once. It installs BlueZ and
+   Intel firmware, configures the WSL firmware loader at boot, and grants the
+   current Linux user limited Bluetooth service controls.
+3. Launch `./device c4`; it attaches the already shared adapter to WSL.
+   If USB/IP reports *Device in error state* after a Windows restart, run
+   `pnputil /enable-device "USB\VID_8087&PID_0033\5&3B784BF&0&10"` in
+   Administrator PowerShell, using the current instance ID from `usbipd state`
+   if it changes, then launch again.
+
+Check `bluetoothctl list` in Ubuntu for a controller, then turn Bluetooth on in
+the device settings. Galaxy's phone bridge advertises as `Galaxy`. Windows cannot
+use the USB Bluetooth adapter while it is attached to WSL. Galaxy over LAN works
+without Bluetooth. [Microsoft's USB guide](https://learn.microsoft.com/windows/wsl/connect-usb)
+documents the USB/IP handoff.
+
+### Return Bluetooth to Windows
+
+Stop `./device` first (Ctrl+C or close its window). In **Administrator
+PowerShell**, find the Intel adapter's current bus ID with `usbipd list`, then
+run:
+
+```powershell
+usbipd unbind --busid 1-10
+usbipd list
+```
+
+Replace `1-10` if its bus ID changed. The adapter should show `Not shared` and
+appear again in Windows Bluetooth settings. Because setup used `bind --force`,
+`usbipd detach` alone may leave Windows Bluetooth unavailable; `unbind` removes
+the sharing registration and detaches it if needed. If Windows still shows the
+adapter as disabled, enable it in Device Manager or run
+`pnputil /enable-device "USB\VID_8087&PID_0033\5&3B784BF&0&10"` with its current
+instance ID, then restart Windows if necessary. This does not affect Galaxy's
+LAN access.
+
 For a deterministic presentation capture with supplied sample state:
 
 ```sh

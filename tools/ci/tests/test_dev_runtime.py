@@ -1,5 +1,6 @@
 import fcntl
 import hashlib
+import json
 import os
 import py_compile
 from pathlib import Path
@@ -12,6 +13,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from tools.host_runtime import GALAXY, LIVE_RELOAD, LIVE_TAG, LIVE_VERSION, HostRuntime, file_lock, main, parse
+from openpilot.system.manager.host_device import attach_shared_bluetooth
 
 
 class TestDeveloperRuntime(unittest.TestCase):
@@ -80,19 +82,41 @@ class TestDeveloperRuntime(unittest.TestCase):
 
   def test_command_build_prepares_mpc_import_dependency(self):
     solver = 'openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so'
-    for command in ('c3', 'c4', 'onroad', 'galaxy', 'python', 'pytest', 'shell'):
+    for command in ('c3', 'c4', 'device', 'onroad', 'galaxy', 'python', 'pytest', 'shell'):
       with self.subTest(command=command), patch('tools.host_runtime.run') as build:
         self.runtime.build(command, 4)
         self.assertIn(solver, build.call_args.args[0])
 
+  def test_device_launches_the_manager_in_parked_host_runtime(self):
+    with patch.object(self.runtime, 'environment', return_value={}), patch.object(self.runtime, 'private_ipc'), \
+         patch('tools.host_runtime.subprocess.Popen') as spawn:
+      spawn.return_value.__enter__.return_value.wait.return_value = 0
+      self.assertEqual(self.runtime.launch('device', 1, []), 0)
+    argv, = spawn.call_args.args
+    self.assertEqual(argv[-2:], ['-m', 'openpilot.system.manager.host_device'])
+    self.assertEqual(spawn.call_args.kwargs['env']['SP_HOST_PARKED'], '1')
+
+  def test_device_reattaches_only_a_shared_bluetooth_adapter(self):
+    devices = {'Devices': [
+      {'BusId': '1-8', 'Description': 'Camera', 'PersistedGuid': 'shared', 'ClientIPAddress': None},
+      {'BusId': '1-10', 'Description': 'Intel Bluetooth', 'PersistedGuid': 'shared', 'ClientIPAddress': None},
+    ]}
+    with patch('openpilot.system.manager.host_device.subprocess.run', side_effect=[Mock(stdout=json.dumps(devices)), Mock()]) as run:
+      attach_shared_bluetooth()
+    self.assertEqual(run.call_args.args[0], ['usbipd.exe', 'attach', '--wsl', '--busid', '1-10'])
+
   def test_cache_environment_ignores_external_imports_and_settings(self):
-    with patch.dict(os.environ, PYTHONPATH='/elsewhere', PARAMS_ROOT='/real/params', OPENPILOT_PREFIX='real', CC='cross-compiler'):
+    with patch.dict(os.environ, PYTHONPATH='/elsewhere', PARAMS_ROOT='/real/params', OPENPILOT_PREFIX='real', CC='cross-compiler',
+                    SP_HOST_NETWORK_MODE='nat'):
       env = self.runtime.environment()
     self.assertNotIn('/elsewhere', env['PYTHONPATH'])
+    self.assertNotIn('SP_HOST_NETWORK_MODE', env)
     self.assertEqual(env['CC'], '/usr/bin/clang')
     self.assertTrue(Path(env['PARAMS_ROOT']).is_relative_to(self.runtime.cache))
     self.assertNotEqual(env['OPENPILOT_PREFIX'], 'real')
     self.assertEqual(Path(env['ANDROID_AUTO_DIR']), self.runtime.cache / 'android_auto')
+    self.assertEqual(Path(env['SP_HOST_GALAXY_BLE_DATA']), self.runtime.cache / 'galaxy-ble')
+    self.assertEqual(Path(env['SP_HOST_BLUETOOTH_PREFERENCE']), self.runtime.cache / 'bluetooth' / 'BluetoothEnabled')
     second = HostRuntime(self.root, 'shared', system='Darwin', machine='arm64')
     cabana = HostRuntime(self.root, 'cabana', system='Darwin', machine='arm64')
     self.assertEqual(second.prefix, self.runtime.prefix)
@@ -113,6 +137,7 @@ class TestDeveloperRuntime(unittest.TestCase):
 
   def test_command_parsing_preserves_tool_arguments(self):
     self.assertEqual(parse(['c3', '8', '--demo']), ('c3', 8, ['--demo']))
+    self.assertEqual(parse(['device'])[0], 'device')
     self.assertEqual(parse(['juggle', '4', '--demo']), ('plotjuggler', 4, ['--demo']))
     self.assertEqual(parse(['python', '-c', 'print(1)'])[2], ['-c', 'print(1)'])
     self.assertEqual(parse(['pytest', '-n', '2'])[2], ['-n', '2'])

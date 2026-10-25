@@ -2,6 +2,7 @@
 
 from ipaddress import IPv4Address, ip_network
 import json
+import os
 import subprocess
 import threading
 import time
@@ -24,6 +25,10 @@ class LocalAccess:
   def snapshot(self):
     with self.lock:
       if self.cached is not None and self.clock() < self.expiry:
+        return self.cached
+      if os.getenv('SP_HOST_NETWORK_MODE') not in (None, 'mirrored'):
+        self.cached = {'available': False, 'addresses': [], 'reason': 'Restart WSL to enable mirrored networking for Galaxy LAN access.'}
+        self.expiry = self.clock() + 5.0
         return self.cached
       addresses = []
       reason = 'Connect to the Galaxy hotspot, or put the comma and phone on the same Wi-Fi or Ethernet network.'

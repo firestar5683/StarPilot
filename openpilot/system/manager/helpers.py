@@ -45,6 +45,8 @@ def unblock_stdout() -> None:
     os._exit(exit_status)
 
 def save_bootlog():
+  if os.getenv("SP_HOST_RUNTIME") == "1":
+    return  # Desktop manager runs from source; the device-only bootlog binary is absent.
   # copy current params
   tmp = tempfile.mkdtemp()
   params_dirname = pathlib.Path(Params().get_param_path()).name

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+profile="${1:-c4}"
+case "${profile}" in
+  c3) big=1 ;;
+  c4) big=0 ;;
+  *) echo "Usage: ./device [c3|c4]" >&2; exit 2 ;;
+esac
+
+# Run the real manager with host hardware/cloud disabled. The manager owns the
+# UI and Galaxy processes, just as it does on a comma device.
+export STARPILOT_CLOUD_DISABLED=1
+export BIG="${big}"
+export BLOCK="${BLOCK:+${BLOCK},}replay_owner,map_snapshot_operations"
+
+exec "${ROOT_DIR}/dev" device
