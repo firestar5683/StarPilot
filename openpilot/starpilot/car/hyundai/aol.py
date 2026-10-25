@@ -293,6 +293,7 @@ def create_intent(CP, settings):
     owner = ClassicLongCardIntent(CP, settings)
     if qualified_blended_alpha(CP):
       owner.independent_cruise_buttons = independent_cruise_buttons_supported(CP)
+      owner.preserve_batched_edges = bool(CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG)
     return owner
   if qualified_classic_scc(CP):
     from openpilot.starpilot.car.hyundai.classic_scc_intent import ClassicSccCardIntent
@@ -306,7 +307,8 @@ def create_intent(CP, settings):
 
   independent_cruise_buttons = independent_cruise_buttons_supported(CP)
   return AolCardIntent(settings, explicit_latch=policy_for(CP).explicit_latch,
-                       independent_cruise_buttons=independent_cruise_buttons)
+                       independent_cruise_buttons=independent_cruise_buttons,
+                       preserve_batched_edges=bool(qualified_blended_stock(CP) and CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG))
 
 
 def ordinary_axis_request_allowed(CP, CS) -> bool:
@@ -536,4 +538,3 @@ def pending_stock_angle_arm(CP, CS, sm, owner, *, now_ns, producer, acknowledged
                 not native.requestedLongitudinal and not native.longitudinalAllowed)
   except (AttributeError, KeyError, IndexError, TypeError, ValueError, OverflowError):
     return False
-

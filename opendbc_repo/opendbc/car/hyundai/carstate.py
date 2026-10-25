@@ -335,8 +335,9 @@ class CarState(CarStateBase):
     if is_blended(self.CP):
       if self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG:
         self.lfa_block_msg = copy.copy(cp_cam.vl["CAM_0x2a4"])
-        from opendbc.car.hyundai.blended_stock_aol import camera_current
+        from opendbc.car.hyundai.blended_stock_aol import camera_current, camera_snapshot
         self.blended_camera_current = camera_current(cp_cam)
+        self.blended_camera_snapshot = camera_snapshot(cp_cam, self.blended_camera_current)
         self.lkas11 = {}
       else:
         self.msg_364 = copy.copy(cp_cam.vl["ALERTS_364"])

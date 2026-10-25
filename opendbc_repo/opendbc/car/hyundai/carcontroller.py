@@ -27,6 +27,7 @@ from opendbc.car.hyundai.ioniq6_longitudinal import Ioniq6LongitudinalPolicy
 from opendbc.car.hyundai.canfd_dash_icons import CanFDDashIcons
 from opendbc.car.hyundai.classic_scc_aol import qualified as qualified_classic_stock_aol
 from opendbc.car.hyundai.canfd_stock_aol import qualified as qualified_canfd_stock_aol
+from opendbc.car.hyundai.blended_stock_aol import MixedCameraSchedule
 from opendbc.car.hyundai.ev6_aol import qualified as qualified_ev6_aol
 from opendbc.car.hyundai.g90_longitudinal import G90LongitudinalPolicy
 from opendbc.car.hyundai.gv70_longitudinal import is_gv70, scc_request, suppress_stock_cancel
@@ -122,6 +123,7 @@ class CarController(CarControllerBase):
     self.cancel_counter = 0
     self.blended_longitudinal = None
     self.blended_previous_lateral = False
+    self.blended_camera_schedule = MixedCameraSchedule()
     self.blended_disengage_frame = None
     self.last_ccnc_161_ts_ns = 0
     self.last_ccnc_162_ts_ns = 0
@@ -319,8 +321,8 @@ class CarController(CarControllerBase):
             sys_warning, sys_state, CC.enabled, hud_control.leftLaneVisible, hud_control.rightLaneVisible,
             left_lane_warning, right_lane_warning, {}, include_alerts=False, counter_mod=0xF,
             fcw_opt_usm=2 if apply_steer_req or icon == 3 else 1))
-        if (self.frame % 5 == 0 and CS.out.canValid and not CS.out.canTimeout and
-            CS.blended_camera_current):
+        if self.blended_camera_schedule.due(getattr(CS, 'blended_camera_snapshot', None),
+            CS.out.canValid and not CS.out.canTimeout and CS.blended_camera_current):
           can_sends.append(hyundaicanfd.create_suppress_lfa(self.packer, self.CAN, CS.lfa_block_msg, False))
       else:
         _projection_packet_index = len(can_sends) if _projection is not None else 0

@@ -1,3 +1,5 @@
+import time
+
 from opendbc.car import structs
 from opendbc.car.hyundai.values import CAR, HyundaiFlags
 from opendbc.car.hyundai.hyundaicanfd import CanBus
@@ -70,3 +72,30 @@ def camera_current(parser):
   return bool(healthy and not bus_timeout and source is not None and source.timestamps
               and source.counter_fail < MAX_BAD_COUNTER and 0 < int(source.timestamps[-1]) <= now
               and now - int(source.timestamps[-1]) <= source.timeout_threshold)
+
+
+def camera_snapshot(parser, current):
+  if not current:
+    return None
+  stamp = int(parser.message_states[0x2A4].timestamps[-1])
+  return stamp, int(parser._last_update_nanos) - stamp, time.monotonic_ns()
+
+
+class MixedCameraSchedule:
+  """Palisade HDA2 source-copy schedule; native copy admission is unchanged."""
+  MAX_SOURCE_AGE_NS = 20_000_000
+
+  def __init__(self, clock=None):
+    self.clock = clock
+    self.last_source = 0
+
+  def due(self, snapshot, healthy):
+    if not healthy or snapshot is None:
+      return False
+    stamp, age, observed = snapshot
+    now = (self.clock or time.monotonic_ns)()
+    if (stamp <= self.last_source or age < 0 or not 0 < observed <= now or
+        age + now - observed > self.MAX_SOURCE_AGE_NS):
+      return False
+    self.last_source = stamp
+    return True
