@@ -949,6 +949,38 @@ def run(
       raise RuntimeError('learner child shutdown reaping unproved')
 
 
+class _SourceCache:
+  """Settings snapshots at receipt-renewal rate, re-read at once when the calibration generation changes.
+
+  The key is the generation a snapshot was read for: off, manual and unreadable snapshots carry none of their
+  own, so comparing against theirs would re-read and re-parse every setting on every loop."""
+  REFRESH_NS = 250_000_000
+
+  def __init__(self, read, calibration_frame):
+    self._read, self._calibration_frame = read, calibration_frame
+    self.source = None
+    self.generation = ''
+
+  def _store(self, now, frame):
+    self.source, self.generation = self._read(now, frame), '' if frame is None else frame[0]
+    return self.source
+
+  def read(self, now):
+    # Observe resets on every loop, but keep settings reads at receipt-renewal rate.
+    frame = self._calibration_frame(now)
+    generation = '' if frame is None else frame[0]
+    if self.source is None or generation != self.generation or now - self.source.observed_ns >= self.REFRESH_NS:
+      return self._store(now, frame)
+    return self.source
+
+  def read_now(self, now):
+    # The regular 250ms read cache and independent 250ms publication cadence
+    # can publish a receipt already330ms old; a normal next interval then
+    # crosses its original500ms deadline. Read the actual snapshot here after
+    # fitting/persistence work instead of extending that old observation.
+    return self._store(now, self._calibration_frame(now))
+
+
 def main():
   # Imports belong only to the separate optional process. No workerthread/GIL
   # shared with realtime controller processes, no independent selection read.
@@ -995,7 +1027,6 @@ def main():
   applied_socket = messaging.sub_sock('starpilotCarState', conflate=False)
   pm = messaging.PubMaster(['autoSteeringLearning', 'starpilotSteeringTracking'])
   cp_sha256 = car_params_digest(CP)
-  source_cache = [None]
   vehicle_session = uuid.uuid4().hex
   from openpilot.starpilot.flm.calibration_lifecycle import ProducerCalibrationLifecycle
   calibration_lifecycle = ProducerCalibrationLifecycle()
@@ -1008,22 +1039,8 @@ def main():
       calibration=() if frame is None else frame[1], vehicle_session=vehicle_session,
       calibration_generation='' if frame is None else frame[0])
 
-  def source_reader(now):
-    # Observe resets on every loop, but keep settings reads at receipt-renewal rate.
-    frame = calibration_frame(now)
-    generation = '' if frame is None else frame[0]
-    if (source_cache[0] is None or generation != source_cache[0].calibration_generation or
-        now - source_cache[0].observed_ns >= 250_000_000):
-      source_cache[0] = current_source(now, frame)
-    return source_cache[0]
-
-  def publication_source_reader(now):
-    # The regular 250ms read cache and independent 250ms publication cadence
-    # can publish a receipt already330ms old; a normal next interval then
-    # crosses its original500ms deadline. Read the actual snapshot here after
-    # fitting/persistence work instead of extending that old observation.
-    source_cache[0] = current_source(now, calibration_frame(now))
-    return source_cache[0]
+  source_cache = _SourceCache(current_source, calibration_frame)
+  source_reader, publication_source_reader = source_cache.read, source_cache.read_now
 
   def current_sources(identity, epoch):
     now = time.monotonic_ns()
