@@ -34,6 +34,11 @@ MAX_FAST_FAILURES = 5
 UNRESPONSIVE_SECONDS = 120.0
 PLAYING_GRACE_SECONDS = 600.0
 LOG_LINES = 200
+# Music runs on the core the driving models leave about half idle. isolcpus keeps the kernel from balancing
+# anything onto it, so without this pin music lands on the little cores shared with locationd, loggerd and the
+# Android Auto renderer. The models are realtime and always preempt it; nice keeps it behind Wi-Fi receive too.
+MUSIC_CORE = 7
+MUSIC_NICE = 10
 
 
 def network_ready() -> bool:
@@ -74,6 +79,37 @@ def _kill_group(process: subprocess.Popen | None) -> None:
     except ProcessLookupError:
       pass
     process.wait(timeout=STOP_SECONDS)
+
+
+def _core_online(core: int, sys_cpu: Path = Path('/sys/devices/system/cpu')) -> bool:
+  try:
+    return (sys_cpu / f'cpu{core}' / 'online').read_text().strip() == '1'
+  except OSError:
+    return False
+
+
+def place_music(pids: list[int], *, core: int = MUSIC_CORE, proc: Path = Path('/proc'),
+                core_online: Callable[[int], bool] = _core_online) -> None:
+  """Keep every thread of these processes on the music core at MUSIC_NICE.
+
+  Re-applied every tick: parked power saving takes core 7 offline, which resets the affinity of the
+  threads pinned to it, and pulseaudio does not keep the nice it inherits. A thread that exits
+  meanwhile is skipped."""
+  if sys.platform != 'linux' or not core_online(core):
+    return
+  for pid in pids:
+    try:
+      tids = [int(tid) for tid in os.listdir(proc / str(pid) / 'task')]
+    except (OSError, ValueError):
+      continue
+    for tid in tids:
+      try:
+        if os.sched_getaffinity(tid) != {core}:
+          os.sched_setaffinity(tid, {core})
+        if os.getpriority(os.PRIO_PROCESS, tid) < MUSIC_NICE:
+          os.setpriority(os.PRIO_PROCESS, tid, MUSIC_NICE)
+      except OSError:
+        pass
 
 
 def reap_orphans(layout: Layout, proc: Path = Path('/proc')) -> int:
@@ -599,6 +635,7 @@ def main() -> None:
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
           supervisor._set('failed', str(error))
       supervisor.publish()
+      place_music([os.getpid(), *(child.pid for child in (supervisor.server, supervisor.player) if child is not None)])
       stop.wait(1.0)
   finally:
     reporter.close()
