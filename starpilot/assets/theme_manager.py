@@ -584,7 +584,7 @@ class ThemeManager:
         "color_scheme": ("colors", self.holiday_theme),
         "distance_icons": ("distance_icons", self.holiday_theme),
         "icon_pack": ("icons", self.holiday_theme),
-        "sound_pack": ("sounds", self.holiday_theme),
+        "sound_pack": ("sounds", "stock"),
         "turn_signal_pack": ("signals", self.holiday_theme),
         "wheel_image": ("wheel_image", self.holiday_theme)
       }
@@ -601,7 +601,7 @@ class ThemeManager:
         "color_scheme": ("colors", selected_theme.replace("-animated", "")),
         "distance_icons": ("distance_icons", self.randomize_distance_icons(available_themes, selected_theme.replace("-animated", ""))),
         "icon_pack": ("icons", selected_theme),
-        "sound_pack": ("sounds", selected_theme.replace("-animated", "")),
+        "sound_pack": ("sounds", "stock"),
         "turn_signal_pack": ("signals", selected_theme.replace("-animated", "")),
         "wheel_image": ("wheel_image", self.randomize_wheel_image(available_themes, selected_theme.replace("-animated", "")))
       }
@@ -611,7 +611,7 @@ class ThemeManager:
         "color_scheme": ("colors", starpilot_toggles.color_scheme),
         "distance_icons": ("distance_icons", starpilot_toggles.distance_icons),
         "icon_pack": ("icons", starpilot_toggles.icon_pack),
-        "sound_pack": ("sounds", starpilot_toggles.sound_pack),
+        "sound_pack": ("sounds", "stock"),
         "turn_signal_pack": ("signals", starpilot_toggles.signal_icons),
         "wheel_image": ("wheel_image", starpilot_toggles.wheel_image)
       }
@@ -646,7 +646,10 @@ class ThemeManager:
   def update_theme_asset(self, asset_type, theme, boot_run=False):
     save_location = ACTIVE_THEME_PATH / asset_type
 
-    if self.holiday_theme != "stock":
+    if asset_type == "sounds":
+      theme = "stock"
+      asset_location = STOCKOP_THEME_PATH / asset_type
+    elif self.holiday_theme != "stock":
       asset_location = HOLIDAY_THEME_PATH / self.holiday_theme / asset_type
     elif theme in HOLIDAY_SLUGS:
       asset_location = HOLIDAY_THEME_PATH / theme / asset_type

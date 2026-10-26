@@ -995,7 +995,7 @@ class StarPilotVariables:
     toggle.distance_icons = self.get_value("DistanceIconPack", cast=None, condition=custom_themes, default="stock")
     toggle.icon_pack = self.get_value("IconPack", cast=None, condition=custom_themes, default="stock")
     toggle.signal_icons = self.get_value("SignalAnimation", cast=None, condition=custom_themes, default="stock")
-    toggle.sound_pack = self.get_value("SoundPack", cast=None, condition=custom_themes, default="stock")
+    toggle.sound_pack = "stock"
     toggle.random_themes = self.get_value("RandomThemes", condition=custom_themes)
     toggle.random_themes_holidays = self.get_value("RandomThemesHolidays", condition=toggle.random_themes)
     if toggle.random_themes:
@@ -1176,7 +1176,6 @@ class StarPilotVariables:
       toggle.distance_icons = toggle.current_holiday_theme
       toggle.icon_pack = toggle.current_holiday_theme
       toggle.signal_icons = toggle.current_holiday_theme
-      toggle.sound_pack = toggle.current_holiday_theme
       toggle.wheel_image = toggle.current_holiday_theme
 
     toggle.lane_changes = self.get_value("LaneChanges")
