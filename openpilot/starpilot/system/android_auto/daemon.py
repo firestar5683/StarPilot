@@ -217,7 +217,7 @@ def main() -> int:
   source_verifier = GalaxySourceVerifier()
   from openpilot.common.params import Params
   from openpilot.starpilot.galaxy.evidence import EvidenceSource
-  from openpilot.starpilot.galaxy.settings import LiveContextSource
+  from openpilot.starpilot.galaxy.authority import LiveContextSource
   with ExitStack() as cleanup:
     evidence = EvidenceSource().start()
     cleanup.callback(evidence.close)
