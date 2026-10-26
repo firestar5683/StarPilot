@@ -84,5 +84,23 @@ class TestBitmapFonts(unittest.TestCase):
       self.assertAlmostEqual(raw_draw.call_args.args[3], 36 * 1.16)
 
 
+def test_text_cache_keeps_hot_labels_when_dynamic_values_fill_it():
+  from openpilot.system.ui.lib.lru_cache import LRUCache
+  fonts = BitmapFonts.__new__(BitmapFonts)
+  fonts.profile = Profile.LARGE
+  font = SimpleNamespace(texture=SimpleNamespace(id=1))
+  fonts._fonts = {'Inter-Bold.fnt': font}
+  fonts._measurements = LRUCache(1024)
+  with patch('openpilot.starpilot.ui.presentation.rl.measure_text_ex', return_value=SimpleNamespace(x=20, y=30)) as measure:
+    first = fonts.measure('SET', FontRole.BOLD, 30)
+    for index in range(2048):
+      fonts.measure(str(index), FontRole.BOLD, 30)
+      assert fonts.measure('SET', FontRole.BOLD, 30) is first
+    assert sum(call.args[1] == 'SET' for call in measure.call_args_list) == 1
+    assert len(fonts._measurements) == 1024
+    fonts.measure('0', FontRole.BOLD, 30)
+    assert sum(call.args[1] == '0' for call in measure.call_args_list) == 2
+
+
 if __name__ == "__main__":
   unittest.main()
