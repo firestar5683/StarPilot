@@ -10,6 +10,8 @@ import numpy as np
 from PIL import Image
 import pyray as rl
 
+from openpilot.system.ui.lib.lru_cache import LRUCache
+
 
 class Profile(StrEnum):
   LARGE = "large"
@@ -43,20 +45,24 @@ class TextSize:
   height: float
 
 
+_ROLE_FILENAMES = {
+  FontRole.MEDIUM: "Inter-Medium.fnt",
+  FontRole.BOLD: "Inter-Bold.fnt",
+  FontRole.SEMI_BOLD: "Inter-SemiBold.fnt",
+  FontRole.BRAND: "Sora-800.fnt",
+  FontRole.ROMAN: "Inter-Regular.fnt",
+  FontRole.DISPLAY: "Inter-Bold.fnt",
+  FontRole.SET_SPEED: "DINish-Speed.fnt",
+  FontRole.FALLBACK: "unifont.fnt",
+}
+
+
 def font_filename(profile: Profile, role: FontRole) -> str:
   if role == FontRole.NORMAL:
     return "Inter-Regular.fnt" if profile == Profile.LARGE else "Inter-Medium.fnt"
-  return {
-    FontRole.MEDIUM: "Inter-Medium.fnt",
-    FontRole.BOLD: "Inter-Bold.fnt",
-    FontRole.SEMI_BOLD: "Inter-SemiBold.fnt",
-    FontRole.BRAND: "Sora-800.fnt",
-    FontRole.ROMAN: "Inter-Regular.fnt",
-    FontRole.DISPLAY: "Inter-Bold.fnt",
-    FontRole.SET_SPEED: "DINish-Speed.fnt",
-    FontRole.SPEED: "DINish-Speed.fnt" if profile == Profile.LARGE else "Inter-Bold.fnt",
-    FontRole.FALLBACK: "unifont.fnt",
-  }[role]
+  if role == FontRole.SPEED:
+    return "DINish-Speed.fnt" if profile == Profile.LARGE else "Inter-Bold.fnt"
+  return _ROLE_FILENAMES[role]
 
 
 def default_font_directory() -> Path:
@@ -108,9 +114,9 @@ class BitmapFonts:
     self.profile = Profile(profile)
     self._directory = directory
     self._fonts: dict[str, rl.Font] = {}
-    self._measurements: dict[tuple, TextSize] = {}
-    self._vertical_ink: dict[tuple, tuple[float, float]] = {}
-    self._horizontal_ink: dict[tuple, tuple[float, float]] = {}
+    self._measurements: LRUCache[tuple, TextSize] = LRUCache(1024)
+    self._vertical_ink: LRUCache[tuple, tuple[float, float]] = LRUCache(1024)
+    self._horizontal_ink: LRUCache[tuple, tuple[float, float]] = LRUCache(1024)
     self._glyph_ink: dict[str, dict[int, tuple[int, int] | None]] = {}
     default_texture_id = rl.get_font_default().texture.id
     try:
@@ -155,8 +161,6 @@ class BitmapFonts:
     key = font.texture.id, text, size, spacing, width_scale, weight
     if key not in self._measurements:
       measured = rl.measure_text_ex(font, text, size * self.profile.font_scale, spacing)  # noqa: TID251
-      if len(self._measurements) >= 1024:
-        self._measurements.clear()
       self._measurements[key] = TextSize(measured.x * width_scale + (weight if text else 0), measured.y)
     return self._measurements[key]
 
@@ -169,8 +173,6 @@ class BitmapFonts:
       scale = size * self.profile.font_scale / font.baseSize
       top = min((font.glyphs[index].offsetY for index in glyphs), default=0)
       bottom = max((font.glyphs[index].offsetY + font.recs[index].height for index in glyphs), default=0)
-      if len(self._vertical_ink) >= 1024:
-        self._vertical_ink.clear()
       self._vertical_ink[key] = (top * scale, bottom * scale)
     return self._vertical_ink[key]
 
@@ -195,8 +197,6 @@ class BitmapFonts:
         x += glyph.advanceX or rec.width
       if left is None:
         left = right = 0.
-      if len(self._horizontal_ink) >= 1024:
-        self._horizontal_ink.clear()
       # Match draw(): the optical width scale applies to the whole run and the weight pass shifts right.
       self._horizontal_ink[key] = (left * scale * width_scale, right * scale * width_scale + (weight if text else 0))
     return self._horizontal_ink[key]
