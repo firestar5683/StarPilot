@@ -26,6 +26,7 @@ import threading
 import time
 import traceback
 from collections import deque
+from contextlib import ExitStack
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1311,51 +1312,58 @@ class Supervisor:
                                   bitrate_kbps=config["bitrate_kbps"],
                                   margin_height=mode.margin_height, software_fps=software_fps, log=self.log,
                                   rate_control=config["rate_control"])
-    fps = min(fps, mode.fps, config["fps"] or fps)
-    interval = 1.0 / fps
-    flags = (FLAG_NV12 if config["gpu_nv12"] and getattr(encoder, "supports_nv12", False) else 0) | \
-            (FLAG_ASYNC_READBACK if config["async_readback"] else 0)
-    request = FrameRequest(mode.width, mode.height, mode.margin_width, mode.margin_height, int(interval * 1e6), flags)
-    self.log("frame_pipeline", nv12=bool(flags & FLAG_NV12), async_readback=bool(flags & FLAG_ASYNC_READBACK),
-             target_fps=fps, encoder=getattr(encoder, "backend", "libx264"))
-    view = config["view"]
-    if view == "car" and not self._synthetic and self._renderer_command is None and not renderer_available():
-      view = "unavailable"
-    source = ViewSource(view, request, self.log, synthetic=self._synthetic,
-                        mirror_path=self._frame_path or DEFAULT_FRAME_PATH, car_path=self._car_frame_path,
-                        touch_path=self._touch_path, control_path=self._control_path, renderer_command=self._renderer_command,
-                        renderer_log=identity_store.LOG_DIR / "car_ui.log")
-    self._set(view=source.label, encoder=getattr(encoder, "backend", "libx264"), target_fps=fps)
-    watch = LinkWatch(lease, self.log).start()
-    try:
-      from openpilot.starpilot.system.android_auto.media_audio import MediaAudio, music_control
-      from openpilot.starpilot.system.android_auto.media_status import MediaStatus
-      session.media_control = music_control
-      session.audio = MediaAudio.create(session, self.log)
-      if session.audio is not None:
-        session.audio.track_info = MediaStatus.create(session, self.log)
-    except Exception as error:  # music is optional; projection must never depend on it
-      self.log("media_audio_unavailable", error=str(error))
-    try:
-      from openpilot.starpilot.system.android_auto.nav_status import NavStatus
-      session.nav = NavStatus.create(session, self.log)
-    except Exception as error:  # turn-by-turn is optional; projection must never depend on it
-      self.log("nav_status_unavailable", error=str(error))
-    try:
+    # Own native allocations before any later setup can fail. ExitStack also
+    # releases the remaining resources if an individual cleanup raises.
+    with ExitStack() as resources:
+      def shutdown_if_stopped():
+        if self._stop.is_set():
+          try:
+            session.shutdown()
+          except Exception:
+            pass
+      def close_optional(name):
+        component = getattr(session, name, None)
+        if component is not None:
+          component.close()
+      resources.callback(shutdown_if_stopped)
+      resources.callback(encoder.close)
+      fps = min(fps, mode.fps, config["fps"] or fps)
+      interval = 1.0 / fps
+      flags = (FLAG_NV12 if config["gpu_nv12"] and getattr(encoder, "supports_nv12", False) else 0) | \
+              (FLAG_ASYNC_READBACK if config["async_readback"] else 0)
+      request = FrameRequest(mode.width, mode.height, mode.margin_width, mode.margin_height, int(interval * 1e6), flags)
+      self.log("frame_pipeline", nv12=bool(flags & FLAG_NV12), async_readback=bool(flags & FLAG_ASYNC_READBACK),
+               target_fps=fps, encoder=getattr(encoder, "backend", "libx264"))
+      view = config["view"]
+      if view == "car" and not self._synthetic and self._renderer_command is None and not renderer_available():
+        view = "unavailable"
+      source = ViewSource(view, request, self.log, synthetic=self._synthetic,
+                          mirror_path=self._frame_path or DEFAULT_FRAME_PATH, car_path=self._car_frame_path,
+                          touch_path=self._touch_path, control_path=self._control_path, renderer_command=self._renderer_command,
+                          renderer_log=identity_store.LOG_DIR / "car_ui.log")
+      resources.callback(source.close)
+      self._set(view=source.label, encoder=getattr(encoder, "backend", "libx264"), target_fps=fps)
+      watch = LinkWatch(lease, self.log)
+      resources.callback(watch.stop)
+      watch.start()
+      try:
+        from openpilot.starpilot.system.android_auto.media_audio import MediaAudio, music_control
+        from openpilot.starpilot.system.android_auto.media_status import MediaStatus
+        session.media_control = music_control
+        session.audio = MediaAudio.create(session, self.log)
+        if session.audio is not None:
+          resources.callback(close_optional, 'audio')
+          session.audio.track_info = MediaStatus.create(session, self.log)
+      except Exception as error:  # music is optional; projection must never depend on it
+        self.log("media_audio_unavailable", error=str(error))
+      try:
+        from openpilot.starpilot.system.android_auto.nav_status import NavStatus
+        session.nav = NavStatus.create(session, self.log)
+        if session.nav is not None:
+          resources.callback(close_optional, 'nav')
+      except Exception as error:  # turn-by-turn is optional; projection must never depend on it
+        self.log("nav_status_unavailable", error=str(error))
       self._stream(session, encoder, source, watch, interval)
-    finally:
-      if session.audio is not None:
-        session.audio.close()
-      if getattr(session, "nav", None) is not None:
-        session.nav.close()
-      watch.stop()
-      source.close()
-      encoder.close()
-      if self._stop.is_set():
-        try:
-          session.shutdown()
-        except Exception:
-          pass
 
   # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: The bounded ACK/input drain and conditional waits keep video and touches responsive.
   # Altering this can degrade video smoothness or introduce lag on Android Auto.
