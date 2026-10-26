@@ -1,5 +1,6 @@
 """Authenticated local projection of the shared saved-feature owner."""
 
+from openpilot.starpilot.ui import lane_v4_menu
 from openpilot.starpilot.ui.lane_change_feature import confirm_question as lane_change_question
 
 from collections.abc import Callable
@@ -37,7 +38,7 @@ from openpilot.starpilot.ui.sentry_owner import RESET as SENTRY_RESET, SentryOwn
 from openpilot.starpilot.ui.vasm_owner import ANNOTATION as VASM_ANNOTATION, RESET as VASM_RESET, VASMOwner, validated_annotation
 
 
-PAGES = frozenset(("hub", "developer", "vehicle", "slc", "lane", "lane_change", "profiles", "traffic", "aggressive", "standard", "relaxed",
+PAGES = frozenset((*lane_v4_menu.PAGES, "hub", "developer", "vehicle", "slc", "lane", "lane_change", "profiles", "traffic", "aggressive", "standard", "relaxed",
                    "curve", "torque", "aol", "wheel", "appearance", "display", "data", "sounds", "pip", "sentry", "vasm",
                    "conditional", "conditional/cem", "conditional/ccm",
                    *(f"{name}/{category}" for name in ("traffic", "aggressive", "standard", "relaxed")
@@ -368,7 +369,8 @@ def _projection(row: FeatureRow, page: str) -> dict:
           "confirm": bool(row.key in CONFIRM_ACTIONS or is_long_confirm_action(row.key) or
                           row.key in (PIP_RESET, PIP_EDITOR, VASM_RESET, VASM_ANNOTATION) or row.key.startswith(PIP_FORMAT_PREFIX)),
           "repairValue": row.repair_value, "defaultValue": row.default_value, "resetAvailable": row_default(row) is not None,
-          "displayScale": "lane-strength" if row.key == "LaneCenteringStrength" else None}
+          "displayScale": "lane-strength" if row.key == "LaneCenteringStrength" else None,
+          "rangePair": lane_v4_menu.range_descriptor(row) if page.startswith("lane") else None}
 
 
 def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
@@ -471,7 +473,7 @@ class SettingsGateway:
     with self.lock:
       ctx = self.context.sample()
       sections = []
-      for page in ("torque", "lane", "lane_change", "aol", "conditional", "profiles", "slc", "curve"):
+      for page in ("torque", "lane", *lane_v4_menu.PAGES, "lane_change", "aol", "conditional", "profiles", "slc", "curve"):
         state = self._state(page, ctx)
         sections.append({"title": state.title,
                          "rows": [{"label": row.label, "value": row.value} for row in state.rows[:64]]})
@@ -590,8 +592,8 @@ class SettingsGateway:
       return self._vasm_owner(ctx).snapshot()
     state = self._owner(ctx).snapshot(page, parked=ctx.parked,
                                       system_long=_qualified(ctx, "long"),
-                                      lateral_context=_qualified(ctx, "lane") or (page == "lane" and _qualified(ctx, "lane_live")),
-                                      metric=ctx.metric, configure_while_driving=True)
+                                      lateral_context=_qualified(ctx, "lane") or ((page == "lane" or page in lane_v4_menu.PAGES) and _qualified(ctx, "lane_live")),
+                                      metric=ctx.metric, configure_while_driving=True, lane_v4=True)
     if ctx.editing_saved_vehicle:
       from opendbc.car.values import PLATFORMS
       platform = PLATFORMS[ctx.cp.carFingerprint]
@@ -727,6 +729,10 @@ class SettingsGateway:
       if request is None:
         raise SettingsChanged("Unavailable choice")
       request = replace(request, confirmation=True)
+    if request.key in lane_v4_menu.CHECK_KEYS:
+      error = lane_v4_menu.edit_error(self._owner(ctx), request)
+      if error:
+        raise SettingsChanged(error)
     with self.lock:
       self._clean()
       if len(self.intents) >= MAX_INTENTS:

@@ -19,11 +19,11 @@ DESCRIPTIONS = {
   'lane_change:close_gap': 'Temporarily reduces following time during a lane change when the lane and lead gap are clear.',
   'lane_change:close_gap_seconds': 'Sets following time while Close lane-change gap is active. Higher values leave more space.',
   'lane_change:reset': 'Restores the default lane-change assistance, signal timing, pace and gap settings.',
-  'LaneCentering': 'Uses detected lane lines to help keep the vehicle centered in its lane.',
-  'LaneCenteringPauseOnSignal': 'Pauses lane-centering correction while a turn signal is on.',
-  'LaneCenterOffset': 'Moves the lane-centering target left or right of the detected lane center.',
+  'LaneCentering': 'Add lane-centering correction to the driving model’s steering using detected lane lines and road edges.',
+  'LaneCenteringPauseOnSignal': 'Gradually remove lane-centering correction while a turn signal is on, allowing the driving model to guide the path. Lane centering can resume when the signal is off.',
+  'LaneCenterOffset': 'Shift the target position left or right when centring between two boundaries. Negative values move it left; positive values move it right. This does not affect clearance correction away from a single boundary.',
   'LaneCenteringE2EAuthority': 'Lets a confident driving-model path reduce lane-centering correction when the model path differs from the lane center.',
-  'LaneCenteringStrength': 'Sets the strength of lane-centering correction. 100% is normal; higher values strengthen it.',
+  'LaneCenteringStrength': 'Set how much correction lane centering requests. Higher values request more correction; lower values request less. Strength controls the amount requested, while Correction response time controls how quickly it changes. Increasing strength does not raise the maximum correction limit.',
   'PauseLateralSpeed': 'Pauses steering assistance below this speed. Zero disables the speed-based pause.',
   'PauseLateralOnSignal': 'Limits the low-speed steering pause to times when a turn signal is on.',
   'LateralResumeDelay': 'Waits before resuming steering after signaling ends, if speed fell below half the steering-pause threshold.',
@@ -240,6 +240,8 @@ def purpose(row):
 
 def description(row):
   """Keep actual error/prerequisite information after the setting's purpose."""
+  if row.key == 'LaneCenteringE2EAuthority' and row.label == 'Maximum model path preference':
+    return row.reason
   base = purpose(row)
   if base is None:
     return row.reason

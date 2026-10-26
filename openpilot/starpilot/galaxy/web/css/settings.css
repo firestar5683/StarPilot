@@ -709,3 +709,20 @@ html.gx-maker-open, html.gx-maker-open body { touch-action: manipulation; }
 .gx-layout__inspector .gx-select__button { min-height: 40px; padding-block: 7px; }
 .gx-layout__display .gx-row .gx-select__button { min-height: 36px; padding-block: 5px; }
 .gx-layout__display .gx-row .gx-field { min-height: 0; padding-block: 0; }
+
+/* Two native range inputs share one track; endpoint buttons resolve coincident thumbs. */
+.gx-paired-track { position: relative; height: 40px; margin: 4px 0; touch-action: pan-y; }
+.gx-paired-track::before, .gx-paired-fill { position: absolute; top: 18px; height: 4px; border-radius: 3px; }
+.gx-paired-track::before { content: ''; left: 0; right: 0; background: var(--border, #48505d); }
+.gx-paired-fill { background: var(--accent, #00b0dc); pointer-events: none; }
+.gx-paired-input { position: absolute; inset: 0; width: 100%; margin: 0; background: transparent; pointer-events: none; }
+.gx-paired-input::-webkit-slider-runnable-track { background: transparent; border-color: transparent; }
+.gx-paired-input::-moz-range-track { background: transparent; border-color: transparent; }
+.gx-paired-input::-webkit-slider-thumb { pointer-events: auto; }
+.gx-paired-input::-moz-range-thumb { pointer-events: auto; }
+.gx-paired-input:disabled::-webkit-slider-thumb { pointer-events: none; }
+.gx-paired-input:disabled::-moz-range-thumb { pointer-events: none; }
+.gx-slider-header [aria-pressed="true"] { outline: 2px solid var(--accent, #00b0dc); outline-offset: -2px; }
+
+.gx-range-row .gx-slider-header { flex-wrap: wrap; }
+input[type="range"].gx-slider.gx-paired-input { height: 40px; background: transparent; border: none; }

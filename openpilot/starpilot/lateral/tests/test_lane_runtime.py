@@ -288,7 +288,7 @@ class LaneRuntimeTests(unittest.TestCase):
       root = Path(temporary)
       params = SimpleNamespace(get_param_path=lambda key: str(root / key))
       (root / 'LaneCentering').write_bytes(b'1')
-      self.assertEqual(read_settings(params).strength, 1.5)
+      self.assertEqual(read_settings(params).strength, 2.1)
       (root / 'LaneCenteringStrength').write_bytes(b'1.0')
       self.assertEqual(read_settings(params).strength, 1.0)
       self.assertEqual((root / 'LaneCenteringStrength').read_bytes(), b'1.0')
@@ -296,7 +296,7 @@ class LaneRuntimeTests(unittest.TestCase):
       host = LaneCenteringHost(params)
       now = 10_000_000_000
       first = host.sample(Frame(now), now_ns=now, lateral_active=True, longitudinal_active=False)
-      self.assertEqual(first.settings.strength, 1.5)
+      self.assertEqual(first.settings.strength, 2.1)
       (root / 'LaneCenteringStrength').write_bytes(b'3.0')
       now += host.REFRESH_NS
       updated = host.sample(Frame(now), now_ns=now, lateral_active=True, longitudinal_active=False)
@@ -315,6 +315,7 @@ class LaneRuntimeTests(unittest.TestCase):
   def test_normal_reader_admission_uses_steering_and_saved_preference_gates(self):
     with OpenpilotPrefix(), mock.patch.dict(os.environ, {'LANE_CENTERING_REPLAY_RUNTIME': '0'}):
       params = Params()
+      params.put_bool('LaneCentering', False, block=True)  # Explicit off state; user defaults enable it.
       for alternate in (False, True):
         with self.subTest(alternate=alternate):
           stock, tagged = ioniq_candidate(alternate=alternate)
@@ -340,6 +341,7 @@ class LaneRuntimeTests(unittest.TestCase):
                                                          'AOL_REPLAY_RUNTIME': '0'}), \
          mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
       params = Params()
+      params.put_bool('LaneCentering', False, block=True)  # Explicit off state; user defaults enable it.
       stock, tagged = ioniq_candidate()
       params.put('LaneCenteringE2EAuthority', 0.0, block=True)
       params.put('CarParams', tagged.to_bytes(), block=True)
@@ -419,6 +421,7 @@ class LaneRuntimeTests(unittest.TestCase):
   def test_saved_settings_bounds_and_corruption(self):
     with OpenpilotPrefix():
       params = Params()
+      params.put_bool('LaneCentering', False, block=True)  # Explicit off state; user defaults enable it.
       self.assertFalse(read_settings(params).enabled)
       self.assertTrue(read_settings(params).pause_on_signal)
       params.put_bool('LaneCentering', True, block=True)

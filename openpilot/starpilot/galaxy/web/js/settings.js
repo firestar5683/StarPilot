@@ -2,7 +2,7 @@ import { GxDialog } from "./dialog.js"
 import { GxState } from "./state.js"
 import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
-import { GalaxySettingRow, settingControl } from "./galaxy-setting-row.js"
+import { GalaxySettingRow, GalaxyRangeSettingRow, pairedSettingRows, settingControl } from "./galaxy-setting-row.js"
 import { OnroadLayoutPage } from "./onroad-layout.js"
 import { FavoritesPage } from "./favorites.js"
 import { SoundPacks } from "./sound-packs.js"
@@ -255,7 +255,7 @@ export class SettingsFeed {
 
 export const SettingsPage = {
   emits: ["nested"],
-  components: { GxDialog, GxState, GalaxySettingRow, OnroadLayoutPage, FavoritesPage, SoundPacks, CloudProviderPage, GxNotice },
+  components: { GxDialog, GxState, GalaxySettingRow, GalaxyRangeSettingRow, OnroadLayoutPage, FavoritesPage, SoundPacks, CloudProviderPage, GxNotice },
   props: {
     mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     initialPage: { type: String, default: "hub" }, title: { type: String, default: "Toggles" },
@@ -289,7 +289,7 @@ export const SettingsPage = {
       if (inHub && section.id === "longitudinal") {
         entries.sort((a, b) => section.pages.indexOf(a.row.page) - section.pages.indexOf(b.row.page))
       }
-      return entries.filter(({ row }) => !isPipCropRow(row)).filter(({ row, index }) => {
+      return pairedSettingRows(entries).filter(({ row }) => !isPipCropRow(row)).filter(({ row, index }) => {
         const previous = rows[index - 1]
         return !(["sounds", "display"].includes(this.state.data?.page) && row.repairValue === "Auto" &&
           previous?.choices?.includes("Auto") && settingControl(previous) === "slider" && row.label === `Use Auto ${previous.label}`)
@@ -406,7 +406,7 @@ export const SettingsPage = {
       <p class="gx-page-description" v-else-if="state.data?.page === 'traffic'">Tune low-speed following and jerk, blending toward Relaxed at higher speeds.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'aol'">Keep steering assistance active independently of cruise control.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'torque'">Tune how StarPilot applies steering torque.</p>
-      <p class="gx-page-description" v-else-if="state.data?.page === 'lane'">Choose lane-centering behavior and alerts.</p>
+      <p class="gx-page-description" v-else-if="state.data?.page === 'lane'">Lane centering uses detected lane lines and road edges to calculate a target position, then compares it with the driving model’s predicted path. It adds a limited, smoothed steering correction to the model’s request to bring the path closer to that target.<br><br>With two suitable boundaries, it aims for the centre between them. With only one, it can add correction away from that boundary when the model path comes too close. The model remains the basis for steering, while model preference controls how much it can reduce the added lane-centering correction.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'curve'">Set how the vehicle slows for curves ahead.</p>
       <div v-else-if="state.data?.page === 'slc'"><p class="gx-page-description">Control how speed limits change your set speed.</p>
         <a class="gx-btn gx-btn--tonal" href="https://wiki.firestar.link/exclusive/speed-limit-controller/#vision-speed-limits" target="_blank" rel="noopener noreferrer"><i class="bi bi-book" aria-hidden="true"></i> Vision speed limits guide</a></div>
@@ -433,7 +433,7 @@ export const SettingsPage = {
                 <button v-if="state.data.page !== 'hub' && state.data.rows.length" type="button" class="gx-icon-btn" :aria-label="state.searchOpen ? 'Close page search' : 'Search within this page'" :aria-pressed="state.searchOpen" @click="togglePageSearch"><i class="bi" :class="state.searchOpen ? 'bi-x-lg' : 'bi-search'" aria-hidden="true"></i></button>
                 </div>
               <div v-if="state.searchOpen" class="gx-settings__search"><input ref="pageSearch" v-model="state.query" class="gx-field" type="search" aria-label="Search within this page" placeholder="Search within…"></div>
-              <GalaxySettingRow v-for="{ row, index } in visibleRows" :key="rowKey(row, index)" :row="row" :index="index"
+              <component :is="row.paired ? 'GalaxyRangeSettingRow' : 'GalaxySettingRow'" v-for="{ row, index } in visibleRows" :key="rowKey(row, index)" :row="row" :index="index"
                 :busy="busy" :disabled="!!state.error || !row.available" :save-value="(index, value) => feed.previewValue(index, value)"
                 @open="open" @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
               <div v-if="!visibleRows.length" class="gx-empty">No matching settings.</div>

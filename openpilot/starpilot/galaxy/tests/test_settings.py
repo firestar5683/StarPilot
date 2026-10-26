@@ -177,7 +177,7 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertNotEqual(first["view"], second["view"])
     self.assertEqual(first["rows"], second["rows"])
     first_row = first["rows"][0]
-    self.params.put_bool("LaneCentering", False, block=True)
+    self.params.put_bool("LaneCentering", True, block=True)
     row = self.page("lane")["rows"][0]
     self.assertEqual(first_row["value"], row["value"])
     self.assertNotEqual(first_row["revision"], row["revision"])
@@ -755,6 +755,7 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertEqual(legacy.read_bytes(), b'{"0.001":{"average":2.4,"count":2}}')
 
   def test_one_use_confirmation_and_exact_source_context(self):
+    self.params.put_bool("LaneCentering", False, block=True)
     page = self.page("lane")
     index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Enable Lane Centering")
     intent = self.gateway.preview(page["view"], index, 1, self.session, self.generation)
@@ -1120,9 +1121,9 @@ class SettingsGatewayTest(unittest.TestCase):
                                  ("LaneCenteringE2EAuthority", 75, b"0.75"),
                                  ("LaneCenteringStrength", 105, b"1.575")):
       with self.subTest(key=key):
-        page = self.page("lane")
+        page = self.page("lane/preferences" if key in ("LaneCenteringE2EAuthority", "LaneCenteringStrength") else "lane")
         labels = {"LaneCentering": "Enable Lane Centering", "LaneCenteringPauseOnSignal": "Pause on signal",
-                  "LaneCenterOffset": "Lane offset", "LaneCenteringE2EAuthority": "Model path preference",
+                  "LaneCenterOffset": "Lane offset", "LaneCenteringE2EAuthority": "Maximum model path preference",
                   "LaneCenteringStrength": "Lane Centering Strength"}
         index = next(i for i, row in enumerate(page["rows"]) if row["label"] == labels[key])
         self.assertTrue(page["rows"][index]["available"])
@@ -1136,6 +1137,7 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertFalse(_onroad_preference("torque", "reset_profiles"))
 
   def test_live_lane_rejects_unsupported_vehicle_and_master_dependency(self):
+    self.params.put_bool("LaneCentering", False, block=True)
     tagged, _ = self._live_lane_context()
     page = self.page("lane")
     pause = next(row for row in page["rows"] if row["label"] == "Pause on signal")
@@ -1144,12 +1146,14 @@ class SettingsGatewayTest(unittest.TestCase):
       bad = car.CarParams.new_message(**tagged.to_dict())
       setattr(bad, flag, True)
       self.context.value = AuthorityContext(False, bad, bad.as_reader().as_builder().to_bytes())
-      self.assertFalse(any(row["available"] for row in self.page("lane")["rows"]))
+      setting_rows = [row for row in self.page("lane")["rows"] if not row.get("page")]
+      self.assertTrue(setting_rows)
+      self.assertFalse(any(row["available"] for row in setting_rows))
     self.context.value = AuthorityContext(False, SimpleNamespace(brand="unknown", carFingerprint="OTHER", notCar=False,
                                         dashcamOnly=False, passive=False), b"other")
     page = self.page("lane")
     rows = page["rows"]
-    self.assertFalse(next(row for row in rows if row["label"] == "Lane Centering Strength")["available"])
+    self.assertFalse(next(row for row in self.page("lane/preferences")["rows"] if row["label"] == "Lane Centering Strength")["available"])
     index = next(i for i, row in enumerate(rows) if row["label"] == "Enable Lane Centering")
     self.assertFalse(rows[index]["available"])
     with self.assertRaises(SettingsChanged):
@@ -1157,7 +1161,7 @@ class SettingsGatewayTest(unittest.TestCase):
 
   def test_live_lane_retains_range_session_source_and_cp_guards(self):
     tagged, root = self._live_lane_context()
-    page = self.page("lane")
+    page = self.page("lane/preferences")
     index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Lane Centering Strength")
     for value in (32, 201, float("nan")):
       with self.subTest(value=value), self.assertRaises(SettingsChanged):
@@ -1169,7 +1173,7 @@ class SettingsGatewayTest(unittest.TestCase):
     with self.assertRaises(SettingsChanged):
       self.gateway.confirm(intent["intent"], self.session, self.generation)
     self.context.value = AuthorityContext(False, tagged, tagged.as_reader().as_builder().to_bytes())
-    page = self.page("lane")
+    page = self.page("lane/preferences")
     intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=105)
     (root / "LaneCenteringStrength").write_bytes(b"1.1")
     self.assertFalse(self.gateway.confirm(intent["intent"], self.session, self.generation))
@@ -1189,13 +1193,13 @@ class SettingsGatewayTest(unittest.TestCase):
         (root / key).write_bytes(str(value).encode())
     self.gateway = SettingsGateway(Files(), self.context, clock=lambda: 100.0)
     self.context.value.cp.safetyConfigs = []
-    page = self.page("lane")
+    page = self.page("lane/preferences")
     index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Lane Centering Strength")
     self.assertFalse(page["rows"][index]["available"])
     with self.assertRaises(SettingsChanged):
       self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=200)
     self.context.value = AuthorityContext(True, tagged, tagged.as_reader().as_builder().to_bytes())
-    page = self.page("lane")
+    page = self.page("lane/preferences")
     self.assertTrue(page["rows"][index]["available"])
     self.assertEqual((page["rows"][index]["minimum"], page["rows"][index]["maximum"]), (33, 200))
     intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=200)
@@ -1899,6 +1903,7 @@ class SettingsHttpTest(unittest.TestCase):
     self.assertEqual(legacy.read_bytes(), b'{}')
 
   def test_auth_precedes_source_read_and_http_save(self):
+    self.params.put_bool("LaneCentering", False, block=True)
     calls = 0
     original = self.gateway.page
     def counted(*args):
@@ -1962,6 +1967,7 @@ class SettingsHttpTest(unittest.TestCase):
     self.assertFalse(self.params.get_bool("LaneCentering"))
 
   def test_confirm_finishes_before_acknowledged_logout(self):
+    self.params.put_bool("LaneCentering", False, block=True)
     cookie = self.login()
     _, page, _ = self.request("/api/settings/pages/lane", cookie=cookie)
     index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Enable Lane Centering")

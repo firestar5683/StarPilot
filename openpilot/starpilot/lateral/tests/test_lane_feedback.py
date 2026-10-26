@@ -6,7 +6,7 @@ import numpy as np
 import pyray as rl
 
 from openpilot.cereal import messaging
-from openpilot.starpilot.lateral.lane_centering import LaneCenteringResult
+from openpilot.starpilot.lateral.lane_centering import LaneCenteringResult, MAX_CORRECTION
 from openpilot.starpilot.lateral.lane_feedback import BLUE, MAX_AGE_NS, SERVICE, direction, feedback_message
 
 
@@ -40,7 +40,7 @@ class TestLaneFeedback(unittest.TestCase):
     self.assertEqual(direction(sm, now + MAX_AGE_NS + 1, 0), 0)
     self.assertEqual(direction(sm, now - 1, 0), 0)
     self.assertEqual(direction(sm, now, sm.frame), 0)
-    for applied, requested in ((0.0013, 0.0013), (0.0006, 0.0005), (-0.0003, 0.0005), (float('nan'), 0.0005)):
+    for applied, requested in ((MAX_CORRECTION + 0.0001, MAX_CORRECTION + 0.0001), (0.0006, 0.0005), (-0.0003, 0.0005), (float('nan'), 0.0005)):
       sm, now = self.reader(applied=applied, requested=requested)
       self.assertEqual(direction(sm, now, 0), 0)
     for field, value in (('version', 0), ('lateralActive', False), ('modelMonoTime', 1), ('carControlMonoTime', 1)):

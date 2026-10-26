@@ -42,6 +42,8 @@ from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY, LEGACY_KEY
 from openpilot.starpilot.ui.torque_feature import TorqueFeature
 from openpilot.starpilot.ui.controller_feature import ControllerFeature, SETUP_ACTION
 from openpilot.starpilot.ui.slc_offset_feature import SlcOffsetOwner
+from openpilot.starpilot.ui import lane_v4_menu
+from openpilot.starpilot.lateral.lane_tuning import NUMBERS as LANE_NUMBERS, BOOLS as LANE_BOOLS, PREFIX as LANE_PREFIX, KEYS as LANE_V4_KEYS, DEFAULTS as LANE_DEFAULTS
 from openpilot.starpilot.longitudinal.profile_preferences import read_document_value, read_profile_health
 from openpilot.starpilot.ui.long_profile_feature import (LongProfileFeature, is_long_confirm_action, VALUE_HELP, CATEGORY_HELP,
                                                        preset_label, preset_value)
@@ -83,7 +85,8 @@ BOOL_DEFAULTS = {
   "SpeedLimitController": False, "ShowSpeedLimits": True,
   "SLCConfirmation": False,
   "PauseLateralOnSignal": False,
-  "LaneCentering": False, "LaneCenteringPauseOnSignal": True,
+  "LaneCentering": True, "LaneCenteringPauseOnSignal": True,
+  **{key: True for key in LANE_BOOLS.values()},
   "CustomPersonalities": False, PLANNER_SELECTION_KEY: True,
   LEAD_APPROACH_KEY: False,
   LEAD_TAKEOFF_KEY: False,
@@ -92,6 +95,7 @@ BOOL_DEFAULTS = {
   "ForceAutoTuneOff": False, "AlwaysOnLateral": True, "NostalgiaMode": False,
 }
 FLOAT_SPECS = {
+  **{LANE_PREFIX + row[0]: (row[2], row[3], row[4], row[5]) for row in LANE_NUMBERS.values()},
   "ForceStopDistanceOffset": (-20, 20, 1, "ft"),
   "LaneCenterOffset": (-0.3, 0.3, 0.01, "m"),
   "LaneCenteringE2EAuthority": (0.0, 1.0, 0.05, "fraction"),
@@ -118,7 +122,7 @@ AOL_THRESHOLD = "AolBrakePauseSpeedMps"
 AOL_LEGACY_THRESHOLD = "PauseAOLOnBrake"
 TORQUE_NUMBERS = LEGACY_KEYS
 LANE_LIVE_KEYS = frozenset(("LaneCentering", "LaneCenteringPauseOnSignal", "LaneCenterOffset",
-                            "LaneCenteringE2EAuthority", "LaneCenteringStrength"))
+                            "LaneCenteringE2EAuthority", "LaneCenteringStrength")) | LANE_V4_KEYS
 CURVE_KEYS = frozenset((CURVE_MASTER_KEY, CURVE_NO_LEAD_KEY))
 CURVE_PAGE_KEYS = CURVE_KEYS | {"ShowCSCStatus"}
 CRUISE_KEYS = frozenset(("CustomCruise", "CustomCruiseLong"))
@@ -608,6 +612,8 @@ class FeatureSettingsOwner:
     return self._read_saved(key, limit)[1]
 
   def _default(self, key: str) -> str:
+    if key in LANE_DEFAULTS:
+      return str(int(LANE_DEFAULTS[key])) if isinstance(LANE_DEFAULTS[key], bool) else str(LANE_DEFAULTS[key])
     if key == "AlwaysOnLateral":
       from openpilot.starpilot.aol.defaults import default_enabled
       return "1" if default_enabled(self.vehicle_params()) else "0"
@@ -784,20 +790,21 @@ class FeatureSettingsOwner:
     return result.committed and result.verified
 
   def snapshot(self, page: str, *, parked: bool, system_long: bool, lateral_context: bool, metric: bool,
-               configure_while_driving: bool = False) -> FeatureSettingsState:
+               configure_while_driving: bool = False, lane_v4: bool = False) -> FeatureSettingsState:
     selected_vehicle = self._vehicle_params_source()
     token = self._snapshot_reads.set({})
     vehicle_token = self._snapshot_vehicle.set((selected_vehicle,))
     try:
       return self._build_snapshot(page, parked=parked, system_long=system_long, lateral_context=lateral_context,
-                                  metric=metric, configure_while_driving=configure_while_driving)
+                                  metric=metric, configure_while_driving=configure_while_driving, lane_v4=lane_v4)
     finally:
       self._snapshot_vehicle.reset(vehicle_token)
       self._snapshot_reads.reset(token)
 
   def _build_snapshot(self, page: str, *, parked: bool, system_long: bool, lateral_context: bool, metric: bool,
-                      configure_while_driving: bool = False) -> FeatureSettingsState:
-    del metric  # The persisted unit file, including invalid bytes, owns offset labels.
+                      configure_while_driving: bool = False, lane_v4: bool = False) -> FeatureSettingsState:
+    # Persisted units own every displayed tuning value, including lane controls.
+    metric = read_saved(self.params, "IsMetric", 8) == (b"1", True)
     configurable = parked or configure_while_driving
     title = {FeaturePage.HUB: "Driving Controls", FeaturePage.LANE: "Lane Centering"}.get(page, page.replace("_", " ").title())
     rows: list[FeatureRow] = []
@@ -1101,7 +1108,7 @@ class FeatureSettingsOwner:
                              available=allowed and valid and fallback in ("0", "1", "2"), default_value="On"))
       rows.extend(offset_rows)
       title = "Speed Limit Controller"
-    elif page == FeaturePage.LANE:
+    elif page == FeaturePage.LANE or (lane_v4 and page in lane_v4_menu.PAGES):
       from openpilot.starpilot.lateral.lane_runtime import runtime_supported
       strength_supported = runtime_supported(self.vehicle_params())
       allowed = strength_supported and ((configurable and lateral_context) or (not parked and self.authority("lane_live")))
@@ -1112,7 +1119,8 @@ class FeatureSettingsOwner:
                            self._value("LaneCenteringPauseOnSignal")[0] in ("0", "1")),
                    self._number_row("LaneCenterOffset", "Lane offset", allowed),
                    replace(self._number_row("LaneCenteringE2EAuthority", "Model path preference", allowed, scale=100, unit="%"),
-                           reason="Higher values let a confident model path reduce lane-centering correction when it differs from the lane center")))
+                           dependencies=lane_v4_menu.dependencies(self, "LaneCenteringE2EAuthority"),
+                            reason="Higher values let a confident model path reduce lane-centering correction when it differs from the lane center")))
       strength_row = self._number_row("LaneCenteringStrength", "Lane Centering Strength",
                                       allowed and strength_supported, scale=100 / STRENGTH_BASELINE, unit="%")
       rows.append(replace(strength_row,
@@ -1121,6 +1129,8 @@ class FeatureSettingsOwner:
                           minimum=33, maximum=round(STRENGTH_MAX / STRENGTH_BASELINE * 100), step=1 if strength_row.step > 0 else 0,
                           reason="100% is normal; lower values reduce centering and higher values strengthen it" if strength_supported else
                           "Not available with this vehicle configuration"))
+      if lane_v4:
+        title, rows = lane_v4_menu.menu(self, page, rows, allowed, metric)
     elif page == FeaturePage.LANE_CHANGE:
       title = "Lane Changes"
       rows.extend(self.lane_changes.rows(parked))
@@ -1558,17 +1568,19 @@ class FeatureSettingsOwner:
         current, _, valid = self._value(key)
         low, high, _, _ = FLOAT_SPECS[key]
         number = float(request.value)
+        if key in lane_v4_menu.CHECK_KEYS:
+          if lane_v4_menu.edit_error(self, request):
+            return False
+          number = lane_v4_menu.stored_number(request)
         if key == "LaneCenteringStrength":
           if not 33 <= number <= STRENGTH_MAX / STRENGTH_BASELINE * 100:
             return False
           number = max(low, number * STRENGTH_BASELINE / 100)
-        elif key == "LaneCenteringE2EAuthority":
-          number /= 100
         if not valid or not math.isfinite(float(current)) or not low <= float(current) <= high or not math.isfinite(number) or not low <= number <= high:
           return False
         if key == "ForceStopDistanceOffset" and not number.is_integer():
           return False
-        encoded = str(int(number)) if key == "ForceStopDistanceOffset" else str(round(number, 4))
+        encoded = str(int(number)) if key == "ForceStopDistanceOffset" else str(round(number, 8 if key == "LaneCenteringV4MaxCorrection" else 4))
       elif key == SLC_FALLBACK:
         current, _, valid = self._value(key)
         if not valid or current not in ("0", "1", "2") or request.value not in ("On", "Off"):
@@ -1651,6 +1663,14 @@ class FeatureSettingsOwner:
                   all(self._readable(name) and self._raw(name) == raw for name, raw in request.dependencies))
         result = commit_exact(self.params, key=source_key, max_bytes=8, raw=encoded.encode(),
                               expected=request.expected, authorized=authorized_aol, temp_prefix=".aol-on-")
+        return result.committed and result.verified
+      if key in LANE_V4_KEYS or key == lane_v4_menu.E2E_MAX:
+        def authorized_lane_v4():
+          return (self.authority(group) and self.vehicle_fingerprint() == request.vehicle_fingerprint and
+                  all(self._readable(name) and self._raw(name) == raw for name, raw in request.dependencies) and
+                  (key not in lane_v4_menu.CHECK_KEYS or not lane_v4_menu.edit_error(self, request)))
+        result = commit_exact(self.params, key=key, max_bytes=128, raw=encoded.encode(), expected=request.expected,
+                              authorized=authorized_lane_v4, temp_prefix=".lane-v4-")
         return result.committed and result.verified
       if source_key in BOOL_DEFAULTS:
         self.params.put_bool(source_key, encoded == "1", block=True)

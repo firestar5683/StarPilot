@@ -303,7 +303,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertTrue(self.owner.apply(FeatureSettingsRequest(reset_row.key, reset_row.source, reset_row.default_value,
                                                           vehicle_fingerprint=reset_row.vehicle_fingerprint)))
     self.assertEqual((root / row.key).read_bytes(), b"1.5")
-    self.assertEqual(registered.get_default_value("LaneCenteringStrength"), 1.5)
+    self.assertEqual(registered.get_default_value("LaneCenteringStrength"), 2.1)
     for percent, expected in ((33, b"0.5"), (67, b"1.005"), (100, b"1.5"), (105, b"1.575"), (150, b"2.25"), (200, b"3.0")):
       current = self._row("lane", "LaneCenteringStrength")
       self.assertTrue(self.owner.apply(FeatureSettingsRequest(current.key, current.source, str(percent),
@@ -375,6 +375,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertTrue(VehicleStartupPreferences.read(self.params, enabled=True).turn_assist)
 
   def test_live_lane_owner_maps_only_explicit_keys(self):
+    self.params.put_bool("LaneCentering", False, block=True)
     from opendbc.car.car_helpers import interfaces
     from opendbc.car.toyota.values import CAR
     cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)

@@ -7,7 +7,8 @@ from pathlib import Path
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.common.realtime import DT_CTRL
 from openpilot.common.params import UnknownKeyName
-from openpilot.starpilot.lateral.lane_centering import ControlMode, LaneCenteringRequest, LaneCenteringSettings, STRENGTH_BASELINE, STRENGTH_MAX
+from openpilot.starpilot.lateral.lane_centering import ControlMode, LaneCenteringRequest, LaneCenteringSettings, STRENGTH_DEFAULT, STRENGTH_MAX
+from openpilot.starpilot.lateral.lane_tuning import NUMBERS, BOOLS, PREFIX, valid_tuning
 from openpilot.starpilot.feature_capabilities import lateral_supported
 
 
@@ -25,20 +26,25 @@ def read_settings(params) -> LaneCenteringSettings:
     return value == b'1'
 
   try:
-    enabled = boolean('LaneCentering', b'0')
+    enabled = boolean('LaneCentering', b'1')
     pause = boolean('LaneCenteringPauseOnSignal', b'1')
     offset = float(raw('LaneCenterOffset', b'0.0'))
     authority = float(raw('LaneCenteringE2EAuthority', b'1.0'))
     try:
-      strength = float(raw('LaneCenteringStrength', str(STRENGTH_BASELINE).encode()))
+      strength = float(raw('LaneCenteringStrength', str(STRENGTH_DEFAULT).encode()))
     except UnknownKeyName:
-      strength = STRENGTH_BASELINE
+      strength = STRENGTH_DEFAULT
     if not math.isfinite(strength) or not 0.5 <= strength <= STRENGTH_MAX:
       raise ValueError('Invalid lane strength')
     if not math.isfinite(offset) or not -0.3 <= offset <= 0.3 or not math.isfinite(authority) or not 0 <= authority <= 1:
       raise ValueError('Invalid lane tuning')
-    return LaneCenteringSettings(enabled, offset, authority, pause, strength)
-  except (OSError, ValueError):
+    tuning = {field: float(raw(PREFIX + spec[0], str(spec[1]).encode())) for field, spec in NUMBERS.items()}
+    tuning.update({field: boolean(key, b'1') for field, key in BOOLS.items()})
+    settings = LaneCenteringSettings(enabled, offset, authority, pause, strength, **tuning)
+    if not valid_tuning(settings):
+      raise ValueError('Invalid lane v4 tuning')
+    return settings
+  except (OSError, ValueError, UnknownKeyName):
     return LaneCenteringSettings()
 
 

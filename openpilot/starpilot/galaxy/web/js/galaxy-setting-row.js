@@ -54,7 +54,7 @@ export function presentedSetting(row) {
   return { ...row, value: laneStrengthDisplay(row.value, row),
     defaultValue: row.defaultValue == null ? row.defaultValue : laneStrengthDisplay(row.defaultValue, row),
     minimum: 1, maximum: 10, step: row.step > 0 ? 1 : 0, unit: "",
-    reason: row.available ? "1–10; 5 is normal. Lower values reduce centering and higher values strengthen it" : row.reason }
+    reason: row.available ? "Set how much correction lane centering requests. Higher values request more correction; lower values request less. Strength controls the amount requested, while Correction response time controls how quickly it changes. Increasing strength does not raise the maximum correction limit." : row.reason }
 }
 
 export const GalaxySettingRow = {
@@ -72,6 +72,8 @@ export const GalaxySettingRow = {
   data() { return { preview: undefined, interacting: false, fineScrub: null, isFineScrubbing: false, updating: false } },
   computed: {
     presentedRow() { return presentedSetting(this.row) },
+    saveIndex() { return this.index },
+    activeSlider() { return this.$refs.slider },
     control() { return settingControl(this.row) },
     showDefault() {
       const value = this.presentedRow.value, initial = this.presentedRow.defaultValue
@@ -103,7 +105,7 @@ export const GalaxySettingRow = {
       this.updating = true
       const token = this.feedback === "saved" && this.control === "switch" ? beginSave() : null
       try {
-        const result = await this.saveValue(this.index, savedValue)
+        const result = await this.saveValue(this.saveIndex, savedValue)
         if (token !== null) {
           await this.$nextTick()
           finishSave(token, result !== false && result !== null &&
@@ -182,14 +184,14 @@ export const GalaxySettingRow = {
       const next = snapNumeric(raw, this.bounds)
       if (next === null) return
       this.preview = next
-      if (this.$refs.slider) this.$refs.slider.value = next
+      if (this.activeSlider) this.activeSlider.value = next
     },
     releasePointer(event) {
       const pointerId = this.fineScrub?.pointerId
       this.clearHoldTimer()
       this.fineScrub = null
       this.isFineScrubbing = this.interacting = false
-      try { (event?.target || this.$refs.slider)?.releasePointerCapture?.(pointerId) } catch {}
+      try { (event?.target || this.activeSlider)?.releasePointerCapture?.(pointerId) } catch {}
     },
     onSliderPointerEnd(event) {
       if (!this.fineScrub || event.pointerId !== this.fineScrub.pointerId) return
@@ -201,7 +203,7 @@ export const GalaxySettingRow = {
       if (!this.fineScrub || event.pointerId !== this.fineScrub.pointerId) return
       this.releasePointer(event)
       this.preview = undefined
-      if (this.$refs.slider) this.$refs.slider.value = this.sliderValue
+      if (this.activeSlider) this.activeSlider.value = this.sliderValue
     },
   },
   watch: {
@@ -242,7 +244,7 @@ export const GalaxySettingRow = {
           @input="onSliderInput" @change="onSliderCommit" @blur="onSliderBlur"
           @pointerdown="onSliderPointerDown" @pointermove="onSliderPointerMove" @pointerup="onSliderPointerEnd"
           @pointercancel="onSliderCancel" @lostpointercapture="onSliderCancel" @keydown="beginInteract">
-        <div class="gx-slider-meta"><span>{{ bounds.min }} to {{ bounds.numericMax ?? bounds.max }} {{ presentedRow.unit }}<template v-if="bounds.auto"> · Auto at right</template></span><span>Step: {{ bounds.step }} {{ presentedRow.unit }}</span></div>
+        <div class="gx-slider-meta"><span>{{ bounds.min }} to {{ bounds.numericMax ?? bounds.max }} {{ presentedRow.unit }}<template v-if="bounds.auto"> Â· Auto at right</template></span><span>Step: {{ bounds.step }} {{ presentedRow.unit }}</span></div>
       </div>
       <GalaxySelect v-else-if="control === 'select'" class="gx-field" :aria-label="row.label" :value="currentValue" :disabled="dimmed" @change="onSelect">
         <option v-for="choice in row.choices" :key="choice" :value="choice">{{ choice }}</option>
@@ -250,5 +252,117 @@ export const GalaxySettingRow = {
       <button v-else-if="control === 'group'" type="button" class="gx-btn gx-btn--tonal" :disabled="dimmed" @click="$emit('open', row.page)">Manage</button>
       <button v-else-if="control === 'action' && row.action" type="button" class="gx-btn gx-btn--tonal" :disabled="dimmed" @click="$emit('review', index, row.confirm ? 0 : 1)">{{ row.repairValue === 'Reset' || /reset|default/i.test(row.label) ? 'Reset' : row.repairValue ? 'Set ' + row.repairValue : row.label }}</button>
       <span v-else class="gx-row__value gx-row__readout">{{ displayValue }}</span>
+    </div>`,
+}
+
+// Paired lane settings keep the original row indices and scalar save protocol.
+export function pairedSettingRows(entries) {
+  const hidden = new Set(), replacements = new Map()
+  for (const entry of entries) {
+    const spec = entry.row.rangePair
+    if (!spec || spec.end !== "max") continue
+    const lower = entries.find(item => item.row.rangePair?.group === spec.group && item.row.rangePair.end === "min")
+    if (!lower || settingControl(entry.row) !== "slider" || settingControl(lower.row) !== "slider") continue
+    hidden.add(lower.index)
+    const paired = spec.enabled || spec.group === "radius" ? { lower: lower.row, lowerIndex: lower.index, strict: ["radius", "override"].includes(spec.group) } : null
+    replacements.set(entry.index, { ...entry, row: { ...entry.row, label: spec.label, reason: spec.help, paired } })
+  }
+  return entries.filter(item => !hidden.has(item.index)).map(item => replacements.get(item.index) || item)
+}
+
+export const GalaxyRangeSettingRow = {
+  extends: GalaxySettingRow,
+  name: "GalaxyRangeSettingRow",
+  data() { return { endpoint: "max" } },
+  computed: {
+    endpointRow() { return this.endpoint === "min" ? this.row.paired.lower : this.row },
+    presentedRow() { return presentedSetting(this.endpointRow) },
+    saveIndex() { return this.endpoint === "min" ? this.row.paired.lowerIndex : this.index },
+    activeSlider() { return this.$refs[this.endpoint + "Slider"] },
+    dimmed() { return this.disabled || !this.row.available || !this.row.paired.lower.available || !this.row.action },
+    bounds() {
+      const lower = numericBounds(this.row.paired.lower), upper = numericBounds(this.row)
+      return { min: Math.min(lower.min, upper.min), max: Math.max(lower.max, upper.max), step: upper.step }
+    },
+    rangeStyle() {
+      const percent = value => 100 * (Number(value) - this.bounds.min) / (this.bounds.max - this.bounds.min)
+      return { left: percent(this.endpointValue("min")) + "%", right: (100 - percent(this.endpointValue("max"))) + "%" }
+    },
+  },
+  methods: {
+    endpointValue(end) { return end === this.endpoint ? this.currentValue : end === "min" ? this.row.paired.lower.value : this.row.value },
+    endpointText(end) { return this.endpointValue(end) + " " + this.row.unit },
+    selectEndpoint(end) {
+      if (this.locked || this.fineScrub || end === this.endpoint) return
+      this.preview = undefined
+      this.interacting = false
+      this.endpoint = end
+    },
+    boundedValue(raw) {
+      const endpointBounds = numericBounds(this.endpointRow)
+      let value = snapNumeric(raw, endpointBounds)
+      if (value === null) return null
+      const gap = this.row.paired.strict ? endpointBounds.step : 0
+      return this.endpoint === "min" ? Math.min(value, Number(this.row.value) - gap)
+        : Math.max(value, Number(this.row.paired.lower.value) + gap)
+    },
+    onSliderInput(event) {
+      GalaxySettingRow.methods.onSliderInput.call(this, event)
+      if (this.preview !== undefined) this.preview = this.boundedValue(this.preview)
+    },
+    onSliderPointerMove(event) {
+      GalaxySettingRow.methods.onSliderPointerMove.call(this, event)
+      if (this.preview !== undefined) this.preview = this.boundedValue(this.preview)
+    },
+    flushSlider(raw) {
+      const value = this.boundedValue(raw)
+      if (value !== null) return GalaxySettingRow.methods.flushSlider.call(this, value)
+    },
+    onTrack(event) {
+      if (this.locked || event.target.tagName === "INPUT") return
+      const rect = event.currentTarget.getBoundingClientRect()
+      const value = this.bounds.min + (event.clientX - rect.left) / rect.width * (this.bounds.max - this.bounds.min)
+      const lowerDistance = Math.abs(value - Number(this.row.paired.lower.value))
+      const upperDistance = Math.abs(value - Number(this.row.value))
+      this.selectEndpoint(lowerDistance === upperDistance ? this.endpoint : lowerDistance < upperDistance ? "min" : "max")
+      return this.flushSlider(value)
+    },
+  },
+  template: `
+    <div class="gx-row gx-row--stack gx-range-row" :class="{ disabled: dimmed }" :inert="busy || updating" :aria-busy="busy || updating || undefined">
+      <div class="gx-row__info">
+        <span class="gx-row__label">{{ row.label }}</span>
+        <span class="gx-row__desc">{{ row.reason }}</span>
+      </div>
+      <div class="gx-slider-row" :class="{ 'is-fine-scrubbing': isFineScrubbing }">
+        <div class="gx-slider-header">
+          <button type="button" class="gx-btn gx-btn--tonal" :aria-pressed="endpoint === 'min'" :disabled="dimmed"
+            :aria-label="'Select minimum ' + row.label" @click="selectEndpoint('min')">Min {{ endpointText('min') }}</button>
+          <button type="button" class="gx-btn gx-btn--tonal" :aria-pressed="endpoint === 'max'" :disabled="dimmed"
+            :aria-label="'Select maximum ' + row.label" @click="selectEndpoint('max')">Max {{ endpointText('max') }}</button>
+          <button v-if="showDefault" type="button" class="gx-btn gx-btn--tonal gx-setting-default"
+            :disabled="dimmed || !endpointRow.resetAvailable" :aria-label="'Reset ' + endpoint + ' ' + row.label + ' to default'"
+            @click="$emit('reset-default', saveIndex)">Default {{ endpoint }}</button>
+        </div>
+        <div class="gx-paired-track" @pointerdown="onTrack">
+          <span class="gx-paired-fill" :style="rangeStyle"></span>
+          <input ref="minSlider" type="range" class="gx-slider gx-paired-input" :style="{ zIndex: endpoint === 'min' ? 3 : 2 }"
+            :aria-label="'Minimum ' + row.label" :aria-valuetext="endpointText('min')"
+            :min="bounds.min" :max="bounds.max" :step="bounds.step" :value="endpointValue('min')" :disabled="dimmed"
+            @focus="selectEndpoint('min')" @input="selectEndpoint('min'); onSliderInput($event)"
+            @change="onSliderCommit" @blur="onSliderBlur" @pointerdown.stop="selectEndpoint('min'); onSliderPointerDown($event)"
+            @pointermove="onSliderPointerMove" @pointerup="onSliderPointerEnd"
+            @pointercancel="onSliderCancel" @lostpointercapture="onSliderCancel" @keydown="beginInteract">
+          <input ref="maxSlider" type="range" class="gx-slider gx-paired-input" :style="{ zIndex: endpoint === 'max' ? 3 : 2 }"
+            :aria-label="'Maximum ' + row.label" :aria-valuetext="endpointText('max')"
+            :min="bounds.min" :max="bounds.max" :step="bounds.step" :value="endpointValue('max')" :disabled="dimmed"
+            @focus="selectEndpoint('max')" @input="selectEndpoint('max'); onSliderInput($event)"
+            @change="onSliderCommit" @blur="onSliderBlur" @pointerdown.stop="selectEndpoint('max'); onSliderPointerDown($event)"
+            @pointermove="onSliderPointerMove" @pointerup="onSliderPointerEnd"
+            @pointercancel="onSliderCancel" @lostpointercapture="onSliderCancel" @keydown="beginInteract">
+        </div>
+        <div class="gx-slider-meta"><span>{{ bounds.min }} to {{ bounds.max }} {{ row.unit }}</span>
+          <span>{{ interacting ? (isFineScrubbing ? 'Fine scrubbing' : 'Hold to fine scrub') : 'Step: ' + bounds.step + ' ' + row.unit }}</span></div>
+      </div>
     </div>`,
 }

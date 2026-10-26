@@ -10,14 +10,15 @@ import math
 from numbers import Real
 from typing import Any
 
-import capnp
 import numpy as np
 
 from openpilot.cereal import log
 from openpilot.common.scalar_clip import clip_scalar
+from openpilot.starpilot.lateral.lane_tuning import valid_tuning, STOCK_CORRECTION, MAX_CORRECTION
 
 
 STRENGTH_BASELINE = 1.5
+STRENGTH_DEFAULT = 2.1
 STRENGTH_MAX = 2 * STRENGTH_BASELINE
 
 MIN_SPEED = 5.0
@@ -27,12 +28,11 @@ MIN_LANE_WIDTH = 2.6
 MAX_LANE_WIDTH = 4.8
 MAX_OFFSET = 0.3
 MIN_CENTER_TO_LINE = 1.1
-MAX_CORRECTION = 0.004 * 0.30
-CENTER_ERROR_DEADBAND = 0.08
+CENTER_ERROR_DEADBAND = 0.02
 E2E_MAX_PATH_STD = 0.35
 E2E_BREAK_IN_START = 0.15
 E2E_BREAK_IN_FULL = 0.50
-ACQUIRE_TAU = 0.4
+ACQUIRE_TAU = 0.35
 RELEASE_TAU = 0.2
 
 
@@ -53,7 +53,39 @@ class LaneCenteringSettings:
   offset_m: float = 0.0
   e2e_authority: float = 1.0
   pause_on_signal: bool = True
-  strength: float = STRENGTH_BASELINE
+  strength: float = STRENGTH_DEFAULT
+  min_speed_mps: float = 0.0
+  max_correction: float = 0.0018
+  max_width: float = 4.8
+  confidence_split: float = 0.2
+  min_confidence: float = 0.1
+  high_std: float = 1.0
+  low_std: float = 0.6
+  edge_std: float = 1.0
+  car_width: float = 1.85
+  clearance: float = 0.0
+  smoothing_tau: float = 0.2
+  smoothing_distance: float = 0.25
+  response_tau: float = 0.35
+  release_tau: float = 0.2
+  single_clearance: float = 0.45
+  single_deadband: float = 0.02  # Saved name retained; applies to every mode.
+  lookahead_time: float = 1.0
+  override_start: float = E2E_BREAK_IN_START
+  override_full: float = E2E_BREAK_IN_FULL
+  curve_adaptation: bool = True
+  response_min: float = 0.1
+  e2e_min: float = 0.0
+  curve_start_radius: float = 2000.0
+  curve_full_radius: float = 250.0
+  # Retained for historical replay; live preferences always enable all three.
+  mode1: bool = True
+  mode2: bool = True
+  mode3: bool = True
+
+  @property
+  def min_width(self) -> float:
+    return self.car_width + 2 * self.clearance
 
 
 @dataclass(frozen=True)
@@ -167,6 +199,7 @@ def _single_boundary_target(model: Any, paths, qualified, lookahead: float, offs
   return target
 
 
+
 def raw_correction(model: Any, speed_mps: float, offset_m: float, e2e_authority: float, *, _paths=None) -> float | None:
   """Return a finite raw curvature correction, or None for unqualified model data."""
   speed = _finite_number(speed_mps)
@@ -214,7 +247,8 @@ def raw_correction(model: Any, speed_mps: float, offset_m: float, e2e_authority:
         return None
     error = target_y - model_y
     error_abs = abs(error)
-    error = math.copysign(max(0.0, error_abs - CENTER_ERROR_DEADBAND), error)
+    # Preserve the standalone upstream helper's original deadband.
+    error = math.copysign(max(0.0, error_abs - 0.08), error)
 
     # Reduce lane authority only when path variance establishes confidence.
     try:
@@ -233,32 +267,204 @@ def raw_correction(model: Any, speed_mps: float, offset_m: float, e2e_authority:
     return None
 
 
-def _reader_geometry_key(model):
-  if not isinstance(model, capnp.lib.capnp._DynamicStructReader):
-    return None
+def _error_correction(model, speed, error, authority, lookahead, deadband=CENTER_ERROR_DEADBAND,
+                      override_start=E2E_BREAK_IN_START, override_full=E2E_BREAK_IN_FULL):
+  error_abs = abs(error)
+  error = math.copysign(max(0.0, error_abs - deadband), error)
   try:
-    return (tuple(model.laneLineProbs), tuple(model.laneLineStds),
-            *((tuple(line.x), tuple(line.y)) for line in (model.laneLines[1], model.laneLines[2])),
-            tuple(model.position.x), tuple(model.position.y), tuple(model.position.yStd))
-  except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
+    std_path = _path_xy(model.position.x, model.position.yStd)
+    path_std = _at(std_path, lookahead) if std_path is not None else None
+    if path_std is not None and 0.0 <= path_std <= E2E_MAX_PATH_STD:
+      break_in = clip_scalar((error_abs - override_start) / (override_full - override_start), 0.0, 1.0)
+      error *= 1.0 - clip_scalar(authority, 0.0, 1.0) * break_in
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    pass
+  return 2.0 * error / lookahead ** 2
+
+
+def _boundaries(model, lookahead, settings):
+  # Fixed order supplies line-before-edge, then left-before-right tie breaking.
+  accepted = []
+  for kind, index, side in (("line", 1, 0), ("line", 2, 1), ("edge", 0, 0), ("edge", 1, 1)):
+    try:
+      std = _finite_number((model.laneLineStds if kind == "line" else model.roadEdgeStds)[index])
+      limit = settings.edge_std
+      if kind == "line":
+        confidence = _finite_number(model.laneLineProbs[index])
+        if confidence is None or not settings.min_confidence <= confidence <= 1.0:
+          continue
+        limit = settings.high_std if confidence >= settings.confidence_split else settings.low_std
+      if std is None or not 0.0 <= std < limit:
+        continue
+      path = _path((model.laneLines if kind == "line" else model.roadEdges)[index])
+      y = _at(path, lookahead) if path is not None else None
+      if y is not None:
+        accepted.append((side, kind, y))
+    except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
+      continue
+  return accepted
+
+
+def _bend_target(model, chosen, lookahead, settings):
+  """Road-boundary bend weight; None means unknown, zero means straight."""
+  if len(chosen) != 2:
+    return None
+  fits = []
+  lo, hi = max(0., lookahead - 10.), lookahead + 10.
+  origin, scale = (lo + hi) * .5, (hi - lo) * .5
+  probes = (np.linspace(lo, hi, 9) - origin) / scale
+  try:
+    for side, kind, _ in chosen:
+      path = _path((model.laneLines if kind == "line" else model.roadEdges)[side + 1 if kind == "line" else side])
+      if path is None or path[0][0] > lo or path[0][-1] < hi:
+        return None
+      x, y = path
+      inside = (x >= lo) & (x <= hi)
+      if np.count_nonzero(inside) < 4:
+        return None
+      u = (x[inside] - origin) / scale
+      c = np.polynomial.polynomial.polyfit(u, y[inside], 3)
+      if not np.isfinite(c).all() or np.max(np.abs(np.polynomial.polynomial.polyval(u, c) - y[inside])) > .10:
+        return None
+      at = (lookahead - origin) / scale
+      slope = (c[1] + 2*c[2]*at + 3*c[3]*at*at) / scale
+      curvature = (2*c[2] + 6*c[3]*at) / (scale*scale) / (1 + slope*slope)**1.5
+      if not math.isfinite(curvature) or abs(curvature) > .1:
+        return None
+      fits.append((curvature, np.polynomial.polynomial.polyval(probes, c),
+                   (c[1] + 2*c[2]*probes + 3*c[3]*probes**2) / scale))
+    left, right = fits
+    widths = (right[1] - left[1]) / np.hypot(1., (left[2] + right[2]) * .5)
+    if (not np.isfinite(widths).all() or np.min(widths) < settings.min_width or
+        np.max(widths) > settings.max_width or np.ptp(widths) > .6 or
+        abs(left[0] - right[0]) > max(.001, .3 * max(abs(left[0]), abs(right[0])))):
+      return None
+    k = abs((left[0] + right[0]) * .5)
+    fraction = clip_scalar((k - 1/settings.curve_start_radius) /
+                           (1/settings.curve_full_radius - 1/settings.curve_start_radius), 0., 1.)
+    return fraction*fraction*(3 - 2*fraction)
+  except (AttributeError, IndexError, TypeError, ValueError, OverflowError, FloatingPointError, np.linalg.LinAlgError):
     return None
 
 
 class LaneCenteringController:
   def __init__(self) -> None:
     self._correction = 0.0
-    self._geometry_cache = None
+    self._limit = STOCK_CORRECTION
+    self._clear_boundaries()
 
   def reset(self) -> None:
     self._correction = 0.0
-    self._geometry_cache = None
+    self._limit = STOCK_CORRECTION
+    self._clear_boundaries()
+
+  def _clear_boundaries(self):
+    self._bend_weight = 0.0
+    self._preference_weight = 0.0
+    self._response_tau = ACQUIRE_TAU
+    self._e2e_authority = 1.0
+    self._smoothed = [None, None]
+    self._sample_id = None
+    self._sample_elapsed = 0.0
+    self._raw = None
+    self.selected_mode = 0
+    self.selected_sources = ()
+
+  def _adapt(self, model, settings, chosen, lookahead):
+    if not settings.curve_adaptation:
+      self._bend_weight = 0.0
+      self._preference_weight = 0.0
+    elif self.selected_mode != 3:
+      target = _bend_target(model, chosen, lookahead, settings)
+      if target is not None:
+        self._bend_weight += (target - self._bend_weight) * (1.0 - math.exp(-self._sample_elapsed / .20))
+        # Lower preference weight means higher model preference.
+        tau = -1.0 / math.log(.05) if target < self._preference_weight else .20
+        self._preference_weight += (target - self._preference_weight) * (1.0 - math.exp(-self._sample_elapsed / tau))
+    self._response_tau = settings.response_tau + (settings.response_min - settings.response_tau) * self._bend_weight
+    self._e2e_authority = settings.e2e_authority + (settings.e2e_min - settings.e2e_authority) * self._preference_weight
+
+  def _frame_correction(self, observation):
+    model, settings, speed = observation.model, observation.settings, observation.speed_mps
+    lookahead = clip_scalar(speed * settings.lookahead_time, 8.0, 35.0)
+    path = _path(getattr(model, "position", None))
+    model_y = _at(path, lookahead) if path is not None else None
+    boundaries = _boundaries(model, lookahead, settings)
+    left = max((b[2] for b in boundaries if b[0] == 0), default=None)
+    right = min((b[2] for b in boundaries if b[0] == 1), default=None)
+    if model_y is None or (left is not None and right is not None and right <= left):
+      self._smoothed = [None, None]
+      self.selected_mode, self.selected_sources = 0, ()
+      self._adapt(model, settings, (), lookahead)
+      return None
+    lines = [b for b in boundaries if b[1] == "line"]
+    wide = len(lines) == 2 and lines[1][2] - lines[0][2] > settings.max_width
+    pairs = [(l, r) for l in boundaries if l[0] == 0 for r in boundaries if r[0] == 1
+             if settings.min_width <= r[2] - l[2] <= settings.max_width]
+    chosen, mode = (), 0
+    narrow = left is not None and right is not None and right - left < settings.min_width
+    if not wide and not narrow:
+      if settings.mode1:
+        chosen = next((pair for pair in pairs if all(b[1] == "line" for b in pair)), ())
+        mode = 1 if chosen else 0
+      if not chosen and settings.mode2:
+        mixed = [pair for pair in pairs if pair[0][1] != pair[1][1]]
+        chosen = min(mixed, key=lambda pair: pair[1][2] - pair[0][2], default=())
+        mode = 2 if chosen else 0
+    clearance = settings.car_width * .5 + settings.single_clearance
+    if not chosen and settings.mode3 and boundaries:
+      if left is not None and right is not None and left + clearance > right - clearance:
+        self._smoothed = [None, None]
+        self.selected_mode, self.selected_sources = 0, ()
+        self._adapt(model, settings, (), lookahead)
+        return None
+      chosen = (max(boundaries, key=lambda b: clearance - ((model_y - b[2]) if b[0] == 0 else (b[2] - model_y))),)
+      mode = 3
+    self.selected_mode = mode
+    self.selected_sources = tuple((b[0], b[1]) for b in chosen)
+    self._adapt(model, settings, chosen, lookahead)
+    for side in (0, 1):
+      boundary = next((b for b in chosen if b[0] == side), None)
+      if boundary is None:
+        self._smoothed[side] = None
+        continue
+      raw, previous = boundary[2], self._smoothed[side]
+      if previous is None or settings.smoothing_tau == 0 or settings.smoothing_distance == 0:
+        self._smoothed[side] = raw
+      else:
+        filtered = previous + (raw - previous) * (1.0 - math.exp(-self._sample_elapsed / settings.smoothing_tau))
+        self._smoothed[side] = clip_scalar(filtered, raw - settings.smoothing_distance, raw + settings.smoothing_distance)
+    if not chosen:
+      return None
+    if mode in (1, 2):
+      sl, sr = self._smoothed
+      width = sr - sl
+      if not settings.min_width <= width <= settings.max_width:
+        return None
+      safe_offset = min(MAX_OFFSET, max(0.0, width * .5 - MIN_CENTER_TO_LINE))
+      error = (sl + sr) * .5 + clip_scalar(settings.offset_m, -safe_offset, safe_offset) - model_y
+    else:
+      side, _, raw = chosen[0]
+      away = 1 if side == 0 else -1
+      target = self._smoothed[side] + away * clearance
+      raw_shortfall = clearance - away * (model_y - raw)
+      smoothed_shortfall = away * (target - model_y)
+      opposite = right if side == 0 else left
+      if opposite is not None and away * (opposite - target) < clearance:
+        return None
+      # A clear raw boundary or a clear smoothed boundary requests zero, never attraction.
+      if raw_shortfall <= 0 or smoothed_shortfall <= 0:
+        return 0.0
+      error = away * smoothed_shortfall
+    return _error_correction(model, speed, error, self._e2e_authority, lookahead,
+                             settings.single_deadband, settings.override_start, settings.override_full)
 
   def _result(self, base: float, reason: str) -> LaneCenteringResult:
     correction = self._correction
     return LaneCenteringResult(base + correction, correction, (correction > 0) - (correction < 0), reason)
 
-  def _fade(self, base: float, dt: float, reason: str) -> LaneCenteringResult:
-    self._correction *= math.exp(-dt / RELEASE_TAU)
+  def _fade(self, base: float, dt: float, reason: str, tau: float) -> LaneCenteringResult:
+    self._correction *= math.exp(-dt / tau) if tau else 0.0
     if abs(self._correction) < 1e-12:
       self._correction = 0.0
     return self._result(base, reason)
@@ -280,21 +486,24 @@ class LaneCenteringController:
         type(observation.model_valid) is not bool or type(observation.lateral_active) is not bool or
         type(observation.turn_signal_active) is not bool or type(observation.driver_override) is not bool or
         type(observation.time_discontinuity) is not bool or
-        type(settings.enabled) is not bool or type(settings.pause_on_signal) is not bool):
+        type(settings.enabled) is not bool or type(settings.pause_on_signal) is not bool or not valid_tuning(settings)):
       self.reset()
       return LaneCenteringResult(base, 0.0, 0, "invalid_input")
+    self._limit = settings.max_correction
+    self._correction = clip_scalar(self._correction, -self._limit, self._limit)
     if observation.time_discontinuity:
       self.reset()
       return self._result(base, "time_discontinuity")
     if not observation.mode.lateral_authority or not settings.enabled or not observation.lateral_active or \
-       not observation.model_valid or speed < MIN_SPEED:
+       not observation.model_valid or speed < settings.min_speed_mps:
       self.reset()
       return self._result(base, "inactive")
     if observation.driver_override:
       self.reset()
       return self._result(base, "driver_override")
     if settings.pause_on_signal and observation.turn_signal_active:
-      return self._fade(base, dt, "signal_release")
+      self._clear_boundaries()
+      return self._fade(base, dt, "signal_release", settings.release_tau)
     try:
       if observation.model.meta.laneChangeState != log.LaneChangeState.off:
         self.reset()
@@ -302,26 +511,17 @@ class LaneCenteringController:
     except (AttributeError, TypeError, ValueError):
       self.reset()
       return self._result(base, "invalid_model")
-    # Filtering runs per control tick, including repeated model samples.
-    geometry = _reader_geometry_key(observation.model)
-    cache_key = (observation.model_sample_id, geometry)
-    cached = self._geometry_cache
-    paths = None
-    if geometry is not None:
-      if cached is not None and cached[0] is observation.model and cached[1] == cache_key:
-        paths = cached[2]
-      else:
-        paths = (_path_xy(*geometry[2]), _path_xy(*geometry[3]),
-                 _path_xy(geometry[4], geometry[5]), _path_xy(geometry[4], geometry[6]))
-        self._geometry_cache = (observation.model, cache_key, paths)
-    else:
-      self._geometry_cache = None
-    raw = raw_correction(observation.model, speed, offset, authority, _paths=paths)
+    self._sample_elapsed += dt
+    if self._sample_id != observation.model_sample_id:
+      self._raw = self._frame_correction(observation)
+      self._sample_id = observation.model_sample_id
+      self._sample_elapsed = 0.0
+    raw = self._raw
     if raw is None or not math.isfinite(raw):
-      return self._fade(base, dt, "unqualified_model")
-    target = clip_scalar(raw, -0.004, 0.004) * 0.30
+      return self._fade(base, dt, "unqualified_model", settings.release_tau)
+    target = clip_scalar(raw * 0.30, -self._limit, self._limit)
     if strength != 1.0:
-      target = clip_scalar(target * strength, -MAX_CORRECTION, MAX_CORRECTION)
-    self._correction += (target - self._correction) * (1.0 - math.exp(-dt / ACQUIRE_TAU))
-    self._correction = clip_scalar(self._correction, -MAX_CORRECTION, MAX_CORRECTION)
+      target = clip_scalar(target * strength, -self._limit, self._limit)
+    self._correction += (target - self._correction) * (1.0 - math.exp(-dt / self._response_tau) if self._response_tau else 1.0)
+    self._correction = clip_scalar(self._correction, -self._limit, self._limit)
     return self._result(base, "qualified")

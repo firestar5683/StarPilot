@@ -1,7 +1,7 @@
 """Native model-message fixtures for the standalone curvature contribution."""
 from dataclasses import replace
-import json
 import math
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -11,7 +11,7 @@ from unittest.mock import patch
 from openpilot.cereal import messaging
 from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
 from openpilot.starpilot.lateral.lane_centering import (ControlMode, LaneCenteringController, LaneCenteringInput,
-                                                       LaneCenteringSettings, MAX_CORRECTION, raw_correction)
+                                                       LaneCenteringSettings, MAX_CORRECTION, STOCK_CORRECTION, raw_correction)
 
 
 XS = [float(i) for i in range(51)]
@@ -34,7 +34,7 @@ def model(*, left=-1.5, right=2.1, path=0.0, path_std=0.1, prob=0.9, std=0.1):
 
 def observation(m=None, **updates):
   source = LaneCenteringInput(m if m is not None else model(), 1, True, 0.0002, 20.0,
-                              ControlMode.LATERAL_ONLY, True, LaneCenteringSettings(True, 0.0, 0.0, True), 0.01)
+                              ControlMode.LATERAL_ONLY, True, LaneCenteringSettings(True, 0.0, 0.0, True, strength=1.5, max_correction=STOCK_CORRECTION, min_speed_mps=4.4704), 0.01)
   return replace(source, **updates)
 
 
@@ -47,33 +47,23 @@ def settled(controller, source, ticks=300):
 
 
 class TestLaneCentering(unittest.TestCase):
-  def test_reader_cache_detects_mutation_samples_and_reset(self):
+  def test_boundary_geometry_updates_once_per_model_frame_and_reset(self):
     from openpilot.starpilot.lateral import lane_centering as module
-    builder = model()
-    reader = builder.as_reader()
-    source = observation(reader)
+    source = observation(model().as_reader(), settings=LaneCenteringSettings(True, e2e_authority=0., curve_adaptation=False))
     controller = LaneCenteringController()
     with patch.object(module, '_path_xy', wraps=module._path_xy) as evaluate:
       first = controller.update(source)
       second = controller.update(source)
       self.assertGreater(second.correction, first.correction)
       self.assertEqual(evaluate.call_count, 4)
-      builder.laneLines[2].y = [2.5] * len(XS)
-      controller.update(source)
+      controller.update(replace(source, model_sample_id=2))
       self.assertEqual(evaluate.call_count, 8)
-      builder.laneLineProbs = [0., .1, .1, 0.]
-      self.assertEqual(controller.update(source).reason, 'unqualified_model')
-      self.assertEqual(evaluate.call_count, 12)
-      controller.update(replace(source, model_sample_id=0))
-      self.assertEqual(evaluate.call_count, 16)
-      controller.update(replace(source, model=reader.as_builder().as_reader()))
-      self.assertEqual(evaluate.call_count, 20)
       controller.reset()
       controller.update(source)
-      self.assertEqual(evaluate.call_count, 24)
+      self.assertEqual(evaluate.call_count, 12)
       controller.update(replace(source, time_discontinuity=True))
       controller.update(source)
-      self.assertEqual(evaluate.call_count, 28)
+      self.assertEqual(evaluate.call_count, 16)
 
   def test_explicit_axis_authority(self):
     for mode, allowed in ((ControlMode.OFF, False), (ControlMode.LATERAL_ONLY, True),
@@ -87,6 +77,8 @@ class TestLaneCentering(unittest.TestCase):
   def test_held_model_sample_advances_filter_as_in_frozen_controller(self):
     controller = LaneCenteringController()
     source = observation()
+    # Isolate the filter from v4 versus legacy-helper deadband differences.
+    source = replace(source, settings=replace(source.settings, response_tau=.4, single_deadband=.08))
     first = controller.update(source).correction
     second = controller.update(source).correction
     raw = raw_correction(source.model, 20.0, 0.0, 0.0)
@@ -97,7 +89,7 @@ class TestLaneCentering(unittest.TestCase):
     self.assertGreater(second, first)
 
   def test_strength_increases_sublimit_correction_without_changing_default(self):
-    source = observation()
+    source = observation(model(left=-1.6, right=2.0))  # Remains below cap with 2cm deadband and strength3.0.
     standard, explicit, stronger = LaneCenteringController(), LaneCenteringController(), LaneCenteringController()
     for _ in range(100):
       before = standard.update(source)
@@ -145,7 +137,7 @@ class TestLaneCentering(unittest.TestCase):
   def test_strength_does_not_replace_model_path_authority(self):
     shifted = model(path=0.5)
     for authority in (0.0, 0.5, 1.0):
-      source = observation(shifted, settings=LaneCenteringSettings(True, e2e_authority=authority))
+      source = observation(shifted, settings=LaneCenteringSettings(True, e2e_authority=authority, strength=1.5))
       normal = settled(LaneCenteringController(), source).correction
       stronger = settled(LaneCenteringController(), replace(source, settings=replace(source.settings, strength=3.0))).correction
       self.assertAlmostEqual(stronger, normal * 2, delta=1e-15)
@@ -158,7 +150,7 @@ class TestLaneCentering(unittest.TestCase):
                 7.2995725765035352e-05)
     controller = LaneCenteringController()
     source = observation()
-    source = replace(source, settings=replace(source.settings, strength=1.0))
+    source = replace(source, settings=replace(source.settings, strength=1.0, response_tau=.4, single_deadband=.08))
     for reference in expected:
       self.assertAlmostEqual(controller.update(source).correction, reference, delta=1e-15)
 
@@ -183,22 +175,32 @@ class TestLaneCentering(unittest.TestCase):
     left = settled(LaneCenteringController(), observation(model(left=-2.1, right=1.5))).correction
     self.assertGreater(right, 0.0)
     self.assertLess(left, 0.0)
-    self.assertEqual(settled(LaneCenteringController(), observation(model(left=-1.75, right=1.85))).correction, 0.0)
+    self.assertEqual(settled(LaneCenteringController(), observation(model(left=-1.79, right=1.81))).correction, 0.0)
     settings = LaneCenteringSettings(True, 0.3, 0.0)
     narrow = observation(model(left=-1.3, right=1.3), settings=settings)
     safe_limit = replace(narrow, settings=replace(settings, offset_m=0.2))
     self.assertAlmostEqual(settled(LaneCenteringController(), narrow).correction,
                            settled(LaneCenteringController(), safe_limit).correction)
-    extreme = settled(LaneCenteringController(), observation(model(left=0.0, right=3.0)))
-    self.assertAlmostEqual(extreme.correction, MAX_CORRECTION, delta=1e-6)
+    extreme = settled(LaneCenteringController(), observation(model(left=0.0, right=3.0)), ticks=400)
+    self.assertAlmostEqual(extreme.correction, STOCK_CORRECTION, delta=1e-6)
+
+  def test_doubled_cap_is_reachable_and_bounded_in_both_directions(self):
+    self.assertAlmostEqual(MAX_CORRECTION, 0.0024)
+    for sign in (-1, 1):
+      for strength in (1.0, 1.5, 3.0):
+        source = observation(model(left=-1.8 + sign * 1.5, right=1.8 + sign * 1.5),
+                             speed_mps=5., settings=LaneCenteringSettings(True, strength=strength, e2e_authority=0., response_tau=0., response_min=0., max_correction=MAX_CORRECTION))
+        result = LaneCenteringController().update(source)
+        self.assertAlmostEqual(result.correction, sign * 0.0024)
+        self.assertAlmostEqual(result.candidate_curvature, source.base_curvature + result.correction)
 
   def test_e2e_break_in_requires_confident_path(self):
     shifted = model(left=-1.0, right=2.6)
     no_e2e = settled(LaneCenteringController(), observation(shifted)).correction
     full_e2e = settled(LaneCenteringController(), observation(
-      shifted, settings=LaneCenteringSettings(True, 0.0, 1.0))).correction
+      shifted, settings=replace(observation().settings, e2e_authority=1.0))).correction
     uncertain = settled(LaneCenteringController(), observation(
-      model(left=-1.0, right=2.6, path_std=0.6), settings=LaneCenteringSettings(True, 0.0, 1.0))).correction
+      model(left=-1.0, right=2.6, path_std=0.6), settings=replace(observation().settings, e2e_authority=1.0))).correction
     self.assertGreater(no_e2e, 0.0)
     self.assertAlmostEqual(full_e2e, 0.0)
     self.assertAlmostEqual(uncertain, no_e2e)
@@ -214,7 +216,7 @@ class TestLaneCentering(unittest.TestCase):
         elif change == "override":
           blocked = replace(source, driver_override=True)
         elif change == "low_speed":
-          blocked = replace(source, speed_mps=4.9)
+          blocked = replace(source, speed_mps=source.settings.min_speed_mps - .1)
         elif change == "invalid_model":
           blocked = replace(source, model_valid=False)
         elif change == "long_only":
@@ -239,7 +241,7 @@ class TestLaneCentering(unittest.TestCase):
     self.assertEqual(signal.reason, "signal_release")
     no_pause = replace(source, settings=replace(source.settings, pause_on_signal=False), turn_signal_active=True)
     self.assertGreater(controller.update(no_pause).correction, signal.correction)
-    fading = controller.update(replace(source, model=model(prob=0.2)))
+    fading = controller.update(replace(source, model=model(prob=0.09), model_sample_id=2))
     self.assertGreater(fading.correction, 0.0)
     self.assertLess(fading.correction, before)
     self.assertEqual(fading.reason, "unqualified_model")
@@ -260,7 +262,7 @@ class TestLaneCentering(unittest.TestCase):
     self.assertEqual(unsignaled.correction, 0.0)
 
   def test_unqualified_native_models_have_no_new_correction(self):
-    for bad_model in (model(prob=0.2), model(std=0.4), model(left=-0.5, right=0.5),
+    for bad_model in (model(prob=0.09), model(std=1.0), model(left=-0.5, right=0.5),
                       model(path=float("nan"))):
       with self.subTest(model=bad_model):
         self.assertEqual(LaneCenteringController().update(observation(bad_model)).correction, 0.0)
@@ -412,18 +414,20 @@ class TestSingleBoundary(unittest.TestCase):
           m.laneLineProbs = [0., .95, float('nan'), 0.]
         self.assertIsNone(raw_correction(m, 20., 0., 0.))
 
-  def test_current_edge_is_rechecked_for_held_reader(self):
+  def test_edge_acceptance_changes_only_on_new_model_frame(self):
     m = single()
     source = observation(m.as_reader())
     controller = LaneCenteringController()
-    first = controller.update(source)
-    self.assertGreater(first.correction, 0.)
-    m.roadEdgeStds = [.1, .31]
-    refused = controller.update(source)
-    self.assertEqual(refused.reason, 'unqualified_model')
-    self.assertAlmostEqual(refused.correction, first.correction * math.exp(-.01 / .2))
+    controller.update(source)
+    self.assertEqual(controller.selected_mode, 2)
+    m.roadEdgeStds = [1.01, 1.01]
+    controller.update(source)
+    self.assertEqual(controller.selected_mode, 2)
+    controller.update(replace(source, model_sample_id=source.model_sample_id + 1))
+    self.assertEqual(controller.selected_mode, 3)
     m.roadEdgeStds = [.1, .1]
-    self.assertEqual(controller.update(source).reason, 'qualified')
+    controller.update(replace(source, model_sample_id=source.model_sample_id + 2))
+    self.assertEqual(controller.selected_mode, 2)
 
   def test_single_boundary_still_obeys_override_freshness_signal_and_axis(self):
     source = observation(single())
