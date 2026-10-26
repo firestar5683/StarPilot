@@ -228,7 +228,8 @@ def _rlog_model_loads(root, route, names, allowed):
       total += len(compressed)
       if total > MAX_ROUTE_COMPRESSED_BYTES:
         return []
-      for event in decode_segment(compressed, codec, cancelled=lambda: not permitted()):
+      # Validate the whole rlog, but retain only model-load diagnostics.
+      for event in decode_segment(compressed, codec, cancelled=lambda: not permitted(), retain=frozenset(('logMessage',))):
         if event.valid and event.which() == 'logMessage':
           raw = str(event.logMessage)
           if (load := logged_model_load(raw)) is not None and 0 < load.loaded_mono_ns <= event.logMonoTime:

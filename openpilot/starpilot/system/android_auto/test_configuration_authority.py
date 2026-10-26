@@ -5,7 +5,7 @@ from unittest import mock
 import pytest
 
 from openpilot.starpilot.system.android_auto import daemon
-from openpilot.starpilot.galaxy.settings import LiveContextSource
+from openpilot.starpilot.galaxy.authority import LiveContextSource
 from openpilot.starpilot.drive_state.tests.test_evidence import Messages
 
 
@@ -49,7 +49,7 @@ def test_daemon_uses_configuration_authority_and_cleans_up_after_bind_failure(bi
     bluetooth, supervisor, server = mock.Mock(), mock.Mock(), mock.Mock()
     factories = [
       ('openpilot.starpilot.galaxy.evidence.EvidenceSource', evidence),
-      ('openpilot.starpilot.galaxy.settings.LiveContextSource', authority),
+      ('openpilot.starpilot.galaxy.authority.LiveContextSource', authority),
       ('openpilot.starpilot.system.android_auto.bluetooth_bridge.SharedBluetoothOwner', bluetooth),
       ('openpilot.common.params.Params', mock.Mock()),
       ('openpilot.starpilot.system.android_auto.daemon.Supervisor', supervisor),

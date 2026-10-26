@@ -179,7 +179,9 @@ class SegmentSummary:
         closed = read_closed_rlog(self.root, segment_name, permitted=allowed)
         if filename not in RLOGS or closed.codec != RLOGS[filename] or not current():
           raise SegmentSummaryChanged('Local recording identity changed')
-        events = decode_segment(closed.compressed, closed.codec, cancelled=lambda: not allowed())
+        # Other messages still undergo validation without staying resident for projection.
+        events = decode_segment(closed.compressed, closed.codec, cancelled=lambda: not allowed(),
+                                retain=frozenset(('carState', 'carControl')))
         result = _project(events, allowed)
         if not allowed() or not current():
           raise SegmentSummaryChanged('Local recording identity changed')

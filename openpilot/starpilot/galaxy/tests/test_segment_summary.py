@@ -116,8 +116,8 @@ class SegmentSummaryTest(unittest.TestCase):
       lock.unlink()
       from openpilot.starpilot.galaxy import segment_summary
       decode = segment_summary.decode_segment
-      def mutate(data, codec, *, cancelled):
-        events = decode(data, codec, cancelled=cancelled)
+      def mutate(data, codec, **kwargs):
+        events = decode(data, codec, **kwargs)
         with source.open('ab') as output:
           output.write(b'changed')
         return events

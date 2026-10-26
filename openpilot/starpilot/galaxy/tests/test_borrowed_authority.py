@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from openpilot.starpilot.galaxy.settings import LiveContextSource
+from openpilot.starpilot.galaxy.authority import LiveContextSource
 
 
 class Messages:
