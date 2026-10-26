@@ -160,7 +160,8 @@ class UIState:
     self.experimental_mode: bool = self.params.get_bool("ExperimentalMode")
     self.navigation_enabled = self.params.get_bool("NavigationEnabled")
     self.nav_destination_set = self.params.get("NavDestination") is not None
-    self.jetlink_status_feed = None if self.replay_clock is not None else JetlinkStatusFeed()
+    # A projection renderer polls Jetlink itself, and only while its Jetlink widget is shown onroad.
+    self.jetlink_status_feed = None if self.replay_clock is not None or self.projection_read_only else JetlinkStatusFeed()
     if self.jetlink_status_feed is not None:
       self.jetlink_status_feed.set_enabled(True)
     self.chestnut_present: bool = False
