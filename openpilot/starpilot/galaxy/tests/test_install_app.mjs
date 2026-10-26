@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { androidInstallHelp, installHelp, InstallApp, rememberInstallPrompt, isIosDevice, isAndroidDevice } from '../web/js/install-app.js'
+import { ANDROID_BETA_URL, installHelp, InstallApp, rememberInstallPrompt, isIosDevice, isAndroidDevice } from '../web/js/install-app.js'
 assert.match(installHelp({ secure: true, agent: 'iPhone' }), /Share.*Add to Home Screen/)
 assert.match(installHelp({ secure: false, agent: 'Android' }), /web app.*https:\/\/galaxy\.firestar\.link/)
 assert.match(installHelp({ secure: true, agent: 'Android' }), /Install app/)
-assert.match(androidInstallHelp(), /download the Android app.*locally|locally.*download the Android app/i)
+assert.equal(ANDROID_BETA_URL, 'https://groups.google.com/g/galaxy-starpilot-android-beta')
 assert.match(installHelp({ secure: true, agent: 'Chrome' }), /Install app/)
 const events = new Map()
 let modeListener
@@ -44,7 +44,7 @@ await InstallApp.methods.installWeb.call(late)
 assert.equal(prompted, 2)
 InstallApp.beforeUnmount.call(late)
 
-// Android offers the local APK; tunnel pages explain how to connect locally.
+// Android sends users to the Google Groups beta instead of a direct APK download.
 navigator.userAgent = 'Android'
 let apk
 globalThis.location = { protocol: 'http:', assign: value => { apk = value } }
@@ -57,15 +57,12 @@ assert.equal(apk, undefined, 'Native updates never hand the APK to a browser')
 delete window.StarPilotApp
 const android = { ...InstallApp.data() }
 InstallApp.methods.installAndroid.call(android)
-assert.equal(apk, './app.apk')
+assert.equal(apk, ANDROID_BETA_URL)
 assert.match(InstallApp.template, /Install web app/)
-assert.match(InstallApp.template, /Download Android APK/)
+assert.match(InstallApp.template, /Join the Android beta/)
+assert.doesNotMatch(InstallApp.template, /app\.apk|Download Android APK/)
 assert.match(InstallApp.template, /Update offline app \(Android\)/)
 assert.match(InstallApp.template, /android && !ios/)
-location.protocol = 'https:'
-InstallApp.methods.installAndroid.call(android)
-assert.equal(android.help, true)
-assert.match(android.message, /Android app.*locally|locally.*Android app/i)
 
 // Choosing the web app on Android always keeps web-install guidance.
 const webHelp = InstallApp.methods.installHelp.call(android)

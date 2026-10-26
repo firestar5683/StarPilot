@@ -66,6 +66,6 @@ console.log('Local access: actual Vue component/setup, bounded automatically syn
 assert.equal(GalaxyPage.components.LocalAccess, LocalAccess)
 const installStep = GalaxyPage.template.slice(GalaxyPage.template.indexOf('<h3>Install Galaxy</h3>'), GalaxyPage.template.indexOf('</li>', GalaxyPage.template.indexOf('<h3>Install Galaxy</h3>')))
 assert.ok(installStep.includes('<LocalAccess v-if="!ios" :mode="mode" :on-unauthorized="unauthorized" />'))
-assert.ok(installStep.indexOf('Download Android APK') < installStep.indexOf('<LocalAccess'))
+assert.ok(installStep.indexOf('Android users:') < installStep.indexOf('<LocalAccess'))
 compile(GalaxyPage.template, { decodeEntities: value => value.replaceAll('&amp;', '&') })
 console.log('Galaxy APK installation exposes authenticated local links with current mode and session handling')

@@ -57,7 +57,7 @@ try {
   const notice = banner(host)
   assert.ok(notice, 'A native app without an internet-sharing lease still gets an update notice')
   assert.match(text(notice), /Version 1.1.5 is available.*Installed: 1.1.4/s)
-  assert.ok(all(notice).some(item => item.type === 'a' && item.props.href === './app.apk' && text(item).includes('Update app')))
+  assert.ok(all(notice).some(item => item.type === 'a' && item.props.href === 'https://groups.google.com/g/galaxy-starpilot-android-beta' && text(item).includes('Update app')))
   assert.ok(all(host).some(item => item.type === 'div' && item.props.class === 'install-state' && text(item).includes('true')),
     'The main install action is told to render as an update')
   const root = host.children.find(item => item.type === 'div')

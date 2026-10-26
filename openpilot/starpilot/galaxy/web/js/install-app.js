@@ -18,22 +18,20 @@ export function installHelp({ secure = window.isSecureContext, agent = navigator
   return 'This browser cannot install Galaxy automatically. Open the browser menu and choose Install app or Add to Home Screen. On a Mac in Safari, choose File → Add to Dock.'
 }
 
-export function androidInstallHelp() {
-  return 'Connect locally to your comma, then download the Android app from Galaxy Access & Install. Allow your browser to install unknown apps when Android asks.'
-}
+export const ANDROID_BETA_URL = 'https://groups.google.com/g/galaxy-starpilot-android-beta'
 
 export const InstallApp = {
   name: 'InstallApp',
   props: { url: { type: String, default: '' }, updateAvailable: { type: Boolean, default: false } },
-  data: () => ({ prompt: null, installed: false, help: false, message: '',
+  data: () => ({ prompt: null, installed: false, message: '', betaUrl: ANDROID_BETA_URL,
     android: isAndroidDevice(), ios: isIosDevice() }),
   computed: { onPublicGalaxy() { return window.location?.hostname === 'galaxy.firestar.link' } },
   mounted() {
     this.prompt = deferredPrompt
     this.displayMode = window.matchMedia('(display-mode: standalone)')
     this.updateInstalled = () => { this.installed = !!window.StarPilotApp || this.displayMode.matches || navigator.standalone === true }
-    this.onPrompt = (event) => { event.preventDefault(); deferredPrompt = event; this.prompt = event; this.help = false }
-    this.onInstalled = () => { this.installed = true; this.prompt = deferredPrompt = null; this.help = false }
+    this.onPrompt = (event) => { event.preventDefault(); deferredPrompt = event; this.prompt = event }
+    this.onInstalled = () => { this.installed = true; this.prompt = deferredPrompt = null }
     this.updateInstalled()
     window.addEventListener('beforeinstallprompt', this.onPrompt)
     window.addEventListener('appinstalled', this.onInstalled)
@@ -61,8 +59,7 @@ export const InstallApp = {
         window.StarPilotApp.installUpdate()
         return
       }
-      if (location.protocol === 'http:') location.assign('./app.apk')
-      else { this.message = androidInstallHelp(); this.help = true }
+      location.assign(ANDROID_BETA_URL)
     },
   },
   template: `<div class="gx-install-app">
@@ -75,7 +72,7 @@ export const InstallApp = {
     <a v-else-if="url" class="gx-btn" :href="url" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Install web app</a>
     <p v-else class="gx-note">Pair in step 1 to get your install link.</p>
     <a v-if="ios" class="gx-btn" href="https://apps.apple.com/ca/app/starpilot-bt/id6821039119" target="_blank" rel="noopener"><i class="bi bi-apple" aria-hidden="true"></i> Download StarPilot BT on the App Store</a>
-    <button v-if="android && !ios && (!installed || updateAvailable)" type="button" class="gx-btn" @click="installAndroid"><i class="bi bi-download" aria-hidden="true"></i><span>{{ updateAvailable ? 'Update offline app (Android)' : 'Download Android APK' }}</span></button>
-    <p v-if="help" class="gx-note gx-install-help">{{ message }}</p>
+    <button v-if="android && !ios && updateAvailable" type="button" class="gx-btn" @click="installAndroid"><i class="bi bi-download" aria-hidden="true"></i><span>Update offline app (Android)</span></button>
+    <a v-else-if="android && !ios && !installed" class="gx-btn" :href="betaUrl" target="_blank" rel="noopener"><i class="bi bi-google-play" aria-hidden="true"></i><span>Join the Android beta</span></a>
   </div>`,
 }

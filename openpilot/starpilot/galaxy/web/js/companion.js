@@ -86,10 +86,8 @@ export const GalaxyCompanion = {
     <p v-if="native"><button class="gx-btn gx-btn--tonal" @click="connectionOptions">Bluetooth, Galaxy Wi-Fi or LAN</button></p>
     <BluetoothNotice v-if="bluetooth" feature="Media transfers and phone internet">Phone internet requires the Galaxy hotspot. Settings and small requests remain available.</BluetoothNotice>
     <p v-else>Share your phone’s mobile data over Galaxy Wi-Fi. Navigation and online services use your mobile plan. Log uploads, software updates and offline map downloads are blocked.</p>
-    <template v-if="!native"><p>Join TheGalaxy Wi-Fi, download the Android app, then allow your browser to install unknown apps when Android asks.</p>
-      <a v-if="status?.appAvailable && mode === 'local'" class="gx-btn" href="./app.apk">Download Android app</a>
-      <p v-else class="gx-note">Connect locally to a comma with the companion APK installed to download.</p>
-      <img v-if="status?.appAvailable && mode === 'local'" src="./api/companion/qr.svg" class="gx-tunnel__qr" alt="Download app over Galaxy Wi-Fi" />
+    <template v-if="!native"><p>Join the Android beta on Google Groups to get the app, then join TheGalaxy Wi-Fi.</p>
+      <a class="gx-btn" href="https://groups.google.com/g/galaxy-starpilot-android-beta" target="_blank" rel="noopener">Join the Android beta</a>
     </template>
     <template v-if="status && mode === 'local'"><p>Status: <strong>{{ status.state }}</strong> {{ status.reason }} · {{ ((native ? nativeBytes : status.bytes) / 1048576).toFixed(1) }} MB today</p>
       <button v-if="!bluetooth" class="gx-btn gx-btn--tonal" :disabled="busy" @click="toggle">{{ (native ? sharing : status.enabled) ? 'Disable phone internet' : 'Enable phone internet' }}</button>

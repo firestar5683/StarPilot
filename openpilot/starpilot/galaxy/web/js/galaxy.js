@@ -91,7 +91,7 @@ export const GalaxyPage = {
       <GxNotice v-else-if="showAppUpdate && !ios" tone="warn" title="Android app update available">
         Version {{ availableAppVersion }} is available. Installed: {{ installedAppVersion }}.
         <template #actions><button v-if="nativeInstallerAvailable" type="button" class="gx-btn" @click="installAppUpdate">Update app</button>
-          <a v-else class="gx-btn" href="./app.apk">Update app</a>
+          <a v-else class="gx-btn" href="https://groups.google.com/g/galaxy-starpilot-android-beta" target="_blank" rel="noopener">Update app</a>
           <button type="button" class="gx-btn gx-btn--tonal" aria-label="Dismiss app update notice" @click="dismissAppUpdate">Dismiss</button></template>
       </GxNotice>
       <GxState v-if="mode !== 'local'">Connect to your comma to set up remote access.</GxState>
@@ -123,7 +123,7 @@ export const GalaxyPage = {
             <div><h3>Install Galaxy</h3><p>Launch Galaxy from your home screen or desktop.</p></div></div>
           <div class="gx-aa-step__body"><InstallApp :url="url" :update-available="appUpdateAvailable" />
             <p v-if="availableAppVersion && !ios">Android offline app version: <strong>{{ availableAppVersion }}</strong><span v-if="installedAppVersion"> · {{ nativeVersion ? 'Installed' : 'Connected phone' }}: {{ installedAppVersion }}</span></p>
-            <p v-if="!ios"><strong>Download Android APK</strong> to use Galaxy over Galaxy Wi-Fi or your local network without Internet. Download it while connected locally from this page.</p>
+            <p v-if="!ios"><strong>Android users:</strong> join the Android beta on Google Groups to get the app for use over Galaxy Wi-Fi or your local network without Internet.</p>
             <LocalAccess v-if="!ios" :mode="mode" :on-unauthorized="unauthorized" />
             <p class="gx-note">Your remote link needs Internet and an active tunnel. For offline local access, bookmark your hotspot or local address.</p>
           </div>
