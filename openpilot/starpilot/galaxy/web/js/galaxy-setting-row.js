@@ -13,7 +13,7 @@ export const switchRow = (label, enabled, reason = "") => ({
 
 export function numericBounds(row) {
   const min = Number(row.minimum), max = Number(row.maximum), step = Number(row.step)
-  return Number.isFinite(min) && Number.isFinite(max) && Number.isFinite(step) && max > min && step > 0
+  return Number.isFinite(min) && Number.isFinite(max) && Number.isFinite(step) && max >= min && step > 0
     ? { min, max, step } : null
 }
 
@@ -78,7 +78,7 @@ export const GalaxySettingRow = {
     showDefault() {
       const value = this.presentedRow.value, initial = this.presentedRow.defaultValue
       if (initial === null || initial === undefined || this.row.page) return false
-      return Number.isFinite(Number(value)) && Number.isFinite(Number(initial)) ? Number(value) !== Number(initial) : String(value) !== String(initial)
+      return Number.isFinite(Number(value)) && Number.isFinite(Number(initial)) ? Math.abs(Number(value) - Number(initial)) > (["in", "ft"].includes(this.presentedRow.unit) ? 0.000501 : 1e-9) : String(value) !== String(initial)
     },
     bounds() {
       const bounds = numericBounds(this.presentedRow)
@@ -151,7 +151,7 @@ export const GalaxySettingRow = {
     onSliderInput(event) {
       if (this.locked || this.fineScrub?.active) { event.target.value = this.sliderValue; return }
       this.beginInteract()
-      this.preview = Number(event.target.value)
+      this.preview = snapNumeric(event.target.value, this.bounds)
       this.startHoldTimer()
     },
     onSliderCommit(event) {
@@ -302,9 +302,15 @@ export const GalaxyRangeSettingRow = {
       const endpointBounds = numericBounds(this.endpointRow)
       let value = snapNumeric(raw, endpointBounds)
       if (value === null) return null
-      const gap = this.row.paired.strict ? endpointBounds.step : 0
-      return this.endpoint === "min" ? Math.min(value, Number(this.row.value) - gap)
-        : Math.max(value, Number(this.row.paired.lower.value) + gap)
+      const peer = Number(this.endpoint === "min" ? this.row.value : this.row.paired.lower.value)
+      const gap = this.row.paired.strict ? 1e-7 : 0
+      const { min, max, step } = endpointBounds
+      // Round toward the allowed side of the peer, even when a unit conversion is off-grid.
+      const edge = this.endpoint === "min"
+        ? min + Math.floor((peer - gap - min) / step + 1e-9) * step
+        : min + Math.ceil((peer + gap - min) / step - 1e-9) * step
+      if (edge < min && this.endpoint === "min" || edge > max && this.endpoint === "max") return null
+      return snapNumeric(this.endpoint === "min" ? Math.min(value, edge) : Math.max(value, edge), endpointBounds)
     },
     onSliderInput(event) {
       GalaxySettingRow.methods.onSliderInput.call(this, event)

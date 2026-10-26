@@ -49,9 +49,16 @@ assert.equal(commits.length, 2)
 assert.equal(pairedSettingRows(entries("response", false))[0].row.paired, null)
 const radius = control(pairedSettingRows(entries("radius", false))[0]).vm
 radius.selectEndpoint("min")
-assert.equal(radius.boundedValue(.9), .35 - .01)
+assert.equal(radius.boundedValue(.9), .34)
 radius.selectEndpoint("max")
-assert.equal(radius.boundedValue(0), .1 + .01)
+assert.equal(radius.boundedValue(0), .11)
+// A converted, off-grid peer must keep both strict endpoints on the allowed grid.
+radius.row.value = ".355"
+radius.row.paired.lower.value = ".105"
+radius.selectEndpoint("min")
+assert.equal(radius.boundedValue(.9), .35)
+radius.selectEndpoint("max")
+assert.equal(radius.boundedValue(0), .11)
 radius.row.available = false
 assert.equal(radius.dimmed, true)
 

@@ -1117,7 +1117,7 @@ class SettingsGatewayTest(unittest.TestCase):
     _, root = self._live_lane_context()
     for key, value, expected in (("LaneCentering", "On", b"1"),
                                  ("LaneCenteringPauseOnSignal", "Off", b"0"),
-                                 ("LaneCenterOffset", 0.15, b"0.15"),
+                                 ("LaneCenterOffset", 0.25, b"0.00635"),
                                  ("LaneCenteringE2EAuthority", 75, b"0.75"),
                                  ("LaneCenteringStrength", 105, b"1.575")):
       with self.subTest(key=key):

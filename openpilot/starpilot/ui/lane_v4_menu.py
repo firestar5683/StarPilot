@@ -1,5 +1,6 @@
 """Galaxy-only presentation; the native lane page keeps its existing five rows."""
 from dataclasses import replace
+import math
 from openpilot.starpilot.lateral.lane_tuning import NUMBERS, PREFIX, PAIRS, DEFAULTS, GEOMETRY_KEYS, STOCK_CORRECTION, BEND_KEYS, ADAPTATION
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow
 
@@ -16,7 +17,88 @@ SECTIONS = {
 PAGES = tuple(SECTIONS)
 SPECS = {PREFIX + row[0]: row for row in NUMBERS.values()}
 E2E_MAX = "LaneCenteringE2EAuthority"
-CHECK_KEYS = SPECS.keys() | {E2E_MAX}
+OFFSET = "LaneCenterOffset"
+CHECK_KEYS = SPECS.keys() | {E2E_MAX, OFFSET}
+# Display grids stay within the controller's SI bounds. Unit changes never write a tune.
+IMPERIAL = {
+  "MinSpeed": (1 / .44704, "mph", 0, 45, 1),
+  "CarWidth": (1 / .0254, "in", 40, 118, 1),
+  "MaxWidth": (1 / .3048, "ft", 7, 32, .5),
+  "HighStd": (1 / .3048, "ft", 0, 9.5, .25),
+  "LowStd": (1 / .3048, "ft", 0, 9.5, .25),
+  "EdgeStd": (1 / .3048, "ft", 0, 9.5, .25),
+  "Clearance": (1 / .0254, "in", 0, 39, .5),
+  "SingleClearance": (1 / .0254, "in", 0, 39, .5),
+  "SmoothingDistance": (1 / .0254, "in", 0, 19.5, .5),
+  "SingleDeadband": (1 / .0254, "in", 0, 5.75, .25),
+  "OverrideStart": (1 / .0254, "in", 0, 39, .5),
+  "OverrideFull": (1 / .0254, "in", 0, 39, .5),
+  "CurveFullRadius": (1 / .3048, "ft", 100, 3250, 50),
+  "CurveStartRadius": (1 / .3048, "ft", 350, 9800, 50),
+}
+DISTANCE_KEYS = {key for key, spec in SPECS.items() if spec[5] in ("m", "cm", "speed")} | {OFFSET}
+
+
+def display_grid(key, metric):
+  if key == OFFSET:
+    return (100, "cm", -30, 30, 1) if metric else (1 / .0254, "in", -11.5, 11.5, .25)
+  if key == E2E_MAX:
+    return 100, "%", 0, 100, 5
+  spec = SPECS[key]
+  if not metric and spec[0] in IMPERIAL:
+    return IMPERIAL[spec[0]]
+  if spec[5] == "speed":
+    return 3.6, "km/h", 0, 70, 1
+  scale = 100 / STOCK_CORRECTION if spec[5] == "% of stock" else 100 if spec[5] in ("%", "cm") else 1
+  return scale, spec[5], spec[2] * scale, spec[3] * scale, spec[4] * scale
+
+
+def unit_help(text, unit):
+  if unit in ("in", "ft"):
+    name = "inches" if unit == "in" else "feet"
+    return text.replace("centimetres", name).replace("metres", name)
+  return text
+
+
+def present(owner, row, metric):
+  """Clamp edit ranges to peer settings on a clean display grid, never the saved value."""
+  key = row.key
+  scale, unit, origin, end, step = display_grid(key, metric)
+  low, high = origin, end
+  try:
+    if key in PAIRS or key in LIMIT_PAIRS:
+      peer_key, lower = (PAIRS[key], key.endswith("MinConfidence")) if key in PAIRS else LIMIT_PAIRS[key]
+      peer = float(owner._value(peer_key)[0]) * scale
+      strict = "Radius" in key or "Override" in key
+      if lower:
+        high = min(high, peer - (1e-7 if strict else 0))
+      else:
+        low = max(low, peer + (1e-7 if strict else 0))
+    if key in GEOMETRY_KEYS:
+      width, clearance, maximum = (float(owner._value(PREFIX + k)[0]) for k in ("CarWidth", "Clearance", "MaxWidth"))
+      if key.endswith("MaxWidth"):
+        low = max(low, (width + 2 * clearance) * scale + 1e-7)
+      else:
+        high = min(high, ((maximum - width) / 2 if key.endswith("Clearance") else maximum - 2 * clearance) * scale - 1e-7)
+    low = round(origin + math.ceil((low - origin) / step - 1e-9) * step, 8)
+    high = round(origin + math.floor((high - origin) / step + 1e-9) * step, 8)
+    valid = math.isfinite(low) and math.isfinite(high) and low <= high
+  except (ValueError, TypeError, OverflowError):
+    valid = False
+  value = owner._value(key)[0]
+  try:
+    value = str(round(float(value) * scale, 3)) if row.step else row.value
+    default = str(float(owner._default(key)) * scale)
+    # Reset must not cross a peer, and must restore the exact SI default (not a rounded display step).
+    if not valid or not low <= float(default) <= high:
+      default = None
+  except (ValueError, TypeError):
+    default = None
+  return replace(row, value=value, minimum=low if valid else origin, maximum=high if valid else end,
+                 step=step if row.step else 0, unit=unit, display_unit=unit,
+                 available=row.available and valid, default_value=default,
+                 dependencies=dependencies(owner, key), reason=unit_help(row.reason, unit))
+
 LIMIT_PAIRS = {PREFIX + "ResponseMin": (PREFIX + "ResponseTime", True),
                PREFIX + "ResponseTime": (PREFIX + "ResponseMin", False),
                PREFIX + "E2EMin": (E2E_MAX, True), E2E_MAX: (PREFIX + "E2EMin", False),
@@ -28,7 +110,7 @@ CURVE_HELP = "Allows the correction response time and model path preference to c
 
 def dependencies(owner, key):
   names = ([name for name in GEOMETRY_KEYS if name != key] if key in GEOMETRY_KEYS else
-           [PAIRS[key]] if key in PAIRS else []) + (["IsMetric"] if key == PREFIX + "MinSpeed" else [])
+           [PAIRS[key]] if key in PAIRS else []) + (["IsMetric"] if key in DISTANCE_KEYS else [])
   if key in LIMIT_PAIRS:
     names.append(LIMIT_PAIRS[key][0])
   if key in BEND_KEYS or key in (PREFIX + "ResponseTime", E2E_MAX):
@@ -39,21 +121,20 @@ def stored_number(request):
   value = float(request.value)
   if request.key == E2E_MAX:
     return value / 100
+  if request.key in DISTANCE_KEYS:
+    scales = {"mph": .44704, "km/h": 1 / 3.6, "cm": .01, "m": 1, "in": .0254, "ft": .3048}
+    return value * scales[request.display_unit]
   spec = SPECS[request.key]
-  if spec[5] == "speed":
-    if request.display_unit not in ("mph", "km/h"):
-      raise ValueError("Speed units changed")
-    return value * (.44704 if request.display_unit == "mph" else 1 / 3.6)
   if spec[5] == "% of stock":
     return value * STOCK_CORRECTION / 100
-  return value / 100 if spec[5] in ("%", "cm") else value
+  return value / 100 if spec[5] == "%" else value
 
 def edit_error(owner, request):
   import math
   try:
     value = stored_number(request)
     spec = SPECS.get(request.key)
-    low, high = (spec[2], spec[3]) if spec else (0., 1.)
+    low, high = (spec[2], spec[3]) if spec else (-.3, .3) if request.key == OFFSET else (0., 1.)
     if not math.isfinite(value) or not low <= value <= high:
       return "Value outside setting range"
     if request.dependencies != dependencies(owner, request.key):
@@ -70,10 +151,10 @@ def edit_error(owner, request):
                 "Minimum corner radius must be below Maximum corner radius" if strict else
                 "Minimum correction response time cannot exceed Maximum correction response time" if "Response" in request.key else
                 "Minimum model path preference cannot exceed Maximum model path preference")
-    if request.key == PREFIX + "MinSpeed":
-      expected_unit = "km/h" if owner._value("IsMetric")[0] == "1" else "mph"
+    if request.key in DISTANCE_KEYS:
+      expected_unit = display_grid(request.key, owner._value("IsMetric")[0] == "1")[1]
       if request.display_unit != expected_unit:
-        return "Speed units changed; refresh settings"
+        return "Units changed; refresh settings"
     if request.key in GEOMETRY_KEYS:
       geometry = {key: value if key == request.key else float(owner._value(key)[0]) for key in GEOMETRY_KEYS}
       if (not all(math.isfinite(v) for v in geometry.values()) or
@@ -85,7 +166,7 @@ def edit_error(owner, request):
       if not math.isfinite(peer) or lower > upper:
         return "Minimum confidence for Lower-confidence lane lines cannot exceed Minimum confidence for Higher-confidence lane lines"
     return ""
-  except (ValueError, TypeError, OSError):
+  except (ValueError, TypeError, KeyError, OSError):
     return "Invalid lane setting or related saved value"
 
 RANGE_PAIRS = {
@@ -111,7 +192,7 @@ def range_descriptor(row):
     return None
   group, end, label = pair
   enabled = dict(row.dependencies).get(ADAPTATION) in (None, b"1")
-  return dict(group=group, end=end, label=label, help=RANGE_HELP[group], enabled=enabled)
+  return dict(group=group, end=end, label=label, help=unit_help(RANGE_HELP[group], row.unit), enabled=enabled)
 
 
 def menu(owner, page, rows, allowed, metric):
@@ -139,15 +220,12 @@ def menu(owner, page, rows, allowed, metric):
   for key, spec in SPECS.items():
     if spec[8] != group:
       continue
-    unit = spec[5]
-    scale = 100 / STOCK_CORRECTION if unit == "% of stock" else 100 if unit in ("%", "cm") else (3.6 if metric else 1 / .44704) if unit == "speed" else 1
-    unit = ("km/h" if metric else "mph") if unit == "speed" else unit
-    row = owner._number_row(key, spec[6], allowed and (adaptive or key not in BEND_KEYS), scale=scale, unit=unit)
-    rows.append(replace(row, reason=spec[7] + (" Turn on Curve adaptation to edit." if key in BEND_KEYS and not adaptive else "") if allowed else row.reason,
-                        step=1 if spec[5] == "speed" and row.step else row.step,
-                        maximum=round(row.maximum, 5) if spec[5] == "speed" else row.maximum,
-                        default_value=str(spec[1] * scale), display_unit=unit,
-                        dependencies=dependencies(owner, key)))
+    row = owner._number_row(key, spec[6], allowed and (adaptive or key not in BEND_KEYS))
+    reason = spec[7]
+    if not metric and key == PREFIX + "LookaheadTime":
+      reason = reason.replace("8-35 metres", "approximately 26-115 feet")
+    row = replace(row, reason=reason + (" Turn on Curve adaptation to edit." if key in BEND_KEYS and not adaptive else "") if allowed else row.reason)
+    rows.append(present(owner, row, metric))
   # Keep each minimum immediately beside its ordinary maximum.
   for lower, upper in ((PREFIX + "ResponseMin", PREFIX + "ResponseTime"), (PREFIX + "E2EMin", E2E_MAX)):
     child = next((row for row in rows if row.key == lower), None)

@@ -1117,7 +1117,7 @@ class FeatureSettingsOwner:
                    replace(self._bool_row("LaneCenteringPauseOnSignal", "Pause on signal", allowed and lane_enabled == "1"),
                            default_reset_available=allowed and parked and self._value("LaneCenteringPauseOnSignal")[2] and
                            self._value("LaneCenteringPauseOnSignal")[0] in ("0", "1")),
-                   self._number_row("LaneCenterOffset", "Lane offset", allowed),
+                   lane_v4_menu.present(self, self._number_row("LaneCenterOffset", "Lane offset", allowed), metric),
                    replace(self._number_row("LaneCenteringE2EAuthority", "Model path preference", allowed, scale=100, unit="%"),
                            dependencies=lane_v4_menu.dependencies(self, "LaneCenteringE2EAuthority"),
                             reason="Higher values let a confident model path reduce lane-centering correction when it differs from the lane center")))
@@ -1129,6 +1129,7 @@ class FeatureSettingsOwner:
                           minimum=33, maximum=round(STRENGTH_MAX / STRENGTH_BASELINE * 100), step=1 if strength_row.step > 0 else 0,
                           reason="100% is normal; lower values reduce centering and higher values strengthen it" if strength_supported else
                           "Not available with this vehicle configuration"))
+      rows = [lane_v4_menu.present(self, row, metric) if row.key == lane_v4_menu.E2E_MAX else row for row in rows]
       if lane_v4:
         title, rows = lane_v4_menu.menu(self, page, rows, allowed, metric)
     elif page == FeaturePage.LANE_CHANGE:
@@ -1580,7 +1581,7 @@ class FeatureSettingsOwner:
           return False
         if key == "ForceStopDistanceOffset" and not number.is_integer():
           return False
-        encoded = str(int(number)) if key == "ForceStopDistanceOffset" else str(round(number, 8 if key == "LaneCenteringV4MaxCorrection" else 4))
+        encoded = str(int(number)) if key == "ForceStopDistanceOffset" else str(round(number, 8 if key in lane_v4_menu.CHECK_KEYS else 4))
       elif key == SLC_FALLBACK:
         current, _, valid = self._value(key)
         if not valid or current not in ("0", "1", "2") or request.value not in ("On", "Off"):
@@ -1664,7 +1665,7 @@ class FeatureSettingsOwner:
         result = commit_exact(self.params, key=source_key, max_bytes=8, raw=encoded.encode(),
                               expected=request.expected, authorized=authorized_aol, temp_prefix=".aol-on-")
         return result.committed and result.verified
-      if key in LANE_V4_KEYS or key == lane_v4_menu.E2E_MAX:
+      if key in LANE_V4_KEYS or key in lane_v4_menu.CHECK_KEYS:
         def authorized_lane_v4():
           return (self.authority(group) and self.vehicle_fingerprint() == request.vehicle_fingerprint and
                   all(self._readable(name) and self._raw(name) == raw for name, raw in request.dependencies) and

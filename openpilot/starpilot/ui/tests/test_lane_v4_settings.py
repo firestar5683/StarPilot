@@ -13,6 +13,7 @@ from openpilot.starpilot.lateral.lane_centering import LaneCenteringSettings
 @pytest.fixture
 def f():
   v=fixtures.SettingsGatewayTest();v.setUp()
+  v.params.put_bool("IsMetric",True,block=True)
   yield v
   v.doCleanups()
 
@@ -74,7 +75,7 @@ def test_contradictory_edits_rejected_with_explanation(f,page,label,value,messag
   elif label == 'Maximum lane width':
     edit(f,page,'Two-boundary minimum clearance',35)
   before = read_settings(f.params)
-  with pytest.raises(SettingsChanged,match=message):edit(f,page,label,value)
+  with pytest.raises(SettingsChanged,match='outside setting range'):edit(f,page,label,value)
   assert read_settings(f.params)==before
 
 def test_independent_uncertainty_and_clearance_allowed(f):
@@ -99,6 +100,7 @@ def test_malformed_stored_settings_disable(f,key,value):
 
 def test_vehicle_and_unit_change_reject_stale_intent(f):
   for change in ('vehicle','units'):
+    f.params.put_bool('IsMetric',False,block=True)
     p=f.page('lane/activation');i=next(i for i,r in enumerate(p['rows']) if r['label']=='Minimum speed')
     intent=f.gateway.preview(p['view'],i,0,f.session,f.generation,value=20)
     if change=='vehicle':f.context.value=replace(f.context.value,cp_raw=b'changed')
@@ -176,13 +178,14 @@ def test_override_pair_independent_of_curve_toggle_and_order(f,adaptation):
   assert [r['label'] for r in rows[:4]]==['Lane Centering Strength','Maximum correction','Deadband','Lookahead time']
   pair=[r for r in rows if (r.get('rangePair') or {}).get('group')=='override']
   assert len(pair)==2 and all(r['available'] and r['rangePair']['enabled'] for r in pair)
-  assert all(r['step']==1 and r['minimum']==0 and r['maximum']==100 and r['unit']=='cm' for r in pair)
+  assert all(r['step']==1 and r['unit']=='cm' for r in pair)
+  assert [(r['minimum'],r['maximum']) for r in pair]==[(0,49),(16,100)]
   assert [float(r['value']) for r in pair]==[15.,50.]
   edit(f,'lane/preferences','Start model override',20)
   edit(f,'lane/preferences','Full model override',60)
   settings=read_settings(f.params);assert (settings.override_start,settings.override_full)==(.2,.6)
   for label,value in [('Start model override',60),('Full model override',20)]:
-    with pytest.raises(SettingsChanged,match='must be below'):edit(f,'lane/preferences',label,value)
+    with pytest.raises(SettingsChanged,match='outside setting range'):edit(f,'lane/preferences',label,value)
     assert read_settings(f.params)==settings
   edit(f,'lane/preferences','Start model override',reset=True)
   edit(f,'lane/preferences','Full model override',reset=True)
@@ -215,3 +218,75 @@ def test_invalid_saved_new_tuning_disables(f,key,value):
   f.params.put_bool('LaneCentering',True,block=True)
   Path(f.params.get_param_path(PREFIX+key)).write_bytes(value)
   assert not read_settings(f.params).enabled
+
+
+@pytest.mark.parametrize("metric", [False, True])
+def test_all_display_grids_and_units_do_not_write_tune(f, metric):
+  before = read_settings(f.params)
+  f.params.put_bool("IsMetric", metric, block=True)
+  all_rows = []
+  for page in ("lane", *lane_v4_menu.PAGES):
+    all_rows.extend(r for r in f.gateway._state(page, f.context.value).rows if r.key in lane_v4_menu.CHECK_KEYS)
+  assert read_settings(f.params) == before
+  for row in all_rows:
+    assert row.minimum <= row.maximum
+    assert row.step > 0
+    if row.key in lane_v4_menu.DISTANCE_KEYS:
+      assert row.unit in (("cm", "m", "km/h") if metric else ("in", "ft", "mph"))
+      assert "IsMetric" in dict(row.dependencies)
+    # The displayed endpoints are a deliberate clean grid, not converted SI decimals.
+    assert abs((row.maximum-row.minimum)/row.step-round((row.maximum-row.minimum)/row.step)) < 1e-6
+    for val in (row.minimum, row.maximum):
+      from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsRequest
+      req=FeatureSettingsRequest(row.key,row.source,str(val),dependencies=row.dependencies,display_unit=row.display_unit)
+      assert not lane_v4_menu.edit_error(f.gateway._owner(f.context.value),req), (row.key,val)
+
+
+@pytest.mark.parametrize("page,label,value,key,expected", [
+ ("lane", "Lane offset", -.25, "LaneCenterOffset", -.00635),
+ ("lane/activation/geometry", "Car body width", 73, PREFIX+"CarWidth", 1.8542),
+ ("lane/activation/geometry", "Maximum lane width", 16, PREFIX+"MaxWidth", 4.8768),
+ ("lane/activation/geometry", "Single-boundary minimum clearance", 18, PREFIX+"SingleClearance", .4572),
+ ("lane/preferences", "Deadband", .75, PREFIX+"SingleDeadband", .01905),
+ ("lane/activation/acceptance", "Road edge maximum position uncertainty", 3.25, PREFIX+"EdgeStd", .9906),
+ ("lane/preferences/curves", "Maximum corner radius", 5000, PREFIX+"CurveStartRadius", 1524),
+])
+def test_imperial_edit_exact_storage_and_default(f,page,label,value,key,expected):
+  f.params.put_bool("IsMetric",False,block=True)
+  edit(f,page,label,value)
+  assert float(f.params.get(key)) == pytest.approx(expected,abs=1e-8)
+  edit(f,page,label,reset=True)
+  assert float(f.params.get(key)) == pytest.approx(float(f.params.get_default_value(key)),abs=1e-8)
+
+
+def test_zero_confidence_and_equal_non_strict_endpoints(f):
+  edit(f,"lane/activation/acceptance/lower_confidence","Minimum confidence",0)
+  edit(f,"lane/activation/acceptance/higher_confidence","Minimum confidence",0)
+  row=next(r for r in f.page("lane/activation/acceptance/lower_confidence")["rows"] if r["label"]=="Minimum confidence")
+  assert row["minimum"]==row["maximum"]==0
+  edit(f,"lane/preferences/smoothing","Minimum correction response time",.35)
+  row=next(r for r in f.page("lane/preferences/smoothing")["rows"] if r["label"]=="Maximum correction response time")
+  assert row["minimum"]==.35
+
+
+def test_distance_unit_change_rejects_pending_edit(f):
+  p=f.page("lane");i=next(i for i,r in enumerate(p["rows"]) if r["label"]=="Lane offset")
+  intent=f.gateway.preview(p["view"],i,0,f.session,f.generation,value=3)
+  f.params.put_bool("IsMetric",False,block=True)
+  assert not f.gateway.confirm(intent["intent"],f.session,f.generation)
+  assert f.params.get("LaneCenterOffset") is None
+
+
+def test_invalid_peer_reset_unavailable_and_uncertainty_independent(f):
+  edit(f,"lane/activation/acceptance/higher_confidence","Minimum confidence",50)
+  edit(f,"lane/activation/acceptance/lower_confidence","Minimum confidence",40)
+  row=next(r for r in f.page("lane/activation/acceptance/higher_confidence")["rows"] if r["label"]=="Minimum confidence")
+  assert not row["resetAvailable"]
+  edit(f,"lane/activation/acceptance/lower_confidence","Maximum position uncertainty",2.5)
+  assert read_settings(f.params).low_std==2.5
+
+
+def test_imperial_lookahead_help(f):
+  f.params.put_bool("IsMetric",False,block=True)
+  row=next(r for r in f.page("lane/preferences")["rows"] if r["label"]=="Lookahead time")
+  assert "26-115 feet" in row["reason"] and "metres" not in row["reason"]

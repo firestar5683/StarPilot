@@ -3,6 +3,8 @@ import pytest
 from openpilot.starpilot.ui.tests.test_lane_v4_settings import f,edit
 from openpilot.starpilot.lateral.lane_runtime import read_settings
 from openpilot.starpilot.galaxy.settings import SettingsChanged
+from openpilot.starpilot.ui import lane_v4_menu
+from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsRequest
 
 def test_root_order_and_disabled_children(f):
   root=f.page('lane')
@@ -32,11 +34,14 @@ def test_split_clearance_and_persistence(f):
 def test_invalid_pairs_explained(f,page,label,value,message):
   if label == 'Minimum corner radius':
     edit(f,page,'Maximum corner radius',1000)
-  with pytest.raises(SettingsChanged,match=message):edit(f,page,label,value)
+  row=next(r for r in f.gateway._state(page,f.context.value).rows if r.label==label)
+  request=FeatureSettingsRequest(row.key,row.source,str(value),dependencies=row.dependencies,display_unit=row.display_unit)
+  assert message in lane_v4_menu.edit_error(f.gateway._owner(f.context.value),request)
+  with pytest.raises(SettingsChanged,match='outside setting range'):edit(f,page,label,value)
 
 def test_e2e_minmax_and_stale_toggle(f):
   edit(f,'lane/preferences','Minimum model path preference',50)
-  with pytest.raises(SettingsChanged,match='cannot exceed'):edit(f,'lane/preferences','Maximum model path preference',25)
+  with pytest.raises(SettingsChanged,match='outside setting range'):edit(f,'lane/preferences','Maximum model path preference',25)
   page=f.page('lane/preferences/smoothing');i=next(i for i,r in enumerate(page['rows']) if r['label']=='Minimum correction response time')
   intent=f.gateway.preview(page['view'],i,0,f.session,f.generation,value=.25)
   f.params.put_bool('LaneCenteringV4CurveAdaptation',False,block=True)
