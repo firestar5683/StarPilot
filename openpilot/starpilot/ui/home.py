@@ -151,6 +151,8 @@ class HomeView:
       rl.draw_circle(71 + index * 37, 209, 13, color)
     network_labels = {"none": "--", "wifi": "Wi-Fi", "ethernet": "ETH", "cell2G": "2G", "cell3G": "3G", "cell4G": "LTE", "cell5G": "5G"}
     self._text(network_labels.get(state.network, "Unknown"), FontRole.NORMAL, 35, 58, 247)
+    if state.jetlink in JETLINK_COLORS:
+      draw_jetlink(rl.Rectangle(123, 290, 40, 42), state.jetlink)
     temperature = "--"
     if state.temperature_c is not None:
       temperature = f"{state.temperature_c:.0f}°C" if state.metric else f"{state.temperature_c * 1.8 + 32:.0f}°F"

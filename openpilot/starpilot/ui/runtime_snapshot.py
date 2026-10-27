@@ -731,11 +731,11 @@ class RuntimeSnapshotAdapter:
     jetlink = "connected" if jetlink_port == "connected" else "plugged" if jetlink_port == "device" else "off"
     gpu_present = bool((device is not None and getattr(device, "chestnutPresent", False) and
                         not getattr(ui, "usb_unknown", False)) or
-                       (jetlink_status.state in ("connected", "connecting", "ready", "active")))
+                       (jetlink_status.state in ("detected", "connected", "connecting", "preparing", "prepared", "waiting", "reconnecting", "ready", "active")))
     gpu_active = bool(gpu_present and getattr(getattr(ui, "chestnut_state", None), "value", None) == "active")
     home = HomeState(version=DISPLAY_VERSION, commit=_text(params, "GitCommit"),
                      commit_date=_commit_date(_text(params, "GitCommitDate")),
-                     model_label="Jetlink Model" if jetlink_status.state in ("ready", "active") else "",
+                     model_label="Jetlink Model" if jetlink_status.state in ("ready", "prepared", "waiting", "active") else "",
                      description=home_description(_text(params, "UpdaterCurrentDescription")),
                      mode=(HomeMode.CONDITIONAL_EXPERIMENTAL if self._conditional_choice is ModeChoice.CEM else
                            HomeMode.CONDITIONAL_CHILL if self._conditional_choice is ModeChoice.CCM else

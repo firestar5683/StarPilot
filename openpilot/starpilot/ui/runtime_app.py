@@ -901,10 +901,15 @@ class StarShellSession:
     try:
       if self.model_source is None:
         self.model_source = ModelStatusSource(self.adapter.ui_state.params)
-      return model_page(self.model_source.snapshot(), self.model_manager_snapshot())
+      status = self.model_source.snapshot()
     except Exception:
       # Model status is optional diagnostics; UI remains usable without IPC.
-      return model_page(project_status(None, None, None, None, time.monotonic_ns()))
+      status = project_status(None, None, None, None, time.monotonic_ns())
+    try:
+      manager = self.model_manager_snapshot()
+    except (OSError, RuntimeError, ValueError):
+      manager = None
+    return model_page(status, manager)
 
   def _model_manager(self):
     if getattr(self, 'model_manager', None) is None:

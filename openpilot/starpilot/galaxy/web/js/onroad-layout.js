@@ -1081,6 +1081,14 @@ export const OnroadLayoutPage = {
       this.recordChange(before)
       this.state.notice = ""
     },
+    setWidgetHideDisconnected(value) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.hideDisconnectedToggle) return
+      this.finishColorEdit()
+      const before = clone(this.state.draft)
+      this.selectedPosition.hideDisconnected = value === 'On'
+      this.recordChange(before)
+      this.state.notice = ""
+    },
     setWidgetCollapse(value) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.collapseToggle) return
       this.finishColorEdit()

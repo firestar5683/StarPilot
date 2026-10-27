@@ -1076,6 +1076,9 @@ if __name__ == "__main__":
 
 @pytest.mark.parametrize('phase,label,present', [('active', 'Jetlink Model', True),
                                                ('ready', 'Jetlink Model', True), ('connecting', '', True),
+                                               ('prepared', 'Jetlink Model', True), ('waiting', 'Jetlink Model', True),
+                                               ('preparing', '', True), ('reconnecting', '', True),
+                                               ('detected', '', True), ('failed', '', False),
                                                ('disconnected', '', False), ('unavailable', '', False),
                                                ('off', '', False)])
 def test_home_jetlink_model_name_and_gpu_share_existing_feed(phase, label, present):

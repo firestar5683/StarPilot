@@ -172,10 +172,11 @@ export function validDocument(document, metadata) {
       const widget = profile.widgets[id], limits = placementLimits(profile, id, layout)
       const resizable = widget.resizable, box = widget.box, opacity = widget.opacity
       return keysEqual(position, ["x", "y", "enabled", ...(resizable ? ["size"] : []), ...(box ? ["width", "height"] : []),
-        ...(opacity ? ["opacity"] : []), ...(widget.iconSize ? ["display"] : []), ...(widget.backgroundToggle ? ["background"] : []), ...(widget.collapseToggle ? ["collapse"] : [])]) &&
+        ...(opacity ? ["opacity"] : []), ...(widget.iconSize ? ["display"] : []), ...(widget.backgroundToggle ? ["background"] : []), ...(widget.collapseToggle ? ["collapse"] : []), ...(widget.hideDisconnectedToggle ? ["hideDisconnected"] : [])]) &&
         (!widget.iconSize || ["words", "icons"].includes(position.display)) &&
         (!widget.backgroundToggle || typeof position.background === "boolean") &&
         (!widget.collapseToggle || typeof position.collapse === "boolean") &&
+        (!widget.hideDisconnectedToggle || typeof position.hideDisconnected === "boolean") &&
         (!opacity || (Number.isInteger(position.opacity) && position.opacity >= opacity.min && position.opacity <= opacity.max)) &&
         (!resizable || (Number.isInteger(position.size) && position.size >= resizable.min && position.size <= resizable.max)) &&
         (!box || (Number.isInteger(position.width) && position.width >= box.minWidth && position.width <= box.maxWidth &&
@@ -251,6 +252,7 @@ export function validSnapshot(data) {
         !object(widget.opacity) || ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
         widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
         widget.opacity.default > widget.opacity.max)) return false
+      if (widget.hideDisconnectedToggle != null && (widget.kind !== "jetlink_status" || widget.hideDisconnectedToggle !== true)) return false
       if (widget.collapseToggle != null && (!projection || widget.kind !== "now_playing" || widget.collapseToggle !== true)) return false
       if (widget.backgroundToggle != null && (!projection || !["nav_home", "nav_work", "bookmark", "car_exit"].includes(widget.kind) ||
         widget.backgroundToggle !== true || !widget.opacity)) return false

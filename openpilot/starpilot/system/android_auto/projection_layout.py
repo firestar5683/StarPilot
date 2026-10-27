@@ -118,7 +118,8 @@ def layout_metadata_for_viewport(viewport):
                              'width': JETLINK_SIZE[0], 'height': JETLINK_SIZE[1], 'colors': {},
                              'note': 'Shown while Jetlink is on: connection, device and host processing time. Opacity sets the card background.',
                              'opacity': {'min': JETLINK_OPACITY[0], 'max': JETLINK_OPACITY[1], 'default': JETLINK_OPACITY[2]},
-                             'default': {'x': 30, 'y': 650, 'enabled': False, 'opacity': JETLINK_OPACITY[2]}}
+                             'hideDisconnectedToggle': True,
+                             'default': {'x': 30, 'y': 650, 'enabled': False, 'opacity': JETLINK_OPACITY[2], 'hideDisconnected': False}}
   exit_w, exit_h = CAR_EXIT_SIZE
   widgets[CAR_EXIT] = {'label': 'Exit to car', 'kind': CAR_EXIT, 'width': exit_w, 'height': exit_h, 'colors': {},
                        'required': True, 'frontmost': True,
@@ -259,6 +260,10 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
       placement.setdefault('opacity', 100)
     if key in CARD_WIDGETS and type(placement) is dict:
       placement.setdefault('opacity', CARD_WIDGETS[key][2])
+    if key == JETLINK_WIDGET and type(placement) is dict:
+      placement.setdefault('hideDisconnected', False)
+      if type(placement['hideDisconnected']) is not bool:
+        raise ValueError('Invalid hide when disconnected setting')
     if key == NOW_PLAYING_WIDGET and type(placement) is dict:
       placement.setdefault('collapse', False)
     if key == 'driver_monitor' and type(placement) is dict and 'size' not in placement:
@@ -271,6 +276,7 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
               ({'opacity', 'background'} if key in ACTION_WIDGETS else set()) |
               ({'opacity'} if key == 'cruise_limits' or key in CARD_WIDGETS else set()) |
               ({'collapse'} if key == NOW_PLAYING_WIDGET else set()) |
+              ({'hideDisconnected'} if key == JETLINK_WIDGET else set()) |
               ({'width', 'height', 'opacity'} if key == NAV_MAP else set()))
     if type(placement) is not dict or set(placement) != fields or type(placement['enabled']) is not bool:
       raise ValueError('Invalid projection widget')

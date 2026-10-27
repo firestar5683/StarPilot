@@ -226,6 +226,8 @@ export const ONROAD_LAYOUT_TEMPLATE = `
                 </template>
                 <GalaxySettingRow feedback="draft" v-if="selectedWidget.backgroundToggle" :row="switchRow('Show background', selectedPosition.background === true)" :index="0"
                   :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setWidgetBackground(value)" />
+                <GalaxySettingRow feedback="draft" v-if="selectedWidget.hideDisconnectedToggle" :row="switchRow('Hide when disconnected', selectedPosition.hideDisconnected === true)" :index="0"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setWidgetHideDisconnected(value)" />
                 <GalaxySettingRow v-if="selectedWidget.collapseToggle" :row="switchRow('Collapse when paused', selectedPosition.collapse === true)" :index="0"
                   :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setWidgetCollapse(value)" />
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>

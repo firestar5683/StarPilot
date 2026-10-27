@@ -407,10 +407,10 @@ class UIState:
     feed = getattr(self, "jetlink_status_feed", None)
     jetlink = feed.snapshot() if feed is not None and getattr(self, "replay_clock", None) is None and not detected else None
     if jetlink is not None and jetlink.state != "off" and not self.started:
-      self.chestnut_present = jetlink.state not in ("disconnected", "unavailable")
+      self.chestnut_present = jetlink.state not in ("disconnected", "unavailable", "failed")
       self.chestnut_state = (ChestnutState.DISCONNECTED if jetlink.state == "disconnected" else
-                            ChestnutState.FAILED if jetlink.state == "unavailable" else
-                            ChestnutState.READY if jetlink.state in ("ready", "active") else ChestnutState.LOADING)
+                            ChestnutState.FAILED if jetlink.state in ("unavailable", "failed") else
+                            ChestnutState.READY if jetlink.state in ("ready", "prepared", "waiting", "active") else ChestnutState.LOADING)
       return
     if not self.started:
       self.chestnut_present = detected
@@ -425,13 +425,13 @@ class UIState:
     model_fresh = (model_seen and self.sm.valid["modelV2"] and self.sm.alive["modelV2"] and
                    0 < model_stamp <= UIState.display_time_ns(self) <= model_stamp + 250_000_000)
     if jetlink is not None and jetlink.state != "off":
-      self.chestnut_present = jetlink.state not in ("disconnected", "unavailable")
+      self.chestnut_present = jetlink.state not in ("disconnected", "unavailable", "failed")
       if jetlink.state == "active" and model_fresh and self.sm["modelV2"].big:
         self.chestnut_output_seen = True
         self.chestnut_state = ChestnutState.ACTIVE
       elif jetlink.state == "disconnected":
         self.chestnut_state = ChestnutState.DISCONNECTED
-      elif jetlink.state == "unavailable" or self.chestnut_output_seen:
+      elif jetlink.state in ("unavailable", "failed") or self.chestnut_output_seen:
         self.chestnut_state = ChestnutState.FAILED
       else:
         self.chestnut_state = ChestnutState.LOADING

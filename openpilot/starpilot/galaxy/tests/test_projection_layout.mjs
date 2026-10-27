@@ -21,7 +21,7 @@ metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96,
   note: "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
   default: { x: 30, y: 954, enabled: true, opacity: 75, background: false } }
 metadata.widgets.jetlink_status = { label: "Jetlink status", kind: "jetlink_status", width: 420, height: 84, colors: {},
-  opacity: { min: 0, max: 100, default: 85 }, available: true, default: { x: 30, y: 650, enabled: false, opacity: 85 } }
+  opacity: { min: 0, max: 100, default: 85 }, hideDisconnectedToggle: true, available: true, default: { x: 30, y: 650, enabled: false, opacity: 85, hideDisconnected: false } }
 metadata.widgetOrder = [...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "jetlink_status", "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
@@ -274,3 +274,20 @@ assert.deepEqual(orderedSnapshot.document.widgetOrder.large, orderedRaw.document
 assert.deepEqual(projectionPayload({revision: raw.revision, document: orderedSnapshot.document}, orderedSnapshot.metadata).document,
   orderedRaw.document)
 console.log('Projection layers survive editor translation and save payload')
+
+const hideDraft = copy(data.document)
+hideDraft.layouts.large.jetlink_status.hideDisconnected = true
+assert.equal(validDocument(hideDraft, data.metadata), true)
+hideDraft.layouts.large.jetlink_status.hideDisconnected = 'true'
+assert.equal(validDocument(hideDraft, data.metadata), false)
+const hideVm = {
+  editable: true, state: { drag: null, layerDrag: null, draft: copy(data.document), notice: 'old' },
+  selectedWidget: data.metadata.profiles.large.widgets.jetlink_status,
+  finishColorEdit() {}, recordChange(before) { this.before = before },
+}
+hideVm.selectedPosition = hideVm.state.draft.layouts.large.jetlink_status
+OnroadLayoutPage.methods.setWidgetHideDisconnected.call(hideVm, 'On')
+assert.equal(hideVm.selectedPosition.hideDisconnected, true)
+assert.equal(hideVm.before.layouts.large.jetlink_status.hideDisconnected, false)
+OnroadLayoutPage.methods.setWidgetHideDisconnected.call(hideVm, 'Off')
+assert.equal(hideVm.selectedPosition.hideDisconnected, false)
