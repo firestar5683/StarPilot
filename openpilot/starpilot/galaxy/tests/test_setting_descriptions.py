@@ -96,7 +96,7 @@ def test_actual_owner_projections_have_no_uncovered_setting(tmp_path):
     for row in rows:
       if row.key:
         assert purpose(row), (page, row.key)
-        assert _projection(row, page)['reason'].startswith(purpose(row))
+        assert _projection(row)['reason'].startswith(purpose(row))
 
   check(DeveloperSettingsOwner(params, lambda: True).snapshot().rows, 'developer')
 

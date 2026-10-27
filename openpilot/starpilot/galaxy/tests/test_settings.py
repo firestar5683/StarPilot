@@ -17,7 +17,7 @@ from opendbc.car.toyota.interface import CarInterface as ToyotaInterface
 from opendbc.car.toyota.values import CAR as ToyotaCar
 from openpilot.common.params import Params
 from openpilot.starpilot.galaxy.settings import (
-  AuthorityContext, LiveContextSource, SettingsChanged, SettingsGateway,
+  AuthorityContext, LiveContextSource, PAGES, SettingsChanged, SettingsGateway,
 )
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.server import make_server
@@ -247,10 +247,17 @@ class SettingsGatewayTest(unittest.TestCase):
         self.assertFalse(self.params.get_bool("SpeedLimitController"))
 
   def test_all_saved_groups_are_display_only_projection(self):
+    self.context.value = replace(self.context.value,
+                                 cp=ToyotaInterface.get_non_essential_params(ToyotaCar.TOYOTA_COROLLA_TSS2))
     hub = self.page("hub")
+    self.assertTrue(hub["sections"])
+    self.assertTrue(all(section["pages"] and all(page["id"] in PAGES for page in section["pages"])
+                        for section in hub["sections"]))
+    lateral = next(section for section in hub["sections"] if section["id"] == "lateral")
+    self.assertEqual(next(page for page in lateral["pages"] if page["id"] == "aol")["title"], self.page("aol")["title"])
     self.assertEqual([row["page"] for row in hub["rows"]],
                      ["curve", "slc", "lane", "lane_change", "profiles", "conditional", "torque", "aol", "wheel",
-                      "aggressive", "standard", "relaxed", "traffic"])
+                     "vehicle", "aggressive", "standard", "relaxed", "traffic"])
     for page in ("slc", "lane", "lane_change", "profiles", "conditional", "conditional/cem", "conditional/ccm",
                  "curve", "torque", "aol", "appearance", "display", "sounds", "pip", "sentry", "aggressive/following"):
       with self.subTest(page=page):
@@ -258,6 +265,8 @@ class SettingsGatewayTest(unittest.TestCase):
         self.assertTrue(result["rows"])
         for row in result["rows"]:
           self.assertFalse({"source", "related_source", "dependencies", "capability", "vehicle_fingerprint"} & row.keys())
+          if row["page"]:
+            self.assertIsInstance(row["carVisible"], bool)
 
   def test_appearance_confirmation_is_source_and_session_bound_without_cp(self):
     from openpilot.starpilot.ui.appearance_preferences import read_visibility
