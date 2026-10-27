@@ -98,10 +98,12 @@ class ModelsCompact:
     summary = data.get("summary", {})
     cards = [_grey_card("model manager", f"{summary.get('installed', 0)} installed · {summary.get('missing', 0)} missing"),
              _grey_card("model selection", "takes effect at the next start")]
+    cards.extend(_grey_card(row.label.lower(), f"{row.value}. {row.reason}".lower())
+                 for row in state.rows if row.label.startswith("Jetlink"))
     for profile, field in (("small", "activeSmallModel"), ("big", "activeBigModel")):
       mid = data.get(field, "")
       label = next((m.get("label", mid) for m in data["models"] if m["value"] == mid), mid or "none — always use small")
-      cards.append(self._button(f"active {profile}", label, lambda p=profile: self.open("catalog", p),
+      cards.append(self._button("chestnut model" if profile == "big" else "active small", label, lambda p=profile: self.open("catalog", p),
                                 data.get("capabilities", {}).get("select") is True and not data.get("randomizer")))
     cards.append(self._button("model randomizer", "on · choose at each start" if data.get("randomizer") else "off",
                               lambda: self._action(page, "randomizer"), model_action_allowed(data, "randomizer")))
@@ -113,7 +115,8 @@ class ModelsCompact:
                               model_action_allowed(data, "refresh_manifest")))
     if data.get("progress"):
       cards.append(_grey_card("download status", data["progress"].lower()))
-    cards.extend(_grey_card(row.label.lower(), f"{row.value}. {row.reason}".lower()) for row in state.rows)
+    cards.extend(_grey_card(row.label.lower(), f"{row.value}. {row.reason}".lower())
+                 for row in state.rows if not row.label.startswith("Jetlink"))
     return cards
 
   def _catalog(self, page: _ModelsPage, data: dict) -> list:
@@ -183,7 +186,8 @@ class ModelsCompact:
       gui_app.push_widget(BigDialog("action unavailable", "Turn off the vehicle, then refresh the model list and try again."))
       return
     needs_gpu = (action == "download" and model and model.get("requiresGpu") and not model.get("gpuAvailable") or
-                 action == "download_all" and any(not m.get("installed") and m.get("downloadAvailable") and m.get("requiresGpu") and
+                 action == "download_all" and any(not m.get("installed") and m.get("downloadRequired") is not False and
+                                                   m.get("downloadAvailable") and m.get("requiresGpu") and
                                                    not m.get("gpuAvailable") for m in data["models"]))
     if not confirmed and (action == "delete" or needs_gpu):
       question = f"delete {model.get('label', model_id)}?" if action == "delete" and model else "download gpu models? an external gpu is needed to run them"

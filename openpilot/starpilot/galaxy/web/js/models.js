@@ -170,7 +170,7 @@ export function modelActionAllowed(data, action, model = null) {
     return model?.installed === true && model.selectable === true && fitsModelProfile(model, action === "select-big" ? "big" : "small")
   }
   if (action === "download") return !data.downloading && !!model && !model.installed && model.downloadAvailable === true
-  if (action === "downloadAll") return !data.downloading && data.models.some(m => !m.installed && m.downloadAvailable === true)
+  if (action === "downloadAll") return !data.downloading && data.models.some(m => !m.installed && m.downloadRequired !== false && m.downloadAvailable === true)
   if (action === "cancel") return data.downloading === true
   if (action === "delete") return !data.downloading && !!model && !model.builtin && model.deletable !== false &&
     (model.installed || model.partial) && ![data.currentModel, data.activeSmallModel, data.activeBigModel].includes(model.value)
@@ -331,7 +331,7 @@ export const ModelsPage = {
   computed: {
     currentLabel() { return this.models.find(m => m.value === this.currentModel)?.label || this.currentModel || "" },
     runningModelLabel() {
-      if (!this.selectionUncertain && this.status.jetlink?.active) return "Jetlink remote model"
+      if (!this.selectionUncertain && this.status.jetlink?.active) return this.status.jetlink.activeModel || "Jetlink remote model"
       if (this.runtime.status === "unavailable" || this.runtime.status === "stale") return "Status unavailable"
       if (this.runtime.status !== "ready" || !this.runtime.data) return "Checking…"
       const model = this.runtime.data
@@ -445,7 +445,7 @@ export const ModelsPage = {
         if (action === "enable-randomizer" && !await this.confirmAction({ title: "Model Randomizer", message: "Choose a different installed, verified model each start. Excluded models are skipped. Favorites do not change the random pool.", confirmLabel: "Enable" })) return
         if (action === "delete" && !await this.confirmAction({ title: "Delete Model", message: `Delete local files for "${model.label}"?`, confirmLabel: "Delete", danger: true })) return
         const needsGpu = action === "download" ? model.requiresGpu && !model.gpuAvailable : action === "downloadAll" &&
-          this.models.some(m => !m.installed && m.requiresGpu && !m.gpuAvailable && m.downloadAvailable === true)
+          this.models.some(m => !m.installed && m.downloadRequired !== false && m.requiresGpu && !m.gpuAvailable && m.downloadAvailable === true)
         if (needsGpu) {
           allowGpuWithoutGpu = await this.confirmAction({ title: "No External GPU Detected", confirmLabel: "Download Anyway",
             message: "These model files require an external GPU. You can download them now, but they cannot run until a compatible GPU is connected and detected. GPU model files can be large. Downloading does not activate a model." })
@@ -491,20 +491,21 @@ export const ModelsPage = {
               <label for="gx-jetlink-mode" class="gx-row__label">Remote model connection</label>
               <GalaxySelect id="gx-jetlink-mode" class="gx-field" :value="pendingChoice?.action === 'jetlink' ? pendingChoice.value : status.jetlink.mode" :disabled="!actionAvailable('jetlink')" @change="configureJetlink($event.target.value)">
                 <option value="off">Off</option>
-                <option value="usb" :disabled="!status.jetlink.supported || status.jetlink.chestnut">USB computer</option>
+                <option value="usb" :disabled="!status.jetlink.supported || status.jetlink.chestnut">USB host (Android / PC / Jetson)</option>
                 <option value="ios" :disabled="!status.jetlink.supported || status.jetlink.chestnut">iPhone / iPad</option>
               </GalaxySelect>
             </div>
-            <p class="gx-note" role="status"><span class="gx-chip">{{ status.jetlink.state }}</span><span v-if="status.jetlink.model && !status.jetlink.active"> · selected: {{ status.jetlink.model }}</span></p>
+            <p class="gx-model-reason">Choose USB host for Android phones and tablets, computers, or Jetson devices. Choose iPhone / iPad for the Jetlink iOS app.</p>
+            <p class="gx-note" role="status"><span class="gx-chip">{{ status.jetlink.state }}</span><span v-if="status.jetlink.active"> · running: {{ status.jetlink.activeModel || 'Remote model' }}</span><span v-else-if="status.jetlink.model"> · selected: {{ status.jetlink.model }} · not in use</span></p>
             <p v-if="status.jetlink.progress">{{ status.jetlink.progress }}</p>
             <p v-if="status.jetlink.reason" class="gx-model-reason">{{ status.jetlink.reason }}</p>
             <p v-if="status.jetlink.chestnut" class="gx-model-reason">Chestnut is connected. Jetlink stays off while Chestnut is fitted.</p>
-            <p class="gx-model-reason">Prepared means the remote model is built, not active. The local Small model remains available. Small and Chestnut catalog selections are unchanged.</p>
+            <p class="gx-model-reason">Jetlink prepares its model remotely. No Chestnut model download is needed for Jetlink. Prepared means ready, while Active means remote output is in use. The local Small model remains available.</p>
             <div v-if="status.jetlink.mode === 'ios'" class="gx-row" :class="{disabled: !actionAvailable('jetlink')}">
-              <span class="gx-row__info gx-row__label">Charge phone over USB</span>
-              <label class="gx-switch"><input type="checkbox" role="switch" aria-label="Charge phone over USB" :checked="status.jetlink.chargePhone === true" :disabled="!actionAvailable('jetlink')" @change="toggleJetlinkCharge($event)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label>
+              <span class="gx-row__info gx-row__label">Charge mobile device over USB</span>
+              <label class="gx-switch"><input type="checkbox" role="switch" aria-label="Charge mobile device over USB" :checked="status.jetlink.chargePhone === true" :disabled="!actionAvailable('jetlink')" @change="toggleJetlinkCharge($event)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label>
             </div>
-            <p class="gx-model-reason">Set up parked with a USB 3 data cable and separate power. Keep the computer awake; keep the iPhone app open and unlocked.</p>
+            <p class="gx-model-reason">Set up parked with a USB 3 data cable and separate power. Keep the host awake and the Jetlink app running. On a mobile device, keep the app open and the device unlocked.</p>
             <div class="gx-actions"><a class="gx-btn gx-btn--tonal" href="https://github.com/StarPilotHQ/StarPilot/blob/SecretGoodStarPilot/openpilot/starpilot/models/JETLINK.md" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Open Jetlink setup guide</a></div>
           </div>
         </section>
@@ -527,7 +528,7 @@ export const ModelsPage = {
               <label class="gx-switch"><input type="checkbox" role="switch" aria-label="Model Randomizer" :checked="status.randomizer === true" :disabled="!actionAvailable(status.randomizer ? 'disable-randomizer' : 'enable-randomizer')" @change="toggleRandomizer($event)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label>
             </div>
             <p v-if="status.randomizer" class="gx-model-reason">A different verified model is chosen each start. {{ status.gpuAvailable && activeBigModel ? 'Big GPU' : 'Small on-device' }} models are used. {{ (status.blacklistedModels || []).length }} excluded. Favorites only mark your preferred models.</p>
-            <p v-if="!status.gpuAvailable" class="gx-model-reason">An external GPU is not detected. Active Small is used; your Big selection is saved for later.</p>
+            <p v-if="!status.gpuAvailable && !status.jetlink?.active" class="gx-model-reason">Chestnut is not detected. The local Small model is available; your Chestnut selection is saved for later.</p>
 
             <div class="gx-model-control">
               <label class="gx-row__label" for="gx-model-small">Active Small · On-device</label>
@@ -537,9 +538,9 @@ export const ModelsPage = {
             </div>
 
             <div class="gx-model-control">
-              <label class="gx-row__label" for="gx-model-big">Active Big · GPU</label>
+              <label class="gx-row__label" for="gx-model-big">Chestnut model · External GPU</label>
               <GalaxySelect id="gx-model-big" class="gx-field" :value="pendingChoice?.action === 'select-big' ? pendingChoice.value : activeBigModel" :disabled="selectionUncertain || capabilities.select !== true || status.isOnroad || status.randomizer" @change="$event.target.value ? runAction('select-big', installedBigModels.find(m => m.value === $event.target.value)) : runAction('select-big')">
-                <option value="">None — always use Active Small</option>
+                <option value="">None — use Small with Chestnut</option>
                 <option v-for="m in installedBigModels" :key="m.value" :value="m.value" :disabled="!m.installed || !m.selectable">{{ m.label || m.value }}</option>
               </GalaxySelect>
             </div>

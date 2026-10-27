@@ -89,6 +89,38 @@ class ModelManagerTest(unittest.TestCase):
     self.manager.worker.join(3)
     self.assertFalse(self.manager.worker.is_alive())
 
+  def test_jetlink_bulk_download_skips_chestnut_but_keeps_explicit_download(self):
+    big_row = next(row for row in self.manifest['models'] if row.get('uses_external_gpu'))
+    for key in ('artifact_format', 'artifact_sha256', 'artifact_size', 'artifact_chunk_count'):
+      big_row[key] = self.row[key]
+    big_id = big_row['id']
+    self.manager.jetlink = SimpleNamespace(snapshot=lambda: {"mode": "ios", "chestnut": False})
+    self.manager.gpu_present = lambda: False
+    self.manager.action('refresh_manifest', {})
+    self.manager.worker.join(3)
+    view = self.manager.snapshot()
+    big = [m for m in view['models'] if m['requiresGpu']]
+    self.assertTrue(big)
+    self.assertTrue(all(not m['downloadRequired'] for m in big))
+    self.assertTrue(all('Jetlink' in m['unavailableReason'] for m in big if not m['installed']))
+    with patch.object(self.manager, '_download') as download, patch.object(self.manager, '_installed', return_value=False):
+      self.manager.action('download_all', {'allowGpuWithoutGpu': True})
+      self.manager.worker.join(3)
+      entries = catalog(self.root)
+      self.assertTrue(all(not entries[call.args[0]].get('uses_external_gpu') for call in download.call_args_list))
+      download.reset_mock()
+      self.manager.action('download', {'model': big_id, 'allowGpuWithoutGpu': True})
+      self.manager.worker.join(3)
+      download.assert_called_once()
+    self.manager.gpu_present = lambda: True
+    self.manager.jetlink = SimpleNamespace(snapshot=lambda: {"mode": "ios", "chestnut": True})
+    view = self.manager.snapshot()
+    self.assertTrue(all(m['downloadRequired'] for m in view['models'] if m['requiresGpu'] and not m['installed']))
+    with patch.object(self.manager, '_download') as download, patch.object(self.manager, '_installed', return_value=False):
+      self.manager.action('download_all', {})
+      self.manager.worker.join(3)
+      self.assertTrue(any(entries[call.args[0]].get('uses_external_gpu') for call in download.call_args_list))
+
   def model_status(self):
     return next(x for x in self.manager.snapshot()['models'] if x['value'] == 'gwm8223')
 

@@ -472,6 +472,8 @@ class ModelManager:
       self._refresh_if_needed()
       entries, prefs = catalog(self.root), preferences(self.root)
       parked, gpu = self.parked(), self.gpu_present()
+      jetlink = self.jetlink_owner().snapshot()
+      remote = jetlink.get("mode") in ("usb", "ios") and not jetlink.get("chestnut") and not gpu
       job = self._job_status()
       models = []
       for mid, row in entries.items():
@@ -485,18 +487,20 @@ class ModelManager:
                        "builtin": mid == DEFAULT_SMALL,
                        "requiresGpu": requires_gpu, "gpuAvailable": gpu or not requires_gpu, "small": not requires_gpu,
                        "selectable": installed, "downloadAvailable": published, "artifactSize": row.get("artifact_size", 0),
+                       "downloadRequired": not installed and not (remote and requires_gpu),
                        "unavailableReason": "" if installed else "Checking artifact" if checking else
+                       "Optional Chestnut download; Jetlink prepares its model remotely" if remote and requires_gpu else
                        "Download required" if published else f"{GENERATION} download not published"})
       count = sum(bool(row["installed"]) for row in models)
       return {"schemaVersion": 1, "models": models, "activeSmallModel": prefs["small"], "activeBigModel": prefs["big"],
               "currentModel": prefs["big"] if gpu and prefs["big"] else prefs["small"], "userFavorites": prefs["userFavorites"],
               "sortMode": prefs["sortMode"], "randomizer": prefs["randomizer"], "blacklistedModels": prefs["blacklistedModels"],
-              "summary": {"total": len(models), "installed": count, "missing": len(models)-count},
+              "summary": {"total": len(models), "installed": count, "missing": sum(bool(m["downloadRequired"]) for m in models)},
               "jobId": job.get("jobId", ""), "cancelRequested": job.get("cancelRequested", False),
               "downloadVariant": job.get("variant", "standard"),
               "modelToDownload": job.get("model", ""), "downloadAll": job.get("downloadAll", False),
               "downloading": job["downloading"], "progress": job.get("progress", ""),
-              "isOnroad": not parked, "gpuAvailable": gpu, "jetlink": self.jetlink_owner().snapshot(),
+              "isOnroad": not parked, "gpuAvailable": gpu, "jetlink": jetlink,
               "capabilities": {"select": parked, "download": parked, "downloadAll": parked, "cancel": True,
                                "jetlink": parked, "refresh": parked, "favorites": True, "delete": parked, "randomizer": parked, "exclusions": parked}}
 
@@ -660,8 +664,12 @@ class ModelManager:
       self._check_cancelled()
       entries = catalog(self.root)
       variant = payload.get("variant", "standard")
+      jetlink = self.jetlink_owner().snapshot()
+      gpu = self.gpu_present()
+      remote = jetlink.get("mode") in ("usb", "ios") and not jetlink.get("chestnut") and not gpu
       ids = [payload["model"]] if action == "download" else [mid for mid, row in entries.items()
-            if "artifact_sha256" in row and (not row.get("uses_external_gpu") or self.gpu_present() or payload.get("allowGpuWithoutGpu"))]
+            if "artifact_sha256" in row and (not row.get("uses_external_gpu") or
+                                            not remote and (gpu or payload.get("allowGpuWithoutGpu")))]
       if action != "refresh_manifest":
         for mid in ids:
           self._check_cancelled()

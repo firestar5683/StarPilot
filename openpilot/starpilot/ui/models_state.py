@@ -41,6 +41,14 @@ def model_page(status: ModelStatus, manager: dict | None = None) -> FeatureSetti
   elif status.fallback_reason == "selected-load-failed":
     rows += (FeatureRow("", "Fallback", "Bundled driving model", reason="Selected model load or run failed"),)
   if manager is not None:
+    link = manager.get("jetlink", {})
+    if link.get("active"):
+      rows = (
+        FeatureRow("", "Runtime", "Jetlink remote model active", reason="Live remote output reported by modeld"),
+        FeatureRow("", "Loaded model", link.get("activeModel") or "Jetlink remote model"),
+        FeatureRow("", "Remote artifact", (link.get("activeArtifactSha256") or "Unavailable")[:16]),
+        FeatureRow("", "Local fallback", entries[status.loaded_id].name if status.loaded_id in entries else "Unavailable"),
+      )
     rows = model_manager_rows(manager) + rows
   return FeatureSettingsState(title="Driving Model", subtitle="Selections apply at next start; runtime shows the loaded model.",
                               rows=rows)
@@ -65,7 +73,8 @@ def model_action_allowed(data: dict, action: str, model: dict | None = None, pro
   if action == "download":
     return not data.get("downloading") and bool(model and not model.get("installed") and model.get("downloadAvailable") is True)
   if action == "download_all":
-    return not data.get("downloading") and any(not m.get("installed") and m.get("downloadAvailable") is True for m in data.get("models", ()))
+    return not data.get("downloading") and any(not m.get("installed") and m.get("downloadRequired") is not False and
+                                              m.get("downloadAvailable") is True for m in data.get("models", ()))
   if action == "cancel":
     return data.get("downloading") is True
   if action == "delete":
@@ -110,12 +119,21 @@ def model_profile_request(data: dict, profile: str, model_id: str) -> dict | Non
 def model_manager_rows(data: dict) -> tuple[FeatureRow, ...]:
   summary = data.get("summary", {})
   rows = [FeatureRow("", "Model catalog", f"{summary.get('installed', 0)} installed / {summary.get('total', 0)} total")]
+  link = data.get("jetlink")
+  if link is not None:
+    rows += [FeatureRow("", "Jetlink setting", {"off": "Off", "usb": "USB host", "ios": "Mobile device (iOS)"}.get(link.get("mode"), "Unavailable")),
+             FeatureRow("", "Jetlink status", link.get("state", "unavailable").capitalize(), reason=link.get("reason", "")),
+             FeatureRow("", "Jetlink usage", "Remote model active" if link.get("active") else "Not in use",
+                        reason=link.get("progress", ""))]
+    if link.get("mode") in ("usb", "ios") and not link.get("chestnut"):
+      rows.append(FeatureRow("", "Jetlink model", link.get("activeModel") or link.get("model") or "Waiting for app",
+                             reason="Prepared remotely; Chestnut model downloads are optional"))
   for profile, field in (("small", "activeSmallModel"), ("big", "activeBigModel")):
     mid = data.get(field, "")
     label = next((m.get("label", mid) for m in data.get("models", ()) if m.get("value") == mid), mid or "None — always use Active Small")
     available = (data.get("capabilities", {}).get("select") is True and data.get("isOnroad") is False and
                  not data.get("downloading") and not data.get("randomizer"))
-    rows.append(FeatureRow("", f"Active {profile.title()}", label, source=mid.encode(), available=available,
+    rows.append(FeatureRow("", "Chestnut model" if profile == "big" else "Active Small", label, source=mid.encode(), available=available,
                            reason="Randomizer selects at the next start" if data.get("randomizer") else
                            "Change for next start" if available else "Turn the vehicle off to change models", page=f"models:{profile}"))
   return tuple(rows)

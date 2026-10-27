@@ -1,6 +1,6 @@
 # JetLink with StarPilot
 
-JetLink runs a driving model on a USB-connected computer or phone. The comma
+JetLink runs a driving model on a USB-connected mobile device, computer, or Jetson. The comma
 runs **StarPilot**. JetLink is experimental; a prepared host model is not proof
 that StarPilot has switched to it. Set up parked, with both devices online.
 
@@ -8,8 +8,8 @@ that StarPilot has switched to it. Set up parked, with both devices online.
 
 1. Install or update **StarPilot**, following the [StarPilot repository instructions](../../../README.md).
    Use a StarPilot release containing JetLink support. Finish installation and restart the comma.
-2. Open **Galaxy → Model Manager → Jetlink**. Choose **USB computer** for a
-   Jetson, Mac, Linux PC, or Android host; choose **iPhone / iPad** for an Apple phone or tablet.
+2. Open **Galaxy → Model Manager → Jetlink**. Choose **USB host** for a
+   Jetson, Mac, Linux PC, or Android host; choose **Mobile device (iOS)** for an Apple phone or tablet.
    **Off** is the default. These selections are separate from Small and Chestnut models.
 3. Use a USB 3 data cable. Power the comma and host separately. Every cable,
    hub, and port in the connection must support USB 3. Chestnut takes precedence
@@ -43,7 +43,7 @@ their comma-side ZoomPilot instructions are replaced by **Set up StarPilot** abo
 Use an Apple silicon Mac with macOS 15 or newer. Get the Jetlink DMG from
 [the upstream releases](https://github.com/zoompilot/jetlink/releases), put the app
 in Applications, and start it. Keep it awake and connect by USB 3.
-Use **USB computer** in StarPilot's Galaxy, rather than following the comma-side
+Use **USB host** in StarPilot's Galaxy, rather than following the comma-side
 ZoomPilot installation instructions in the credited
 [Mac host reference](https://github.com/zoompilot/jetlink/blob/bf4dc94/docs/macos-app.md).
 
@@ -51,7 +51,7 @@ ZoomPilot installation instructions in the credited
 
 Install the upstream [Jetlink TestFlight beta](https://testflight.apple.com/join/DAsYk5sP).
 It requires a USB-C device supporting USB 3 and iOS/iPadOS 26.1 or newer.
-Choose **iPhone / iPad** in StarPilot, allow the host app's Local Network access,
+Choose **Mobile device (iOS)** in StarPilot, allow the host app's Local Network access,
 connect by USB 3, and keep the app open and the device unlocked. Check sustained
 thermal performance with the app's benchmark; that benchmark excludes cable latency.
 The [credited Apple host reference](https://github.com/zoompilot/jetlink/blob/bf4dc94/docs/iphone-app.md)
@@ -62,7 +62,7 @@ contains hardware details. StarPilot supplies the comma-side instructions above.
 Android is experimental and performance is not established. Install the
 upstream Jetlink Android APK from [its releases](https://github.com/zoompilot/jetlink/releases).
 Use a recent USB 3-capable Android 12+ phone, a powered USB 3 hub, and separate
-comma power. Choose **USB computer** in StarPilot. Follow the host's USB permission
+comma power. Choose **USB host** in StarPilot. Follow the host's USB permission
 prompt and benchmark sustained performance before use.
 [Credited Android host reference](https://github.com/zoompilot/jetlink/blob/bf4dc94/docs/android-app.md).
 
@@ -83,7 +83,7 @@ Jetlink is on but cannot run, an offroad alert says why.
 If a connection fails, check separate power, USB 3 support, host sleep, cooling,
 and the chosen StarPilot connection mode. An iPhone must stay unlocked with the
 app foregrounded. Save host and StarPilot logs when reporting an issue; do not
-interpret “prepared” as “active”. Phone charging is a separate Galaxy preference
+interpret “prepared” as “active”. Mobile device charging is a separate Galaxy preference
 and defaults off.
 
 ## Attribution and license

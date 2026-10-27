@@ -74,6 +74,39 @@ class TestJetlinkSettings(unittest.TestCase):
     self.owner.configure({"mode": "ios", "chargePhone": True})
     self.assertEqual(self.params.values, {"JetlinkMode": 2, "JetlinkChargePhone": True})
 
+  def test_unplug_and_chestnut_override_previous_execution(self):
+    self.params.values["JetlinkMode"] = 1
+    self.status = self.status._replace(active=True, running="running", running_sha256="b" * 64, port="empty")
+    view = self.owner.snapshot()
+    self.assertEqual(view["state"], "disconnected")
+    self.assertFalse(view["present"])
+    self.assertFalse(view["active"])
+    self.assertIsNone(view["activeArtifactSha256"])
+    self.chestnut = True
+    self.status = self.status._replace(port="host")
+    view = self.owner.snapshot()
+    self.assertEqual(view["mode"], "usb")
+    self.assertFalse(view["active"])
+    self.assertFalse(view["enabled"])
+    self.assertIn("Chestnut", view["reason"])
+
+  def test_off_does_not_keep_previous_execution(self):
+    self.status = self.status._replace(active=True, running="running")
+    view = self.owner.snapshot()
+    self.assertEqual(view["state"], "off")
+    self.assertFalse(view["active"])
+    self.assertFalse(view["present"])
+
+  def test_status_failure_preserves_the_setting(self):
+    self.params.values["JetlinkMode"] = 2
+    def failed():
+      raise OSError('status unavailable')
+    self.owner._link = lambda: SimpleNamespace(status=failed)
+    view = self.owner.snapshot()
+    self.assertEqual(view["mode"], "ios")
+    self.assertEqual(view["state"], "unavailable")
+    self.assertFalse(view["active"])
+
   def test_manager_parked_guard_and_catalog_preserved(self):
     with tempfile.TemporaryDirectory() as tmp:
       parked = [True]

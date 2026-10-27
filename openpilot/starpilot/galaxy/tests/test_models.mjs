@@ -96,7 +96,7 @@ globalThis.document = priorDocument
 
 assert.match(ModelsPage.template, /offline preview/)
 assert.match(ModelsPage.template, /Active Small/)
-assert.match(ModelsPage.template, /None — always use Active Small/)
+assert.match(ModelsPage.template, /None — use Small with Chestnut/)
 console.log("Model status client lifecycle checks passed")
 
 const expanded = fixture()
@@ -215,7 +215,7 @@ assert.equal(modelActionAllowed({ ...randomPayload, isOnroad: true }, 'favorite'
 assert.equal(modelActionAllowed(randomPayload, 'exclude', pending), true)
 assert.match(ModelsPage.template, /Model Randomizer/)
 assert.match(ModelsPage.template, /Include in Randomizer/)
-assert.match(ModelsPage.template, /An external GPU is not detected/)
+assert.match(ModelsPage.template, /Chestnut is not detected/)
 const randomManagement = managerFixture()
 randomManagement.manager.start()
 await randomManagement.reply(0, randomPayload)
@@ -278,10 +278,15 @@ console.log('Narrow model controls and completed operation feedback checks passe
 
 // Connection settings share the parked/authenticated action path, not catalog selection.
 const jetlinkView = { isOnroad: false, capabilities: { jetlink: true }, jetlink: { mode: "off" } }
+const optionalChestnut = { ...big, installed: false, downloadAvailable: true, downloadRequired: false }
+const remoteDownloads = { ...managerPayload, models: [optionalChestnut] }
+assert.equal(modelActionAllowed(remoteDownloads, 'downloadAll'), false)
+assert.equal(modelActionAllowed(remoteDownloads, 'download', optionalChestnut), true)
+assert.equal(modelActionAllowed({ ...remoteDownloads, models: [{ ...optionalChestnut, downloadRequired: true }] }, 'downloadAll'), true)
 assert.equal(modelActionAllowed(jetlinkView, "jetlink"), true)
 assert.equal(modelActionAllowed({ ...jetlinkView, isOnroad: true }, "jetlink"), false)
 assert.equal(modelActionAllowed({ ...jetlinkView, capabilities: {} }, "jetlink"), false)
-assert.match(ModelsPage.template, /Prepared means the remote model is built, not active/)
+assert.match(ModelsPage.template, /Prepared means ready, while Active means remote output is in use/)
 const linkManagement = managerFixture()
 linkManagement.manager.start()
 await linkManagement.reply(0, { ...managerPayload, ...jetlinkView })

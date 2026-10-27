@@ -18,6 +18,20 @@ from openpilot.starpilot.ui.shell import ShellMode, ShellView
 
 
 class TestModelPage(unittest.TestCase):
+  def test_remote_execution_and_preparation_are_distinct_on_native_pages(self):
+    local = ModelStatus(BUNDLED_CURRENT, BUNDLED_CURRENT, ModelVariant.SMALL, ModelHealth.ACTIVE, False, None, 'a' * 64)
+    link = {'mode': 'ios', 'state': 'prepared', 'model': 'Remote pick', 'active': False, 'progress': 'Ready'}
+    prepared = model_page(local, {'jetlink': link})
+    rows = {row.label: row.value for row in prepared.rows}
+    self.assertEqual(rows['Jetlink setting'], 'Mobile device (iOS)')
+    self.assertEqual(rows['Jetlink usage'], 'Not in use')
+    self.assertEqual(rows['Loaded variant'], 'Small')
+    active = model_page(local, {'jetlink': {**link, 'active': True, 'state': 'active', 'activeModel': 'Remote stand-in'}})
+    rows = {row.label: row.value for row in active.rows}
+    self.assertEqual(rows['Runtime'], 'Jetlink remote model active')
+    self.assertEqual(rows['Loaded model'], 'Remote stand-in')
+    self.assertNotIn('Loaded variant', rows)
+
   def test_runtime_stall_has_truthful_fallback_wording(self):
     status = ModelStatus(BUNDLED_CURRENT, BUNDLED_CURRENT, ModelVariant.SMALL, ModelHealth.ACTIVE,
                          False, 'chestnut-run-stalled', 'a' * 64)
