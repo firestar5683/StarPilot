@@ -1,6 +1,7 @@
 import math
 import numpy as np
 from opendbc.can import CANPacker
+from opendbc.bluepilot_lateral.hosts.starpilot.lateral import BluePilotLateral, FrameInputs  # BluePilot
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, apply_hysteresis, structs
 from opendbc.car.ford import fordcan
 from opendbc.car.ford.aol import qualified as qualified_aol
@@ -57,6 +58,9 @@ class CarController(CarControllerBase):
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.CAN = fordcan.CanBus(CP)
 
+    self.bp = BluePilotLateral(CP, self.packer, self.CAN)  # BluePilot
+    # StarPilot's openpilot side attaches the per-frame BluePilot inputs and settings (controller_extensions.py)
+    self.bluepilot_inputs = None
     self.stock_cruise_button = FordStockCruiseButton()
     self.lat_ui_owned = False
     self.hands_free_cluster_input = None
@@ -76,6 +80,8 @@ class CarController(CarControllerBase):
 
   def update(self, CC, CS, now_nanos):
     can_sends = []
+    frame_inputs = self.bluepilot_inputs.update() if self.bluepilot_inputs is not None else FrameInputs()
+    bp_active = self.bp.update(frame_inputs, self.frame)  # BluePilot
     if self.hands_free_cluster_input is not None:
       self.hands_free_cluster_input.update()
     if not CC.latActive:
@@ -119,6 +125,10 @@ class CarController(CarControllerBase):
       # Preserve the stock LMC heartbeat without requesting lateral action.
       can_sends.append(fordcan.create_lat_ctl_msg(self.packer, self.CAN, False, 0., 0., 0., 0.,
                                                   stock_lmc=CS.lateral_motion_control))
+    elif bp_active and (self.frame % CarControllerParams.STEER_STEP) == 0:  # BluePilot
+      lat_sends, self.apply_curvature_last = self.bp.step_lateral(CC, CS, actuators, self.apply_curvature_last)
+      can_sends.extend(lat_sends)
+      self.lat_ui_owned |= CC.latActive
     elif (self.frame % CarControllerParams.STEER_STEP) == 0:
       # Bronco and some other cars consistently overshoot curv requests
       # Apply some deadzone + smoothing convergence to avoid oscillations
@@ -178,6 +188,8 @@ class CarController(CarControllerBase):
         direction = 2 if self.apply_lka_angle_last >= 0. else 4
         can_sends.append(fordcan.create_lka_msg(self.packer, self.CAN, lka_active, self.apply_lka_angle_last,
                                                 direction, self.apply_lka_curvature_last, transit=True))
+      elif bp_active:  # BluePilot
+        can_sends.append(self.bp.step_lka(CC, hud_control))
       else:
         can_sends.append(fordcan.create_lka_msg(self.packer, self.CAN))
 

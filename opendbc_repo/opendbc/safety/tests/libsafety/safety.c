@@ -465,3 +465,18 @@ bool safety_test_hyundai_gv60_catalog_rejection(bool alternate) {
 #endif
   return rejected;
 }
+
+// BluePilot lateral hooks (modes/ford.h): the startup state ford_init gave the library, and the pinion RX
+// append's guard. A selected RX list with no room left denies TX instead of dropping a check.
+bool get_ford_bp_lateral(void) { return ford_bp_lateral; }
+bool get_ford_bp_pinion_curvature(void) { return ford_bp_pinion_curvature; }
+int get_ford_rx_checks_len(void) { return current_safety_config.rx_checks_len; }
+
+bool test_ford_bp_pinion_rx_overflow(void) {
+  RxCheck workspace[11] = {0};
+  safety_config config = current_safety_config;
+  config.rx_checks = workspace;
+  config.rx_checks_len = 11;
+  ford_bp_append_pinion_rx(&config, workspace);
+  return (config.tx_msgs == NULL) && (config.tx_msgs_len == 0) && (config.rx_checks_len == 11) && !ford_aol_enabled;
+}

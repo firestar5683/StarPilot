@@ -12,6 +12,7 @@
 #define FORD_BrakeSysFeatures      0x415U   // RX from ABS, for vehicle speed
 #define FORD_EngVehicleSpThrottle2 0x202U   // RX from PCM, for second vehicle speed
 #define FORD_Yaw_Data_FD1          0x91U    // RX from RCM, for yaw rate
+#define FORD_SteeringPinion_Data   0x7EU    // RX from PSCM, optional angle_meas source (BluePilot STEER_ANGLE_CURVATURE)
 #define FORD_Steering_Data_FD1     0x083U   // TX by OP, various driver switches and LKAS/CC buttons
 #define FORD_ACCDATA               0x186U   // TX by OP, ACC controls
 #define FORD_ACCDATA_3             0x18AU   // TX by OP, ACC/TJA user interface
@@ -34,6 +35,10 @@ static uint8_t ford_get_counter(const CANPacket_t *msg) {
   if (msg->addr == FORD_Yaw_Data_FD1) {
     // Signal: VehRollYaw_No_Cnt
     cnt = msg->data[5];
+  }
+  if (msg->addr == FORD_SteeringPinion_Data) {
+    // Signal: StePinAn_No_Cnt (47|4@0+)
+    cnt = (msg->data[5] >> 4) & 0xFU;
   }
   return cnt;
 }
@@ -81,6 +86,9 @@ static bool ford_get_quality_flag_valid(const CANPacket_t *msg) {
   if (msg->addr == FORD_Yaw_Data_FD1) {
     valid = ((msg->data[6] >> 4) & 0x3U) == 0x3U;  // VehYawWActl_D_Qf
   }
+  if (msg->addr == FORD_SteeringPinion_Data) {
+    valid = ((msg->data[5] >> 2) & 0x3U) == 0x3U;  // StePinCompAnEst_D_Qf (3=OK)
+  }
   return valid;
 }
 
@@ -99,6 +107,12 @@ static const CurvatureSteeringLimits FORD_STEERING_LIMITS = {
   .curvature_error_min_speed = 10.0,  // m/s
   .max_steer_power = 0,               // disabled, Ford has no steed power signal
 };
+
+// BluePilot: the Ford 4-signal lateral checks, pinion angle_meas source and angle-mode state, from the
+// bluepilot_lateral library. Lateral follows StarPilot's lateral permission, which includes AOL.
+#define BP_HOST_LAT_ALLOWED() lateral_controls_allowed()
+// cppcheck-suppress misra-c2012-20.1; needs the Ford constants defined above
+#include "opendbc/bluepilot_lateral/safety/ford.h"
 
 // Transit 0x3CA has 0.000005 rad/m per raw step and runs at 33 Hz. Keep its
 // command history separate from the inactive 0x3D3 heartbeat at 20 Hz.
@@ -165,7 +179,7 @@ static void ford_rx_hook(const CANPacket_t *msg) {
   }
 
   // Update vehicle yaw rate
-  if (msg_matches(msg, FORD_Yaw_Data_FD1, FORD_MAIN_BUS)) {
+  if (msg_matches(msg, FORD_Yaw_Data_FD1, FORD_MAIN_BUS) && !ford_bp_pinion_curvature) {  // BluePilot: pinion source replaces yaw
     // FIXME: safety can receive yaw before new vehicle speed, it should recompute meas on either received
     // Signal: VehYaw_W_Actl
     // TODO: we should use the speed which results in the closest angle measurement to the desired angle
@@ -206,6 +220,7 @@ static void ford_rx_hook(const CANPacket_t *msg) {
     // Physical combined cancel/resume switch, not the outgoing resume signal.
     ford_cancel_resume_button = (msg->data[2] & 0x20U) != 0U;
   }
+  ford_bp_rx_hook(msg);  // BluePilot: pinion angle_meas source
 }
 
 static bool ford_tx_hook(const CANPacket_t *msg) {
@@ -323,6 +338,7 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     } else {
       // Other Ford profiles retain their neutral status handling.
     }
+    ford_bp_lka_tx(msg);  // BluePilot: angle-mode state from the frame's unused bits
   }
 
   // Safety check for LateralMotionControl action
@@ -334,12 +350,17 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     unsigned int raw_path_angle = (msg->data[3] << 3) | (msg->data[4] >> 5);
     unsigned int raw_path_offset = (msg->data[5] << 2) | (msg->data[6] >> 6);
 
-    // These signals are not yet tested with the current safety limits
-    bool violation = (raw_curvature_rate != FORD_INACTIVE_CURVATURE_RATE) || (raw_path_angle != FORD_INACTIVE_PATH_ANGLE) || (raw_path_offset != FORD_INACTIVE_PATH_OFFSET);
+    bool violation = false;
+    if (ford_bp_lateral) {  // BluePilot: 4-signal lateral
+      violation = ford_bp_lmc_tx(false, raw_curvature, raw_curvature_rate, raw_path_offset, raw_path_angle, steer_control_enabled);
+    } else {
+      // These signals are not yet tested with the current safety limits
+      violation = (raw_curvature_rate != FORD_INACTIVE_CURVATURE_RATE) || (raw_path_angle != FORD_INACTIVE_PATH_ANGLE) || (raw_path_offset != FORD_INACTIVE_PATH_OFFSET);
 
-    // Check angle error and steer_control_enabled
-    int desired_curvature = raw_curvature - FORD_INACTIVE_CURVATURE;  // /FORD_STEERING_LIMITS.curvature_to_can to get real curvature
-    violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, FORD_STEERING_LIMITS);
+      // Check angle error and steer_control_enabled
+      int desired_curvature = raw_curvature - FORD_INACTIVE_CURVATURE;  // /FORD_STEERING_LIMITS.curvature_to_can to get real curvature
+      violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, FORD_STEERING_LIMITS);
+    }
     // The Transit steers through Lane_Assist_Data1; its LateralMotionControl is an inactive heartbeat
     violation |= ford_lka_steering && steer_control_enabled;
 
@@ -357,12 +378,17 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     unsigned int raw_path_angle = ((msg->data[3] & 0x1FU) << 6) | (msg->data[4] >> 2);
     unsigned int raw_path_offset = ((msg->data[4] & 0x3U) << 8) | msg->data[5];
 
-    // These signals are not yet tested with the current safety limits
-    bool violation = (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE) || (raw_path_angle != FORD_INACTIVE_PATH_ANGLE) || (raw_path_offset != FORD_INACTIVE_PATH_OFFSET);
+    bool violation = false;
+    if (ford_bp_lateral) {  // BluePilot: 4-signal lateral
+      violation = ford_bp_lmc_tx(true, raw_curvature, raw_curvature_rate, raw_path_offset, raw_path_angle, steer_control_enabled);
+    } else {
+      // These signals are not yet tested with the current safety limits
+      violation = (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE) || (raw_path_angle != FORD_INACTIVE_PATH_ANGLE) || (raw_path_offset != FORD_INACTIVE_PATH_OFFSET);
 
-    // Check angle error and steer_control_enabled
-    int desired_curvature = raw_curvature - FORD_INACTIVE_CURVATURE;  // /FORD_STEERING_LIMITS.curvature_to_can to get real curvature
-    violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, FORD_STEERING_LIMITS);
+      // Check angle error and steer_control_enabled
+      int desired_curvature = raw_curvature - FORD_INACTIVE_CURVATURE;  // /FORD_STEERING_LIMITS.curvature_to_can to get real curvature
+      violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, FORD_STEERING_LIMITS);
+    }
 
     if (violation) {
       tx = false;
@@ -391,8 +417,27 @@ static void ford_aol_bind_tx(safety_config *ret, CanMsg workspace[7]) {
   }
 }
 
+// BluePilot: the selected RX checks plus the pinion message, enforced only while the pinion angle_meas source
+// is on (ford_bp_init), so a pinion hiccup can't disable controls for users who never consume the message.
+static void ford_bp_append_pinion_rx(safety_config *config, RxCheck workspace[11]) {
+  if (config->rx_checks_len <= 10) {
+    const int count = config->rx_checks_len;
+    for (int i = 0; i < count; i++) {
+      workspace[i] = config->rx_checks[i];
+    }
+    // StePinAn_No_Cs matches no Ford checksum pattern on real frames: integrity via counter (0-15) + quality flag + 100 Hz
+    workspace[count] = (RxCheck){.msg = {{FORD_SteeringPinion_Data, 0, 8, 100U, .max_counter = 15U, .ignore_checksum = true}, {0}, {0}}};
+    config->rx_checks = workspace;
+    config->rx_checks_len = count + 1;
+  } else {
+    config->tx_msgs = NULL;
+    config->tx_msgs_len = 0;
+    ford_aol_reset();
+  }
+}
+
 static safety_config ford_init(uint16_t configured_param) {
-  static RxCheck ford_rx_workspace[10];
+  static RxCheck ford_rx_workspace[11];
   const uint16_t param = ford_profile_word(configured_param) & ~256U;
   const bool manual = (configured_param & 256U) != 0U;
   // Manual variants are only defined for the exact registered Ford profiles.
@@ -567,6 +612,12 @@ static safety_config ford_init(uint16_t configured_param) {
     _Static_assert(sizeof(FORD_LONG_TX_MSGS) <= sizeof(ford_aol_tx_msgs), "Ford long TX capacity");
     _Static_assert(sizeof(FORD_CANFD_LONG_TX_MSGS) <= sizeof(ford_aol_tx_msgs), "Ford CAN FD long TX capacity");
     ford_aol_bind_tx(&ret, ford_aol_tx_msgs);
+  }
+  // BluePilot: the library's startup bits ride bits 9-14 (ford_param.h). The Transit steers through
+  // Lane_Assist_Data1 alone and never takes them.
+  const uint16_t bp_param = ford_lka_steering ? 0U : ((configured_param & FORD_BP_PARAM_MASK) >> FORD_BP_PARAM_SHIFT);
+  if (ford_bp_init(bp_param)) {
+    ford_bp_append_pinion_rx(&ret, ford_rx_workspace);
   }
   return ret;
 }
