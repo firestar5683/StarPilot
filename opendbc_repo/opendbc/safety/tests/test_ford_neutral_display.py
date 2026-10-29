@@ -19,7 +19,8 @@ def owner(request):
   bus = CanBus(fingerprint=gen_empty_fingerprint())
   address, data, src = fordcan.create_lka_msg(native.packer, bus)
   assert native.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, src, data))
-  return native
+  yield native
+  native.tearDown()  # AE 32 must not reach the next test's profile
 
 
 def inactive(owner):

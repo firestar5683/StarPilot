@@ -18,7 +18,8 @@ def owner(request):
   native.safety.set_alternative_experience(32)
   native.safety.set_aol_test_heartbeat(True)
   native.arm()
-  return native
+  yield native
+  native.tearDown()  # AE 32 must not reach the next test's profile
 
 
 def command(owner, *, active, curvature=0., offset_byte=False):

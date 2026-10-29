@@ -17,6 +17,9 @@ class TestFordStockSwitch(unittest.TestCase):
     self._message_fixture.SAFETY_PARAM = self.SAFETY_PARAM
     self._message_fixture.setUp()
 
+  def tearDown(self):
+    libsafety_py.libsafety.set_alternative_experience(0)
+
   def __getattr__(self, name):
     fixture = self.__dict__.get("_message_fixture")
     if fixture is None:
