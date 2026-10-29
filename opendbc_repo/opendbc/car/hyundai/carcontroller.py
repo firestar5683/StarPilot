@@ -77,7 +77,8 @@ def angle_torque_reduction_gain(steering_torque, v_ego, lat_active, last_gain):
 
 def classic_aol_dash_enabled(cp):
   return bool(cp.carFingerprint != CAR.KIA_RAY_EV and (qualified_classic_stock_aol(cp, marked_only=True) or
-    cp.carFingerprint == CAR.HYUNDAI_ELANTRA_2021 and qualified_classic_long_buttons(cp, marked_only=True)))
+    cp.carFingerprint in (CAR.HYUNDAI_ELANTRA_2021, CAR.KIA_STINGER_2022) and
+    qualified_classic_long_buttons(cp, marked_only=True)))
 
 
 def process_hud_alert(enabled, fingerprint, hud_control):
