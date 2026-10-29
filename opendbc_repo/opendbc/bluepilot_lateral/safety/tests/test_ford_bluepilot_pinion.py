@@ -17,7 +17,8 @@ import numpy as np
 from ....car.ford.values import CAR
 from ....car.vehicle_model import VehicleModel, calc_slip_factor
 from ...core.values_ext import (
-  FordSafetyFlagsSP, FORD_HOST_ONLY_PLATFORMS, FORD_PINION_GEOMETRY_INDEX, FORD_PINION_GEOMETRY_SHIFT, FORD_PINION_WHEELBASE,
+  FordSafetyFlagsSP, FORD_HOST_ONLY_PLATFORMS, FORD_NO_PINION_PLATFORMS, FORD_PINION_GEOMETRY_INDEX, FORD_PINION_GEOMETRY_SHIFT,
+  FORD_PINION_WHEELBASE,
 )
 from ...core.carcontroller_ext import pinion_vehicle_model, scale_tire_stiffness_per_mass
 from ....car.ford.interface import CarInterface
@@ -222,10 +223,11 @@ class TestFordBPPinionGeometryTable(unittest.TestCase):
     # the index rides bits 1-4 of current_safety_param_sp; growing past 15 would silently
     # disable the firmware side while the control side still enables
     self.assertLessEqual(len(rows) - 1, 15)
-    # every supported platform has a row, every Python index entry points at a C row.
-    # C may carry rows for platforms upstream has since dropped (row 10, Mondeo): unused, harmless.
-    # a row for a platform this host's CAR doesn't have (FORD_HOST_ONLY_PLATFORMS) has no CarSpecs here
-    self.assertEqual({n for n in FORD_PINION_GEOMETRY_INDEX if n in set(CAR)}, set(CAR), "every Ford platform needs a geometry row")
+    # every supported platform has a row unless it can't take the pinion source (FORD_NO_PINION_PLATFORMS), every
+    # Python index entry points at a C row. A row for a platform this host's CAR doesn't have
+    # (FORD_HOST_ONLY_PLATFORMS) has no CarSpecs here
+    self.assertEqual({n for n in FORD_PINION_GEOMETRY_INDEX if n in set(CAR)}, set(CAR) - FORD_NO_PINION_PLATFORMS,
+                     "every Ford platform needs a geometry row")
     self.assertTrue(set(FORD_PINION_GEOMETRY_INDEX) - set(CAR) <= FORD_HOST_ONLY_PLATFORMS)
     self.assertTrue(set(FORD_PINION_GEOMETRY_INDEX.values()) <= set(rows) - {0})
     self.assertEqual(len(set(FORD_PINION_GEOMETRY_INDEX.values())), len(FORD_PINION_GEOMETRY_INDEX), "duplicate index")

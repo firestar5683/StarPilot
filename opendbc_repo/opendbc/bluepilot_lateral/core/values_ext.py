@@ -26,17 +26,24 @@ class FordSafetyFlagsSP:
 # ford_pinion_geometry table in bluepilot_lateral/safety/ford.h row for row.
 # Index 0 is reserved as invalid: the firmware treats flag-set-but-no-index as feature
 # off, so a half-configured param can never select the wrong geometry silently.
-# FORD_EDGE_MK2 is deliberately absent: ALT_STEER_ANGLE platforms read a RELATIVE pinion
-# angle (SteeringPinion_Data_Alt + learned offset) and lack the absolute measurement
-# this feature needs -- the toggle no-ops there and yaw behavior is kept.
-# Index 10 (FORD_MONDEO_MK5) is reserved but unmapped here: that platform exists in
-# BluePilot but not in this opendbc baseline. Indices stay aligned with the C table.
+# Platforms with no row are in FORD_NO_PINION_PLATFORMS. Indices stay aligned with the C table.
 # BluePilot: the per-platform tables key on the platform name (CP.carFingerprint), not the CAR enum,
 # so a row for a platform some host lacks never breaks import there; it just never matches.
-# FORD_HOST_ONLY_PLATFORMS lists the names with rows here that this repo's CAR doesn't have (e.g.
-# Mondeo MK5, which BP7 and StarPilot have; note the hosts with each); any name a host's CAR lacks
-# must be on it (tests/test_platform_tables.py).
-FORD_HOST_ONLY_PLATFORMS: frozenset[str] = frozenset()
+# FORD_HOST_ONLY_PLATFORMS lists the names with rows here that upstream opendbc's CAR doesn't have; any
+# name a host's CAR lacks must be on it (tests/test_platform_tables.py).
+FORD_HOST_ONLY_PLATFORMS: frozenset[str] = frozenset({
+  "FORD_EDGE_MK2",     # StarPilot
+  "FORD_MONDEO_MK5",   # BP7, StarPilot
+  "FORD_TRANSIT_MK5",  # StarPilot
+})
+# No pinion geometry row, so no STEER_ANGLE_CURVATURE (the setting no-ops and the yaw source is kept):
+FORD_NO_PINION_PLATFORMS: frozenset[str] = frozenset({
+  # ALT_STEER_ANGLE: reads a RELATIVE pinion angle (SteeringPinion_Data_Alt + learned offset) and lacks the
+  # absolute measurement this needs
+  "FORD_EDGE_MK2",
+  # LKA steering through Lane_Assist_Data1 alone: no BluePilot lateral at all
+  "FORD_TRANSIT_MK5",
+})
 
 FORD_PINION_GEOMETRY_SHIFT = 1
 FORD_PINION_GEOMETRY_INDEX = {
@@ -49,6 +56,7 @@ FORD_PINION_GEOMETRY_INDEX = {
   "FORD_F_150_LIGHTNING_MK1": 7,
   "FORD_F_150_MK14": 8,
   "FORD_MAVERICK_MK1": 9,
+  "FORD_MONDEO_MK5": 10,
   "FORD_MUSTANG_MACH_E_MK1": 11,
   "FORD_RANGER_MK2": 12,
 }

@@ -2,13 +2,14 @@ import unittest
 
 from ...car.ford.values import CAR
 from ..core.values_ext import (
-  ANGLE_GAIN_CANFD_BOF_CARS, ANGLE_GAIN_CANFD_SUV_CARS, FORD_HOST_ONLY_PLATFORMS, FORD_PINION_GEOMETRY_INDEX,
-  FORD_PINION_WHEELBASE,
+  ANGLE_GAIN_CANFD_BOF_CARS, ANGLE_GAIN_CANFD_SUV_CARS, FORD_HOST_ONLY_PLATFORMS, FORD_NO_PINION_PLATFORMS,
+  FORD_PINION_GEOMETRY_INDEX, FORD_PINION_WHEELBASE,
 )
 
 TABLES = {
   "FORD_PINION_GEOMETRY_INDEX": FORD_PINION_GEOMETRY_INDEX,
   "FORD_PINION_WHEELBASE": FORD_PINION_WHEELBASE,
+  "FORD_NO_PINION_PLATFORMS": FORD_NO_PINION_PLATFORMS,
   "ANGLE_GAIN_CANFD_BOF_CARS": ANGLE_GAIN_CANFD_BOF_CARS,
   "ANGLE_GAIN_CANFD_SUV_CARS": ANGLE_GAIN_CANFD_SUV_CARS,
 }
@@ -31,6 +32,9 @@ class TestPlatformTables(unittest.TestCase):
     """update_angle_params checks the body-on-frame group first, so a platform in both would
     silently get those gains."""
     self.assertFalse(ANGLE_GAIN_CANFD_BOF_CARS & ANGLE_GAIN_CANFD_SUV_CARS)
+
+  def test_no_pinion_platforms_have_no_row(self):
+    self.assertFalse(FORD_NO_PINION_PLATFORMS & set(FORD_PINION_GEOMETRY_INDEX))
 
 
 if __name__ == "__main__":
