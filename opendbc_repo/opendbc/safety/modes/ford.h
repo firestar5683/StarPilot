@@ -1,14 +1,8 @@
 #pragma once
 
 #include "opendbc/safety/declarations.h"
+#include "opendbc/safety/modes/ford_param.h"
 #include "opendbc/safety/modes/ford_aol.h"
-#include "opendbc/safety/modes/ford_pinion_measurement.h"
-#include "opendbc/bluepilot_lateral/safety/ford_bp.h"
-
-// StarPilot's extended Ford curvature enforcement below is substantially adapted from
-// BluePilot bp-7.0 panda work, principally Alan Polk's 8f8d6d15f0a590f42b78de964ffb0d0af7f5d63d
-// See /CREDITS.md and /THIRD_PARTY_NOTICES.md. This comment does not attribute the surrounding
-// upstream openpilot code.
 
 
 // Safety-relevant CAN messages for Ford vehicles.
@@ -17,7 +11,6 @@
 #define FORD_DesiredTorqBrk        0x213U   // RX from ABS, for standstill state
 #define FORD_BrakeSysFeatures      0x415U   // RX from ABS, for vehicle speed
 #define FORD_EngVehicleSpThrottle2 0x202U   // RX from PCM, for second vehicle speed
-#define FORD_SteeringPinion_Data 0x7EU
 #define FORD_Yaw_Data_FD1          0x91U    // RX from RCM, for yaw rate
 #define FORD_Steering_Data_FD1     0x083U   // TX by OP, various driver switches and LKAS/CC buttons
 #define FORD_ACCDATA               0x186U   // TX by OP, ACC controls
@@ -41,9 +34,6 @@ static uint8_t ford_get_counter(const CANPacket_t *msg) {
   if (msg->addr == FORD_Yaw_Data_FD1) {
     // Signal: VehRollYaw_No_Cnt
     cnt = msg->data[5];
-  }
-  if (msg->addr == FORD_SteeringPinion_Data) {
-    cnt = (msg->data[5] >> 4) & 0xFU;
   }
   return cnt;
 }
@@ -91,9 +81,6 @@ static bool ford_get_quality_flag_valid(const CANPacket_t *msg) {
   if (msg->addr == FORD_Yaw_Data_FD1) {
     valid = ((msg->data[6] >> 4) & 0x3U) == 0x3U;  // VehYawWActl_D_Qf
   }
-  if (msg->addr == FORD_SteeringPinion_Data) {
-    valid = ((msg->data[5] >> 2) & 0x3U) == 0x3U;
-  }
   return valid;
 }
 
@@ -113,18 +100,6 @@ static const CurvatureSteeringLimits FORD_STEERING_LIMITS = {
   .max_steer_power = 0,               // disabled, Ford has no steed power signal
 };
 
-static CurvatureSteeringLimits ford_measurement_limits(CurvatureSteeringLimits limits) {
-  const int max_curvature_error = (ford_pinion_enabled && (limits.max_curvature_error < 150)) ? 150 : limits.max_curvature_error;
-  return (CurvatureSteeringLimits){
-    .max_curvature = limits.max_curvature,
-    .curvature_to_can = limits.curvature_to_can,
-    .frequency = limits.frequency,
-    .max_curvature_error = max_curvature_error,
-    .curvature_error_min_speed = limits.curvature_error_min_speed,
-    .max_steer_power = limits.max_steer_power,
-  };
-}
-
 // Transit 0x3CA has 0.000005 rad/m per raw step and runs at 33 Hz. Keep its
 // command history separate from the inactive 0x3D3 heartbeat at 20 Hz.
 static const CurvatureSteeringLimits FORD_LKA_STEERING_LIMITS = {
@@ -136,17 +111,9 @@ static const CurvatureSteeringLimits FORD_LKA_STEERING_LIMITS = {
   .max_steer_power = 0,
 };
 
+// The physical cancel/resume switch passes through on stock-ACC profiles
+static bool ford_stock_switch = false;
 static bool ford_cancel_resume_button = false;
-
-static bool ford_generic_canfd_extended = false;
-static bool ford_generic_canfd_announced = false;
-
-static bool ford_explorer_extended = false;
-static bool ford_explorer_announced = false;
-
-static bool ford_mach_e_extended = false;
-static bool ford_mach_e_announced = false;
-static int ford_mach_e_path_angle_last = 0;
 
 static bool ford_lka_steering = false;
 static bool ford_lka_available = false;
@@ -198,7 +165,7 @@ static void ford_rx_hook(const CANPacket_t *msg) {
   }
 
   // Update vehicle yaw rate
-  if (msg_matches(msg, FORD_Yaw_Data_FD1, FORD_MAIN_BUS) && !ford_pinion_enabled) {
+  if (msg_matches(msg, FORD_Yaw_Data_FD1, FORD_MAIN_BUS)) {
     // FIXME: safety can receive yaw before new vehicle speed, it should recompute meas on either received
     // Signal: VehYaw_W_Actl
     // TODO: we should use the speed which results in the closest angle measurement to the desired angle
@@ -211,14 +178,6 @@ static void ford_rx_hook(const CANPacket_t *msg) {
       ford_lka_yaw_seen = true;
       ford_lka_yaw_last_us = microsecond_timer_get();
     }
-  }
-
-  if (ford_pinion_enabled && msg_matches(msg, FORD_SteeringPinion_Data, FORD_MAIN_BUS)) {
-    const int raw = ((msg->data[2] & 0x7FU) << 8) | msg->data[3];
-    const float radians = (((float)raw * 0.1F) - 1600.0F) * 0.017453292519943295F;
-    const float speed = SAFETY_MAX(vehicle_speed.values[0] / VEHICLE_SPEED_FACTOR, 0.1F);
-    const float measured = radians * get_curvature_factor(speed, *ford_pinion_params) / ford_pinion_params->steer_ratio;
-    update_sample(&curvature_state.meas, ROUND(measured * FORD_STEERING_LIMITS.curvature_to_can));
   }
 
   // Update gas pedal
@@ -247,7 +206,6 @@ static void ford_rx_hook(const CANPacket_t *msg) {
     // Physical combined cancel/resume switch, not the outgoing resume signal.
     ford_cancel_resume_button = (msg->data[2] & 0x20U) != 0U;
   }
-  ford_bp_rx(msg);
 }
 
 static bool ford_tx_hook(const CANPacket_t *msg) {
@@ -319,10 +277,7 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
   }
 
   // Safety check for Lane_Assist_Data1 action
-  if ((msg->addr == FORD_Lane_Assist_Data1) && !ford_bp_enabled) {
-    if (ford_mach_e_extended || ford_explorer_extended) {
-      tx &= (msg->data[4] & 0x1U) == 0U;
-    }
+  if (msg->addr == FORD_Lane_Assist_Data1) {
     // Do not allow steering using Lane_Assist_Data1 (Lane-Departure Aid).
     // This message must be sent for Lane Centering to work, and can include
     // values such as the steering angle or lane curvature for debugging,
@@ -370,20 +325,8 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  if (ford_mach_e_extended && tx && (msg->addr == FORD_Lane_Assist_Data1)) {
-    ford_mach_e_announced = (msg->data[4] & 0x2U) != 0U;
-  }
-
-  if (ford_generic_canfd_extended && tx && (msg->addr == FORD_Lane_Assist_Data1)) {
-    ford_generic_canfd_announced = (msg->data[4] & 0x2U) != 0U;
-  }
-
-  if (ford_explorer_extended && tx && (msg->addr == FORD_Lane_Assist_Data1)) {
-    ford_explorer_announced = (msg->data[4] & 0x2U) != 0U;
-  }
-
   // Safety check for LateralMotionControl action
-  if ((msg->addr == FORD_LateralMotionControl) && !ford_bp_enabled) {
+  if (msg->addr == FORD_LateralMotionControl) {
     // Signal: LatCtl_D_Rq
     bool steer_control_enabled = ((msg->data[4] >> 2) & 0x7U) != 0U;
     unsigned int raw_curvature = (msg->data[0] << 3) | (msg->data[1] >> 5);
@@ -391,39 +334,22 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     unsigned int raw_path_angle = (msg->data[3] << 3) | (msg->data[4] >> 5);
     unsigned int raw_path_offset = (msg->data[5] << 2) | (msg->data[6] >> 6);
 
-    // Explorer restores only the classic source-derived curvature-rate field.
-    // Every command still intersects the modern common curvature envelope.
-    bool violation = (raw_path_angle != FORD_INACTIVE_PATH_ANGLE) ||
-                     (raw_path_offset != FORD_INACTIVE_PATH_OFFSET);
-    const unsigned int curvature_bits = raw_curvature;
-    const int desired_curvature = (int)curvature_bits - 1000;
-    if (ford_explorer_extended) {
-      static const struct lookup_t source_rate = {{5.0F, 16.0F, 25.0F}, {0.0025F, 0.0014F, 0.00018F}};
-      if (steer_control_enabled && lateral_controls_allowed()) {
-        const float source_speed = (vehicle_speed.min / VEHICLE_SPEED_FACTOR) - 1.0F;
-        const float source_delta_float = (safety_interpolate(source_rate, source_speed) * 50000.0F) + 1.0F;
-        const int source_delta = (int)source_delta_float;
-        violation |= SAFETY_ABS(desired_curvature - curvature_state.desired_last) > source_delta;
-      }
-      violation |= steer_control_enabled && !ford_explorer_announced;
-      violation |= !steer_control_enabled && ((desired_curvature != 0) ||
-                                             (raw_curvature_rate != FORD_INACTIVE_CURVATURE_RATE));
-    } else {
-      violation |= raw_curvature_rate != FORD_INACTIVE_CURVATURE_RATE;
-    }
-    violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, ford_measurement_limits(FORD_STEERING_LIMITS));
+    // These signals are not yet tested with the current safety limits
+    bool violation = (raw_curvature_rate != FORD_INACTIVE_CURVATURE_RATE) || (raw_path_angle != FORD_INACTIVE_PATH_ANGLE) || (raw_path_offset != FORD_INACTIVE_PATH_OFFSET);
+
+    // Check angle error and steer_control_enabled
+    int desired_curvature = raw_curvature - FORD_INACTIVE_CURVATURE;  // /FORD_STEERING_LIMITS.curvature_to_can to get real curvature
+    violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, FORD_STEERING_LIMITS);
+    // The Transit steers through Lane_Assist_Data1; its LateralMotionControl is an inactive heartbeat
     violation |= ford_lka_steering && steer_control_enabled;
 
     if (violation) {
       tx = false;
-      if (ford_explorer_extended) {
-        curvature_state.desired_last = 0;
-      }
     }
   }
 
   // Safety check for LateralMotionControl2 action
-  if ((msg->addr == FORD_LateralMotionControl2) && !ford_bp_enabled) {
+  if (msg->addr == FORD_LateralMotionControl2) {
     // Signal: LatCtl_D2_Rq
     bool steer_control_enabled = ((msg->data[0] >> 4) & 0x7U) != 0U;
     unsigned int raw_curvature = (msg->data[2] << 3) | (msg->data[3] >> 5);
@@ -431,86 +357,18 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     unsigned int raw_path_angle = ((msg->data[3] & 0x1FU) << 6) | (msg->data[4] >> 2);
     unsigned int raw_path_offset = ((msg->data[4] & 0x3U) << 8) | msg->data[5];
 
-    const unsigned int curvature_bits = raw_curvature;
-    const int desired_curvature = (int)curvature_bits - (int)FORD_INACTIVE_CURVATURE;
-    const int desired_path_angle = (int)raw_path_angle - (int)FORD_INACTIVE_PATH_ANGLE;
-    bool violation = raw_path_offset != FORD_INACTIVE_PATH_OFFSET;
-    if (ford_mach_e_extended) {
-      // Exact Mach-E extension retains the source envelope and the modern common
-      // ISO/RT checks. This is an intersection, not generic Ford limit widening.
-      static const CurvatureSteeringLimits FORD_MACH_E_STEERING_LIMITS = {
-        .max_curvature = 1000,
-        .curvature_to_can = 50000,
-        .frequency = 20,
-        .max_curvature_error = 300,
-        .curvature_error_min_speed = 10.0,
-        .max_steer_power = 0,
-      };
-      const struct lookup_t source_rate = {{5.0F, 16.0F, 25.0F}, {0.0025F, 0.0014F, 0.00018F}};
-      const float speed = vehicle_speed.max / VEHICLE_SPEED_FACTOR;
-      const float speed_min = SAFETY_MAX(vehicle_speed.min / VEHICLE_SPEED_FACTOR, 1.0F);
-      const int source_delta = (safety_interpolate(source_rate, speed_min - 1.0F) * 50000.0F) + 1.0F;
-      const float source_max_float = ((3.0F - (9.81F * 0.06F)) / (speed_min * speed_min) * 50000.0F) + 1.0F;
-      const int source_max = (int)source_max_float;
-      if (!ford_mach_e_announced) {
-        violation |= steer_control_enabled || (desired_path_angle != 0) || (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE);
-      }
-      if (steer_control_enabled) {
-        violation |= SAFETY_ABS(desired_curvature - curvature_state.desired_last) > source_delta;
-        violation |= SAFETY_ABS(desired_curvature) > source_max;
-      } else {
-        violation |= (desired_curvature != 0) || (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE);
-      }
-      if (desired_path_angle != 0) {
-        const float curvature = SAFETY_ABS(desired_curvature) / 50000.0F;
-        const float path_angle = SAFETY_ABS(desired_path_angle) / 2000.0F;
-        const float combined_accel = (curvature + (path_angle / SAFETY_MAX(speed, 1.0F))) * speed * speed;
-        violation |= !steer_control_enabled || !controls_allowed;
-        violation |= (speed < 3.0F) || (speed >= 8.8F);
-        violation |= (SAFETY_ABS(desired_curvature) < 975) || (SAFETY_ABS(desired_path_angle) > 320);
-        violation |= ((desired_curvature * desired_path_angle) <= 0) || (combined_accel > 2.5F);
-        violation |= SAFETY_ABS(desired_path_angle - ford_mach_e_path_angle_last) > 110;
-      }
-      violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, ford_measurement_limits(FORD_MACH_E_STEERING_LIMITS));
-    } else if (ford_generic_canfd_extended) {
-      // One generic CAN FD owner; Mach-E's wider error/path assist stays separate.
-      static const struct lookup_t source_rate = {{5.0F, 16.0F, 25.0F}, {0.0025F, 0.0014F, 0.00018F}};
-      const float source_speed = SAFETY_MAX(vehicle_speed.min / VEHICLE_SPEED_FACTOR, 1.0F);
-      const float source_delta_float = (safety_interpolate(source_rate, source_speed - 1.0F) * 50000.0F) + 1.0F;
-      const int source_delta = (int)source_delta_float;
-      const float source_max_float = ((3.0F - (9.81F * 0.06F)) / (source_speed * source_speed) * 50000.0F) + 1.0F;
-      const int source_max = (int)source_max_float;
-      violation |= raw_path_angle != FORD_INACTIVE_PATH_ANGLE;
-      violation |= steer_control_enabled && !ford_generic_canfd_announced;
-      if (steer_control_enabled) {
-        violation |= SAFETY_ABS(desired_curvature - curvature_state.desired_last) > source_delta;
-        violation |= SAFETY_ABS(desired_curvature) > source_max;
-      } else {
-        violation |= (desired_curvature != 0) || (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE);
-      }
-      violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, ford_measurement_limits(FORD_STEERING_LIMITS));
-    } else {
-      violation |= (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE) || (raw_path_angle != FORD_INACTIVE_PATH_ANGLE);
-      violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, ford_measurement_limits(FORD_STEERING_LIMITS));
-    }
-    tx &= !violation;
-    if (ford_generic_canfd_extended && !tx) {
-      curvature_state.desired_last = 0;
-    }
-    if (ford_mach_e_extended && !tx) {
-      // External path/announcement checks must not retain a rejected command.
-      curvature_state.desired_last = 0;
-      ford_mach_e_path_angle_last = 0;
-    }
-    if (ford_mach_e_extended && tx) {
-      ford_mach_e_path_angle_last = desired_path_angle;
+    // These signals are not yet tested with the current safety limits
+    bool violation = (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE) || (raw_path_angle != FORD_INACTIVE_PATH_ANGLE) || (raw_path_offset != FORD_INACTIVE_PATH_OFFSET);
+
+    // Check angle error and steer_control_enabled
+    int desired_curvature = raw_curvature - FORD_INACTIVE_CURVATURE;  // /FORD_STEERING_LIMITS.curvature_to_can to get real curvature
+    violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, FORD_STEERING_LIMITS);
+
+    if (violation) {
+      tx = false;
     }
   }
 
-  if (ford_bp_enabled) {
-    if (msg->addr == FORD_Lane_Assist_Data1) { tx &= ford_bp_lka(msg); }
-    if ((msg->addr == FORD_LateralMotionControl) || (msg->addr == FORD_LateralMotionControl2)) { tx &= ford_bp_lateral(msg); }
-  }
   ford_aol_tx(msg, tx);
   return tx;
 }
@@ -533,35 +391,9 @@ static void ford_aol_bind_tx(safety_config *ret, CanMsg workspace[7]) {
   }
 }
 
-
-static void ford_append_pinion_rx(safety_config *config, RxCheck workspace[11]) {
-  if (config->rx_checks_len <= 10) {
-    const int count = config->rx_checks_len;
-    for (int i = 0; i < count; i++) {
-      workspace[i] = config->rx_checks[i];
-    }
-    workspace[count] = (RxCheck){.msg = {{FORD_SteeringPinion_Data, 0, 8, 100U,
-      .max_counter = 15U, .ignore_checksum = true}, {0}, {0}}};
-    config->rx_checks = workspace;
-    config->rx_checks_len = count + 1;
-  } else {
-    config->tx_msgs = NULL;
-    config->tx_msgs_len = 0;
-    ford_aol_reset();
-  }
-}
-
 static safety_config ford_init(uint16_t configured_param) {
-  static RxCheck ford_rx_workspace[11];
-  const bool pinion_valid = ford_pinion_word_valid(configured_param);
-  const uint16_t profile_param = ford_pinion_base_word(configured_param);
-  const uint16_t geometry = (configured_param >> 10U) & 15U;
-  ford_pinion_enabled = pinion_valid && ((configured_param & FORD_PINION_ENABLE) != 0U);
-  ford_pinion_params = ford_pinion_geometry_at(ford_pinion_enabled ? geometry : 0U);
-  const uint16_t bp_param = profile_param & ~256U;
-  const bool joint_angle = ((unsigned int)alternative_experience == 32U) &&
-    ((bp_param == 146U) || (bp_param == 147U) || (bp_param == 160U) || (bp_param == 161U) || (bp_param == 194U) || (bp_param == 195U));
-  const uint16_t param = joint_angle ? (bp_param & ~128U) : bp_param;
+  static RxCheck ford_rx_workspace[10];
+  const uint16_t param = ford_profile_word(configured_param) & ~256U;
   const bool manual = (configured_param & 256U) != 0U;
   // Manual variants are only defined for the exact registered Ford profiles.
   const bool manual_valid = !manual || ford_aol_param_valid(configured_param);
@@ -621,30 +453,9 @@ static safety_config ford_init(uint16_t configured_param) {
   const uint16_t FORD_PARAM_CANFD = 2;
   const uint16_t FORD_PARAM_LKA_STEERING = 4;
   const uint16_t FORD_PARAM_NEW_PORT = 8;
-  const uint16_t FORD_PARAM_MACH_E_EXTENDED = 16U;
-  const uint16_t FORD_PARAM_EXPLORER_EXTENDED = 32U;
-  const uint16_t FORD_PARAM_GENERIC_CANFD_EXTENDED = 64U;
-  const bool generic_canfd_namespace = GET_FLAG(param, FORD_PARAM_GENERIC_CANFD_EXTENDED);
-  ford_generic_canfd_extended = (param == 66U) && (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param)));
-  ford_generic_canfd_extended |= (param == 67U) && (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param)));
-  ford_generic_canfd_announced = false;
-  const bool explorer_namespace = GET_FLAG(param, FORD_PARAM_EXPLORER_EXTENDED);
-  ford_explorer_extended = ((param == 32U) || (param == 33U)) &&
-                           (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param)));
-  ford_explorer_announced = false;
-  const bool mach_e_namespace = GET_FLAG(param, FORD_PARAM_MACH_E_EXTENDED);
-  ford_mach_e_extended = (param == 18U) && (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param)));
-  ford_mach_e_extended |= (param == 19U) && (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param)));
-  const bool bp_config_valid = ford_bp_configure(bp_param);
-  ford_stock_switch = ((((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param))) &&
-                      ((param == 2U) || (param == 8U) || (param == 10U) || (param == 12U) ||
-                       ((param == 18U) && ford_mach_e_extended) ||
-                       ((param == 32U) && ford_explorer_extended) ||
-                       ((param == 66U) && ford_generic_canfd_extended))) ||
-                      (ford_bp_enabled && ((param & 1U) == 0U));
+  ford_stock_switch = (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param))) &&
+                      ((param == 0U) || (param == 2U) || (param == 8U) || (param == 10U) || (param == 12U));
   ford_cancel_resume_button = false;
-  ford_mach_e_path_angle_last = 0;
-  ford_mach_e_announced = false;
   const bool ford_canfd = GET_FLAG(param, FORD_PARAM_CANFD);
   ford_lka_steering = GET_FLAG(param, FORD_PARAM_LKA_STEERING);
   const bool ford_new_port = GET_FLAG(param, FORD_PARAM_NEW_PORT);
@@ -662,7 +473,7 @@ static safety_config ford_init(uint16_t configured_param) {
   safety_config ret;
   if (ford_canfd) {
     ret = BUILD_SAFETY_CFG(ford_rx_checks, FORD_CANFD_STOCK_TX_MSGS);
-    bool long_profile = (param == 11U) || (param == 19U) || (param == 67U);
+    bool long_profile = (param == 3U) || (param == 11U);
 #ifdef ALLOW_DEBUG
     long_profile |= GET_FLAG(param, 1U);
 #endif
@@ -670,8 +481,9 @@ static safety_config ford_init(uint16_t configured_param) {
       ret = BUILD_SAFETY_CFG(ford_rx_checks, FORD_CANFD_LONG_TX_MSGS);
     }
   } else {
-    ret = ford_new_port ? BUILD_SAFETY_CFG(ford_rx_checks, FORD_STOCK_TX_MSGS) :
-                          BUILD_SAFETY_CFG(ford_rx_checks, FORD_LONG_TX_MSGS);
+    // Classic stock ACC (0) and the new ports send no ACCDATA unless openpilot long is set
+    ret = (ford_new_port || (param == 0U)) ? BUILD_SAFETY_CFG(ford_rx_checks, FORD_STOCK_TX_MSGS) :
+                                             BUILD_SAFETY_CFG(ford_rx_checks, FORD_LONG_TX_MSGS);
     if (ford_lka_steering) {
       SET_RX_CHECKS(ford_lka_rx_checks, ret);
     }
@@ -679,10 +491,6 @@ static safety_config ford_init(uint16_t configured_param) {
       SET_TX_MSGS(FORD_LONG_TX_MSGS, ret);
     }
   }
-  if (ford_explorer_extended && (param == 32U)) {
-    SET_TX_MSGS(FORD_STOCK_TX_MSGS, ret);
-  }
-  if (ford_bp_enabled && (param == 128U)) { SET_TX_MSGS(FORD_STOCK_TX_MSGS, ret); }
   if (ford_stock_switch) {
     if (ford_lka_steering) {
       SET_RX_CHECKS(ford_stock_lka_rx_checks, ret);
@@ -690,9 +498,7 @@ static safety_config ford_init(uint16_t configured_param) {
       SET_RX_CHECKS(ford_stock_rx_checks, ret);
     }
   }
-  if (!manual_valid || !bp_config_valid || (mach_e_namespace && !ford_mach_e_extended) ||
-      (explorer_namespace && !ford_explorer_extended) ||
-      (generic_canfd_namespace && !ford_generic_canfd_extended)) {
+  if (!manual_valid) {
     ret.tx_msgs = NULL;
     ret.tx_msgs_len = 0;
   }
@@ -736,7 +542,7 @@ static safety_config ford_init(uint16_t configured_param) {
     } else if (base == 10U) {
       selected_rx = ford_aol_mondeo_rx;
       selected_len = 10;
-    } else if ((base == 12U) || (base == 18U) || (base == 66U)) {
+    } else if ((base == 12U) || (base == 2U)) {
       selected_rx = ford_aol_transit_rx;
       selected_len = 10;
     } else {
@@ -761,15 +567,6 @@ static safety_config ford_init(uint16_t configured_param) {
     _Static_assert(sizeof(FORD_LONG_TX_MSGS) <= sizeof(ford_aol_tx_msgs), "Ford long TX capacity");
     _Static_assert(sizeof(FORD_CANFD_LONG_TX_MSGS) <= sizeof(ford_aol_tx_msgs), "Ford CAN FD long TX capacity");
     ford_aol_bind_tx(&ret, ford_aol_tx_msgs);
-  }
-  if (ford_pinion_enabled) {
-    // Append after profile-specific RX selection so AOL retains every existing check.
-    ford_append_pinion_rx(&ret, ford_rx_workspace);
-  }
-  if (!pinion_valid) {
-    ret.tx_msgs = NULL;
-    ret.tx_msgs_len = 0;
-    ford_aol_reset();
   }
   return ret;
 }

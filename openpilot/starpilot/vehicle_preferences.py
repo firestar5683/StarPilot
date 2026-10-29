@@ -42,8 +42,6 @@ class VehicleStartupPreferences:
   gm_camera_pedal: bool = True
   toyota_filter: bool = True
   gm_longitudinal_tune: int = 0
-  ford_lateral_mode: int = 0
-  ford_pinion: bool = field(default=False, kw_only=True)
   toyota_lock_doors: bool = False
   toyota_unlock_doors: bool = False
   toyota_radar_mode: int = 0
@@ -52,7 +50,6 @@ class VehicleStartupPreferences:
 
   @classmethod
   def read(cls, params, *, enabled: bool):
-    from openpilot.starpilot.car.ford.lateral_preferences import selected as ford_mode
     from openpilot.starpilot.car.toyota.radar_preferences import selected as toyota_radar_mode
     from openpilot.starpilot.car.gm.tune_preferences import selected_tune
     from openpilot.starpilot.car.tesla.preap_preferences import stock_configuration
@@ -114,9 +111,7 @@ class VehicleStartupPreferences:
                subaru_sng=bool(enabled and readable and safe in (None, b"0") and read_saved(params, "SubaruSNG", 8) == (b"1", True)),
                subaru_software_cruise=bool(enabled and readable and safe in (None, b"0") and
                    read_saved(params, "SubaruRedneckCruise", 8) == (b"1", True)), toyota_radar_mode=toyota_radar_mode(params, enabled=enabled),
-               ford_lateral_mode=ford_mode(params, enabled=enabled),
-               ford_pinion=bool(enabled and read_saved(params, "SafeMode", 8) in ((None, True), (b"0", True)) and
-                                read_saved(params, "FordPrefSteerAngleCurvature", 8) == (b"1", True)), tesla_screen=screen,
+               tesla_screen=screen,
                tesla_screen_brake=screen_brake, toyota_auto_hold=toyota,
                toyota_sng=bool(enabled and readable and safe in (None, b"0") and
                                read_saved(params, "SNGHack", 8) == (b"1", True)), jeep_brake_hold=jeep_hold,
@@ -225,10 +220,6 @@ class VehicleStartupPreferences:
       apply_toyota_auto_hold(cp, self.toyota_auto_hold)
       from opendbc.car.toyota.ars510_preferences import apply_radar_mode
       apply_radar_mode(cp, self.toyota_radar_mode)
-    from opendbc.bluepilot_lateral.hosts.starpilot import select as select_ford_lateral
-    select_ford_lateral(cp, self.ford_lateral_mode)
-    from opendbc.car.ford.pinion import select as select_pinion
-    select_pinion(cp, self.ford_pinion)
     return cp
 
   def finalize(self, cp) -> None:

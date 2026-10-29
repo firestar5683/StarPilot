@@ -1,14 +1,14 @@
-"""Display continuity never grants steering or survives loss of native authority."""
+"""CAN FD display continuity never grants steering or survives loss of native authority."""
 import pytest
 
 from opendbc.car import gen_empty_fingerprint
-from opendbc.car.ford import mache_can, fordcan
+from opendbc.car.ford import fordcan
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.safety.tests.libsafety import libsafety_py
 from opendbc.safety.tests import test_ford_aol
 
 
-@pytest.fixture(params=(18, 19, 274, 275, 66, 67, 322, 323))
+@pytest.fixture(params=(2, 3, 258, 259))
 def owner(request):
   native = test_ford_aol.TestFordAolDriverIntent()
   native.setUp()
@@ -22,8 +22,8 @@ def owner(request):
 
 
 def command(owner, *, active, curvature=0., offset_byte=False):
-  frame = mache_can.create_lat_ctl2_msg(owner.packer, CanBus(fingerprint=gen_empty_fingerprint()),
-                                       int(active), 0, 1, curvature, 0., 0)
+  frame = fordcan.create_lat_ctl2_msg(owner.packer, CanBus(fingerprint=gen_empty_fingerprint()),
+                                     int(active), 0., 0., curvature, 0., 0)
   data = bytearray(frame[1])
   if offset_byte:
     data[5] ^= 1
@@ -31,7 +31,7 @@ def command(owner, *, active, curvature=0., offset_byte=False):
 
 
 def announce(owner):
-  frame = mache_can.create_lka_msg(owner.packer, CanBus(fingerprint=gen_empty_fingerprint()))
+  frame = fordcan.create_lka_msg(owner.packer, CanBus(fingerprint=gen_empty_fingerprint()))
   assert owner.safety.safety_tx_hook(libsafety_py.make_CANPacket(frame[0], frame[2], frame[1]))
 
 

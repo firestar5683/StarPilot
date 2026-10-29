@@ -2,13 +2,13 @@
 import pytest
 
 from opendbc.car import gen_empty_fingerprint
-from opendbc.car.ford import mache_can
+from opendbc.car.ford import fordcan
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.safety.tests.libsafety import libsafety_py
 from opendbc.safety.tests import test_ford_aol
 
 
-@pytest.fixture(params=(19, 67, 275, 323))
+@pytest.fixture(params=(3, 259))
 def owner(request):
   native = test_ford_aol.TestFordAolDriverIntent()
   native.setUp()
@@ -17,14 +17,14 @@ def owner(request):
   native.safety.set_alternative_experience(32)
   native.pump(40, main=0, mask=0, heartbeat=False)
   bus = CanBus(fingerprint=gen_empty_fingerprint())
-  address, data, src = mache_can.create_lka_msg(native.packer, bus)
+  address, data, src = fordcan.create_lka_msg(native.packer, bus)
   assert native.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, src, data))
   return native
 
 
 def inactive(owner):
   bus = CanBus(fingerprint=gen_empty_fingerprint())
-  address, data, src = mache_can.create_lat_ctl2_msg(owner.packer, bus, 0, 0, 1, 0., 0., 0)
+  address, data, src = fordcan.create_lat_ctl2_msg(owner.packer, bus, 0, 0., 0., 0., 0., 0)
   assert owner.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, src, data))
 
 
@@ -71,7 +71,7 @@ def test_main_off_continuity_has_no_steering_or_longitudinal_authority(owner):
     assert owner.safety.aol_get_permission_mask() == 0
     assert not owner.safety.get_controls_allowed()
   bus = CanBus(fingerprint=gen_empty_fingerprint())
-  address, data, src = mache_can.create_lat_ctl2_msg(owner.packer, bus, 1, 0, 1, 0., 0., 1)
+  address, data, src = fordcan.create_lat_ctl2_msg(owner.packer, bus, 1, 0., 0., 0., 0., 1)
   assert not owner.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, src, data))
   assert owner.safety.safety_fwd_hook(2, 0x18A) == 0
 
@@ -139,7 +139,7 @@ def test_neutral_continuity_across_real_microsecond_timer_wrap(owner):
   owner.safety.set_alternative_experience(32)
   owner.pump(40, main=0, mask=0, heartbeat=False)
   bus = CanBus(fingerprint=gen_empty_fingerprint())
-  address, data, src = mache_can.create_lka_msg(owner.packer, bus)
+  address, data, src = fordcan.create_lka_msg(owner.packer, bus)
   assert owner.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, src, data))
   acquire(owner)
   for tick in range(40):
@@ -155,9 +155,9 @@ def test_neutral_continuity_across_real_microsecond_timer_wrap(owner):
 def active_then_off(owner, full=False):
   owner.arm()
   bus = CanBus(fingerprint=gen_empty_fingerprint())
-  address, data, src = mache_can.create_lka_msg(owner.packer, bus)
+  address, data, src = fordcan.create_lka_msg(owner.packer, bus)
   assert owner.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, src, data))
-  address, data, src = mache_can.create_lat_ctl2_msg(owner.packer, bus, 1, 0, 1, 0., 0., 0)
+  address, data, src = fordcan.create_lat_ctl2_msg(owner.packer, bus, 1, 0., 0., 0., 0., 0)
   assert owner.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, src, data))
   assert owner.safety.aol_get_permission_mask() == 1
   if full:
