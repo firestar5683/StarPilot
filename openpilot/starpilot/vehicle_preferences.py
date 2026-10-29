@@ -42,6 +42,7 @@ class VehicleStartupPreferences:
   gm_camera_pedal: bool = True
   toyota_filter: bool = True
   gm_longitudinal_tune: int = 0
+  ford_bluepilot: tuple[tuple[str, str], ...] = field(default=(("disable_BP_lat_UI", "1"),), kw_only=True)
   toyota_lock_doors: bool = False
   toyota_unlock_doors: bool = False
   toyota_radar_mode: int = 0
@@ -55,6 +56,7 @@ class VehicleStartupPreferences:
     from openpilot.starpilot.car.tesla.preap_preferences import stock_configuration
     from openpilot.starpilot.car.tesla.radar_settings import read_radar_settings
     from openpilot.starpilot.car.tesla.pedal_preferences import read_pedal_settings
+    from openpilot.starpilot.car.ford.bluepilot import startup_params as ford_bluepilot
     smoothing = read_snapshot(params, enabled=enabled)
     radar = read_radar_settings(params)
     pedal = read_pedal_settings(params)
@@ -111,7 +113,7 @@ class VehicleStartupPreferences:
                subaru_sng=bool(enabled and readable and safe in (None, b"0") and read_saved(params, "SubaruSNG", 8) == (b"1", True)),
                subaru_software_cruise=bool(enabled and readable and safe in (None, b"0") and
                    read_saved(params, "SubaruRedneckCruise", 8) == (b"1", True)), toyota_radar_mode=toyota_radar_mode(params, enabled=enabled),
-               tesla_screen=screen,
+               ford_bluepilot=tuple(ford_bluepilot(params, enabled=enabled).items()), tesla_screen=screen,
                tesla_screen_brake=screen_brake, toyota_auto_hold=toyota,
                toyota_sng=bool(enabled and readable and safe in (None, b"0") and
                                read_saved(params, "SNGHack", 8) == (b"1", True)), jeep_brake_hold=jeep_hold,
@@ -220,6 +222,8 @@ class VehicleStartupPreferences:
       apply_toyota_auto_hold(cp, self.toyota_auto_hold)
       from opendbc.car.toyota.ars510_preferences import apply_radar_mode
       apply_radar_mode(cp, self.toyota_radar_mode)
+    from opendbc.bluepilot_lateral.hosts.starpilot.safety_param import init_ford_safety_param_starpilot
+    init_ford_safety_param_starpilot(cp, dict(self.ford_bluepilot))
     return cp
 
   def finalize(self, cp) -> None:
