@@ -230,9 +230,10 @@ class TestFordAolDriverIntent(unittest.TestCase):
       frame = create_lat_ctl_msg(self.packer, bus, False, offset, 0., 0., 0.)
     return frame[0], libsafety_py.make_CANPacket(frame[0], frame[2], frame[1])
 
-  def test_one_actuator_sender_while_host_frames_are_accepted(self):
+  def test_one_actuator_sender_while_the_host_sends(self):
     # The camera's actuator is forwarded under AOL so the stock system keeps its message when the host
-    # isn't sending; while the host's inactive frames reach the bus, two senders confuse the PSCM
+    # isn't sending; while the host sends, two senders confuse the PSCM, and a camera frame standing in
+    # for a rejected host frame mid-steer makes it ramp out and fault
     for word in self.PROFILES:
       with self.subTest(word=word):
         self.reset(word)
@@ -254,8 +255,16 @@ class TestFordAolDriverIntent(unittest.TestCase):
         self.assertEqual(self.safety.safety_fwd_hook(2, address), 0)
         self.assertTrue(self.safety.safety_tx_hook(inactive))
         self.assertEqual(self.safety.safety_fwd_hook(2, address), -1)
-        self.assertFalse(self.safety.safety_tx_hook(self.host_actuator(valid=False)[1]))
+        # a rejected host frame is a missed frame, not the camera's turn
+        _, rejected = self.host_actuator(valid=False)
+        for _ in range(10):
+          self.pump(5)
+          self.assertFalse(self.safety.safety_tx_hook(rejected))
+          self.assertEqual(self.safety.safety_fwd_hook(2, address), -1)
+        self.pump(31)
         self.assertEqual(self.safety.safety_fwd_hook(2, address), 0)
+        self.assertFalse(self.safety.safety_tx_hook(rejected))
+        self.assertEqual(self.safety.safety_fwd_hook(2, address), -1)
         self.safety.set_safety_hooks(structs.CarParams.SafetyModel.ford, word)
         self.assertEqual(self.safety.safety_fwd_hook(2, address), 0)
 

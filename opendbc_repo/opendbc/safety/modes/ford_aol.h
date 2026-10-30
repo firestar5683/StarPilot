@@ -30,9 +30,11 @@ static bool ford_aol_lka_ready = false;
 static uint8_t ford_aol_owned = 0U;
 static uint32_t ford_aol_accepted_ts = 0U;
 
-// The host sends the steering actuator every frame, active or not. While its last frame was
-// accepted, the camera's copy stays off the bus, so the PSCM hears one sender, as it would
-// under static blocking. A rejected or stale host frame lets the camera's copy through again.
+// The host sends the steering actuator every frame, active or not. While it is sending, the
+// camera's copy stays off the bus, so the PSCM hears one sender, as it would under static
+// blocking. A rejected host frame is a missed frame, as without AOL: letting the camera's
+// inactive frame through in its place, mid-steer, makes the PSCM ramp out and fault. Only a
+// host that has stopped sending gives the actuator back to the camera.
 static bool ford_aol_host_actuator_seen = false;
 static uint32_t ford_aol_host_actuator_ts = 0U;
 
@@ -337,7 +339,7 @@ static void ford_aol_tx(const CANPacket_t *msg, bool accepted) {
     const bool display_owned = steering_owned || (accepted && retained_display && ((permission & 1U) != 0U) && !relay_malfunction);
     ford_aol_owned = (steering_owned ? FORD_AOL_STEERING_OWNED : 0U) | (display_owned ? FORD_AOL_DISPLAY_OWNED : 0U);
     ford_aol_accepted_ts = microsecond_timer_get();
-    ford_aol_host_actuator_seen = accepted;
+    ford_aol_host_actuator_seen = true;
     ford_aol_host_actuator_ts = ford_aol_accepted_ts;
   }
   if ((msg->bus == 0U) && ((msg->addr == 0x18AU) || (msg->addr == 0x3D8U))) {
