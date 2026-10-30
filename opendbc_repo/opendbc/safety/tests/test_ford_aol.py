@@ -213,6 +213,61 @@ class TestFordAolDriverIntent(unittest.TestCase):
     for address in (0x3D3, 0x3D8, 0x18A):
       self.assertEqual(self.safety.safety_fwd_hook(2, address), 0)
 
+  def host_actuator(self, *, valid=True):
+    """This profile's steering actuator, inactive, as the host sends it every frame. Invalid adds a path offset,
+    or on the Transit requests steering without lateral permission."""
+    from opendbc.car.ford.fordcan import CanBus, create_lat_ctl_msg, create_lat_ctl2_msg, create_lka_msg
+    from opendbc.car import gen_empty_fingerprint
+    bus = CanBus(fingerprint=gen_empty_fingerprint())
+    base = self.word & ~257
+    offset = 0. if valid else 1.
+    if base == 12:
+      frame = create_lka_msg(self.packer, bus, transit=True) if valid else \
+              create_lka_msg(self.packer, bus, True, 1., 2, .0002, transit=True)
+    elif base in (2, 10):
+      frame = create_lat_ctl2_msg(self.packer, bus, 0, offset, 0., 0., 0., 0)
+    else:
+      frame = create_lat_ctl_msg(self.packer, bus, False, offset, 0., 0., 0.)
+    return frame[0], libsafety_py.make_CANPacket(frame[0], frame[2], frame[1])
+
+  def test_one_actuator_sender_while_host_frames_are_accepted(self):
+    # The camera's actuator is forwarded under AOL so the stock system keeps its message when the host
+    # isn't sending; while the host's inactive frames reach the bus, two senders confuse the PSCM
+    for word in self.PROFILES:
+      with self.subTest(word=word):
+        self.reset(word)
+        self.pump(10)
+        address, inactive = self.host_actuator()
+        self.assertEqual(self.safety.safety_fwd_hook(2, address), 0)
+        for _ in range(20):
+          self.pump(5)
+          self.assertTrue(self.safety.safety_tx_hook(inactive))
+          self.assertEqual(self.safety.safety_fwd_hook(2, address), -1)
+          self.assertEqual(self.safety.safety_fwd_hook(0, address), 2)
+          self.assertEqual(self.safety.safety_fwd_hook(2, 0x321), 0)
+          # replacing the camera's frame grants nothing
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+          self.assertFalse(self.safety.get_controls_allowed())
+        self.pump(30)
+        self.assertEqual(self.safety.safety_fwd_hook(2, address), -1)
+        self.pump(1)
+        self.assertEqual(self.safety.safety_fwd_hook(2, address), 0)
+        self.assertTrue(self.safety.safety_tx_hook(inactive))
+        self.assertEqual(self.safety.safety_fwd_hook(2, address), -1)
+        self.assertFalse(self.safety.safety_tx_hook(self.host_actuator(valid=False)[1]))
+        self.assertEqual(self.safety.safety_fwd_hook(2, address), 0)
+        self.safety.set_safety_hooks(structs.CarParams.SafetyModel.ford, word)
+        self.assertEqual(self.safety.safety_fwd_hook(2, address), 0)
+
+  def test_without_aol_the_actuator_stays_statically_blocked(self):
+    for word in self.BASE_PROFILES:
+      with self.subTest(word=word):
+        self.reset(word)
+        address, _ = self.host_actuator()
+        self.safety.set_alternative_experience(0)
+        self.assertEqual(self.safety.set_safety_hooks(structs.CarParams.SafetyModel.ford, word), 0)
+        self.assertEqual(self.safety.safety_fwd_hook(2, address), -1)
+
   def test_native_bounded_catalog_copy_denies_invalid_and_restores_registered_table(self):
     for length, null_catalog in ((0, False), (1, False), (7, False), (8, False), (1, True)):
       with self.subTest(length=length, null_catalog=null_catalog):

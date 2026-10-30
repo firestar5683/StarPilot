@@ -39,7 +39,7 @@ def acquire(owner):
   assert ui(owner, 0x3D8)
   assert owner.safety.safety_fwd_hook(2, 0x18A) == -1
   assert owner.safety.safety_fwd_hook(2, 0x3D8) == -1
-  assert owner.safety.safety_fwd_hook(2, 0x3D6) == 0
+  assert owner.safety.safety_fwd_hook(2, 0x3D6) == -1  # the accepted inactive actuator replaces the camera's copy
   assert owner.safety.aol_get_permission_mask() == 0
   assert not owner.safety.get_controls_allowed()
 
@@ -68,7 +68,7 @@ def test_main_off_continuity_has_no_steering_or_longitudinal_authority(owner):
       assert ui(owner, 0x18A)
     assert owner.safety.safety_fwd_hook(2, 0x18A) == -1
     assert owner.safety.safety_fwd_hook(2, 0x3D8) == -1
-    assert owner.safety.safety_fwd_hook(2, 0x3D6) == 0
+    assert owner.safety.safety_fwd_hook(2, 0x3D6) == -1
     assert owner.safety.aol_get_permission_mask() == 0
     assert not owner.safety.get_controls_allowed()
   bus = CanBus(fingerprint=gen_empty_fingerprint())
@@ -178,7 +178,7 @@ def test_off_display_precedes_next_inactive_actuator_without_stock_warning_gap(o
   assert owner.safety.safety_fwd_hook(2, 0x3D8) == 0
   assert ui(owner, 0x3D8)
   assert owner.safety.safety_fwd_hook(2, 0x3D8) == -1
-  assert owner.safety.safety_fwd_hook(2, 0x3D6) == 0
+  assert owner.safety.safety_fwd_hook(2, 0x3D6) == -1  # the host is still sending the actuator
   assert owner.safety.aol_get_permission_mask() == 0
   owner.pump(4, main=3, mask=0, heartbeat=False)
   inactive(owner)

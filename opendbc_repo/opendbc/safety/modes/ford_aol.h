@@ -30,6 +30,17 @@ static bool ford_aol_lka_ready = false;
 static uint8_t ford_aol_owned = 0U;
 static uint32_t ford_aol_accepted_ts = 0U;
 
+// The host sends the steering actuator every frame, active or not. While its last frame was
+// accepted, the camera's copy stays off the bus, so the PSCM hears one sender, as it would
+// under static blocking. A rejected or stale host frame lets the camera's copy through again.
+static bool ford_aol_host_actuator_seen = false;
+static uint32_t ford_aol_host_actuator_ts = 0U;
+
+static bool ford_aol_host_actuator_current(void) {
+  return ford_aol_host_actuator_seen &&
+    (safety_get_ts_elapsed(microsecond_timer_get(), ford_aol_host_actuator_ts) <= AOL_HOST_REQUEST_TIMEOUT_US);
+}
+
 // An accepted inactive actuator plus a truthful OFF/standby display can own
 // cluster continuity without owning steering. Keep the existing command lease.
 #define FORD_AOL_NEUTRAL_STEERING_SEEN 0x80U
@@ -109,6 +120,8 @@ static void ford_aol_reset(void) {
   ford_aol_eps = 0U;
   ford_aol_lka_ready = false;
   ford_aol_accepted_ts = 0U;
+  ford_aol_host_actuator_seen = false;
+  ford_aol_host_actuator_ts = 0U;
 }
 
 // Fresh physical MAIN/LKAS or ordinary cruise activation begins a new session.
@@ -324,6 +337,8 @@ static void ford_aol_tx(const CANPacket_t *msg, bool accepted) {
     const bool display_owned = steering_owned || (accepted && retained_display && ((permission & 1U) != 0U) && !relay_malfunction);
     ford_aol_owned = (steering_owned ? FORD_AOL_STEERING_OWNED : 0U) | (display_owned ? FORD_AOL_DISPLAY_OWNED : 0U);
     ford_aol_accepted_ts = microsecond_timer_get();
+    ford_aol_host_actuator_seen = accepted;
+    ford_aol_host_actuator_ts = ford_aol_accepted_ts;
   }
   if ((msg->bus == 0U) && ((msg->addr == 0x18AU) || (msg->addr == 0x3D8U))) {
     if (accepted && ford_aol_neutral_steering_current() && ford_aol_neutral_packet(msg)) {
@@ -344,6 +359,9 @@ static bool ford_aol_fwd(int bus, int addr) {
     const bool display_permitted = !ford_aol_retained_display_profile() || ((ford_aol_permission_mask() & 1U) != 0U);
     blocked = (((ford_aol_owned & FORD_AOL_STEERING_OWNED) != 0U) && (addr == (int)ford_aol_replacement())) ||
       (((ford_aol_owned & FORD_AOL_DISPLAY_OWNED) != 0U) && display_permitted && ((addr == 0x3D8) || (addr == 0x18A)));
+  }
+  if (ford_aol_enabled && (bus == 2) && (addr == (int)ford_aol_replacement()) && ford_aol_host_actuator_current()) {
+    blocked = true;
   }
   if (ford_aol_neutral_current() && (bus == 2)) {
     blocked |= ((addr == 0x18A) && ((ford_aol_neutral_display_mask & 1U) != 0U)) ||

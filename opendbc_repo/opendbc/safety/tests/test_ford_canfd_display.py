@@ -70,7 +70,7 @@ def test_display_survives_fresh_inactive_packets_without_steering_ownership(owne
   for _ in range(30):
     owner.pump(5, mask=1)
     assert owner.safety.safety_tx_hook(command(owner, active=False))
-    assert owner.safety.safety_fwd_hook(2, 0x3D6) == 0
+    assert owner.safety.safety_fwd_hook(2, 0x3D6) == -1  # one 0x3D6 sender: the accepted inactive host frame
     for address in (0x18A, 0x3D8):
       assert owner.safety.safety_fwd_hook(2, address) == -1
       assert owner.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, 0, bytes(8)))
