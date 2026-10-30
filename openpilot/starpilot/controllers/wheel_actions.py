@@ -82,7 +82,7 @@ def button_reported(cp, key):
     if brand == 'ford':
       return bool(cp.openpilotLongitudinalControl)
     if brand == 'mazda':
-      from opendbc.car.mazda.aol import qualified
+      from opendbc.car.mazda.stock_aol import qualified
       return qualified(cp, marked_only=True)
   return True
 
