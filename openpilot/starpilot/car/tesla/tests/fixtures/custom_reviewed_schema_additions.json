@@ -1,6 +1,6 @@
 {
-  "reviewed_schema_commit": "63395a56f1584e81f68556d1fe42c30fc6b3729a",
-  "reviewed_schema_sha256": "cf1217c26673f2cd0e61f33cee56dc11f5d583dde096c41579fd4d633bdf9e64",
+  "reviewed_schema_commit": "cd0f46b9d65a9c5e47002f57e5ad6625c9757c63",
+  "reviewed_schema_sha256": "5effa2eb1fbbada3d1bbaae0acd3d31d780d8ec0e6ee1e214fedbc38ae400182",
   "incumbent_fixture_sha256": "a36ab54c00b5bbe61d520873d24aadfb8f33babd70c31a07046516d5545838d9",
   "types": {
     "0xf35cc4560bbf6ec2": {
@@ -636,6 +636,20 @@
           "ordinal": {
             "explicit": 37
           }
+        }
+      ]
+    },
+    "0x9099c88083a9a9ff": {
+      "kind": "enum",
+      "before_name": "SlcCruiseEvent.Kind",
+      "after_name": "SlcCruiseEvent.Kind",
+      "old_field_count": 12,
+      "old_storage": {},
+      "new_storage": {},
+      "added_enumerants": [
+        {
+          "name": "engagementAdopt",
+          "codeOrder": 12
         }
       ]
     }
