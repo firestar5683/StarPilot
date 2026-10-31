@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from opendbc.car import structs, Bus
 from opendbc.car.ford.values import CAR
 from opendbc.car.ford.carcontroller import CarController
+from opendbc.bluepilot_lateral import BluePilotLateral
 from opendbc.bluepilot_lateral.core.angle import AngleController, Inputs, Command
 
 
@@ -31,7 +32,7 @@ def setup(canfd=True):
                         openpilotLongitudinalControl=True)
   cp.safetyConfigs = [structs.CarParams.SafetyConfig(safetyModel=structs.CarParams.SafetyModel.ford, safetyParam=147 if canfd else 161)]
   owner = CarController({Bus.pt:'ford_lincoln_base_pt'}, cp)
-  owner.bp_lat.host = CoreHost()
+  owner.bp_lat = BluePilotLateral(cp, host=CoreHost())
   cc = structs.CarControl(latActive=True)
   state = structs.CarState(vEgo=32.6, vEgoRaw=32.6, canValid=True,
                            gearShifter=structs.CarState.GearShifter.drive)
@@ -45,9 +46,16 @@ def control_active(message):
   return ((message[1][0] >> 4) if message[0] == 0x3D6 else (message[1][4] >> 2)) & 7
 
 
+def shadow_echo(owner, messages, now):
+  returned = [(address, data, bus | 0x80) for address, data, bus in messages if address == 0x3CA]
+  owner.bp_lat.observe_can([(now, returned)], 0)
+
+
 def prime(owner, cc, cs):
   for now in range(1_000_000_000, 2_000_000_000, 10_000_000):
-    owner.update(cc, cs, now)
+    _, messages = owner.update(cc, cs, now)
+    shadow_echo(owner, messages, now + 1)
+  assert not owner.bp_lat.step_lka(owner.packer, owner.CAN, now + 1)
   assert owner.bp_lat.pending.active
   assert abs(owner.bp_lat.host.controller.path_last) > .015
 
@@ -81,6 +89,7 @@ def test_unrefreshable_stale_lease_neutral_clears_pending_actuator_history():
   seen = []
   for t in range(now + 10_000_000, now + 300_000_000, 10_000_000):
     _, messages = owner.update(cc, cs, t)
+    shadow_echo(owner, messages, t + 1)
     seen.extend(m for m in messages if m[0] == 0x3D6 and control_active(m))
   assert seen
   sig = owner.packer.dbc.name_to_msg['LateralMotionControl2'].sigs['LatCtlPath_An_Actl']
@@ -114,6 +123,8 @@ def test_aol_native_accepts_due_refresh_and_stale_restart_without_relaxation(can
         if address not in (0x3CA, 0x3D6, 0x3D3):
           continue
         assert native.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, data)), (tick, hex(address), data.hex())
+        if address == 0x3CA:
+          owner.bp_lat.observe_can([(now + 1, [(address, data, bus | 0x80)])], 0)
         active += address in (0x3D6, 0x3D3) and bool(control_active((address, data, bus)))
     assert active > 20
   finally:
@@ -125,10 +136,11 @@ def test_rejected_shadow_is_not_an_ack_and_withdraws_next_control():
   prime(owner, cc, cs)
   bp = owner.bp_lat
   now = max(bp.shadow_sent_ns, bp.control_sent_ns) + 72_000_000
-  payload = bp.shadow_return_payload
+  payload = bp.step_lka(owner.packer, owner.CAN, now)[0][1]
   bp.observe_can([(now, [(0x3CA, payload, 0xC0)])], 0)
   assert bp.host.steering_rejected
   assert not bp.shadow_echo_pending
+  assert bp.shadow_return_payload is None
   _, messages = owner.update(cc, cs, now)
   controls = [m for m in messages if m[0] == 0x3D6]
   assert controls and control_active(controls[0]) == 0
@@ -139,8 +151,8 @@ def test_unrelated_or_out_of_order_returns_do_not_refresh_shadow_time():
   owner, cc, cs = setup()
   prime(owner, cc, cs)
   bp = owner.bp_lat
-  sent = bp.shadow_sent_ns
-  payload = bp.shadow_return_payload
+  sent = max(bp.shadow_sent_ns, bp.control_sent_ns) + 72_000_000
+  payload = bp.step_lka(owner.packer, owner.CAN, sent)[0][1]
   bp.shadow_returned_ns = sent + 10_000_000
   bp.observe_can([(sent, [(0x3CA, payload, 0x80)])], 0)
   bp.observe_can([(sent + 20_000_000, [(0x3CA, bytes(8), 0x80)])], 0)
@@ -177,3 +189,49 @@ def test_stale_transport_reset_preserves_continuous_manual_turn_pause():
   for t in range(now + 10_000_000, now + 500_000_000, 10_000_000):
     _, messages = owner.update(cc, cs, t)
     assert not any(control_active(m) for m in messages if m[0] == 0x3D6)
+
+
+def test_shadow_waits_for_return_before_another_request():
+  owner, _, _ = setup()
+  bp = owner.bp_lat
+  bp.pending = Command(True, .02, .001)
+  sent = 1_000_000_000
+  first = bp.step_lka(owner.packer, owner.CAN, sent)[0]
+  assert not bp.step_lka(owner.packer, owner.CAN, sent + 30_000_000)
+  assert not bp.step_lka(owner.packer, owner.CAN, sent + 60_000_000)
+  bp.observe_can([(sent + 60_000_001, [(first[0], first[1], 0x80)])], 0)
+  assert not bp.step_lka(owner.packer, owner.CAN, sent + 70_000_000)
+  assert not bp.step_lka(owner.packer, owner.CAN, sent + 90_000_000)
+  second = bp.step_lka(owner.packer, owner.CAN, sent + 100_000_000)[0]
+  assert ((second[1][4] >> 2) & 7) == 1
+
+
+def test_native_rejected_shadow_retries_the_unaccepted_counter():
+  from opendbc.safety.tests.test_ford_aol import TestFordAolDriverIntent
+  from opendbc.safety.tests.libsafety import libsafety_py
+  native = TestFordAolDriverIntent()
+  native.setUp()
+  try:
+    native.reset(147)
+    owner, _, _ = setup()
+    bp = owner.bp_lat
+    bp.pending = Command(True, .02, .001)
+    sent = 1_000_000_000
+    first = bp.step_lka(owner.packer, owner.CAN, sent)[0]
+    native.safety.set_timer(1_000_000)
+    assert native.safety.safety_tx_hook(libsafety_py.make_CANPacket(first[0], first[2], first[1]))
+    bp.observe_can([(sent + 1, [(first[0], first[1], 0x80)])], 0)
+    bp.step_lka(owner.packer, owner.CAN, sent + 10_000_000)
+    second = bp.step_lka(owner.packer, owner.CAN, sent + 40_000_000)[0]
+    # Independent MCU time reproduces two queued packets arriving only 12 ms apart.
+    native.safety.set_timer(1_012_000)
+    assert not native.safety.safety_tx_hook(libsafety_py.make_CANPacket(second[0], second[2], second[1]))
+    bp.observe_can([(sent + 40_000_001, [(second[0], second[1], 0xC0)])], 0)
+    assert bp.host.steering_rejected
+    assert not bp.step_lka(owner.packer, owner.CAN, sent + 50_000_000)
+    retry = bp.step_lka(owner.packer, owner.CAN, sent + 80_000_000)[0]
+    assert ((retry[1][4] >> 2) & 7) == ((second[1][4] >> 2) & 7)
+    native.safety.set_timer(1_080_000)
+    assert native.safety.safety_tx_hook(libsafety_py.make_CANPacket(retry[0], retry[2], retry[1]))
+  finally:
+    native.tearDown()

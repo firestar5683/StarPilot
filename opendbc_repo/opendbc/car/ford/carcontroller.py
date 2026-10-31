@@ -94,6 +94,7 @@ class CarController(CarControllerBase):
     self.main_on_last = False
     self.lkas_enabled_last = False
     self.steer_alert_last = False
+    self.lkas_ui_sent_ns = self.acc_ui_sent_ns = 0
     self.lead_distance_bars_last = None
     self.distance_bar_frame = 0
     self.apply_lka_angle_last = 0.
@@ -366,7 +367,10 @@ class CarController(CarControllerBase):
     if not aol_owned_ui or ui_enabled or neutral_ui:
       send_ui = (self.main_on_last != main_on) or (self.lkas_enabled_last != ui_enabled) or (self.steer_alert_last != steer_alert)
       # send lkas ui msg at 1Hz or if ui state changes
-      if (self.frame % CarControllerParams.LKAS_UI_STEP) == 0 or send_ui:
+      lkas_due = (now_nanos - self.lkas_ui_sent_ns >= 1_000_000_000 if neutral_ui else
+                  self.frame % CarControllerParams.LKAS_UI_STEP == 0)
+      if lkas_due or send_ui:
+        self.lkas_ui_sent_ns = now_nanos
         can_sends.append(fordcan.create_lkas_ui_msg(self.packer, self.CAN, main_on, ui_enabled, steer_alert, hud_control, CS.lkas_status_stock_values))
 
       # send acc ui msg at 5Hz or if ui state changes
@@ -374,8 +378,10 @@ class CarController(CarControllerBase):
         send_ui = True
         self.distance_bar_frame = self.frame
 
-      acc_ui_step = CarControllerParams.ACC_UI_STEP // 2 if neutral_ui else CarControllerParams.ACC_UI_STEP
-      if (self.frame % acc_ui_step) == 0 or send_ui:
+      acc_due = (now_nanos - self.acc_ui_sent_ns >= 100_000_000 if neutral_ui else
+                 self.frame % CarControllerParams.ACC_UI_STEP == 0)
+      if acc_due or send_ui:
+        self.acc_ui_sent_ns = now_nanos
         show_distance_bars = self.frame - self.distance_bar_frame < 400
         hands_free_cluster = bool(self.cluster_extended_announced and
                                   self.hands_free_cluster_input is not None and self.hands_free_cluster_input.enabled)

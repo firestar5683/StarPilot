@@ -274,6 +274,7 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
 
       local.setattr(sd.sm, 'update_msgs', location_update)
 
+      controller_returns = []
       delayed_pedal_frames = []
       delayed_pedals_seen = set()
       route45_old = {}
@@ -293,7 +294,8 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
         request = 0 if prior_axis is None else (int(prior_axis.aolAxisState.desiredLateral) | (int(prior_axis.aolAxisState.desiredLongitudinal) << 1))
         arm_heartbeat = retained_arm(published.get('aolIntentWire'), prior_axis, now[0])
         heartbeat = bool(request or prior_state is not None and prior_state.selfdriveState.enabled or arm_heartbeat)
-        frames = delayed_pedal_frames[:]
+        frames = delayed_pedal_frames[:] + controller_returns[:]
+        controller_returns.clear()
         delayed_pedal_frames.clear()
 
         def receive(name, values):
@@ -511,6 +513,8 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
             from opendbc.safety.tests.libsafety import libsafety_py
 
             accepted = safety.safety_tx_hook(libsafety_py.make_CANPacket(frame.address, frame.src - joined.offset, frame.dat))
+            if getattr(monkeypatch, 'ford_angle', False) and frame.address in (0x3CA, 0x3D3, 0x3D6):
+              controller_returns.append((frame.address, bytes(frame.dat), (frame.src - joined.offset) | (0x80 if accepted else 0xC0)))
             if (getattr(monkeypatch, 'ford_pinion', False) and (brake or cancel) and command.latActive and
                 frame.address in (0x3D3, 0x3D6)):
               mode = ((frame.dat[4] >> 2) & 7) if frame.address == 0x3D3 else ((frame.dat[0] >> 4) & 7)

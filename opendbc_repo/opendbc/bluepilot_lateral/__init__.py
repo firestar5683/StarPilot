@@ -23,6 +23,7 @@ class BluePilotLateral:
     self.shadow_returned_ns = 0
     self.control_echo_pending = False
     self.shadow_echo_pending = False
+    self.shadow_rejection_pending = False
     self.control_return_payload = None
     self.shadow_return_payload = None
     self.pending_generation = 0
@@ -47,6 +48,10 @@ class BluePilotLateral:
           if timestamp > self.steering_rejection_ns:
             self.steering_rejection_ns = timestamp
             self.host.steering_rejected = True
+          if address == 0x3CA and data == self.shadow_return_payload:
+            self.lka_counter = (data[4] >> 2) & 7
+            self.shadow_return_payload = None
+            self.shadow_rejection_pending = True
           continue
         if source != (main_bus | 0x80):
           continue
@@ -93,10 +98,12 @@ class BluePilotLateral:
   def step_lka(self, packer, CAN, now_ns):
     if now_ns <= 0:
       return []
-    if self.shadow_echo_pending:
+    if self.shadow_echo_pending or self.shadow_rejection_pending:
       self.shadow_echo_ns = now_ns
       self.shadow_echo_pending = False
-    if ((self.shadow_sent_ns and now_ns - self.shadow_sent_ns < 30_000_000) or
+      self.shadow_rejection_pending = False
+    if (self.shadow_return_payload is not None or
+        (self.shadow_sent_ns and now_ns - self.shadow_sent_ns < 30_000_000) or
         (self.shadow_echo_ns and now_ns - self.shadow_echo_ns < 25_000_000)):
       return []
     self.announced = self.pending

@@ -850,7 +850,8 @@ class SelfdriveD:
       all(valid and sample.brakePressed == previous.brakePressed and sample.regenBraking == previous.regenBraking
           and not sample.gasPressed and not sample.buttonEvents for sample, valid in samples))
     ford_lateral_gas = bool(self.ford_source_deadline_supported() and proof[8] and not proof[9] and
-      not self.enabled and not self.active and not CS.cruiseState.enabled)
+      (not self.enabled and not self.active and not CS.cruiseState.enabled or
+       self.enabled and self.active and CS.cruiseState.enabled and proof[7]))
     held_gas = bool((proof[9] and self.enabled and self.active or ford_lateral_gas) and previous.gasPressed and
       self.events.contains(ET.OVERRIDE_LONGITUDINAL) and
       all(valid and sample.gasPressed and not sample.brakePressed and not sample.regenBraking
@@ -946,7 +947,11 @@ class SelfdriveD:
            for sample, valid in samples):
       return 0
     native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=session)
-    if (native is None or not healthy_transport(self.sm, self.CP, CS, session, now_ns, native) or
+    transport_current = healthy_transport(self.sm, self.CP, CS, session, now_ns, native)
+    if not transport_current and held_gas and self.ford_source_deadline_supported() and not active_longitudinal:
+      from openpilot.starpilot.aol.transport_pause import independent_lateral_health
+      transport_current = native is not None and independent_lateral_health(self.sm, self.CP, CS, session, now_ns) == native
+    if (native is None or not transport_current or
         native.pandaSerial != previous_native.pandaSerial or native.pandaInventory != previous_native.pandaInventory or
         native.observedMonoTime < previous_native.observedMonoTime or
         bool(native.requestedLateral) != lateral or bool(native.requestedLongitudinal) != longitudinal):
