@@ -1,4 +1,4 @@
-from opendbc.car.gm.steering_authority import SteeringAuthority
+from opendbc.car.gm.steering_authority import SteeringAuthority, STEERING_COMMAND_TIMEOUT_NS
 from opendbc.car.gm.values import is_volt_flashed_profile
 from opendbc.car.gps import CarGpsTracker, get_car_gps_config
 from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, BrakeSource, volt_cc_pedal_profile
@@ -63,6 +63,7 @@ class CarState(CarStateBase):
     self.cluster_min_speed = CV.KPH_TO_MS / 2.
 
     self.loopback_lka_steering_cmd_updated = False
+    self.bolt_steering_pending: tuple[int, int] | None = None
     self.loopback_lka_steering_cmd_counter = 0
     self.loopback_lka_steering_cmd_ts_nanos = 0
     self.pt_lka_steering_cmd_counter = 0
@@ -503,7 +504,9 @@ class CarState(CarStateBase):
 
     # 0 inactive, 1 active, 2 temporarily limited, 3 failed
     self.lkas_status = pt_cp.vl["PSCMStatus"]["LKATorqueDeliveredStatus"]
-    ret.steerFaultTemporary = self.lkas_status == 2
+    pending = self.bolt_steering_pending
+    receipt_timeout = pending is not None and pt_cp._last_update_nanos - pending[1] > STEERING_COMMAND_TIMEOUT_NS
+    ret.steerFaultTemporary = self.lkas_status == 2 or receipt_timeout
     ret.steerFaultPermanent = self.lkas_status == 3
 
     # 1 - open, 0 - closed

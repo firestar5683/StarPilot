@@ -307,6 +307,8 @@ class CarController(CarControllerBase):
                                 CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and is_bolt_pedal_profile(CP) else None)
 
     self.lka_steering_cmd_counter = 0
+    self.bolt_steering_pending: tuple[int, int] | None = None
+    self.bolt_steering_receipt_seeded = False
     self.lka_icon_status_last = (False, False)
 
     self.hybrid_profile = malibu_hybrid_profile(self.CP)
@@ -454,6 +456,22 @@ class CarController(CarControllerBase):
     elif self.maneuver_paddle_mode == "force":
       self.regen_paddle_pressed = commanded_accel < -.02
     return self.regen_paddle_pressed
+
+  def observe_steering_receipts(self, can_packets):
+    for stamp, packets in can_packets:
+      for address, raw, bus in packets:
+        if address != 0x180 or len(raw) != 4 or bus not in (128, 192):
+          continue
+        counter = (raw[0] >> 4) & 3
+        pending = self.bolt_steering_pending
+        if pending is not None:
+          if counter != pending[0] or stamp < pending[1]:
+            continue
+          self.bolt_steering_pending = None
+          # A rejected packet never reached the bus; retry its counter.
+          self.lka_steering_cmd_counter = (counter + 1) % 4 if bus == 128 else counter
+        elif bus == 128 and not self.bolt_steering_receipt_seeded:
+          self.lka_steering_cmd_counter = (counter + 1) % 4
 
   def update(self, CC, CS, now_nanos, *, startup_keepalive=False):
     if self.bolt_acc_brake_clock is not None and getattr(CS, "bolt_acc_pedal_friction_unavailable", False):
@@ -622,18 +640,17 @@ class CarController(CarControllerBase):
       if CS.loopback_lka_steering_cmd_ts_nanos == 0 or out_of_sync:
         steer_step = self.params.STEER_STEP
 
-    if self.bolt_steering_ack_counter:
-      if CS.loopback_lka_steering_cmd_updated:
-        self.lka_steering_cmd_counter = (CS.loopback_lka_steering_cmd_counter + 1) % 4
-    else:
+    if not self.bolt_steering_ack_counter:
       self.lka_steering_cmd_counter += 1 if CS.loopback_lka_steering_cmd_updated else 0
 
     # Avoid GM EPS faults when transmitting messages too close together: skip this transmit if we
     # received the ASCMLKASteeringCmd loopback confirmation too recently
     last_lka_steer_msg_ms = (now_nanos - CS.loopback_lka_steering_cmd_ts_nanos) * 1e-6
-    if (self.frame - self.last_steer_frame) >= steer_step and last_lka_steer_msg_ms > MIN_STEER_MSG_INTERVAL_MS:
+    if ((self.frame - self.last_steer_frame) >= steer_step and last_lka_steer_msg_ms > MIN_STEER_MSG_INTERVAL_MS and
+        (not self.bolt_steering_ack_counter or self.bolt_steering_pending is None)):
       # Initialize ASCMLKASteeringCmd counter using the camera until we get a msg on the bus
-      if CS.loopback_lka_steering_cmd_ts_nanos == 0 and not self.bolt_pedal_removed and not (self.hybrid_profile is not None and self.hybrid_profile.removed):
+      if (CS.loopback_lka_steering_cmd_ts_nanos == 0 and not self.bolt_steering_receipt_seeded and
+          not self.bolt_pedal_removed and not (self.hybrid_profile is not None and self.hybrid_profile.removed)):
         self.lka_steering_cmd_counter = CS.pt_lka_steering_cmd_counter + 1
 
       if lat_active and not (self.ordinary_cc_profile and CC.enabled and not CS.out.cruiseState.enabled and not aol_lateral):
@@ -648,6 +665,9 @@ class CarController(CarControllerBase):
       self.apply_torque_last = apply_torque
       idx = self.lka_steering_cmd_counter % 4
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, lat_active))
+      if self.bolt_steering_ack_counter:
+        self.bolt_steering_pending = (idx, now_nanos)
+        self.bolt_steering_receipt_seeded = True
       if _projection is not None:
         _projection.emit('gm.ASCMLKASteeringCmd', apply_torque, lat_active, can_sends[-1])
       CS.steering_authority.command(now_nanos, lat_active)
