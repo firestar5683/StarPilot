@@ -1,4 +1,4 @@
-"""Selected safety slot for the exact first-generation captured CANFD owner."""
+"""Selected CANFD safety slot, retaining the exact captured-startup topology."""
 from opendbc.car.structs import CarParams
 from opendbc.car.hyundai.values import CAR, HyundaiFlags
 
@@ -23,6 +23,20 @@ def topology_index(cp):
 
 def config_index(cp):
   owner = topology_index(cp)
+  if owner is None and len(cp.safetyConfigs) == 2:
+    auxiliary, selected = cp.safetyConfigs
+    try:
+      factory = CAR(cp.carFingerprint)
+    except ValueError:
+      return None
+    if (cp.brand == 'hyundai' and factory.config.flags & HyundaiFlags.CANFD and
+        not factory.config.flags & HyundaiFlags.CANFD_ANGLE_STEERING and
+        cp.flags & HyundaiFlags.CANFD and not cp.flags & HyundaiFlags.CANFD_ANGLE_STEERING and
+        not cp.passive and not cp.dashcamOnly and not cp.notCar and
+        cp.steerControlType == CarParams.SteerControlType.torque and
+        auxiliary.safetyModel == CarParams.SafetyModel.noOutput and auxiliary.safetyParam == 0 and
+        selected.safetyModel == CarParams.SafetyModel.hyundaiCanfd):
+      return 1
   if owner != 1:
     return owner
   raw = int(cp.safetyConfigs[owner].safetyParam)

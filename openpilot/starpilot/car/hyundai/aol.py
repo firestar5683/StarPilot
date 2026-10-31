@@ -388,8 +388,7 @@ def physical_cancel_lateral_allowed(CP, CS, intent, native, *, settings, previou
         not any(e.type == car.CarState.ButtonEvent.Type.cancel for e in CS.buttonEvents)):
       return False
     ev6_long = CP.carFingerprint == HyundaiCAR.KIA_EV6 and qualified_canfd_long(CP, marked_only=True)
-    return bool((ev6_long or (settings.lkas_action == 9 or settings.main_action == 9) and
-      independent_cruise_buttons_supported(CP, marked_only=True)) and
+    return bool((ev6_long or independent_cruise_buttons_supported(CP, marked_only=True)) and
       previous is not None and previous.lateral_active and previous.native_acknowledged and
       intent is not None and intent.settingsQualified and intent.allowedLatch and intent.lateralArmed and
       not intent.pauseLateral and intent.producerSessionId and intent.carStateLogMonoTime == source_ns and
@@ -434,8 +433,7 @@ def retained_shared_long_cancel_intent(CP, CS, sm, feedback, owner, *, cancel_so
         not owner.allowed_latch or owner.pause_lateral or owner.pause_longitudinal or owner._fault_inhibit):
       return False
     settings = owner.settings
-    if (not settings.enabled or not (ev6_long or settings.lkas_action == 9 or settings.main_action == 9) or
-        any(settings.cancel_actions) or cp_identity(CP) != feedback.cp or
+    if (not settings.enabled or any(settings.cancel_actions) or cp_identity(CP) != feedback.cp or
         feedback.failed or feedback.paused or feedback.pending_event or feedback.qualified or feedback.awaiting or
         feedback.retention_started_ns or feedback.retention_pending or feedback.retention_qualified or
         feedback.source_retention_started_ns or feedback.temporary_host_qualified or

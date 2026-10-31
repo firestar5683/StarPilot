@@ -178,8 +178,8 @@ def test_stock_brake_exception_does_not_expand_configuration_admission(identity,
     configs[1].safetyParam = word
     from opendbc.car.hyundai.canfd_owner import config_index
 
-    assert config_index(cp) == (1 if lka else None)
-    assert qualified(cp, marked_only=True) == lka
+    assert config_index(cp) == 1
+    assert qualified(cp, marked_only=True)
   assert not stock_lateral_off(cp, state, native, allow_independent_brake=boundary != 'no_brake_role')
 
 

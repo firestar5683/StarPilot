@@ -78,7 +78,7 @@ def _invalid_controls_emits_no_commands(received):
   return envelope.which() == 'sendcan' and not envelope.valid and len(envelope.sendcan) == 0
 
 
-def _exercise_join(identity, alternate, incidental, withdrawal, monkeypatch, *, shared_long=False, two_panda=False):
+def _exercise_join(identity, alternate, incidental, withdrawal, monkeypatch, *, shared_long=False, two_panda=False, unmapped=False):
   assert not two_panda or (shared_long and not alternate and identity == CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN)
   offset = 4 if two_panda else 0
   bootstrap_refusals = []
@@ -90,7 +90,7 @@ def _exercise_join(identity, alternate, incidental, withdrawal, monkeypatch, *, 
     saved = Params()
     saved.put_bool('OpenpilotEnabledToggle', True, block=True)
     saved.put_bool('AlwaysOnLateral', True, block=True)
-    saved.put('LKASButtonControl', AOL_TOGGLE, block=True)
+    saved.put('LKASButtonControl', 0 if unmapped else AOL_TOGGLE, block=True)
     saved.put('MainCruiseButtonControl', 0, block=True)
     now = [10_000_000_000]
     holder = None
@@ -157,7 +157,7 @@ def _exercise_join(identity, alternate, incidental, withdrawal, monkeypatch, *, 
       sd, controls, drive = case._authority_callers(False, cp=card.CP.as_reader().as_builder(), genuine_events=True)
       # The reusable helper defaults this to None; exercise actual saved mappings.
       sd.aol_settings = read_settings(saved)
-      assert sd.aol_settings.lkas_action == AOL_TOGGLE and sd.aol_settings.main_action == 0
+      assert sd.aol_settings.lkas_action == (0 if unmapped else AOL_TOGGLE) and sd.aol_settings.main_action == 0
       assert sd.CP.to_dict() == card.CP.to_dict() == controls.CP.to_dict()
       assert len(card.CP.safetyConfigs) == (2 if two_panda else 1)
       assert bool(card.CP.openpilotLongitudinalControl) == shared_long
@@ -614,3 +614,9 @@ def test_gv70_single_panda_long_cancel_neighbor(withdrawal, monkeypatch):
   assert _native_variant() == 'debug'
   _exercise_join(CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN, False, 'cancel', withdrawal,
                  monkeypatch, shared_long=True)
+
+
+@pytest.mark.parametrize('identity,alternate', [
+  (CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN, False), (CAR.KIA_EV6, True)])
+def test_default_aol_actual_cancel_join(identity, alternate, monkeypatch):
+  _exercise_join(identity, alternate, 'cancel', 'toggle-off', monkeypatch, unmapped=True)

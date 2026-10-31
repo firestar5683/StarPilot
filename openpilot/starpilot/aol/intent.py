@@ -332,7 +332,7 @@ class AolCardIntent:
       if cancel_pressed:
         # An unassigned cruise CANCEL cannot toggle, arm or renew independent
         # lateral. Keep the existing withdrawal for configured CANCEL actions.
-        if not independent_buttons or any(self.settings.cancel_actions):
+        if not self.independent_cruise_buttons or any(self.settings.cancel_actions):
           self._record_latch_clear('cancel_press')
           self.allowed_latch = False
       elif not self._gesture_neutral_seen:
