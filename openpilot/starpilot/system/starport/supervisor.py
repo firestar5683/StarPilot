@@ -35,7 +35,7 @@ from typing import Any
 from openpilot.common.hardware import COMMA_HARDWARE
 from openpilot.starpilot.system.starport import car_profiles, device_health, identity as identity_store, system_slice
 from openpilot.starpilot.system.starport.auto_connect import AutoConnectPolicy
-from openpilot.starpilot.system.starport.bootstrap import NAMES, BootstrapError, WirelessBootstrap
+from openpilot.starpilot.system.starport.bootstrap import MODERN_MAJOR, NAMES, BootstrapError, WirelessBootstrap
 from openpilot.starpilot.system.starport.bugsink_report import PairingAttempt
 from openpilot.starpilot.system.starport.frame_source import (DEFAULT_PATH as DEFAULT_FRAME_PATH, FLAG_ASYNC_READBACK, FLAG_NV12,
                                                                   FORMAT_NV12, FrameRequest)
@@ -353,6 +353,7 @@ class Supervisor:
     self._pairing_seen: tuple = ()
     self._car_seen_at = -CAR_LINK_HOLD
     self._hfp_link = threading.Event()  # set when the chosen car opens the hands-free link
+    self._modern_reply: dict[str, bool] = {}  # car address -> answer its v4+ version request like a current phone
     self.auto = AutoConnectPolicy()
     self._companion_retry_at = 0.0
     self.log = EventLog()
@@ -497,11 +498,13 @@ class Supervisor:
       self.stop()
     with self._lock:
       companion = self.config.get("companion_address", "").upper() == address
-      cache = dict(self.config["rfcomm_cache"])
+      cache, replies = dict(self.config["rfcomm_cache"]), dict(self.config.get("modern_reply_cache", {}))
       cached = cache.pop(address, None) is not None
+      cached = replies.pop(address, None) is not None or cached
       if not (chosen or companion or cached):
         return False  # nothing of this device was kept
-      self.config["rfcomm_cache"] = cache
+      self.config.update(rfcomm_cache=cache, modern_reply_cache=replies)
+      self._modern_reply.pop(address, None)
       if chosen:
         if self._bluez is not None:
           self._bluez.release()
@@ -986,6 +989,21 @@ class Supervisor:
     else:
       bluez.restore_class()
 
+  def _remember_reply(self, address: str, modern: bool) -> None:
+    """Keep the version reply a v4+ head unit started with, so the next session leads with it."""
+    with self._lock:
+      self._modern_reply[address] = modern
+      replies = dict(self.config.get("modern_reply_cache", {}))
+      if modern == replies.get(address, False):
+        return
+      if modern:
+        replies[address] = True
+      else:
+        replies.pop(address, None)
+      self.config["modern_reply_cache"] = replies
+      identity_store.save_config(self.config)
+    self.log("bootstrap_reply_remembered", modern=modern)
+
   def _remember_channel(self, address: str, channel: int | None) -> None:
     with self._lock:
       cache = dict(self.config["rfcomm_cache"])
@@ -1234,22 +1252,30 @@ class Supervisor:
       channel, source = self._discover_channel(address), "sdp"
     self.log("rfcomm_channel", channel=channel, source=source)
 
+    boot = None
     try:
       self._stage("rfcomm", f"channel {channel}")
       rfcomm = self._track(bt_sockets.connect_rfcomm(address, channel))
       boot = WirelessBootstrap(rfcomm, self._bootstrap_log, device_serial=config["device_name"],
-                               version_status=int(config.get("version_status", 0)))
+                               version_status=int(config.get("version_status", 0)),
+                               experiment="all" if car_profiles.tuning(config)["bootstrap_experiments"] else "",
+                               modern_reply=self._modern_reply.get(address, config.get("modern_reply_cache", {}).get(address, False)))
       self._set(state="wifi_start")
       result = boot.run(lambda credentials: lease.acquire(credentials, cancelled=boot.join_is_cancelled), cancelled=self._stop.is_set)
     except Exception as error:
       if _stray_link(error):
         raise StrayLinkError(f"Bluetooth link to the car is stuck: {error}") from error  # says nothing about the cached channel
+      if boot is not None and boot.silent_after_modern_version(error):
+        self._modern_reply[address] = not boot.modern_reply  # try the other version reply next
+        self.log("bootstrap_reply_switched", modern=self._modern_reply[address])
       if source == "cache" and not self._stop.is_set() and self._status["last_stage"] in ("rfcomm", "wifi_start") and car_never_answered(error):
         self._remember_channel(address, None)  # the car never answered there; ask it over SDP next time
         self.log("rfcomm_cache_dropped", channel=channel)
       raise
     if source == "sdp":
       self._remember_channel(address, channel)
+    if boot.version_major >= MODERN_MAJOR:
+      self._remember_reply(address, boot.modern_reply)
     self._set(head_unit=result.head_unit)
     self._remember_fingerprint(result.head_unit)
     bluez.restore_class()  # the car has accepted the comma; stop looking like a phone to everything else
