@@ -65,13 +65,16 @@ def _diagnostic_mask(cp):
 def blocking_fault_mask(mask, cp):
   try:
     value = int(mask)
-    return value < 0 or value > 0xFFFFFFFF or bool(value & ~_diagnostic_mask(cp))
+    return value < 0 or value > 0xFFFFFFFF or bool(value and value & ~_diagnostic_mask(cp))
   except (TypeError, ValueError, OverflowError):
     return True
 
 
 def blocking_fault_list(faults, cp):
   try:
+    faults = tuple(faults)
+    if not faults:
+      return False
     allowed = _diagnostic_mask(cp)
     named = ((log.PandaState.FaultType.interruptRateCan1, 1 << 2),
              (log.PandaState.FaultType.interruptRateCan2, 1 << 3),

@@ -1,3 +1,4 @@
+from opendbc.car.config_cache import cached_config
 from dataclasses import dataclass, field, replace
 from enum import Enum, IntFlag
 from math import isfinite
@@ -933,6 +934,13 @@ def is_bolt_pedal_removed_profile(cp, *, stock_only=False):
 
 
 def is_bolt_pedal_profile(cp, *, stock_only=False):
+  if cp.brand != 'gm' or cp.carFingerprint not in BOLT_PEDAL_WORDS:
+    return False
+  return _bolt_pedal_profile(cp, stock_only=stock_only)
+
+
+@cached_config
+def _bolt_pedal_profile(cp, *, stock_only=False):
   """Exact selected interceptor profile, including its startup authority reduction."""
   if is_bolt_pedal_removed_profile(cp, stock_only=stock_only):
     return True
