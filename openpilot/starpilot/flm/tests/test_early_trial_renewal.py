@@ -124,3 +124,48 @@ def test_final_serialization_still_rejects_native_loss_or_expiry(monkeypatch):
   for stamp, native in ((now[0], False), (renewed.expires_ns+1, True)):
     message = steerlearnerd.tracking_message(source(stamp), now_ns=stamp, current_native=native, offer=renewed)
     assert message.starpilotSteeringTracking.trial.version == 0
+
+
+def test_actual_loop_revisits_retained_raw_header_before_another_fifo_batch(monkeypatch):
+  from openpilot.starpilot.flm.tests.test_live_tracking_daemon import NoLegacyFitter
+
+  class RenewalVisited(Exception):
+    pass
+
+  now = [BASE-10_000_000]
+  class SM:
+    updated = {'deviceMotion': False}
+    logMonoTime = {'deviceMotion': BASE}
+    def update(self, timeout=None):
+      if timeout == 0:
+        self.updated['deviceMotion'] = False
+      else:
+        now[0] += 10_000_000
+        self.updated['deviceMotion'] = True
+        # Same received header: prior handling does not prove physical qualification.
+        self.logMonoTime['deviceMotion'] = BASE
+
+  class PendingActor:
+    reason = 'unit_pending_offer'
+    ingress = None
+    def __init__(self):
+      self.calls = 0
+      self.closed = False
+    def tick(self, collector, current_source, **kwargs):
+      assert self.calls == 0, 'retained pose bypassed the early path and drained again'
+      self.calls += 1
+      return offer(BASE)
+    def close(self, reason):
+      self.closed = True
+      return True
+
+  actor, fitter = PendingActor(), NoLegacyFitter()
+  def renewal(sm, cp, collector, current_actor, current_source, **kwargs):
+    assert now[0] == BASE+10_000_000 and current_actor is actor
+    raise RenewalVisited
+  monkeypatch.setattr(steerlearnerd, '_early_tracking_offer', renewal)
+  monkeypatch.setattr(steerlearnerd, 'drain_pair', lambda *args: None)
+  with pytest.raises(RenewalVisited):
+    steerlearnerd.run(S(), SM(), object(), object(), S(send=lambda *args:None), None, None,
+      source, None, None, None, None, fitter, None, clock=lambda:now[0], live_actor=actor)
+  assert actor.closed and fitter.closed

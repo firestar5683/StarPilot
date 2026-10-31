@@ -584,9 +584,11 @@ def run(
 
       # Only an already-existing source-only owner may renew here. Actual
       # observe/witness/native/source gates stay intact; no numerical work or
-      # stale pose is promoted. The full post-drain path remains below.
+      # stale pose is promoted. A retained raw header may still need its first
+      # qualified response; only the actor owns physical-pose deduplication.
+      # The full post-drain path remains below.
       if (live_offer is not None and live_actor is not None and live_history.offer is None and
-          source_valid and tracking_pose_header > previous_tracking_pose_header):
+          source_valid and tracking_pose_header > 0):
         early = _early_tracking_offer(sm, CP, collector, live_actor, source, now_ns=now, clock=clock)
         if early is not None:
           live_offer = early
