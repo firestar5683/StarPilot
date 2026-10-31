@@ -71,6 +71,12 @@ tools/check_vendored.sh <fork checkout>/<path to its opendbc package>/bluepilot_
 
 Run it in your CI to catch an edit to the copy. For a fork working with BluePilot, this repo's nightly check runs it too.
 
+## Installer note: nested submodule
+
+A fork that embeds the library as a *nested* submodule (Option 2 — e.g. `fork → opendbc → opendbc/bluepilot_lateral`) can end up with the library missing after an end-user install. Some installers run a non-recursive `git submodule update --init`, which checks out the first-level submodule but not the library nested inside it, and the build then fails to import it. Installs that use `git submodule update --init --recursive` are unaffected.
+
+If your fork is installed that way, self-heal on launch: before the build imports the library, when its directory is empty, run a recursive submodule update scoped to the embedding submodule — guard on the library's `__init__.py`, retry, and fail soft so an offline boot is no worse than before.
+
 ## How BluePilot releases
 
 - Lateral changes and changes to the library's safety headers are driven on a car before they're released.
