@@ -72,7 +72,7 @@ class NetworkUI(Widget):
     self._current_panel: PanelType = PanelType.WIFI
     self._wifi_panel = self._child(WifiManagerUI(wifi_manager))
     self._advanced_panel = self._child(AdvancedNetworkSettings(wifi_manager))
-    self._nav_button = self._child(NavButton(lambda: tr("Advanced")))
+    self._nav_button = self._child(NavButton(tr("Advanced")))
     self._nav_button.set_click_callback(self._cycle_panel)
     self._action_guard: Callable[[], bool] | None = None
 
