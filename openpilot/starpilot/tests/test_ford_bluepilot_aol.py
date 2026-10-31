@@ -91,16 +91,28 @@ def test_real_rejected_packet_resynchronizes_without_permission_bypass(ford_join
         continue
       accepted = safety.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, data))
       assert accepted, (frame, hex(address), data.hex())
+      if address == 0x3CA:
+        adapter.observe_can([(now + 1, [(address, bytes(data), bus | 0x80)])], bus)
       if rejected and address == 0x3D6:
         neutral_after_rejection |= not active
         recovered |= active and neutral_after_rejection
   assert rejected and neutral_after_rejection and recovered
   # Host recovery never replaces native authorization.
   safety.aol_set_host_request(0)
-  native.pump(5, mask=0, speed=15.)
-  now = (1_000_000 + native.tick * 10_000) * 1000
-  neutral = adapter.step_lateral(CC, CS, native.packer, joined.host.CI.CC.CAN, 180, now)[0]
-  assert (neutral[1][0] >> 4) & 7 == 0
+  neutral_seen = False
+  for frame in range(180, 195):
+    native.pump(1, mask=0, speed=15.)
+    now = (1_000_000 + native.tick * 10_000) * 1000
+    packets = adapter.step_lateral(CC, CS, native.packer, joined.host.CI.CC.CAN, frame, now)
+    packets += adapter.step_lka(native.packer, joined.host.CI.CC.CAN, now)
+    for address, data, bus in packets:
+      if address == 0x3D6:
+        assert (data[0] >> 4) & 7 == 0
+        neutral_seen = True
+      assert safety.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, data))
+      if address == 0x3CA:
+        adapter.observe_can([(now + 1, [(address, bytes(data), bus | 0x80)])], bus)
+  assert neutral_seen
 
 
 @pytest.mark.parametrize('identity', [(CAR.FORD_MUSTANG_MACH_E_MK1, 18), (CAR.FORD_ESCAPE_MK4, 32), (CAR.FORD_F_150_MK14, 66)])
@@ -429,6 +441,8 @@ def test_unrelated_native_rejection_does_not_reset_granted_angle(ford_joined, mo
     packets += adapter.step_lka(native.packer, joined.host.CI.CC.CAN, now)
     for address, data, bus in packets:
       assert safety.safety_tx_hook(libsafety_py.make_CANPacket(address, bus - joined.offset, data)), (frame, hex(address), data.hex())
+      if address == 0x3CA:
+        adapter.observe_can([(now + 1, [(address, data, bus | 0x80)])], joined.host.CI.CC.CAN.main)
       if address in (0x3D3, 0x3D6) and frame >= 80:
         active = ((data[4] >> 2) & 7) if address == 0x3D3 else ((data[0] >> 4) & 7)
         assert active == 1, 'Unrelated LONG rejection reset independently granted steering'
