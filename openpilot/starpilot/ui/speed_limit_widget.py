@@ -6,7 +6,7 @@ from typing import cast
 import pyray as rl
 
 from openpilot.starpilot.ui.large_speed_geometry import LARGE_SIGN_SCALE, CONFIRMATION_SCALE, CONFIRMATION_PADDING
-from openpilot.starpilot.ui.onroad_state import OnroadState, manual_slc_confirmation, speed_limit_bounds, slc_controls
+from openpilot.starpilot.ui.onroad_state import OnroadState, manual_slc_confirmation, speed_limit_bounds, slc_controls, slc_accept_available
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.ui.speed_limit_pulse import SpeedLimitPulse
 from openpilot.starpilot.ui.speed_limit_shapes import SpeedLimitShapes
@@ -134,6 +134,8 @@ class SpeedLimitWidget:
       for control, (fill, border, ink) in zip(slc_controls(self.profile, state), (
           ((35, 74, 57), (106, 153, 127), (224, 243, 232)),
           ((77, 46, 57), (173, 122, 134), (248, 229, 234))), strict=True):
+        if not control.enabled:
+          fill, border, ink = (43, 49, 48), (94, 105, 101), (161, 174, 168)
         left = (control.bounds[0] - x) / scale
         top = (control.bounds[1] - y) / scale
         w, h = (control.bounds[2] - control.bounds[0]) / scale, (control.bounds[3] - control.bounds[1]) / scale
@@ -167,10 +169,11 @@ class SpeedLimitWidget:
       offset_text = cast(str, shown.offset_text)
       top, bottom = self.fonts.vertical_ink(offset_text, FontRole.MEDIUM, text_size(32))
       text(offset_text, 32, start + nw + 10 + ow / 2, 84 - (bottom - top) / scale / 2, secondary)
-    caption = ink_width('New Limit', 30, FontRole.SEMI_BOLD)
+    label = 'New Limit' if slc_accept_available(state) else 'Unavailable'
+    caption = ink_width(label, 30, FontRole.SEMI_BOLD)
     cx = (width - caption - 10) / 2
     accent = rl.Color(214, 188, 240, 255)
-    text('New Limit', 30, cx + caption / 2, 104, accent, FontRole.SEMI_BOLD)
+    text(label, 30, cx + caption / 2, 104, accent, FontRole.SEMI_BOLD)
     ax, ay = x + (cx + caption + 8) * scale, y + 104 * scale
     rl.draw_line_ex(rl.Vector2(ax - 2 * scale, ay - 4 * scale), rl.Vector2(ax + 2 * scale, ay), 1.5 * scale, accent)
     rl.draw_line_ex(rl.Vector2(ax + 2 * scale, ay), rl.Vector2(ax - 2 * scale, ay + 4 * scale), 1.5 * scale, accent)
@@ -180,7 +183,7 @@ class SpeedLimitWidget:
       for left, plus in ((start, True), (start + 18 + 4 + accept + 10, False)):
         self.shapes.wheel_key(plus, x + (left + 9) * scale, y + 135.5 * scale, scale=scale)
       hint_ink = rl.Color(210, 216, 216, 255)
-      text('Accept', 26, start + 22 + accept / 2, 135.5, hint_ink)
+      text('Accept', 26, start + 22 + accept / 2, 135.5, hint_ink if slc_accept_available(state) else MUTED)
       text('Reject', 26, start + 18 + 4 + accept + 10 + 22 + reject / 2, 135.5, hint_ink)
 
   def _sign(self, state: OnroadState, bounds, now: float) -> None:

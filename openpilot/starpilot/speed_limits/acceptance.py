@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 
 CONFIRMATION_NS = 10_000_000_000
+SOURCE_SWITCH_NS = 2_000_000_000
 MAX_REJECTIONS = 256
 
 
@@ -156,6 +157,9 @@ class State:
   presentation: Presentation | None = None
   next_presentation_id: int = 1
   received_speed_mps: float | None = None
+  received_source: str | None = None
+  switch_candidate: Candidate | None = None
+  switch_started_ns: int | None = None
 
 
 @dataclass(frozen=True)
@@ -256,6 +260,14 @@ def _state_errors(state: State) -> list[str]:
     errors.append("invalid state clock")
   if state.received_speed_mps is not None and not _speed_valid(state.received_speed_mps):
     errors.append("invalid received speed")
+  if state.received_source is not None and not _token(state.received_source):
+    errors.append("invalid received source")
+  if state.switch_candidate is not None:
+    if (not _candidate_valid(state.switch_candidate, state.session_id) or state.switch_started_ns is None or not _integer(state.switch_started_ns) or
+        state.last_timestamp_ns is None or state.switch_started_ns > state.last_timestamp_ns):
+      errors.append("invalid source switch")
+  elif state.switch_started_ns is not None:
+    errors.append("source switch lacks candidate")
   if not _integer(state.last_action_sequence, -1) or not _integer(state.next_decision_id, 1) or not _integer(state.next_presentation_id, 1):
     errors.append("invalid state sequence")
   if type(state.timer_running) is not bool or type(state.rejection_capacity_exhausted) is not bool:
@@ -266,10 +278,11 @@ def _state_errors(state: State) -> list[str]:
     errors.append("invalid rejection history")
   if state.pending is not None:
     pending = state.pending
-    if (not isinstance(pending, PendingDecision) or not _candidate_valid(pending.candidate) or
+    if (not isinstance(pending, PendingDecision) or not _candidate_valid(pending.candidate, state.session_id) or
         not _integer(pending.decision_id, 1) or not _integer(pending.active_elapsed_ns) or type(pending.automatic) is not bool or
         not _integer(state.next_decision_id, 1) or pending.decision_id >= state.next_decision_id or
-        state.observation != Observation(ObservationKind.VALID, pending.candidate)):
+        pending.candidate.speed_mps != state.received_speed_mps or
+        pending.automatic and state.observation != Observation(ObservationKind.VALID, pending.candidate)):
       errors.append("invalid pending decision")
     elif rejections_valid and pending.candidate in state.rejected:
       errors.append("pending candidate is already rejected")
@@ -369,6 +382,10 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
   old = state
   state, receipt = _acknowledge(replace(state, observation=observation, last_timestamp_ns=now_ns), action)
   state, adopt_receipt = _acknowledge(state, adopt)
+  if old.pending is not None and old.timer_running:
+    assert old.last_timestamp_ns is not None
+    state = replace(state, pending=replace(old.pending,
+      active_elapsed_ns=old.pending.active_elapsed_ns + now_ns - old.last_timestamp_ns))
   candidate = observation.candidate
   if candidate is None:
     state = replace(state, presentation=None)
@@ -385,6 +402,25 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
   def previous_target() -> float | None:
     return state.accepted.candidate.speed_mps if state.accepted is not None and authority.can_control else None
 
+  def unavailable(basis: str) -> Decision:
+    nonlocal state, receipt
+    pending = state.pending
+    if (pending is None or pending.automatic or not authority.can_control or
+        not (policy.confirm_lower or policy.confirm_higher)):
+      state = replace(state, pending=None, timer_running=False)
+      return finish(basis)
+    # The driver's choice survives missing evidence; its authority does not.
+    if (receipt is not None and receipt.status == 'seen' and action is not None and
+        action.kind is ActionKind.REJECT and action.decision_id == pending.decision_id and
+        pending.active_elapsed_ns <= CONFIRMATION_NS):
+      receipt = replace(receipt, consumed=True, status='reject')
+      state = _reject(state, pending.candidate)
+      return finish('driver_reject')
+    if pending.active_elapsed_ns >= CONFIRMATION_NS:
+      state = _reject(state, pending.candidate)
+      return finish('timeout_reject')
+    return finish(basis)
+
   if state.rejection_capacity_exhausted:
     state = replace(state, pending=None, timer_running=False)
     return finish("session_reset_required")
@@ -392,17 +428,27 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
     state = replace(state, pending=None, timer_running=False)
     return finish("display_only")
   if observation.kind is not ObservationKind.VALID:
-    state = replace(state, pending=None, timer_running=False)
-    return finish(observation.kind.value)
+    return unavailable(observation.kind.value)
 
   assert candidate is not None
   new_limit = state.received_speed_mps != candidate.speed_mps
+  explicit_adopt = (adopt is not None and adopt_receipt is not None and adopt_receipt.status == 'seen' and
+                    old.presentation is not None and old.presentation.presentation_id == adopt.presentation_id and
+                    old.presentation.candidate == candidate == adopt.candidate)
+  if (new_limit and state.received_source is not None and candidate.source != state.received_source and
+      authority.can_control and not explicit_adopt and confirmation_started_ns is None):
+    switching = state.switch_candidate
+    if switching is None or (switching.source, switching.speed_mps) != (candidate.source, candidate.speed_mps):
+      state = replace(state, switch_candidate=candidate, switch_started_ns=now_ns)
+    assert state.switch_started_ns is not None
+    if now_ns - state.switch_started_ns < SOURCE_SWITCH_NS:
+      return unavailable('source_switch_pending')
+  state = replace(state, received_source=candidate.source, switch_candidate=None, switch_started_ns=None)
   if new_limit:
     state = replace(state, received_speed_mps=candidate.speed_mps, pending=None, rejected=frozenset(), timer_running=False)
   if adopt_receipt is not None and adopt_receipt.status == "seen":
     assert adopt is not None
-    if (old.presentation is None or old.presentation.presentation_id != adopt.presentation_id or
-        old.presentation.candidate != candidate or adopt.candidate != candidate):
+    if not explicit_adopt:
       adopt_receipt = replace(adopt_receipt, status="different_presentation")
     else:
       # Recorded for any authority; only an owner of longitudinal control commands a target.
@@ -428,10 +474,8 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
     state = replace(state, pending=None, timer_running=False)
     return finish("inactive")
   if not new_limit and old.pending is not None and old.pending.automatic == (not confirmation):
-    pending = replace(old.pending, candidate=candidate)
-    if old.timer_running:
-      assert old.last_timestamp_ns is not None
-      pending = replace(pending, active_elapsed_ns=pending.active_elapsed_ns + now_ns - old.last_timestamp_ns)
+    assert state.pending is not None
+    pending = replace(state.pending, candidate=candidate)
   else:
     pending = PendingDecision(candidate, state.next_decision_id, automatic=not confirmation)
     state = replace(state, next_decision_id=state.next_decision_id + 1)
@@ -452,7 +496,9 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
       receipt = replace(receipt, status="different_decision")
     elif old.pending is None or old.pending.decision_id != pending.decision_id:
       receipt = replace(receipt, status="not_presented")
-    elif old.presentation is None or old.presentation.candidate != candidate:
+    elif ((old.presentation is None or old.presentation.candidate != candidate) and
+          not (action.kind is ActionKind.REJECT and old.presentation is None and
+               old.pending.candidate.speed_mps == candidate.speed_mps)):
       receipt = replace(receipt, status="different_presentation")
     else:
       receipt = replace(receipt, consumed=True, status=action.kind.value)

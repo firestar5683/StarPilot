@@ -33,6 +33,18 @@ def test_confirm_any_source_without_dashboard_evidence(sm, source):
   assert (current is not None) == (source is not Source.DASHBOARD)
 
 
+def test_retained_choice_still_consumes_a_press_as_its_published_deadline_passes(sm):
+  state = sm['slcState']
+  state.observationKind, state.source, state.pendingSource = 'unknown', 'none', 'map'
+  state.presentationId, state.pendingSinceMonoTime = 0, NOW
+  published = NOW + 9_990_000_000
+  state.frameMonoTime = sm.logMonoTime['slcState'] = published
+  # The fresh displayed frame still has the choice; a late press must not adjust SET.
+  assert physical_actions.pending_confirmation(sm, published + 20_000_000, long_active=True) is not None
+  assert physical_actions.pending_confirmation(sm, published + physical_actions.STATE_MAX_AGE_NS + 1, long_active=True) is None
+  assert physical_actions.state_current(sm, None, 'card', published) is None
+
+
 @pytest.mark.parametrize('field,value', [
   ('enabled', False), ('displayOnly', True), ('observationKind', 'unknown'), ('observationKind', 'absent'),
   ('observationKind', 'stale'), ('source', 'none'), ('source', ''), ('source', 'unsupported'), ('sessionId', ''),

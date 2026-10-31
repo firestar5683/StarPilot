@@ -14,7 +14,7 @@ def rgba(color):
 
 def state(automatic=True, **changes):
   obs = SpeedLimitObservation(ObservationKind.VALID, 'dashboard', 20., pending_speed_limit_mps=20.,
-                             automatic_adoption_pending=automatic, pending_since_ns=10_000_000_000)
+                             automatic_adoption_pending=automatic, pending_since_ns=10_000_000_000, presentation_id=1, action_enabled=True)
   return replace(OnroadState(True, False, 10., 80., obs, drive_frame=1), **changes)
 
 

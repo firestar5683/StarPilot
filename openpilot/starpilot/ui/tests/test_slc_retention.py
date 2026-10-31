@@ -409,6 +409,9 @@ def test_retention_respects_lower_max_secondary_source_and_reset(tmp_path):
   secondary = RetentionDrive(tmp_path / 'secondary', dashboard=True)
   secondary.step(0)
   output, _, target = secondary.step(300, status='noCoverage')
+  assert output.command is None and output.message.slcState.status == 'source_switch_pending'
+  assert target == pytest.approx(published_cruise_mph(45), rel=0, abs=1e-10)
+  output, _, target = secondary.step(2300, status='noCoverage')
   assert target == pytest.approx(published_cruise_mph(70), rel=0, abs=1e-10)
   assert not output.message.slcState.automaticAdoptionPending
   assert output.message.slcState.acceptedSource == 'dashboard'

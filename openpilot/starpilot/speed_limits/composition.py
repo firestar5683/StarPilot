@@ -203,7 +203,8 @@ def step(state: State, frame: Frame) -> Result:
     return Result(replace(base, reset_required=True), selected, acceptance, domain, override,
                   status="invalid_domain_or_override", errors=override.errors or (domain.reason,))
   if not active_path or domain.status is not sd.DomainStatus.VALID:
-    return Result(base, selected, acceptance, domain, override, status="inactive_or_unavailable")
+    return Result(base, selected, acceptance, domain, override,
+                  status=acceptance.basis if acceptance.basis == 'source_switch_pending' else 'inactive_or_unavailable')
   context = domain.context
   if (not isinstance(context, sd.DomainContext) or override.state.session_id != state.session_id or
       override.state.last_timestamp_ns != frame.now_ns or override.state.accepted_mps != context.accepted_raw_mps or

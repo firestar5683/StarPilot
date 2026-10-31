@@ -4,7 +4,7 @@ import math
 
 import pyray as rl
 
-from openpilot.starpilot.ui.onroad_state import ObservationKind, OnroadState
+from openpilot.starpilot.ui.onroad_state import ObservationKind, OnroadState, slc_accept_available
 from openpilot.starpilot.ui.unified_speed_presentation import displayed_limit_mps
 
 
@@ -28,7 +28,7 @@ class SpeedLimitPulse:
       self._started_frame = state.drive_frame
     observation = state.speed_limit
     limit = displayed_limit_mps(observation)
-    pending = (observation.kind == ObservationKind.VALID and observation.pending_speed_limit_mps is not None and
+    pending = (observation.pending_speed_limit_mps is not None and
                observation.pending_speed_limit_mps > 0)
     if not visible or limit is None:
       self.start_time = -math.inf
@@ -48,7 +48,7 @@ class SpeedLimitPulse:
       self.last_limit = limit
       return
     self.display_pulsing = False
-    manual = not observation.automatic_adoption_pending
+    manual = not observation.automatic_adoption_pending and slc_accept_available(state)
     if observation.pending_since_ns > 0:
       self.start_time = observation.pending_since_ns / 1e9
     elif limit != self.last_limit or manual != self.manual_pending or not math.isfinite(self.start_time):

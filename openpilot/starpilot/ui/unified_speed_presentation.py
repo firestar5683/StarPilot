@@ -82,7 +82,7 @@ def resolve_unified_speed(state, *, confirmation=False) -> UnifiedSpeedPresentat
     return str(round(value * factor)) if positive(value) else '–'
   posted = displayed_limit_mps(obs)
   target = displayed_adjusted_limit_mps(obs)
-  pending = str(obs.kind) == 'valid' and positive(obs.pending_speed_limit_mps)
+  pending = positive(obs.pending_speed_limit_mps)
   if confirmation and pending:
     posted = obs.pending_speed_limit_mps
     target = obs.pending_adjusted_limit_mps
@@ -97,7 +97,8 @@ def resolve_unified_speed(state, *, confirmation=False) -> UnifiedSpeedPresentat
     if adjustment:
       offset = f'{adjustment:+d}'
   status = 'Cruise off'
-  if getattr(obs, 'status', '') == 'display_hold' or str(obs.kind) != 'valid' and positive(obs.last_received_speed_limit_mps):
+  if (getattr(obs, 'status', '') == 'display_hold' or pending and obs.presentation_id == 0 or
+      str(obs.kind) != 'valid' and positive(obs.last_received_speed_limit_mps)):
     status = 'Unavailable'
   elif not obs.action_enabled:
     status = 'Display only'

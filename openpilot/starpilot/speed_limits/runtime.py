@@ -210,6 +210,11 @@ class Runtime:
       raise ValueError('invalid SLC advance time')
     self.settings = replace(self.settings, advance_seconds=seconds)
     if seconds == 0:
+      encounter, pending = self.advance.encounter, self.state.acceptance.pending
+      if (encounter is not None and not encounter.crossed and pending is not None and
+          pending.candidate.source == 'map' and pending.candidate.speed_mps == encounter.speed_mps):
+        self.state = replace(self.state, acceptance=replace(self.state.acceptance,
+          observation=acc.Observation(acc.ObservationKind.UNKNOWN), pending=None, presentation=None, timer_running=False))
       self.advance.disable()
 
   def _event_current(self, event: CruiseEvent, sm, now_ns: int) -> bool:
@@ -262,18 +267,21 @@ class Runtime:
     engagement = event.kind == 'engagementAdopt'
     pending = self.state.acceptance.pending
     shown = self.state.acceptance.presentation
+    retained_reject = (event.kind == 'confirmationReject' and event.presentation_id == 0 and
+                       pending is not None and event.decision_id == pending.decision_id)
     if shown is None and engagement:
       shown = self.current_presentation
-    if (event.session_id != self.session_id or shown is None or
+    if (event.session_id != self.session_id or (shown is None and not retained_reject) or
         event.producer_session != str(sm['slcDashboardObservation'].producerSessionId) or
-        event.presentation_id != shown.presentation_id or event.button != ('accel' if event.kind == 'confirmationAccept' else 'decel')):
+        (not retained_reject and event.presentation_id != shown.presentation_id) or
+        event.button != ('accel' if event.kind == 'confirmationAccept' else 'decel')):
       return None, None, None
     if engagement:
       if (event.command_id != 0 or not _number(event.selected_mps, positive=True) or
           not _number(float(sm['carState'].vCruise), positive=True) or
           abs(float(sm['carState'].vCruise) / 3.6 - event.selected_mps) > 0.1):
         return None, None, None
-    elif pending is None or event.decision_id != pending.decision_id or pending.candidate != shown.candidate:
+    elif pending is None or event.decision_id != pending.decision_id or (not retained_reject and pending.candidate != shown.candidate):
       return None, None, None
     action_id = self.ledger.last_action_id + 1
     context = f'presentation:{shown.presentation_id}' if engagement else f'pending:{pending.decision_id}'
@@ -432,7 +440,10 @@ class Runtime:
     shown = self.state.acceptance.presentation
     if shown is None and request.kind == 'adopt':
       shown = self.current_presentation
-    if shown is None or shown.presentation_id != request.presentation_id:
+    pending = self.state.acceptance.pending
+    retained_reject = (request.kind == 'reject' and request.presentation_id == 0 and
+                       pending is not None and request.decision_id == pending.decision_id)
+    if not retained_reject and (shown is None or shown.presentation_id != request.presentation_id):
       return None, None, None
     action_id = self.ledger.last_action_id + 1
     context = self.state.override.context
@@ -656,9 +667,10 @@ class Runtime:
         setattr(state, flag_field, True)
     if state.hasPresentationAdjustedLimit and not self.advance.boundary_id:
       state.offset = float(state.presentationAdjustedLimit) - float(state.speedLimit)
-    if shown is not None:
+    # A retained choice gets an Accept presentation only when fresh evidence matches it.
+    if shown is not None and (pending is None or pending.candidate == shown.candidate):
       state.presentationId = shown.presentation_id
-    elif self.current_presentation is not None and self.current_presentation.candidate == current_selection.observation.candidate:
+    elif pending is None and self.current_presentation is not None and self.current_presentation.candidate == current_selection.observation.candidate:
       state.presentationId = self.current_presentation.presentation_id
     state.status = result.status
     if state.source == 'dashboard' and state.observationKind == 'valid':

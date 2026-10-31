@@ -53,8 +53,10 @@ class SlcActionDispatcher:
       frame_ns = int(state.frameMonoTime)
       decision_id = int(state.decisionId)
       presentation_id = int(state.presentationId)
+      retained_reject = request.kind == SlcActionKind.REJECT and request.presentation_id == presentation_id == 0
       if (not session or session != request.session_id or not bool(state.enabled) or
-          str(state.observationKind) != "valid" or str(state.source) == "none" or not 0 < frame_ns <= now_ns or
+          (not retained_reject and (str(state.observationKind) != 'valid' or str(state.source) == 'none' or presentation_id <= 0)) or
+          not 0 < frame_ns <= now_ns or
           now_ns - frame_ns > _MAX_STATE_AGE_NS or
           decision_id != request.decision_id or presentation_id != request.presentation_id):
         return False

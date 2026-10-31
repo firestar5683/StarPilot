@@ -60,7 +60,7 @@ class OverrideTests(unittest.TestCase):
     self.assertTrue(armed.event_receipt.consumed)
     self.decision(3)
     self.assertEqual(self.reduce(3, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps, 25.0)
-    self.decision(4, candidate=LOW)
+    self.decision(4, candidate=replace(LOW, source=HIGH.source))
     self.assertIsNone(self.reduce(4, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps)
     self.decision(5, candidate=LOW)
     self.assertIsNone(self.reduce(5, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps)
@@ -196,14 +196,26 @@ class OverrideTests(unittest.TestCase):
   def test_pending_lower_and_rejection_keep_accepted_target_and_intent(self):
     self.arm()
     confirmation = acc.Policy(confirm_lower=True, confirm_higher=True)
-    pending = self.decision(3, candidate=LOW, policy=confirmation)
+    lower = replace(LOW, source=HIGH.source)
+    pending = self.decision(3, candidate=lower, policy=confirmation)
     self.assertEqual(pending.basis, "pending")
     self.assertEqual(self.reduce(3, policy=confirmation, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps, 25.0)
     action = acc.DriverAction(SESSION, 2, pending.state.pending.decision_id, acc.ActionKind.REJECT)
-    rejected = acc.step(pending.state, observation(LOW), ACTIVE, confirmation, now_ns=4, action=action)
+    rejected = acc.step(pending.state, observation(lower), ACTIVE, confirmation, now_ns=4, action=action)
     self.accepted = rejected
     self.assertEqual(self.reduce(4, policy=confirmation, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps, 25.0)
-    self.assertIn(LOW, rejected.state.rejected)
+    self.assertIn(lower, rejected.state.rejected)
+
+  def test_provider_flapping_preserves_override_until_the_new_limit_qualifies(self):
+    self.arm()
+    for now, candidate in ((3, LOW), (4, HIGH), (5, LOW)):
+      self.decision(now, candidate=candidate)
+      retained = self.reduce(now, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.))
+      self.assertEqual(retained.contribution_mps, 25.)
+    now = 5 + acc.SOURCE_SWITCH_NS
+    self.decision(now, candidate=LOW)
+    adopted = self.reduce(now, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.))
+    self.assertIsNone(adopted.contribution_mps)
 
   def test_mode_owner_change_suppresses_output_without_forgetting_manual_choice(self):
     self.arm()
@@ -309,7 +321,7 @@ class OverrideTests(unittest.TestCase):
   def test_target_change_requires_new_action_from_the_new_eligible_context(self):
     self.arm()
     old_effect = self.classified(effect=2, now=3, chosen=26.0)
-    self.decision(3, candidate=LOW)
+    self.decision(3, candidate=replace(LOW, source=HIGH.source))
     lower = self.reduce(3, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 26.0), change=old_effect)
     self.assertIsNone(lower.contribution_mps)
     self.assertFalse(lower.event_receipt.consumed)

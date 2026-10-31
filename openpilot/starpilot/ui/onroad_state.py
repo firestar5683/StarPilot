@@ -61,6 +61,7 @@ class SlcControl:
   request: SlcUiRequest
   label: str
   bounds: tuple[float, float, float, float]
+  enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -267,11 +268,18 @@ def manual_slc_confirmation(profile: Profile, state: OnroadState) -> bool:
   return bool((state.longitudinal_active or state.longitudinal_overridden) and
               state.alert.size == AlertSize.NONE and state.toyota_cruise_status not in TOYOTA_NOTICE_STATUSES and
               (profile != Profile.COMPACT or not state.reverse_driver_camera and state.appearance.camera_view != CameraViewChoice.DRIVER) and
-              obs.kind == ObservationKind.VALID and obs.action_enabled and not obs.automatic_adoption_pending and
+              (obs.kind == ObservationKind.VALID or obs.presentation_id == 0) and
+              obs.action_enabled and not obs.automatic_adoption_pending and
               obs.pending_speed_limit_mps is not None and obs.pending_speed_limit_mps > 0 and
-              obs.session_id and obs.decision_id and obs.decision_id > 0 and obs.presentation_id and obs.presentation_id > 0 and
+              obs.session_id and obs.decision_id and obs.decision_id > 0 and
+              obs.presentation_id is not None and obs.presentation_id >= 0 and
               placement(state.customization, profile, widget)['enabled'] and
               placement(state.customization, profile, 'speed_limit_actions')['enabled'])
+
+
+def slc_accept_available(state: OnroadState) -> bool:
+  obs = state.speed_limit
+  return bool(obs.action_enabled and obs.kind == ObservationKind.VALID and obs.presentation_id and obs.presentation_id > 0)
 
 
 def slc_action_bounds(profile: Profile, state: OnroadState):
@@ -286,7 +294,8 @@ def slc_controls(profile: Profile, state: OnroadState) -> tuple[SlcControl, ...]
     if bounds is None:
       return ()
     return tuple(SlcControl(SlcUiRequest(kind, obs.session_id or '', obs.decision_id or 0,
-                                        obs.presentation_id or 0, obs.pending_speed_limit_mps or 0), label, area)
+                                        obs.presentation_id or 0, obs.pending_speed_limit_mps or 0), label, area,
+                            kind == SlcActionKind.REJECT or slc_accept_available(state))
                  for kind, label, area in zip((SlcActionKind.ACCEPT, SlcActionKind.REJECT), ('Accept', 'Reject'),
                                              confirmation_buttons(profile, bounds), strict=True))
   return ()
@@ -365,7 +374,7 @@ class OnroadInput:
   def _pending_context(self, state: OnroadState) -> tuple | None:
     obs = state.speed_limit
     if manual_slc_confirmation(self.profile, state):
-      return obs.session_id, obs.decision_id, obs.presentation_id, obs.pending_speed_limit_mps
+      return obs.session_id, obs.decision_id, obs.pending_speed_limit_mps
     return None
 
   def _personality_target(self, state: OnroadState) -> tuple | None:
@@ -382,7 +391,7 @@ class OnroadInput:
 
   @property
   def pressed_action(self):
-    return self._slc_press.request if self._slc_press else None
+    return self._slc_press.request if self._slc_press and self._slc_press.enabled else None
 
   @property
   def claimed(self) -> bool:
@@ -442,7 +451,7 @@ class OnroadInput:
 
   def release(self, x: float, y: float, state: OnroadState) -> None:
     self.move(x, y, state)
-    if self._slc_press:
+    if self._slc_press and self._slc_press.enabled:
       self.emit(self._slc_press.request)
       self._prompt = None
     if self._sign_press:
@@ -509,7 +518,7 @@ def speed_limit_from_message(message: SlcStateMessage | None) -> SpeedLimitObser
     kind = ObservationKind(message.observationKind)
   except (ValueError, AttributeError):
     return SpeedLimitObservation(kind=ObservationKind.UNKNOWN, status="Invalid SLC observation kind")
-  if kind != ObservationKind.VALID and not (getattr(message, 'lastReceivedSpeedLimit', 0) > 0 or
+  if kind != ObservationKind.VALID and not (message.hasPending or getattr(message, 'lastReceivedSpeedLimit', 0) > 0 or
       getattr(message, 'hasAccepted', False) and getattr(message, 'hasEffectiveClusterTarget', False)):
     return SpeedLimitObservation(kind=kind, source=message.source, status=message.status,
                                  source_readings=source_readings_from_message(message))
@@ -518,17 +527,17 @@ def speed_limit_from_message(message: SlcStateMessage | None) -> SpeedLimitObser
     return SpeedLimitObservation(kind=kind, source=message.source, speed_limit_mps=message.speedLimit if live else None,
                                  source_readings=source_readings_from_message(message),
                                  offset_mps=message.offset,
-                                 pending_speed_limit_mps=message.pendingSpeedLimit if live and message.hasPending else None,
+                                 pending_speed_limit_mps=message.pendingSpeedLimit if message.hasPending else None,
                                  effective_cap_mps=message.effectiveCap if message.hasCeiling else None,
                                  accepted_speed_limit_mps=message.acceptedSpeedLimit if message.hasAccepted else None,
                                  accepted_source=str(getattr(message, "acceptedSource", "none")) or "none",
-                                 pending_source=(str(getattr(message, "pendingSource", "none")) or "none") if live else "none",
+                                 pending_source=str(getattr(message, "pendingSource", "none")) or "none",
                                  effective_cluster_target_mps=(getattr(message, "effectiveClusterTarget", None)
                                    if getattr(message, "hasEffectiveClusterTarget", False) else None),
                                  limiting_max_set=bool(getattr(message, "isLimitingMaxSet", False)),
                                  driver_override_active=bool(getattr(message, "driverOverrideActive", False)),
-                                 session_id=message.sessionId, decision_id=message.decisionId if live else None,
-                                 presentation_id=message.presentationId if live else None, status=message.status,
+                                 session_id=message.sessionId, decision_id=message.decisionId if live or message.hasPending else None,
+                                 presentation_id=message.presentationId if live else 0 if message.hasPending else None, status=message.status,
                                  action_enabled=bool(getattr(message, "enabled", False)),
                                  action_sequence_id=int(getattr(message, "actionSequenceId", 0)),
                                  action_status=str(getattr(message, "actionStatus", "")),

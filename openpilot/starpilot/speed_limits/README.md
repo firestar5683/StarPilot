@@ -24,6 +24,12 @@ numeric limit does not start another decision. A decline remains effective acros
 a source gap or same-value provider change; a later different limit starts a new
 window, including when an earlier numeric limit returns.
 
+A different provider proposing a different numeric limit must remain the proposed
+replacement for two seconds before confirmation or automatic adoption. A competing
+qualified reading cancels that check; missing readings do not restart it. Adoption
+still requires fresh evidence at the end. Same-provider limit changes, explicit
+driver adoption and latched early Maps proposals keep their existing timing.
+
 While StarPilot owns speed control, a proposed limit whose adjusted, rounded target
 already matches both current SET values is recorded without another confirmation
 or cruise command. The comparison uses the same mph/km/h rounding as Card, not
@@ -59,7 +65,12 @@ while system longitudinal control is engaged, including a temporary accelerator
 override. Disengaged and AOL lateral-only modes keep displaying limits without
 prompting. Losing longitudinal engagement cancels the pending choice without
 declining it; re-engaging starts a fresh choice if needed. A pending manual choice
-expires after ten monotonic seconds while engaged.
+expires after ten monotonic seconds while engaged, including source gaps. The same
+decision, card and expanded controls remain during a gap, with Accept disabled and
+an unavailable label. Reject still dismisses that decision. Recovery renews the
+action presentation without restarting the decision, deadline or attention cycle.
+Wheel confirmation presses remain consumed during a gap, so they cannot become
+ordinary SET adjustments. An unavailable Accept is never queued for recovery.
 Decline and timeout leave set speed unchanged. An action at the exact deadline
 can still complete its presented decision; a later action cannot accept it.
 
@@ -86,7 +97,7 @@ This is approximate timing, not a promise to reach the target speed at the sign.
 
 The first offer latches one boundary encounter. Slowing or stopping does not
 retract it or restart the existing ten-second confirmation deadline. Source loss
-removes authority and hides the pending prompt; fresh recovery of the same
+removes authority and retains the pending choice; fresh recovery of the same
 boundary uses the original deadline and a current presentation. Losing longitudinal
 engagement cancels an unanswered choice; re-engaging starts a fresh deadline.
 Decline, expiry, manual override and completed application survive the boundary
@@ -111,8 +122,10 @@ an early `slcCruiseCommand` must carry the same boundary ID. The boundary record
 is in memory for this runtime session, not a saved decision database.
 
 Only a finite positive source observation can propose a limit. Missing, stale and
-unknown observations stay distinct. Source loss clears a pending choice; it cannot
-change set speed. While the publisher remains fresh, the widget retains the latest
+unknown observations stay distinct. Source loss retains an engaged manual choice
+until its original deadline and creates no authority to change set speed. Automatic
+adoption retains accepted history and does not reapply an unchanged limit on
+recovery. While the publisher remains fresh, the widget retains the latest
 received limit, offset and original source with an unavailable status, independently
 of accepted history. Cruise continues using its current SET, including a driver's
 manual adjustment. Source loss creates no speed target and cannot select a

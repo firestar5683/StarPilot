@@ -170,7 +170,8 @@ def test_recovery_renews_presentation_without_restarting_confirmation():
   start = drive.runtime.advance.encounter.started_ns
   assert start is not None
   lost = drive.tick(alive=False)
-  assert not lost.message.slcState.hasPending and lost.command is None
+  assert lost.message.slcState.hasPending and lost.command is None
+  assert lost.message.slcState.decisionId == first.decisionId and lost.message.slcState.presentationId == 0
   recovered = drive.tick(at=start+9_000_000_000, producer=42).message.slcState
   assert recovered.hasPending and recovered.presentationId != first.presentationId
   expired = drive.tick(at=start+acc.CONFIRMATION_NS+1)

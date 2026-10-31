@@ -42,6 +42,103 @@ def command_receipt(runtime, command, seconds, previous, selected, *, applied=Tr
                      command.decisionId, command.presentationId, command.commandId)
 
 
+@pytest.mark.parametrize('wheel', [False, True])
+def test_retained_confirmation_reject_uses_the_original_choice_without_a_speed_command(drive, wheel):
+  sm, cp = drive
+  runtime = Runtime(parse({'SpeedLimitController': True, 'SLCPriority1': 'Dashboard', 'SLCConfirmation': True}))
+  first = tick(runtime, sm, cp, 0).message.slcState
+  sm['slcDashboardObservation'].status = 'unknown'
+  lost = tick(runtime, sm, cp, .05)
+  held = lost.message.slcState
+  assert held.hasPending and held.decisionId == first.decisionId
+  assert held.pendingSinceMonoTime == first.pendingSinceMonoTime
+  assert held.presentationId == 0 and lost.command is None
+  invalid_accept = Action(runtime.session_id, 1, held.decisionId, 0, 'accept')
+  denied = tick(runtime, sm, cp, .075, request=invalid_accept)
+  assert denied.command is None and denied.message.slcState.hasPending
+  if wheel:
+    card_sm = ReplaySM({'slcState': held}, START + 50_000_000)
+    pending = physical_actions.pending_confirmation(card_sm, START + 50_000_000, long_active=True)
+    assert pending is not None and pending.presentation_id == 0
+    helper = VCruiseHelper(cp)
+    helper.v_cruise_kph = helper.v_cruise_cluster_kph = 60.
+    cs = car.CarState(cruiseState={'available': True},
+                      buttonEvents=[car.CarState.ButtonEvent(type='decelCruise', pressed=True)])
+    helper.update_v_cruise(cs, True, False, pending, slc_enabled=True)
+    assert helper.slc_consumed_button is not None and helper.v_cruise_kph == 60.
+    event = CruiseEvent(1, START + 100_000_000, 0., 0., 'decel', 'card-producer', START + 100_000_000,
+                        'confirmationReject', runtime.session_id, held.decisionId, 0)
+    result = tick(runtime, sm, cp, .1, cruise_event=event)
+  else:
+    request = Action(runtime.session_id, 2, held.decisionId, 0, 'reject')
+    result = tick(runtime, sm, cp, .1, request=request)
+  assert not result.result.errors and result.message.slcState.actionStatus == 'reject'
+  assert not result.message.slcState.hasPending and result.command is None
+  sm['slcDashboardObservation'].status = 'valid'
+  recovered = tick(runtime, sm, cp, .15)
+  assert not recovered.message.slcState.hasPending and recovered.command is None
+
+
+@pytest.mark.parametrize('manual', [False, True])
+def test_provider_flapping_and_vision_gaps_do_not_repeat_adoption_or_confirmation(drive, manual):
+  from openpilot.cereal import messaging
+  from openpilot.starpilot.speed_limits.vision.observation import MODEL_ID
+
+  sm, cp = drive
+  envelope = messaging.new_message('slcVisionObservation')
+  vision = envelope.slcVisionObservation.vision
+  vision.producerSessionId, vision.modelId, vision.stream = 'vision-producer', MODEL_ID, 'road'
+  vision.speedMps, vision.confidence, vision.supportCount, vision.episode = 35 * CV.MPH_TO_MS, .95, 2, 4
+  sm = ReplaySM({**sm.data, 'slcVisionObservation': envelope.slcVisionObservation}, START)
+  sm['slcDashboardObservation'].speedMps = 30 * CV.MPH_TO_MS
+  selected = slc_target_kph(30 * CV.MPH_TO_MS, False)
+  sm['carState'].vCruise = sm['carState'].vCruiseCluster = selected
+  runtime = Runtime(parse({'SpeedLimitController': True, 'SLCPriority1': 'Dashboard',
+                          'SLCPriority2': 'Vision', 'SLCConfirmation': manual}),
+                    vision_enabled=True, vision_control_qualified=True)
+
+  def observe(seconds, dashboard=False, available=True, **kwargs):
+    now = START + round(seconds * 1e9)
+    sm['slcDashboardObservation'].status = 'valid' if dashboard else 'unknown'
+    vision.status = 'valid' if available else 'stale'
+    vision.observedMonoTime = vision.cameraFrameEofBootTime = now
+    vision.validUntilMonoTime = now + 2_000_000_000
+    vision.frameId += 1
+    return tick(runtime, sm, cp, seconds, now_boot_ns=now, **kwargs)
+
+  initial = observe(0, dashboard=True)
+  assert initial.message.slcState.hasAccepted and initial.command is None
+  for seconds, primary in ((.1, False), (.5, True), (1., False), (1.5, True), (2., False)):
+    output = observe(seconds, dashboard=primary)
+    assert output.command is None and not output.message.slcState.hasPending
+    assert output.message.slcState.acceptedMonoTime == initial.message.slcState.acceptedMonoTime
+  settled = observe(4.)
+  assert not settled.result.errors
+  assert settled.message.slcState.hasPending == manual
+  if not manual:
+    assert settled.command is not None
+    selected = slc_target_kph(settled.command.slcCruiseCommand.targetMps, False)
+    sm['carState'].vCruise = sm['carState'].vCruiseCluster = selected
+    receipt = command_receipt(runtime, settled.command.slcCruiseCommand, 4.01,
+                              30 * CV.MPH_TO_KPH, selected)
+    assert observe(4.01, cruise_event=receipt).command is None
+  lost = observe(4.05, available=False)
+  recovered = observe(4.15)
+  assert lost.command is None and recovered.command is None
+  assert lost.message.slcState.hasPending == recovered.message.slcState.hasPending == manual
+  assert recovered.message.slcState.acceptedMonoTime == settled.message.slcState.acceptedMonoTime
+  if manual:
+    assert lost.message.slcState.presentationId == 0
+    assert lost.message.slcState.decisionId == recovered.message.slcState.decisionId == settled.message.slcState.decisionId
+    assert lost.message.slcState.pendingSinceMonoTime == recovered.message.slcState.pendingSinceMonoTime == settled.message.slcState.pendingSinceMonoTime
+  vision.speedMps = 40 * CV.MPH_TO_MS
+  changed = observe(4.2)
+  assert changed.message.slcState.hasPending == manual
+  assert (changed.command is not None) == (not manual)
+  if manual:
+    assert changed.message.slcState.decisionId != settled.message.slcState.decisionId
+
+
 @pytest.mark.parametrize('button,kind', [('accel', 'confirmationAccept'), ('decel', 'confirmationReject')])
 def test_wheel_confirmation_does_not_follow_same_step_source_replacement(drive, button, kind):
   sm, cp = drive
