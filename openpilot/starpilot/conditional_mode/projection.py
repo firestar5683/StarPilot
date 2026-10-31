@@ -630,6 +630,9 @@ class SceneProjector:
       stationary_launch_clear=stationary_launch_clear,
       longitudinal_stop_active=bool(_field(control, 'longActive') is True and _field(selfdrive, 'enabled') is True and
         _field(controls, 'longControlState') == structs.CarControl.Actuators.LongControlState.stopping),
+      longitudinal_launch_active=bool(_field(control, 'enabled') is True and _field(control, 'longActive') is True and
+        _field(selfdrive, 'enabled') is True and _field(controls, 'longControlState') in
+        (structs.CarControl.Actuators.LongControlState.starting, structs.CarControl.Actuators.LongControlState.pid)),
       standstill_path_extent_m=(_standstill_path_extent(model) if model_transport_current and car_valid and
                                 _field(car, 'standstill') is True else None),
     )

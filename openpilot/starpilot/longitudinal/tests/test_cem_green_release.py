@@ -119,7 +119,7 @@ class CemGreenCallerTests(unittest.TestCase):
 
   def cycle(self, *, stopped=False, position=None, velocity=None, should_stop=True,
             personality=log.LongitudinalPersonality.aggressive, unavailable=None, stale=None,
-            repeat_model=False, lead=False, desired_accel=None, horizon=20., force_stop_owner=None, resume=False, aol=False):
+            repeat_model=False, lead=False, desired_accel=None, horizon=20., force_stop_owner=None, resume=False, aol=False, starting=False):
     now = MONO + self.tick * 50_000_000
     self.tick += 1
     stamp = now - 2_000_000
@@ -143,7 +143,7 @@ class CemGreenCallerTests(unittest.TestCase):
           value.velocity.x = velocity
       elif name == 'controlsState':
         value.curvature = 0.
-        value.longControlState = LongCtrlState.stopping if stopped else LongCtrlState.pid
+        value.longControlState = LongCtrlState.starting if starting else LongCtrlState.stopping if stopped else LongCtrlState.pid
       elif name == 'selfdriveState':
         value.personality = personality
         if aol:
